@@ -283,6 +283,16 @@ func newVertexProvider(
 		return nil, err
 	}
 	kind = strings.TrimSpace(kind)
+	// Fail here rather than sending an unauthenticated request. Vertex answers a
+	// missing credential with 401, which reads as "credential rejected" and points
+	// at a bad key instead of an absent one.
+	if strings.TrimSpace(secret) == "" {
+		return nil, &ConfigError{Msg: fmt.Sprintf(
+			"provider '%s': no credential configured — vertex_ai needs an API key or a "+
+				"Google service account key; add one before sending requests",
+			providerID,
+		)}
+	}
 	if !strings.EqualFold(kind, CredentialKindServiceAccount) {
 		if !strings.EqualFold(kind, CredentialKindAPIKey) {
 			return nil, &ConfigError{Msg: fmt.Sprintf(
