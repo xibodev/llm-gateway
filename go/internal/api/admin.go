@@ -10,6 +10,7 @@ import (
 
 	"llmgw/internal/config"
 	"llmgw/internal/copilotauth"
+	"llmgw/internal/gcpauth"
 	"llmgw/internal/iam"
 	"llmgw/internal/providers"
 	"llmgw/internal/router"
@@ -255,9 +256,26 @@ func handleUpsertProvider(w http.ResponseWriter, r *http.Request) {
 		writeError(w, 400, "api_key is required for "+registryEntry.Label)
 		return
 	}
-	if strings.TrimSpace(body.APIKey) != "" {
+	if raw := strings.TrimSpace(body.APIKey); raw != "" {
+		// A service account key is a JSON document, not an opaque secret. The
+		// dialog offers one credential field, so detect the document here:
+		// stored as an API key it would be sent as x-goog-api-key and rejected
+		// by Google, reporting a bad key when the real fault is the wrong kind.
+		credentialKind := "api_key"
+		if gcpauth.LooksLikeServiceAccount(raw) {
+			if !strings.EqualFold(body.Type, "vertex_ai") {
+				writeError(w, 400,
+					"a Google service account key is only usable by a vertex_ai provider")
+				return
+			}
+			if _, err := gcpauth.Parse([]byte(raw)); err != nil {
+				writeError(w, 400, err.Error())
+				return
+			}
+			credentialKind = gcpauth.CredentialKind
+		}
 		if _, err := iam.PutSystemProviderConnection(
-			pid, "api_key", strings.TrimSpace(body.APIKey),
+			pid, credentialKind, raw,
 		); err != nil {
 			writeError(w, 500, "store encrypted system connection: "+err.Error())
 			return
