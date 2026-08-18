@@ -1,0 +1,23 @@
+# Caddy site for the gateway. Automatic HTTPS via Let's Encrypt.
+# Replace the hostname with your domain (or an env: {$LLMGW_DOMAIN}).
+llm.example.com {
+	encode zstd gzip
+
+	reverse_proxy gateway:8787 {
+		# Stream Server-Sent Events immediately (no response buffering).
+		flush_interval -1
+	}
+
+	# The /admin panel is an operator surface. Uncomment to restrict it to your IP:
+	# @admin path /admin*
+	# handle @admin {
+	#   @notme not remote_ip 203.0.113.4
+	#   respond @notme 403
+	#   reverse_proxy gateway:8787 { flush_interval -1 }
+	# }
+
+	log {
+		output stdout
+		format console
+	}
+}

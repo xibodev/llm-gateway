@@ -1,0 +1,5 @@
+internal/web/console/node_modules/
+llmgw
+llmgw.exe
+*.test
+coverage/

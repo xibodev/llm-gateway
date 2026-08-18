@@ -1,0 +1,11 @@
+# Normalise line endings so Windows checkouts don't churn CRLF/LF in git.
+* text=auto eol=lf
+*.py text eol=lf
+*.md text eol=lf
+*.yaml text eol=lf
+*.yml text eol=lf
+*.toml text eol=lf
+*.sh text eol=lf
+Dockerfile text eol=lf
+Caddyfile text eol=lf
+uv.lock text eol=lf

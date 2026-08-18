@@ -1,0 +1,136 @@
+# docker-compose.test.yml — sealed INTEGRATION stack for llm-gateway (mocked upstreams)
+#
+# Mode: local-docker / sealed (internal: true network; no egress). Every
+# upstream is WireMock, so no real provider credential is ever required.
+#
+# Usage:
+#   cp test/integration/.env.test.example test/integration/.env.test   # first run only
+#   LLMGW_UAT_TAG=$(git rev-parse --short HEAD) \
+#     docker compose -f test/integration/docker-compose.test.yml \
+#       --env-file test/integration/.env.test \
+#       --project-name llmgw-int \
+#       up --build --wait
+#
+# Always pass LLMGW_UAT_TAG from `git rev-parse`. Hand-typing a commit is how
+# an image ends up labelled with a commit it was not built from.
+#
+# ⛔ Do NOT modify Dockerfile, docker-compose.yml, or deploy/docker-compose.prod.yml.
+# ✅ Build context and Dockerfile are taken exclusively from go/Dockerfile (Go canonical).
+
+services:
+
+  # ── Go Gateway (canonical) ───────────────────────────────────────────────
+  gateway:
+    build:
+      context: ../../go          # relative to this file: repo root → go/
+      dockerfile: Dockerfile
+    image: llm-gateway-go:int-${LLMGW_UAT_TAG:-local}
+    container_name: llmgw-int-gateway
+    restart: "no"
+    env_file:
+      - .env.test
+    environment:
+      LLMGW_HOST: "0.0.0.0"
+      LLMGW_PORT: "8787"
+      LLMGW_STATE_DIR: /state
+      LLMGW_API_KEY: ${LLMGW_API_KEY}
+      LLMGW_ALLOW_UNAUTHENTICATED_API: "0"
+      LLMGW_SSO_ENABLED: "1"
+      LLMGW_SSO_SHARED_SECRET: ${LLMGW_SSO_SHARED_SECRET}
+      LLMGW_SSO_ADMIN_GROUP: llmgw-admin
+      LLMGW_SSO_AUTO_PROVISION: "1"
+      LLMGW_CREDENTIAL_ENCRYPTION_KEY: ${LLMGW_CREDENTIAL_ENCRYPTION_KEY}
+      LLMGW_ALLOW_COPILOT_PROXY: "1"
+      LLMGW_EXPERIMENTAL_COPILOT_PROVIDER: "0"
+      LLMGW_LOG_REQUESTS: "1"
+      LLMGW_LOG_REQUESTS_MAX_BYTES: "10485760"
+      LLMGW_CONFIG: /state/config.yaml
+      LLMGW_AUTODISCOVER_LOCAL: "0"
+    volumes:
+      - test-llmgw-state:/state
+      - ./config.test.yaml:/state/config.yaml:ro
+    networks:
+      - uat
+    depends_on:
+      wiremock:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "/llmgw", "health"]
+      interval: 10s
+      timeout: 5s
+      start_period: 20s
+      retries: 5
+    labels:
+      stack.service: gateway
+      stack.health.path: /health
+      stack.health.port: "8787"
+
+  # ── WireMock — in-network catch-all + fake provider stubs ────────────────
+  wiremock:
+    image: wiremock/wiremock:3.10.0
+    container_name: llmgw-int-wiremock
+    restart: "no"
+    # WireMock is NOT published to the host — gateway-internal only
+    expose:
+      - "8080"
+    volumes:
+      - ./wiremock/mappings:/home/wiremock/mappings:ro
+    command:
+      - "--port=8080"
+      - "--global-response-templating"
+      - "--verbose"
+    networks:
+      - uat
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:8080/__admin/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      start_period: 15s
+      retries: 5
+    labels:
+      stack.service: wiremock
+      stack.health.path: /__admin/health
+      stack.health.port: "8080"
+
+  # ── Edge reverse proxy — only service bridging uat ↔ host-access ──────────
+  edge:
+    image: nginx:1.27-alpine
+    container_name: llmgw-int-edge
+    restart: "no"
+    ports:
+      - "127.0.0.1:8887:8080"   # UAT-only host port; edge is the sole host bridge
+    volumes:
+      - ./edge/nginx.conf:/etc/nginx/nginx.conf:ro
+    networks:
+      - uat
+      - host-access
+    depends_on:
+      gateway:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:8080/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      start_period: 15s
+      retries: 5
+    labels:
+      stack.service: edge
+      stack.role: reverse-proxy
+      stack.health.path: /health
+      stack.health.port: "8080"
+
+# ── Volumes (test-prefixed; isolated from production) ────────────────────────
+volumes:
+  test-llmgw-state:
+    name: test-llmgw-state-int
+
+# ── Network (internal=true; no NAT, no egress) ───────────────────────────────
+networks:
+  uat:
+    name: llmgw-int-network
+    driver: bridge
+    internal: true
+  host-access:
+    name: llmgw-int-host-access
+    driver: bridge
+    internal: false

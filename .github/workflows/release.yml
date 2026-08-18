@@ -1,0 +1,83 @@
+# Publish standalone binaries on a version tag.
+#
+#   git tag v0.0.1 && git push origin v0.0.1
+#     -> llmgw_v0.0.1_windows_amd64.zip, ..._linux_amd64.tar.gz, ...
+#
+# The gateway is pure Go (modernc.org/sqlite, no cgo), so every target
+# cross-compiles from one runner and needs no C toolchain.
+#
+# Gated on ci.yml: a tag cannot publish binaries unless the suite passes.
+name: release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch: {}
+
+permissions:
+  contents: write
+
+jobs:
+  ci:
+    uses: ./.github/workflows/ci.yml
+
+  binaries:
+    needs: ci
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: 1.26.6
+          cache-dependency-path: go/go.sum
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: go/internal/web/console/package-lock.json
+
+      # dist/ is committed, but rebuild it so a release can never ship a stale
+      # console that no commit accounts for.
+      - name: Build console
+        working-directory: go/internal/web/console
+        run: npm ci && npm run build
+
+      - name: Cross-compile
+        working-directory: go
+        env:
+          CGO_ENABLED: "0"
+        run: |
+          set -eu
+          version="${GITHUB_REF_NAME#v}"
+          mkdir -p ../dist
+          for target in windows/amd64 linux/amd64 linux/arm64 darwin/amd64 darwin/arm64; do
+            os="${target%/*}"
+            arch="${target#*/}"
+            ext=""
+            [ "$os" = "windows" ] && ext=".exe"
+            echo "building $os/$arch"
+            GOOS="$os" GOARCH="$arch" go build \
+              -trimpath -ldflags="-s -w" -o "llmgw${ext}" ./cmd/llmgw
+            name="llmgw_${GITHUB_REF_NAME}_${os}_${arch}"
+            if [ "$os" = "windows" ]; then
+              zip -q "../dist/${name}.zip" "llmgw${ext}"
+            else
+              tar -czf "../dist/${name}.tar.gz" "llmgw${ext}"
+            fi
+            rm -f "llmgw${ext}"
+          done
+          echo "built version ${version}"
+
+      - name: Checksums
+        working-directory: dist
+        run: sha256sum * > SHA256SUMS
+
+      - name: Publish release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/*
+          generate_release_notes: true
+          fail_on_unmatched_files: true

@@ -1,0 +1,46 @@
+# Production deployment for the Go build of llm-gateway.
+#   cheap EC2 (or any Linux box) + docker compose + Caddy TLS.
+#
+#   cp .env.example .env   # fill in secrets
+#   mkdir -p state && sudo chown 65532:65532 state   # distroless nonroot uid
+#   docker compose -f deploy/docker-compose.prod.yml up -d --build
+#
+# The gateway is loopback-only; Caddy terminates TLS and reverse-proxies it.
+services:
+  gateway:
+    build:
+      context: ../go
+    image: llm-gateway-go:latest
+    restart: unless-stopped
+    environment:
+      LLMGW_HOST: 0.0.0.0
+      LLMGW_PORT: "8787"
+      LLMGW_STATE_DIR: /state
+      # Admin key (or mint per-project keys in /admin). Keep unauthenticated OFF in prod.
+      LLMGW_API_KEY: ${LLMGW_API_KEY:-}
+      LLMGW_ALLOW_UNAUTHENTICATED_API: ${LLMGW_ALLOW_UNAUTHENTICATED_API:-0}
+      LLMGW_EXPERIMENTAL_COPILOT_PROVIDER: ${LLMGW_EXPERIMENTAL_COPILOT_PROVIDER:-0}
+      LLMGW_GITHUB_COPILOT_CACHE_DIR: /state/cache
+    # State (config.yaml, keys.json 0600, secrets.json 0600, catalog.json, *.db).
+    # Bind mount so the nonroot container (uid 65532) can own + write it.
+    volumes:
+      - ./state:/state
+    expose:
+      - "8787"
+
+  caddy:
+    image: caddy:2
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    depends_on:
+      - gateway
+
+volumes:
+  caddy-data:
+  caddy-config:

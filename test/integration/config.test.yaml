@@ -1,0 +1,77 @@
+# config.test.yaml — UAT provider configuration (read-only mount at /state/config.yaml)
+#
+# Four fake providers are defined. API keys are fake static strings; none of
+# these URLs are live internet endpoints (all route to the in-network WireMock).
+#
+# Provider layout:
+#   primary   → /v1/* → WireMock: models OK, chat/responses → 429
+#   error     → /v1/* → WireMock: models OK, chat/responses → 500
+#   timeout   → /v1/* → WireMock: models OK, requests delayed >provider timeout
+#   fallback  → /v1/* → WireMock: full happy-path (chat, responses, models, audio)
+
+providers:
+  primary:
+    type: openai_compatible
+    base_url: http://wiremock:8080/primary/v1
+    api_key: sk-test-primary-uat-key-000001
+    timeout: 10.0
+
+  error:
+    type: openai_compatible
+    base_url: http://wiremock:8080/error/v1
+    api_key: sk-test-error-uat-key-000002
+    timeout: 10.0
+
+  timeout:
+    type: openai_compatible
+    base_url: http://wiremock:8080/slow/v1
+    api_key: sk-test-timeout-uat-key-000003
+    timeout: 2.0        # short timeout; WireMock mapping delays 5 s
+
+  fallback:
+    type: openai_compatible
+    base_url: http://wiremock:8080/fallback/v1
+    api_key: sk-test-fallback-uat-key-000004
+    timeout: 10.0
+
+# Categories — each covers a distinct UAT scenario
+categories:
+  # Scenario A: 429 failover (primary 429 → fallback succeeds)
+  cat-429-failover:
+    failover:
+      - { provider: primary,  model: gpt-4o }
+      - { provider: fallback, model: gpt-4o }
+
+  # Scenario B: 5xx failover (error 500 → fallback succeeds)
+  cat-5xx-failover:
+    failover:
+      - { provider: error,    model: gpt-4o }
+      - { provider: fallback, model: gpt-4o }
+
+  # Scenario C: timeout failover (timeout 2 s limit → fallback succeeds)
+  cat-timeout-failover:
+    failover:
+      - { provider: timeout,  model: gpt-4o }
+      - { provider: fallback, model: gpt-4o }
+
+  # Scenario D: direct fallback (only fallback; no upstream errors expected)
+  cat-direct-fallback:
+    failover:
+      - { provider: fallback, model: gpt-4o }
+
+  # Scenario E: multi-step priority chain (primary 429 → error 500 → fallback OK)
+  cat-priority-chain:
+    failover:
+      - { provider: primary,  model: gpt-4o }
+      - { provider: error,    model: gpt-4o }
+      - { provider: fallback, model: gpt-4o }
+
+policies:
+  defaults:
+    retry_max_attempts: 1           # no automatic retry inside a single hop; rely on failover chain
+    retry_initial_backoff_seconds: 0.1
+    retry_max_backoff_seconds: 0.5
+    retry_backoff_multiplier: 2.0
+    circuit_failure_threshold: 0    # circuit breaker off for UAT (deterministic behaviour)
+    circuit_cooldown_seconds: 5
+  overrides: {}

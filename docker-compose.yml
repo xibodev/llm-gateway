@@ -1,0 +1,43 @@
+# Local / single-box deployment for the LLM gateway (Go).
+#
+#   LLMGW_API_KEY=... LLMGW_HOST_PORT=8787 docker compose up -d --build
+#
+# The gateway handles bearer auth itself (LLMGW_API_KEY). Put a real config at
+# ./config.local.yaml (see llmgw.config.example.yaml) — it is mounted read-only.
+# The named volume persists gateway state (IAM db, encrypted connections,
+# hashed keys, usage, catalog, Copilot OAuth token cache).
+#
+# The image is distroless/nonroot (uid 65532); state lives at /state rather
+# than a home directory so the container can own it.
+#
+# For TLS + a real box, use deploy/docker-compose.prod.yml instead.
+#
+# NOTE: the published host port is env-driven so it does not squat a fixed port.
+
+services:
+  gateway:
+    build:
+      context: ./go
+    image: llm-gateway-go:local
+    environment:
+      LLMGW_HOST: 0.0.0.0
+      LLMGW_PORT: "8787"
+      LLMGW_STATE_DIR: /state
+      LLMGW_CONFIG: /config/llmgw.config.yaml
+      LLMGW_API_KEY: ${LLMGW_API_KEY:-}
+      LLMGW_ALLOW_UNAUTHENTICATED_API: ${LLMGW_ALLOW_UNAUTHENTICATED_API:-0}
+      LLMGW_EXPERIMENTAL_COPILOT_PROVIDER: ${LLMGW_EXPERIMENTAL_COPILOT_PROVIDER:-0}
+      LLMGW_GITHUB_COPILOT_CACHE_DIR: /state/cache
+    volumes:
+      - ./config.local.yaml:/config/llmgw.config.yaml:ro
+      - llmgw-state:/state
+    ports:
+      - "${LLMGW_HOST_PORT:-8787}:8787"
+    # Lets the gateway reach a host-side Ollama (auto-detected at startup) at
+    # http://host.docker.internal:11434. Harmless when no host Ollama is running.
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    restart: unless-stopped
+
+volumes:
+  llmgw-state:

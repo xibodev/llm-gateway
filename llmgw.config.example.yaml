@@ -1,0 +1,40 @@
+# llm-gateway config (providers + categories). Point LLMGW_CONFIG at this file.
+#
+# API keys are NOT stored here. Enter them in the /admin panel (saved to
+# ~/.llmgw/secrets.json, perms 0600) or reference an env var with ${ENV:NAME}.
+
+providers:
+  copilot:
+    type: github_copilot            # sign in via /admin (device code); no key needed
+  openrouter:
+    type: openai_compatible
+    base_url: https://openrouter.ai/api/v1
+    # api_key: ${ENV:OPENROUTER_API_KEY}   # or enter it in the /admin panel
+  anthropic-direct:
+    type: anthropic
+    base_url: https://api.anthropic.com
+  ollama:
+    type: ollama                    # uses LLMGW_OLLAMA_BASE_URL (default :11434)
+
+# Categories = named, ordered failover chains of real, pinned models. Request a
+# category name and it cascades on 429/5xx/timeout. You can also address any real
+# model directly as "<provider>/<model>" (e.g. copilot/gpt-4o-mini).
+categories:
+  smart:
+    failover:
+      - { provider: copilot, model: claude-sonnet-4.5 }               # within-provider ...
+      - { provider: copilot, model: gpt-5.5 }                          # ... fallback
+      - { provider: openrouter, model: anthropic/claude-3.5-sonnet }   # ... then cross-provider
+  cheap:
+    failover:
+      - { provider: copilot, model: gpt-4o-mini }
+
+policies:
+  defaults:
+    retry_max_attempts: 2
+    circuit_failure_threshold: 4
+    circuit_cooldown_seconds: 30
+  overrides:
+    copilot:
+      circuit_failure_threshold: 3
+      circuit_cooldown_seconds: 60

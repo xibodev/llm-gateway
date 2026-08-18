@@ -1,0 +1,72 @@
+{
+  "mappings": [
+    {
+      "name": "error: GET /models",
+      "request": {
+        "method": "GET",
+        "urlPattern": "/error/v1/models"
+      },
+      "response": {
+        "status": 200,
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "jsonBody": {
+          "object": "list",
+          "data": [
+            {
+              "id": "gpt-4o",
+              "object": "model",
+              "owned_by": "uat-error"
+            },
+            {
+              "id": "gpt-4o-mini",
+              "object": "model",
+              "owned_by": "uat-error"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "error: POST /chat/completions → 500",
+      "request": {
+        "method": "POST",
+        "urlPattern": "/error/v1/chat/completions"
+      },
+      "response": {
+        "status": 500,
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "jsonBody": {
+          "error": {
+            "message": "Internal Server Error (UAT stub)",
+            "type": "server_error",
+            "code": "internal_error"
+          }
+        }
+      }
+    },
+    {
+      "name": "error: POST /responses → 500",
+      "request": {
+        "method": "POST",
+        "urlPattern": "/error/v1/responses"
+      },
+      "response": {
+        "status": 500,
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "jsonBody": {
+          "error": {
+            "message": "Internal Server Error (UAT stub)",
+            "type": "server_error",
+            "code": "internal_error"
+          }
+        }
+      }
+    }
+  ]
+}

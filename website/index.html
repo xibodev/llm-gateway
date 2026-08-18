@@ -1,0 +1,182 @@
+<!doctype html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>llm-gateway — one gateway for your coding-CLI models</title>
+<meta name="description" content="A standalone, multi-provider LLM proxy for coding CLIs. Juggle subscription limits, survive outages, and reach any provider's models through one OpenAI/Anthropic-compatible endpoint.">
+<style>
+  :root{
+    --app:#0b0d10; --card:#14171c; --hl:#1a1e24; --sep:#242a31; --bd:#2a3038;
+    --hi:#f2f5f8; --fg:#c4ccd6; --mut:#8a94a2; --sub:#5f6b78;
+    --accent:#6ea8fe; --accent2:#4ea88a; --warn:#d9a441;
+    --radius:14px;
+  }
+  *{box-sizing:border-box}
+  html{scroll-behavior:smooth}
+  body{margin:0;background:radial-gradient(1200px 600px at 70% -10%,#141b26 0,var(--app) 55%);color:var(--fg);
+    font:15px/1.6 ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;-webkit-font-smoothing:antialiased}
+  a{color:inherit;text-decoration:none}
+  code,pre{font-family:ui-monospace,SFMono-Regular,"SF Mono",Menlo,Consolas,monospace}
+  .wrap{max-width:1080px;margin:0 auto;padding:0 22px}
+  .hi{color:var(--hi)} .mut{color:var(--mut)} .accent{color:var(--accent)}
+  .chip{display:inline-block;font-size:11px;padding:2px 9px;border-radius:999px;border:1px solid var(--bd);color:var(--mut);background:var(--hl)}
+
+  header{position:sticky;top:0;z-index:10;backdrop-filter:blur(10px);background:rgba(11,13,16,.72);border-bottom:1px solid var(--sep)}
+  nav{display:flex;align-items:center;gap:20px;height:60px}
+  .logo{display:flex;align-items:center;gap:10px;font-weight:700;color:var(--hi);letter-spacing:-.02em}
+  .logo .mark{width:26px;height:26px;border-radius:8px;background:linear-gradient(135deg,var(--accent),var(--accent2));display:grid;place-items:center;color:#0b0d10;font-weight:800}
+  nav .links{display:flex;gap:22px;margin-left:auto;align-items:center}
+  nav .links a{color:var(--mut);font-size:14px}
+  nav .links a:hover{color:var(--hi)}
+  .btn{display:inline-block;border-radius:10px;padding:9px 16px;font-size:14px;font-weight:600;border:1px solid var(--bd)}
+  .btn-p{background:linear-gradient(135deg,var(--accent),#5b93ea);color:#0b0d10;border:none}
+  .btn-p:hover{filter:brightness(1.05)}
+  .btn-g:hover{background:var(--hl);color:var(--hi)}
+
+  .hero{padding:84px 0 40px;text-align:center}
+  .hero h1{font-size:clamp(30px,5vw,52px);line-height:1.08;letter-spacing:-.03em;color:var(--hi);margin:0 auto 18px;max-width:14ch}
+  .hero p.lead{font-size:clamp(16px,2.2vw,20px);color:var(--mut);max-width:60ch;margin:0 auto 30px}
+  .hero .cta{display:flex;gap:12px;justify-content:center;flex-wrap:wrap}
+  .glow{position:relative}
+  .terminal{max-width:760px;margin:52px auto 0;text-align:left;border:1px solid var(--sep);border-radius:var(--radius);overflow:hidden;background:#0d1013;box-shadow:0 30px 80px -30px rgba(0,0,0,.7)}
+  .terminal .bar{display:flex;gap:7px;padding:12px 14px;border-bottom:1px solid var(--sep);background:#0f1216}
+  .terminal .bar i{width:11px;height:11px;border-radius:50%;background:#39404a;display:block}
+  .terminal pre{margin:0;padding:18px 20px;font-size:13px;line-height:1.7;color:#cdd6e0;overflow-x:auto}
+  .terminal .c{color:var(--sub)} .terminal .k{color:var(--accent)} .terminal .s{color:var(--accent2)} .terminal .o{color:#d98a4a}
+
+  section{padding:56px 0;border-top:1px solid var(--sep)}
+  h2{font-size:clamp(22px,3vw,30px);color:var(--hi);letter-spacing:-.02em;margin:0 0 8px}
+  .sub{color:var(--mut);margin:0 0 28px;max-width:62ch}
+  .grid{display:grid;gap:16px;grid-template-columns:repeat(auto-fit,minmax(250px,1fr))}
+  .feat{background:var(--card);border:1px solid var(--sep);border-radius:var(--radius);padding:20px}
+  .feat .ic{width:34px;height:34px;border-radius:9px;background:var(--hl);display:grid;place-items:center;margin-bottom:12px;font-size:17px}
+  .feat h3{margin:0 0 6px;color:var(--hi);font-size:16px}
+  .feat p{margin:0;color:var(--mut);font-size:14px}
+
+  .steps{display:grid;gap:16px;grid-template-columns:repeat(auto-fit,minmax(280px,1fr))}
+  .step{background:var(--card);border:1px solid var(--sep);border-radius:var(--radius);padding:20px}
+  .step .n{width:26px;height:26px;border-radius:8px;background:var(--hl);color:var(--accent);display:grid;place-items:center;font-weight:700;font-size:13px;margin-bottom:12px}
+  .step h3{margin:0 0 10px;color:var(--hi);font-size:15px}
+  .step pre{margin:0;background:#0d1013;border:1px solid var(--sep);border-radius:10px;padding:12px 14px;font-size:12.5px;color:#cdd6e0;overflow-x:auto;white-space:pre-wrap}
+  .step .k{color:var(--accent)} .step .s{color:var(--accent2)} .step .c{color:var(--sub)}
+
+  .note{display:flex;gap:12px;align-items:flex-start;background:var(--hl);border:1px solid var(--sep);border-radius:12px;padding:16px;color:var(--mut);font-size:14px;margin-top:22px}
+  footer{border-top:1px solid var(--sep);padding:34px 0;color:var(--sub);font-size:13px}
+  footer .row{display:flex;gap:16px;flex-wrap:wrap;align-items:center}
+  footer a{color:var(--mut)} footer a:hover{color:var(--hi)}
+  .disc{color:var(--sub);font-size:12px;margin-top:8px}
+</style>
+</head>
+<body>
+
+<header><div class="wrap"><nav>
+  <a class="logo" href="#"><span class="mark">L</span> llm-gateway</a>
+  <div class="links">
+    <a href="#features">Features</a>
+    <a href="#quickstart">Quickstart</a>
+    <a href="#connect">Connect a CLI</a>
+    <a class="btn btn-g" href="https://github.com/" target="_blank" rel="noopener">GitHub &#8599;</a>
+  </div>
+</nav></div></header>
+
+<main>
+<section class="hero" style="border-top:none">
+  <div class="wrap glow">
+    <span class="chip">Self-hosted &middot; OpenAI + Anthropic compatible</span>
+    <h1>One gateway for all your coding-CLI models</h1>
+    <p class="lead">A standalone, multi-provider LLM proxy for Claude Code, Copilot CLI and Codex.
+      Juggle subscription limits, survive outages, and reach any provider's models through one endpoint.</p>
+    <div class="cta">
+      <a class="btn btn-p" href="#quickstart">Get started</a>
+      <a class="btn btn-g" href="#features">See features</a>
+    </div>
+
+    <div class="terminal">
+      <div class="bar"><i></i><i></i><i></i></div>
+<pre><span class="c"># point your CLI at the gateway, then address any model as a category&hellip;</span>
+<span class="k">curl</span> http://127.0.0.1:8787/v1/chat/completions \
+  -H <span class="s">"Content-Type: application/json"</span> \
+  -d <span class="s">'{"model":"smart","messages":[{"role":"user","content":"hi"}]}'</span>
+
+<span class="c"># "smart" is your failover chain: try the premium model, fall back on 429/5xx</span>
+<span class="o">smart</span>: copilot/gpt-5.5  &rarr;  copilot/claude-sonnet-4.5  &rarr;  localai/gemma-3-4b-it</pre>
+    </div>
+  </div>
+</section>
+
+<section id="features">
+  <div class="wrap">
+    <h2>Built to juggle providers</h2>
+    <p class="sub">Address a real model as <code>provider/model</code>, or define <b class="hi">categories</b> &mdash; named,
+      ordered failover chains that cascade across your providers on throttle, error, or timeout.</p>
+    <div class="grid">
+      <div class="feat"><div class="ic">&#128260;</div><h3>Categories &amp; failover</h3>
+        <p>One model name, an ordered chain of real targets. Fails over before the first streamed byte &mdash; invisible to the client.</p></div>
+      <div class="feat"><div class="ic">&#129517;</div><h3>API adaptation</h3>
+        <p>Opt-in: reach Responses-only models (like <code>gpt-5.5</code>) over the standard chat API &mdash; the gateway translates, deterministically, from each model's published capabilities.</p></div>
+      <div class="feat"><div class="ic">&#127968;</div><h3>Local providers</h3>
+        <p>Auto-discover Ollama, LocalAI, LM Studio &amp; more on your machine &mdash; surfaced, never hardwired. A free local model makes a great last link in a chain.</p></div>
+      <div class="feat"><div class="ic">&#128273;</div><h3>Project keys &amp; governance</h3>
+        <p>Mint per-project keys with expiry, model/provider allowlists, rate limits and daily budgets &mdash; disable any key instantly.</p></div>
+      <div class="feat"><div class="ic">&#127908;</div><h3>Multimodal</h3>
+        <p>Audio transcription &amp; speech (via LocalAI whisper/piper) and capability-aware vision routing &mdash; multimodal requests land on vision-capable models.</p></div>
+      <div class="feat"><div class="ic">&#9889;</div><h3>Tiny footprint</h3>
+        <p>A ~16&nbsp;MB static Go binary / ~2&nbsp;MB distroless image, ~15&nbsp;MiB idle RAM. <span class="mut">A Python build is available too.</span></p></div>
+    </div>
+  </div>
+</section>
+
+<section id="quickstart">
+  <div class="wrap">
+    <h2>Quickstart</h2>
+    <p class="sub">Run it, connect your providers in the panel, then point a CLI at it.</p>
+    <div class="steps">
+      <div class="step"><div class="n">1</div><h3>Run the gateway</h3>
+<pre><span class="c"># Docker (tiny distroless image)</span>
+<span class="k">docker</span> run -p 8787:8787 -v llmgw:/state \
+  llm-gateway-go</pre></div>
+      <div class="step"><div class="n">2</div><h3>Connect providers</h3>
+<pre><span class="c"># open the panel, add providers,</span>
+<span class="c"># sign into Copilot, build categories</span>
+http://127.0.0.1:8787/<span class="k">admin</span></pre></div>
+      <div class="step"><div class="n">3</div><h3>Address a model</h3>
+<pre><span class="c"># a category name&hellip;</span>
+<span class="s">"model": "smart"</span>
+<span class="c"># &hellip;or an exact provider/model</span>
+<span class="s">"model": "copilot/gpt-4o-mini"</span></pre></div>
+    </div>
+  </div>
+</section>
+
+<section id="connect">
+  <div class="wrap">
+    <h2>Connect a coding CLI</h2>
+    <p class="sub">It speaks both the OpenAI and Anthropic wire formats &mdash; most tools just need a base URL and a key.</p>
+    <div class="steps">
+      <div class="step"><div class="n">&#9632;</div><h3>Claude Code</h3>
+<pre><span class="k">ANTHROPIC_BASE_URL</span>=http://127.0.0.1:8787
+<span class="k">ANTHROPIC_AUTH_TOKEN</span>=<span class="s">&lt;your key&gt;</span></pre></div>
+      <div class="step"><div class="n">&#9632;</div><h3>Codex</h3>
+<pre><span class="k">base_url</span>=http://127.0.0.1:8787/v1</pre></div>
+      <div class="step"><div class="n">&#9632;</div><h3>Copilot CLI (BYOK)</h3>
+<pre><span class="k">COPILOT_PROVIDER_BASE_URL</span>=http://127.0.0.1:8787/v1
+<span class="k">COPILOT_PROVIDER_API_KEY</span>=<span class="s">&lt;your key&gt;</span></pre></div>
+    </div>
+    <div class="note"><span>&#128161;</span><span>Pick a <code>provider/model</code> or a category name from <code>GET /v1/models</code>.
+      Everything &mdash; providers, categories, keys, Copilot login, usage &amp; savings &mdash; is managed from <code>/admin</code>.</span></div>
+  </div>
+</section>
+</main>
+
+<footer><div class="wrap">
+  <div class="row">
+    <a class="logo" href="#" style="font-size:14px"><span class="mark" style="width:22px;height:22px">L</span> llm-gateway</a>
+    <span class="mut">Self-hosted LLM proxy for coding CLIs.</span>
+    <span style="margin-left:auto"><a href="https://github.com/" target="_blank" rel="noopener">GitHub</a></span>
+  </div>
+  <p class="disc">Using a GitHub Copilot subscription as a general gateway provider is a personal-use grey area, not a sanctioned public API &mdash; keep it on your own loopback gateway. Not affiliated with OpenAI, Anthropic, or GitHub.</p>
+</div></footer>
+
+</body>
+</html>

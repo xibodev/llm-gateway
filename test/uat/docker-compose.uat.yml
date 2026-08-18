@@ -1,0 +1,57 @@
+# docker-compose.uat.yml — REAL-INTEGRATION UAT stack for llm-gateway
+#
+# UAT means the real deal: this stack has normal egress and talks to real
+# provider APIs with real (operator-supplied) credentials. Nothing upstream
+# is mocked. For deterministic mocked regression runs, use test/integration/.
+#
+# Usage:
+#   cp test/uat/.env.uat.example test/uat/.env.uat   # first run only, then edit
+#   LLMGW_UAT_TAG=$(git rev-parse --short HEAD) \
+#     docker compose -f test/uat/docker-compose.uat.yml \
+#       --env-file test/uat/.env.uat \
+#       --project-name llmgw-uat \
+#       up --build --wait
+#
+# Always derive LLMGW_UAT_TAG from `git rev-parse` so the image tag states the
+# commit it was actually built from.
+#
+# The gateway starts EMPTY on purpose: UAT begins at the console's first-run
+# journey (http://127.0.0.1:8898/console) — create the owner and project,
+# connect real providers, sync catalogs, run test completions, build routes,
+# mint a key, and wire a real CLI against it.
+
+services:
+  gateway:
+    build:
+      context: ../../go
+      dockerfile: Dockerfile
+    image: llm-gateway-go:uat-${LLMGW_UAT_TAG:-local}
+    container_name: llmgw-uat-gateway
+    restart: "no"
+    env_file:
+      - .env.uat
+    environment:
+      LLMGW_HOST: "0.0.0.0"
+      LLMGW_PORT: "8787"
+      LLMGW_STATE_DIR: /state
+      LLMGW_ALLOW_UNAUTHENTICATED_API: "0"
+      LLMGW_LOG_REQUESTS: "1"
+      LLMGW_LOG_REQUESTS_MAX_BYTES: "10485760"
+      LLMGW_AUTODISCOVER_LOCAL: "0"
+    volumes:
+      - uat-llmgw-state:/state
+    ports:
+      - "127.0.0.1:8898:8787"
+    healthcheck:
+      test: ["CMD", "/llmgw", "health"]
+      interval: 10s
+      timeout: 5s
+      start_period: 20s
+      retries: 5
+    labels:
+      stack.kind: uat-real-integrations
+      stack.health.path: /health
+
+volumes:
+  uat-llmgw-state:
+    name: uat-llmgw-state

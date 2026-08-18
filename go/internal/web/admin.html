@@ -1,0 +1,737 @@
+<!doctype html>
+<html lang="en" data-scheme="dark">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1"/>
+<title>llm-gateway</title>
+<script>(function(){var q=new URLSearchParams(location.search).get('scheme');document.documentElement.dataset.scheme=q||localStorage.getItem('llmgw_scheme')||'dark';})();</script>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
+<script src="https://cdn.tailwindcss.com"></script>
+<script>
+tailwind.config={theme:{extend:{
+  colors:{
+    app:'var(--bg)',card:'var(--card)',card2:'var(--card-2)',hl:'var(--hl)',
+    hi:'var(--text-hi)',fg:'var(--text)',mut:'var(--text-mut)',sub:'var(--text-sub)',
+    accent:'var(--accent)',pos:'var(--pos)',neg:'var(--neg)',warn:'var(--warn)',
+    sep:'var(--sep)',bd:'var(--border)'},
+  fontFamily:{mono:['JetBrains Mono','ui-monospace','SFMono-Regular','Menlo','monospace']}}}}
+</script>
+<script defer src="https://unpkg.com/alpinejs@3.14.1/dist/cdn.min.js"></script>
+<style>
+  html{font-size:87.5%}
+  [x-cloak]{display:none!important}
+  :root{
+    --bgh:240; --bgs:8%; --bgl:9%;
+    --accent-h:41; --accent-s:52%; --accent-l:70%;
+    --bg:hsl(var(--bgh),var(--bgs),var(--bgl));
+    --card:hsl(var(--bgh),var(--bgs),calc(var(--bgl) + 1%));
+    --card-2:hsl(var(--bgh),var(--bgs),calc(var(--bgl) + 3%));
+    --hl:hsl(var(--bgh),var(--bgs),calc(var(--bgl) + 5%));
+    --border:hsl(var(--bgh),var(--bgs),calc(var(--bgl) + 7%));
+    --sep:hsl(var(--bgh),var(--bgs),calc(var(--bgl) + 4%));
+    --shadow-col:hsl(var(--bgh),var(--bgs),calc(var(--bgl) - 4%));
+    --text-hi:hsl(var(--bgh),9%,91%);
+    --text:hsl(var(--bgh),6%,66%);
+    --text-mut:hsl(var(--bgh),6%,50%);
+    --text-sub:hsl(var(--bgh),7%,38%);
+    --accent:hsl(var(--accent-h),var(--accent-s),var(--accent-l));
+    --accent-soft:hsla(var(--accent-h),var(--accent-s),var(--accent-l),.15);
+    --on-accent:hsl(var(--bgh),25%,10%);
+    --pos:hsl(140,44%,62%); --pos-soft:hsla(140,44%,62%,.14);
+    --neg:hsl(2,68%,68%);  --neg-soft:hsla(2,68%,68%,.14);
+    --warn:hsl(38,80%,62%); --warn-soft:hsla(38,80%,62%,.15);
+  }
+  html[data-scheme=light]{
+    --bgs:14%; --bgl:96%;
+    --card:hsl(0,0%,100%);
+    --card-2:hsl(var(--bgh),var(--bgs),calc(var(--bgl) - 3%));
+    --hl:hsl(var(--bgh),var(--bgs),calc(var(--bgl) - 5%));
+    --border:hsl(var(--bgh),calc(var(--bgs) - 3%),calc(var(--bgl) - 13%));
+    --sep:hsl(var(--bgh),calc(var(--bgs) - 3%),calc(var(--bgl) - 8%));
+    --shadow-col:hsl(var(--bgh),var(--bgs),calc(var(--bgl) - 9%));
+    --text-hi:hsl(var(--bgh),18%,13%);
+    --text:hsl(var(--bgh),11%,30%);
+    --text-mut:hsl(var(--bgh),8%,44%);
+    --text-sub:hsl(var(--bgh),8%,56%);
+    --accent:hsl(var(--accent-h),62%,39%);
+    --accent-soft:hsla(var(--accent-h),62%,39%,.12);
+    --on-accent:hsl(0,0%,100%);
+    --pos:hsl(142,52%,34%); --pos-soft:hsla(142,52%,34%,.12);
+    --neg:hsl(2,66%,50%);  --neg-soft:hsla(2,66%,50%,.12);
+    --warn:hsl(35,86%,40%); --warn-soft:hsla(35,86%,40%,.14);
+  }
+  body{font-family:'JetBrains Mono',ui-monospace,SFMono-Regular,Menlo,monospace;-webkit-font-smoothing:antialiased;letter-spacing:-.01em}
+  ::-webkit-scrollbar{width:8px;height:8px}
+  ::-webkit-scrollbar-track{background:transparent}
+  ::-webkit-scrollbar-thumb{background:var(--text-sub);border-radius:4px}
+  ::-webkit-scrollbar-thumb:hover{background:var(--text-mut)}
+  .label{font-size:.68rem;text-transform:uppercase;letter-spacing:.09em;color:var(--text-sub);font-weight:500}
+  .card{background:var(--card);border:1px solid var(--border);border-radius:6px;box-shadow:0 3px 0 0 var(--shadow-col)}
+  .nav-item{color:var(--text-mut);border-radius:5px;transition:.12s}
+  .nav-item:hover{color:var(--text-hi);background:var(--hl)}
+  .nav-item.active{color:var(--accent);background:var(--accent-soft);box-shadow:inset 2px 0 0 var(--accent)}
+  .btn{border-radius:5px;font-weight:500;letter-spacing:.01em;transition:.12s;white-space:nowrap}
+  .btn-primary{background:var(--accent);color:var(--on-accent)}
+  .btn-primary:hover{filter:brightness(1.08)}
+  .btn-ghost{border:1px solid var(--border);color:var(--text)}
+  .btn-ghost:hover{background:var(--hl);color:var(--text-hi)}
+  .inp{background:var(--bg);border:1px solid var(--border);border-radius:5px;color:var(--text-hi)}
+  .inp::placeholder{color:var(--text-sub)}
+  .inp:focus{outline:none;border-color:var(--accent);box-shadow:0 0 0 2px var(--accent-soft)}
+  .tile{background:var(--hl);color:var(--accent)}
+  .chip{display:inline-flex;align-items:center;gap:.3rem;font-size:.7rem;padding:.1rem .5rem;border-radius:4px;border:1px solid transparent;white-space:nowrap}
+  .chip-ok{color:var(--pos);background:var(--pos-soft);border-color:var(--pos-soft)}
+  .chip-bad{color:var(--neg);background:var(--neg-soft);border-color:var(--neg-soft)}
+  .chip-warn{color:var(--warn);background:var(--warn-soft);border-color:var(--warn-soft)}
+  .chip-accent{color:var(--accent);background:var(--accent-soft);border-color:var(--accent-soft)}
+  .chip-mut{color:var(--text-mut);background:var(--hl);border-color:var(--border)}
+  table td,table th{border-color:var(--sep)}
+  a.lnk{color:var(--accent)}a.lnk:hover{text-decoration:underline}
+  .cb{background:var(--bg);border:1px solid var(--border);border-radius:5px;padding:.65rem .8rem;overflow-x:auto;font-size:.72rem;line-height:1.6;color:var(--text-hi);white-space:pre}
+  .doc h3{color:var(--text-hi);font-weight:600;font-size:1.15rem;letter-spacing:-.01em}
+  .doc h4{color:var(--text-hi);font-weight:600;font-size:.95rem}
+  .doc p,.doc li{color:var(--text);font-size:.85rem;line-height:1.7}
+  .doc code{color:var(--accent);background:var(--hl);padding:.05rem .3rem;border-radius:3px;font-size:.78rem}
+  .doc .cb code{color:var(--text-hi);background:transparent;padding:0}
+  .doc a.lnk{cursor:pointer}
+  .doclink{color:var(--text-mut);border-radius:5px;transition:.1s;font-size:.82rem}
+  .doclink:hover{color:var(--text-hi);background:var(--hl)}
+  .doclink-active{color:var(--accent);background:var(--accent-soft);font-weight:500}
+  .callout{border-radius:6px;padding:.75rem .9rem;border:1px solid;font-size:.8rem;line-height:1.6;display:flex;gap:.6rem;align-items:flex-start}
+  .callout-note{border-color:var(--border);background:var(--hl);color:var(--text)}
+  .callout-warn{border-color:var(--warn-soft);background:var(--warn-soft);color:var(--text)}
+  .callout-tip{border-color:var(--pos-soft);background:var(--pos-soft);color:var(--text)}
+  .step{display:flex;gap:.8rem;align-items:flex-start}
+  .step-n{flex:0 0 auto;width:1.55rem;height:1.55rem;border-radius:50%;background:var(--accent-soft);color:var(--accent);display:grid;place-items:center;font-size:.78rem;font-weight:600}
+  .cbwrap{position:relative}
+  .cbwrap .copy{position:absolute;top:.35rem;right:.35rem;font-size:.62rem;padding:.15rem .45rem;border-radius:4px;border:1px solid var(--border);background:var(--card);color:var(--text-mut)}
+  .cbwrap .copy:hover{color:var(--text-hi);background:var(--hl)}
+  .flow{display:flex;align-items:stretch;gap:.5rem;flex-wrap:wrap}
+  .flow-box{flex:1;min-width:120px;border:1px solid var(--border);border-radius:6px;padding:.7rem .8rem;background:var(--bg)}
+  .flow-arrow{display:grid;place-items:center;color:var(--text-sub)}
+</style>
+</head>
+<body class="bg-app text-fg antialiased">
+<div x-data="app()" x-init="init()" x-cloak class="flex min-h-screen">
+
+  <aside class="fixed inset-y-0 left-0 z-20 w-16 md:w-60 border-r border-sep bg-card flex flex-col">
+    <div class="h-14 flex items-center gap-2.5 px-4 border-b border-sep">
+      <div class="w-7 h-7 rounded bg-accent shrink-0 grid place-items-center font-bold" style="color:var(--on-accent)">&#955;</div>
+      <div class="hidden md:block leading-tight"><div class="font-semibold text-hi tracking-tight">llm-gateway</div>
+        <div class="text-[11px] text-sub" x-text="'v'+(s?.version||'…')"></div></div>
+    </div>
+    <nav class="flex-1 p-2 space-y-0.5">
+      <template x-for="it in nav" :key="it.id">
+        <button @click="go(it.id)" class="nav-item w-full flex items-center gap-3 px-3 py-2 text-sm" :class="page===it.id && 'active'">
+          <span class="shrink-0" x-html="it.icon"></span><span class="hidden md:inline" x-text="it.label"></span></button>
+      </template>
+    </nav>
+    <div class="p-3 border-t border-sep hidden md:block space-y-2">
+      <div class="flex items-center gap-2 text-xs"><span class="w-1.5 h-1.5 rounded-full" :class="s?.copilot?.auth?.active_source?'bg-pos':'bg-sub'"></span>
+        <span class="text-sub">Copilot</span><span class="text-mut" x-text="s?.copilot?.auth?.active_source||'not signed in'"></span></div>
+      <div class="chip" :class="s?.auth_required?'chip-ok':'chip-warn'" x-text="s?(s.auth_required?'auth: bearer':'auth: open (local)'):''"></div>
+    </div>
+  </aside>
+
+  <div class="flex-1 ml-16 md:ml-60 min-w-0">
+    <header class="sticky top-0 z-10 h-14 bg-app/90 backdrop-blur border-b border-sep flex items-center gap-4 px-5 md:px-8">
+      <div class="min-w-0"><h1 class="text-[15px] font-semibold text-hi leading-tight" x-text="titles[page].t"></h1>
+        <p class="text-[11px] text-sub hidden sm:block" x-text="titles[page].d"></p></div>
+      <div class="flex-1"></div>
+      <template x-if="page==='providers'"><div class="flex gap-2">
+        <button @click="detectLocal()" class="btn btn-ghost px-3 py-1.5 text-sm">Detect local</button>
+        <button @click="openDrawer()" class="btn btn-primary px-3.5 py-1.5 text-sm">+ Add provider</button></div></template>
+      <template x-if="page==='categories'"><div class="flex gap-2"><input x-model="newCat" @keydown.enter="createCat()" placeholder="new category" class="inp px-3 py-1.5 text-sm w-40">
+        <button @click="createCat()" class="btn btn-primary px-3.5 py-1.5 text-sm">+ Create</button></div></template>
+      <template x-if="page==='keys'"><div class="flex gap-2">
+        <select x-model="keyForm.projectID" class="inp px-3 py-1.5 text-sm w-40"><option value="">project</option><template x-for="p in (s?.projects||[])" :key="p.id"><option :value="p.id" x-text="p.name"></option></template></select>
+        <select x-model="keyForm.principalID" class="inp px-3 py-1.5 text-sm w-40"><option value="">principal</option><template x-for="p in (s?.principals||[]).filter(x=>x.status==='active'&&x.kind!=='system')" :key="p.id"><option :value="p.id" x-text="p.display_name"></option></template></select>
+        <input x-model="keyForm.name" placeholder="key name" class="inp px-3 py-1.5 text-sm w-32">
+        <button @click="mintKey()" class="btn btn-primary px-3.5 py-1.5 text-sm">Mint key</button></div></template>
+      <button @click="toggleScheme()" class="btn btn-ghost w-8 h-8 grid place-items-center" title="Toggle theme">
+        <svg x-show="scheme==='dark'" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/></svg>
+        <svg x-show="scheme==='light'" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="4.5"/><path d="M12 2v2M12 20v2M2 12h2M20 12h2M5 5l1.5 1.5M17.5 17.5L19 19M19 5l-1.5 1.5M6.5 17.5L5 19"/></svg></button>
+      <button @click="load(true)" class="btn btn-ghost w-8 h-8 grid place-items-center" title="Refresh" :class="loading&&'animate-spin'"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12a9 9 0 1 1-2.64-6.36M21 3v6h-6"/></svg></button>
+    </header>
+
+    <main class="px-5 md:px-8 py-6 max-w-6xl">
+      <template x-if="!s"><div class="grid sm:grid-cols-4 gap-4"><template x-for="i in 4" :key="i"><div class="card h-24 animate-pulse"></div></template></div></template>
+
+      <div x-show="s">
+        <!-- OVERVIEW -->
+        <section x-show="page==='overview'" class="space-y-5">
+          <div class="grid grid-cols-2 lg:grid-cols-4 gap-4">
+            <template x-for="c in stats()" :key="c.k"><div class="card p-4">
+              <div class="flex items-center justify-between"><span class="tile w-8 h-8 rounded grid place-items-center" x-html="c.icon"></span>
+                <span class="label" x-text="c.k"></span></div>
+              <div class="text-2xl font-semibold text-hi mt-3" x-text="c.v"></div></div></template>
+          </div>
+          <div class="grid lg:grid-cols-2 gap-4">
+            <div class="card p-5"><div class="flex items-center justify-between mb-3"><h3 class="label">Providers</h3><button @click="go('providers')" class="text-xs text-accent hover:underline">manage &#8594;</button></div>
+              <template x-for="p in s.providers" :key="p.id"><div class="flex items-center gap-3 py-2 border-t border-sep first:border-0">
+                <span class="w-6 h-6 rounded grid place-items-center text-xs font-bold" :style="'background:'+typeColor(p.type)+'22;color:'+typeColor(p.type)" x-text="p.type[0].toUpperCase()"></span>
+                <span class="text-sm text-hi" x-text="p.id"></span><span class="text-xs text-sub" x-text="p.type"></span></div></template>
+              <p x-show="s.providers.length===0" class="text-sm text-mut py-4">No providers yet.</p></div>
+            <div class="card p-5"><div class="flex items-center justify-between mb-3"><h3 class="label">Categories</h3><button @click="go('categories')" class="text-xs text-accent hover:underline">manage &#8594;</button></div>
+              <template x-for="(cat,name) in s.categories" :key="name"><div class="py-2 border-t border-sep first:border-0"><code class="text-sm text-accent" x-text="name"></code> <span class="text-xs text-sub" x-text="cat.failover.length+' models'"></span></div></template>
+              <p x-show="Object.keys(s.categories).length===0" class="text-sm text-mut py-4">No categories yet.</p></div>
+          </div>
+        </section>
+
+        <!-- PROVIDERS -->
+        <section x-show="page==='providers'" class="space-y-4">
+          <div class="card overflow-hidden" x-show="s.providers.length"><table class="w-full text-sm">
+            <thead><tr class="label"><th class="text-left font-medium px-5 py-3">Provider</th><th class="text-left font-medium px-5 py-3">Endpoint</th><th class="text-left font-medium px-5 py-3">Key</th><th class="text-left font-medium px-5 py-3">Status</th><th class="px-5 py-3"></th></tr></thead>
+            <tbody><template x-for="p in s.providers" :key="p.id"><tr class="border-t border-sep hover:bg-hl">
+              <td class="px-5 py-3"><div class="flex items-center gap-3"><span class="w-7 h-7 rounded grid place-items-center text-xs font-bold" :style="'background:'+typeColor(p.type)+'22;color:'+typeColor(p.type)" x-text="p.type[0].toUpperCase()"></span>
+                <div><div class="text-hi font-medium" x-text="p.id"></div><div class="text-xs text-sub"><span x-text="p.type"></span><span x-show="p.force_api_support" class="chip chip-accent ml-1.5" title="API adaptation enabled">adapt</span></div></div></div></td>
+              <td class="px-5 py-3 text-mut max-w-[220px] truncate" x-text="p.base_url||(p.region?('bedrock · '+p.region):'—')"></td>
+              <td class="px-5 py-3"><span class="chip" :class="p.api_key_set?'chip-ok':'chip-mut'" x-text="p.api_key_set?'set':(p.type==='github_copilot'?'oauth':'—')"></span></td>
+              <td class="px-5 py-3"><template x-if="tests[p.id]"><span class="chip" :class="tests[p.id].connected?'chip-ok':'chip-bad'" :title="tests[p.id].note||tests[p.id].error||''" x-text="tests[p.id].connected?('&#9679; '+tests[p.id].model_count+' models'):'&#9679; failed'"></span></template>
+                <template x-if="!tests[p.id]"><span class="text-xs text-sub" x-text="pmodels[p.id]?(pmodels[p.id].length+' cached'):'untested'"></span></template></td>
+              <td class="px-5 py-3"><div class="flex items-center justify-end gap-1.5">
+                <button @click="testProvider(p.id)" class="btn btn-ghost text-xs px-2.5 py-1">Test</button>
+                <button @click="listModels(p.id)" class="btn btn-ghost text-xs px-2.5 py-1">Models</button>
+                <button @click="delProvider(p.id)" class="btn btn-ghost text-xs px-2 py-1 hover:!text-neg" title="Delete">&#10005;</button></div></td>
+            </tr></template></tbody></table></div>
+
+          <!-- DISCOVERED LOCAL CANDIDATES (surfaced, not hardwired) -->
+          <div x-show="discovered.length" class="card p-4 space-y-3">
+            <div class="flex items-center justify-between"><div><h3 class="text-hi font-medium">Local providers found</h3>
+              <p class="text-xs text-mut mt-0.5">Reachable on this machine. Review and add the ones you want — nothing is wired automatically.</p></div>
+              <button @click="discovered=[]" class="btn btn-ghost text-xs px-2.5 py-1">Dismiss</button></div>
+            <template x-for="c in discovered" :key="c.base_url">
+              <div class="flex items-center gap-3 border-t border-sep pt-3">
+                <span class="w-7 h-7 rounded grid place-items-center text-xs font-bold" :style="'background:'+typeColor(c.type)+'22;color:'+typeColor(c.type)" x-text="c.type[0].toUpperCase()"></span>
+                <div class="flex-1 min-w-0"><div class="text-hi font-medium" x-text="c.id"></div>
+                  <div class="text-xs text-sub truncate" x-text="c.note||c.base_url"></div></div>
+                <span class="chip chip-mut" x-text="c.type"></span>
+                <button @click="addDiscovered(c)" class="btn btn-primary text-xs px-3 py-1">Add</button>
+              </div></template>
+          </div>
+          <div x-show="s.providers.length===0" class="card p-12 text-center"><div class="w-11 h-11 rounded tile grid place-items-center mx-auto mb-4">&#9889;</div>
+            <h3 class="text-hi font-medium">No providers connected</h3><p class="text-sm text-mut mt-1 mb-4">Detect a local provider (Ollama, LocalAI, LM Studio, …), or add Copilot / an OpenAI-compatible provider.</p>
+            <div class="flex gap-2 justify-center"><button @click="detectLocal()" class="btn btn-ghost px-4 py-2 text-sm">Detect local</button><button @click="openDrawer()" class="btn btn-primary px-4 py-2 text-sm">+ Add provider</button></div></div>
+        </section>
+
+        <!-- CATEGORIES -->
+        <section x-show="page==='categories'" class="space-y-4">
+          <template x-for="(cat,name) in s.categories" :key="name"><div class="card p-5">
+            <div class="flex items-center justify-between"><div class="flex items-center gap-2"><span class="label">/v1 model</span><code class="text-accent font-medium" x-text="name"></code><span class="text-xs text-sub" x-text="cat.failover.length+' in chain'"></span></div>
+              <div class="flex gap-2"><button x-show="!editing[name]" @click="startEdit(name)" class="btn btn-ghost text-xs px-3 py-1">Edit</button><button @click="delCat(name)" class="btn btn-ghost text-xs px-2 py-1 hover:!text-neg">Delete</button></div></div>
+            <div x-show="!editing[name]" class="flex flex-wrap items-center gap-2 mt-4">
+              <template x-for="(m,i) in cat.failover" :key="i"><div class="flex items-center gap-2">
+                <template x-if="i>0"><svg width="15" height="15" class="text-sub" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 12h14M13 6l6 6-6 6"/></svg></template>
+                <span class="inline-flex items-center gap-2 text-sm bg-hl border border-sep rounded px-3 py-1.5"><span class="w-5 h-5 rounded bg-app grid place-items-center text-[10px] text-mut" x-text="i+1"></span><b class="text-hi" x-text="m.provider"></b><span class="text-sub">/</span><span x-text="m.model"></span></span></div></template>
+              <span x-show="cat.failover.length===0" class="text-sm text-mut">empty — click Edit to pin models</span></div>
+            <div x-show="editing[name]" class="mt-4 space-y-2">
+              <template x-for="(m,i) in editing[name]" :key="i"><div class="flex items-center gap-3 text-sm bg-hl border border-sep rounded px-3 py-2"><span class="w-5 h-5 rounded bg-app grid place-items-center text-[10px] text-mut" x-text="i+1"></span><b class="text-hi" x-text="m.provider"></b><span class="text-sub">/</span><span x-text="m.model"></span><div class="flex-1"></div><button @click="move(name,i,-1)" class="text-mut hover:text-hi px-1">&#8593;</button><button @click="move(name,i,1)" class="text-mut hover:text-hi px-1">&#8595;</button><button @click="editing[name].splice(i,1)" class="text-mut hover:text-neg px-1">&#10005;</button></div></template>
+              <div class="flex flex-wrap items-end gap-2 pt-3 mt-1 border-t border-sep">
+                <label class="text-xs text-mut">provider<select x-model="pick.provider" @change="ensureModels(pick.provider)" class="mt-1 block inp px-2.5 py-2 text-sm min-w-[140px]"><option value="">—</option><template x-for="p in s.providers" :key="p.id"><option x-text="p.id"></option></template></select></label>
+                <label class="text-xs text-mut">model<input x-model="pick.model" list="ml" placeholder="model id" class="mt-1 block inp px-2.5 py-2 text-sm w-72"><datalist id="ml"><template x-for="mid in (pmodels[pick.provider]||[])" :key="mid"><option :value="mid"></option></template></datalist></label>
+                <button @click="addMember(name)" class="btn btn-ghost text-sm px-3 py-2">+ Pin</button><div class="flex-1"></div>
+                <button @click="saveCat(name)" class="btn btn-primary text-sm px-4 py-2">Save</button><button @click="delete editing[name]" class="btn btn-ghost text-sm px-3 py-2">Cancel</button></div>
+              <p class="text-xs text-sub">Order = failover order. Same-provider members cascade on throttle; cross-provider members fail over.</p></div>
+          </div></template>
+          <div x-show="Object.keys(s.categories).length===0" class="card p-12 text-center"><div class="w-11 h-11 rounded tile grid place-items-center mx-auto mb-4">&#9939;</div>
+            <h3 class="text-hi font-medium">No categories</h3><p class="text-sm text-mut mt-1">Create one, then pin real models (from any provider) into an ordered failover chain.<br>Tip: open a provider's <b>Models</b> first so they appear in the picker.</p></div>
+        </section>
+
+        <!-- MODELS -->
+        <section x-show="page==='models'" class="space-y-5">
+          <div class="flex items-center gap-3"><div class="relative flex-1 max-w-sm"><svg class="absolute left-3 top-2.5 text-sub" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4-4"/></svg><input x-model="q" placeholder="Search models…" class="inp w-full pl-9 pr-3 py-2 text-sm"></div><span class="text-xs text-sub" x-text="catalog.length+' total'"></span></div>
+
+          <!-- per-provider model cards -->
+          <template x-for="p in s.providers" :key="p.id"><div class="card p-5" x-show="(modelCards()[p.id]||[]).some(m=>!q||m.id.toLowerCase().includes(q.toLowerCase()))">
+            <div class="flex items-center justify-between mb-4">
+              <div class="flex items-center gap-2.5"><span class="w-7 h-7 rounded grid place-items-center text-xs font-bold" :style="'background:'+typeColor(p.type)+'22;color:'+typeColor(p.type)" x-text="p.type[0].toUpperCase()"></span>
+                <div><div class="text-hi font-medium" x-text="p.id"></div><div class="text-xs text-sub"><span x-text="(modelCards()[p.id]||[]).length+' models'"></span><span x-show="p.catalog_refreshed"> · refreshed <span x-text="p.catalog_refreshed? new Date(p.catalog_refreshed).toLocaleString():''"></span></span></div></div></div>
+              <button @click="refreshProvider(p.id)" class="btn btn-ghost text-xs px-3 py-1.5">&#8635; Refresh</button></div>
+            <div class="grid gap-2.5" style="grid-template-columns:repeat(auto-fill,minmax(230px,1fr))">
+              <template x-for="m in (modelCards()[p.id]||[]).filter(x=>!q||x.id.toLowerCase().includes(q.toLowerCase()))" :key="m.id"><div class="border border-sep rounded-lg p-3 bg-hl/40">
+                <div class="text-hi text-sm font-medium truncate" :title="m.id.split('/').slice(1).join('/')" x-text="m.id.split('/').slice(1).join('/')"></div>
+                <div class="text-[11px] text-sub mb-2" x-text="m.display_name||''"></div>
+                <div class="flex flex-wrap gap-1">
+                  <template x-for="b in endpointBadges(m)" :key="b.t"><span class="chip text-[10px]" :class="b.ok?'chip-ok':'chip-mut'" x-text="b.t"></span></template>
+                  <template x-for="c in capChips(m)" :key="c"><span class="chip chip-mut text-[10px]" x-text="c"></span></template>
+                </div>
+              </div></template>
+            </div>
+            <p x-show="(modelCards()[p.id]||[]).length===0" class="text-sm text-mut py-2">No catalog yet — click <b>Refresh</b> (or <b>Test</b> on Providers).</p>
+          </div></template>
+
+          <!-- category virtual models -->
+          <div class="card p-5" x-show="catalog.some(m=>m.owned_by==='category')">
+            <h3 class="text-hi font-medium mb-3">Categories <span class="text-xs text-sub font-normal">— virtual models that fail over</span></h3>
+            <div class="flex flex-wrap gap-2"><template x-for="m in catalog.filter(x=>x.owned_by==='category' && (!q||x.id.toLowerCase().includes(q.toLowerCase())))" :key="m.id">
+              <span class="inline-flex items-center gap-2 text-sm bg-hl border border-sep rounded px-3 py-1.5"><code class="text-accent" x-text="m.id"></code><span class="text-xs text-sub" x-text="(m.failover||[]).length+' in chain'"></span></span></template></div>
+          </div>
+
+          <div x-show="catalog.length===0" class="card p-12 text-center"><div class="w-11 h-11 rounded tile grid place-items-center mx-auto mb-4">&#128230;</div>
+            <h3 class="text-hi font-medium">No models yet</h3><p class="text-sm text-mut mt-1">Add a provider and click <b>Refresh</b> / <b>Test</b>, or create a category.</p></div>
+        </section>
+
+        <!-- IDENTITY -->
+        <section x-show="page==='identity'" class="space-y-4">
+          <div class="grid md:grid-cols-2 xl:grid-cols-4 gap-4">
+            <div class="card p-4 space-y-3"><h3 class="font-medium text-hi">Add principal</h3>
+              <select x-model="identityForm.kind" class="inp w-full px-2.5 py-1.5 text-sm"><option value="human">Human</option><option value="service">Service</option></select>
+              <input x-model="identityForm.name" placeholder="display name" class="inp w-full px-2.5 py-1.5 text-sm">
+              <input x-model="identityForm.email" placeholder="email (human)" class="inp w-full px-2.5 py-1.5 text-sm">
+              <input x-model="identityForm.subject" placeholder="external subject / service id" class="inp w-full px-2.5 py-1.5 text-sm">
+              <button @click="createPrincipal()" class="btn btn-primary px-3 py-1.5 text-sm">Create principal</button></div>
+            <div class="card p-4 space-y-3"><h3 class="font-medium text-hi">Add project</h3>
+              <input x-model="projectForm.name" placeholder="project name" class="inp w-full px-2.5 py-1.5 text-sm">
+              <input x-model="projectForm.slug" placeholder="slug (optional)" class="inp w-full px-2.5 py-1.5 text-sm">
+              <button @click="createProject()" class="btn btn-primary px-3 py-1.5 text-sm">Create project</button></div>
+            <div class="card p-4 space-y-3"><h3 class="font-medium text-hi">Assign membership</h3>
+              <select x-model="membershipForm.projectID" class="inp w-full px-2.5 py-1.5 text-sm"><option value="">project</option><template x-for="p in (s?.projects||[])" :key="p.id"><option :value="p.id" x-text="p.name"></option></template></select>
+              <select x-model="membershipForm.principalID" class="inp w-full px-2.5 py-1.5 text-sm"><option value="">principal</option><template x-for="p in (s?.principals||[]).filter(x=>x.kind!=='system')" :key="p.id"><option :value="p.id" x-text="p.display_name"></option></template></select>
+              <select x-model="membershipForm.role" class="inp w-full px-2.5 py-1.5 text-sm"><option>owner</option><option>admin</option><option>member</option><option>viewer</option></select>
+              <button @click="setMembership()" class="btn btn-primary px-3 py-1.5 text-sm">Assign</button></div>
+            <div class="card p-4 space-y-3"><div><h3 class="font-medium text-hi">Add personal connection</h3><p class="text-xs text-sub mt-0.5">Encrypted, owner-only API key.</p></div>
+              <select x-model="connectionForm.principalID" class="inp w-full px-2.5 py-1.5 text-sm"><option value="">human principal</option><template x-for="p in (s?.principals||[]).filter(x=>x.kind==='human'&&x.status==='active')" :key="p.id"><option :value="p.id" x-text="p.display_name"></option></template></select>
+              <select x-model="connectionForm.providerID" class="inp w-full px-2.5 py-1.5 text-sm"><option value="">provider</option><template x-for="p in (s?.providers||[]).filter(x=>x.type!=='github_copilot')" :key="p.id"><option :value="p.id" x-text="p.id"></option></template></select>
+              <input x-model="connectionForm.name" placeholder="connection name (e.g. personal)" class="inp w-full px-2.5 py-1.5 text-sm">
+              <input x-model="connectionForm.secret" type="password" placeholder="provider API key" class="inp w-full px-2.5 py-1.5 text-sm">
+              <label class="flex items-center gap-2 text-xs text-mut"><input type="checkbox" x-model="connectionForm.makeDefault"> Use by default for this person</label>
+              <button @click="createConnection()" class="btn btn-primary px-3 py-1.5 text-sm">Save connection</button></div>
+          </div>
+          <div class="card overflow-hidden"><table class="w-full text-sm"><thead><tr class="label"><th class="text-left px-5 py-3">Principal</th><th class="text-left px-5 py-3">Kind</th><th class="text-left px-5 py-3">Email / subject</th><th class="text-left px-5 py-3">Projects</th><th class="text-left px-5 py-3">Copilot BYOC</th><th class="px-5"></th></tr></thead>
+            <tbody><template x-for="p in (s?.principals||[]).filter(x=>x.kind!=='system')" :key="p.id"><tr class="border-t border-sep" :class="p.status!=='active'&&'opacity-60'">
+              <td class="px-5 py-3 text-hi" x-text="p.display_name"></td><td class="px-5 py-3" x-text="p.kind"></td>
+              <td class="px-5 py-3 text-xs text-mut"><div x-text="p.email||'-'"></div><code x-text="p.external_subject||''"></code></td>
+              <td class="px-5 py-3 text-xs text-mut" x-text="principalProjects(p.id)"></td>
+              <td class="px-5 py-3"><span class="chip" :class="hasCredential(p.id,'copilot')?'chip-ok':'chip-mut'" x-text="hasCredential(p.id,'copilot')?'connected':'not connected'"></span></td>
+              <td class="px-5 py-3 text-right"><button x-show="p.kind==='human'" @click="startPrincipalCopilot(p)" class="btn btn-ghost text-xs px-2 py-1">Connect Copilot</button><button @click="togglePrincipal(p)" class="btn btn-ghost text-xs px-2 py-1" x-text="p.status==='active'?'Disable':'Enable'"></button></td>
+            </tr></template></tbody></table></div>
+          <div x-show="byoc.code" class="card p-4" style="border-color:var(--accent)"><div class="label mb-1">Connect Copilot for <span x-text="byoc.name"></span></div><p class="text-sm">Open <a class="lnk" :href="byoc.uri" target="_blank" x-text="byoc.uri"></a> and enter:</p><code class="text-xl text-hi tracking-widest" x-text="byoc.code"></code><p class="text-xs text-mut mt-2" x-text="byoc.status"></p></div>
+          <div class="card overflow-hidden" x-show="personalConnections().length"><table class="w-full text-sm"><thead><tr class="label"><th class="text-left px-5 py-3">Owner</th><th class="text-left px-5 py-3">Provider</th><th class="text-left px-5 py-3">Connection</th><th class="text-left px-5 py-3">Status</th><th class="px-5"></th></tr></thead>
+            <tbody><template x-for="c in personalConnections()" :key="c.id"><tr class="border-t border-sep" :class="c.status!=='active'&&'opacity-60'"><td class="px-5 py-3 text-hi" x-text="principalName(c.principal_id)"></td><td class="px-5 py-3"><code x-text="c.provider_id"></code></td><td class="px-5 py-3"><span x-text="c.connection_name"></span><span x-show="c.is_default" class="chip chip-accent ml-2">default</span><div class="text-xs text-sub" x-text="c.credential_kind"></div></td><td class="px-5 py-3"><span class="chip" :class="c.status==='active'?'chip-ok':'chip-mut'" x-text="c.status"></span></td><td class="px-5 py-3 text-right"><button x-show="c.status==='active'" @click="revokeConnection(c)" class="btn btn-ghost text-xs px-2 py-1 hover:!text-neg">Revoke</button></td></tr></template></tbody></table></div>
+          <div class="card overflow-hidden"><table class="w-full text-sm"><thead><tr class="label"><th class="text-left px-5 py-3">Project</th><th class="text-left px-5 py-3">Status</th><th class="text-left px-5 py-3">Members</th></tr></thead>
+            <tbody><template x-for="p in (s?.projects||[])" :key="p.id"><tr class="border-t border-sep"><td class="px-5 py-3"><span class="text-hi" x-text="p.name"></span> <code class="text-xs text-mut" x-text="p.slug"></code></td><td class="px-5 py-3" x-text="p.status"></td><td class="px-5 py-3 text-xs text-mut" x-text="projectMembers(p.id)"></td></tr></template></tbody></table></div>
+        </section>
+
+        <!-- KEYS -->
+        <section x-show="page==='keys'" class="space-y-4">
+          <div x-show="minted" class="card p-4" style="border-color:var(--accent);background:var(--accent-soft)">
+            <div class="label mb-1" style="color:var(--accent)">New key minted — copy it now</div>
+            <div class="flex items-center gap-2"><code class="text-sm text-hi break-all" x-text="minted"></code><button @click="copy(minted)" class="btn btn-ghost text-xs px-2 py-1 shrink-0">Copy</button></div>
+          </div>
+          <div class="card p-4">
+            <button @click="keyForm.showGov=!keyForm.showGov" class="text-sm text-mut hover:text-hi flex items-center gap-1.5"><span x-text="keyForm.showGov?'\u25be':'\u25b8'"></span> Governance for next key <span class="chip chip-mut">optional</span></button>
+            <div x-show="keyForm.showGov" class="grid gap-3 mt-3" style="grid-template-columns:repeat(auto-fit,minmax(175px,1fr))">
+              <label class="text-xs text-mut">Requests/min (0=&#8734;)<input type="number" min="0" x-model.number="keyForm.rpm" class="mt-1 w-full inp px-2.5 py-1.5 text-sm"></label>
+              <label class="text-xs text-mut">Requests/day (0=&#8734;)<input type="number" min="0" x-model.number="keyForm.daily" class="mt-1 w-full inp px-2.5 py-1.5 text-sm"></label>
+              <label class="text-xs text-mut">Requests/month<input type="number" min="0" x-model.number="keyForm.monthly" class="mt-1 w-full inp px-2.5 py-1.5 text-sm"></label>
+              <label class="text-xs text-mut">Input tokens/day<input type="number" min="0" x-model.number="keyForm.dailyIn" class="mt-1 w-full inp px-2.5 py-1.5 text-sm"></label>
+              <label class="text-xs text-mut">Output tokens/day<input type="number" min="0" x-model.number="keyForm.dailyOut" class="mt-1 w-full inp px-2.5 py-1.5 text-sm"></label>
+              <label class="text-xs text-mut">Total tokens/month<input type="number" min="0" x-model.number="keyForm.monthlyTokens" class="mt-1 w-full inp px-2.5 py-1.5 text-sm"></label>
+              <label class="text-xs text-mut">Estimated USD/day<input type="number" min="0" step="0.01" x-model.number="keyForm.dailyUSD" class="mt-1 w-full inp px-2.5 py-1.5 text-sm"></label>
+              <label class="text-xs text-mut">Estimated USD/month<input type="number" min="0" step="0.01" x-model.number="keyForm.monthlyUSD" class="mt-1 w-full inp px-2.5 py-1.5 text-sm"></label>
+              <label class="text-xs text-mut">Credits/day<input type="number" min="0" x-model.number="keyForm.dailyCredits" class="mt-1 w-full inp px-2.5 py-1.5 text-sm"></label>
+              <label class="text-xs text-mut">Credits/month<input type="number" min="0" x-model.number="keyForm.monthlyCredits" class="mt-1 w-full inp px-2.5 py-1.5 text-sm"></label>
+              <label class="text-xs text-mut">Expires in days (0=never)<input type="number" min="0" x-model.number="keyForm.expiresDays" class="mt-1 w-full inp px-2.5 py-1.5 text-sm"></label>
+              <label class="text-xs text-mut">Allowed models (comma)<input x-model="keyForm.allowedModels" placeholder="smart, copilot/gpt-4o-mini" class="mt-1 w-full inp px-2.5 py-1.5 text-sm"></label>
+              <label class="text-xs text-mut">Allowed providers (comma)<input x-model="keyForm.allowedProviders" placeholder="copilot, localai" class="mt-1 w-full inp px-2.5 py-1.5 text-sm"></label>
+            </div>
+            <p x-show="keyForm.showGov" class="text-xs text-sub mt-2">Applies to the next key you mint (top-right). Blank/0 = unrestricted. Editable per key after minting.</p>
+          </div>
+          <div class="card overflow-hidden" x-show="s.keys && s.keys.length"><table class="w-full text-sm">
+            <thead><tr class="label"><th class="text-left font-medium px-5 py-3">Project</th><th class="text-left font-medium px-5 py-3">Principal / key</th><th class="text-left font-medium px-5 py-3">Prefix</th><th class="text-left font-medium px-5 py-3">Limits</th><th class="text-left font-medium px-5 py-3">Status</th><th class="px-5 py-3"></th></tr></thead>
+            <tbody><template x-for="k in s.keys" :key="k.id"><tr class="border-t border-sep hover:bg-hl" :class="(k.status!=='active'||k.expired)?'opacity-60':''">
+              <td class="px-5 py-3 text-hi" x-text="k.project"></td><td class="px-5 py-3 text-fg"><span x-text="k.principal"></span><span class="text-xs text-mut" x-text="' / '+k.name"></span></td>
+              <td class="px-5 py-3"><code class="text-xs text-mut" x-text="k.prefix"></code></td>
+              <td class="px-5 py-3 text-xs text-mut" x-text="keyLimits(k)"></td>
+              <td class="px-5 py-3"><span class="chip" :class="(k.status!=='active'||k.expired)?'chip-bad':'chip-ok'" x-text="k.expired?'expired':k.status"></span></td>
+              <td class="px-5 py-3 text-right"><button @click="toggleKey(k)" class="btn btn-ghost text-xs px-2 py-1 ml-1" x-text="k.status==='disabled'?'Enable':'Disable'"></button><button @click="revokeKey(k.id)" class="btn btn-ghost text-xs px-2 py-1 ml-1 hover:!text-neg">Revoke</button></td>
+            </tr></template></tbody></table></div>
+          <div x-show="!s.keys || s.keys.length===0" class="card p-12 text-center"><div class="w-11 h-11 rounded tile grid place-items-center mx-auto mb-4">&#128273;</div>
+            <h3 class="text-hi font-medium">No keys yet</h3><p class="text-sm text-mut mt-1">Mint a key for a project (top-right). Usage is attributed to <b>project + key</b>. Use the token as the Bearer / API key in your CLI.</p></div>
+        </section>
+
+        <!-- USAGE + TELEMETRY -->
+        <section x-show="page==='usage'" class="space-y-6">
+          <div class="grid grid-cols-2 lg:grid-cols-4 gap-4">
+            <template x-for="c in usageCards()" :key="c[0]"><div class="card p-5"><div class="label" x-text="c[0]"></div><div class="text-2xl font-semibold text-hi mt-2" x-text="c[2]+c[1]"></div></div></template>
+          </div>
+
+          <div class="grid lg:grid-cols-2 gap-4">
+            <div><h3 class="label mb-2">By project</h3><div class="card overflow-hidden"><table class="w-full text-sm"><thead><tr class="label"><th class="text-left px-4 py-2.5">Project</th><th class="text-right px-4">Requests</th><th class="text-right px-4">Tokens</th><th class="text-right px-4">Cost</th></tr></thead><tbody><template x-for="r in usageGroup('project')" :key="r.project_id"><tr class="border-t border-sep"><td class="px-4 py-2" x-text="projectName(r.project_id)"></td><td class="px-4 text-right" x-text="r.requests"></td><td class="px-4 text-right text-mut" x-text="r.input_tokens+r.output_tokens"></td><td class="px-4 text-right" x-text="'$'+microUSD(r.cost_microusd)"></td></tr></template></tbody></table></div></div>
+            <div><h3 class="label mb-2">By principal</h3><div class="card overflow-hidden"><table class="w-full text-sm"><thead><tr class="label"><th class="text-left px-4 py-2.5">Principal</th><th class="text-right px-4">Requests</th><th class="text-right px-4">Errors</th><th class="text-right px-4">Avg ms</th></tr></thead><tbody><template x-for="r in usageGroup('principal')" :key="r.principal_id"><tr class="border-t border-sep"><td class="px-4 py-2" x-text="principalName(r.principal_id)"></td><td class="px-4 text-right" x-text="r.requests"></td><td class="px-4 text-right" x-text="r.errors"></td><td class="px-4 text-right text-mut" x-text="r.average_latency_ms"></td></tr></template></tbody></table></div></div>
+          </div>
+          <div><h3 class="label mb-2">By model</h3><div class="card overflow-hidden"><table class="w-full text-sm"><thead><tr class="label"><th class="text-left px-4 py-2.5">Model</th><th class="text-right px-4">Requests</th><th class="text-right px-4">Tokens in/out</th><th class="text-right px-4">Credits</th></tr></thead><tbody><template x-for="r in usageGroup('model')" :key="r.model"><tr class="border-t border-sep"><td class="px-4 py-2"><code x-text="r.model"></code></td><td class="px-4 text-right" x-text="r.requests"></td><td class="px-4 text-right text-mut" x-text="r.input_tokens+' / '+r.output_tokens"></td><td class="px-4 text-right" x-text="(r.credits_milli/1000).toFixed(1)"></td></tr></template></tbody></table></div></div>
+
+          <div><h3 class="label mb-2">Throttling &amp; fallback <span class="text-xs text-sub font-normal normal-case tracking-normal" x-text="tele?('· '+tele.stats.events+' events, '+tele.stats.throttled+' throttled'):''"></span></h3>
+            <div class="card overflow-hidden"><table class="w-full text-sm"><thead><tr class="label"><th class="text-left font-medium px-5 py-2.5">When</th><th class="text-left font-medium px-5 py-2.5">Requested</th><th class="text-left font-medium px-5 py-2.5">Chain (attempts &#8594; served)</th></tr></thead>
+              <tbody><template x-for="(e,i) in (tele?.recent||[])" :key="i"><tr class="border-t border-sep align-top"><td class="px-5 py-2 text-mut whitespace-nowrap" x-text="fmtTime(e.ts)"></td><td class="px-5 py-2"><code class="text-accent" x-text="e.requested"></code><span x-show="e.throttled" class="chip chip-warn ml-2">throttled</span></td>
+                <td class="px-5 py-2"><div class="flex flex-wrap gap-1.5">
+                  <template x-for="(a,j) in e.attempts" :key="j"><span class="chip" :class="a.ok?'chip-ok':'chip-bad'" :title="a.error||''"><span x-text="a.ok?'&#10003;':'&#10007;'"></span><span x-text="a.provider+'/'+a.model"></span><span x-show="a.throttled" class="text-warn">&#183;429</span></span></template></div></td></tr></template></tbody></table>
+              <p x-show="!tele||tele.recent.length===0" class="text-sm text-mut px-5 py-6 text-center">No failover events yet. They appear when a category retries past a failed/throttled target.</p></div></div>
+          <div class="grid lg:grid-cols-2 gap-4">
+            <div class="card p-4"><h3 class="label mb-3">Alert rules</h3><div class="grid grid-cols-2 gap-2"><select x-model="alertForm.projectID" class="inp px-2 py-1.5 text-sm"><option value="">all projects</option><template x-for="p in (s?.projects||[])" :key="p.id"><option :value="p.id" x-text="p.name"></option></template></select><select x-model="alertForm.metric" class="inp px-2 py-1.5 text-sm"><option>requests</option><option>input_tokens</option><option>output_tokens</option><option>total_tokens</option><option>cost_microusd</option><option>credits_milli</option></select><select x-model="alertForm.period" class="inp px-2 py-1.5 text-sm"><option>day</option><option>month</option></select><input type="number" min="1" max="100" x-model.number="alertForm.threshold" class="inp px-2 py-1.5 text-sm" placeholder="percent"><button @click="createAlert()" class="btn btn-primary px-3 py-1.5 text-sm">Add quota alert</button></div><div class="mt-3"><template x-for="a in alerts" :key="a.id"><div class="border-t border-sep py-2 text-sm flex"><span x-text="(a.project_id?projectName(a.project_id):'all')+' · '+a.metric+' '+a.threshold+'%/'+a.period"></span><button @click="deleteAlert(a.id)" class="ml-auto text-xs text-neg">delete</button></div></template></div></div>
+            <div class="card p-4"><h3 class="label mb-3">Notification outbox</h3><template x-for="e in outbox" :key="e.id"><div class="border-t border-sep py-2 text-sm"><div class="flex"><span class="chip chip-warn" x-text="e.kind"></span><span class="ml-auto text-xs text-mut" x-text="fmtTime(e.ts)"></span></div><div class="text-xs text-mut mt-1" x-text="JSON.stringify(e.payload)"></div></div></template><p x-show="outbox.length===0" class="text-sm text-mut">No pending notifications.</p></div>
+          </div>
+        </section>
+
+        <!-- SETTINGS -->
+        <section x-show="page==='settings'" class="space-y-4 max-w-2xl">
+          <div class="card p-5"><h3 class="label mb-3">GitHub Copilot</h3>
+            <p class="text-sm text-fg">Proxy <b class="text-hi" x-text="s.copilot.enabled?'enabled':'disabled'"></b> · token source <b class="text-hi" x-text="s.copilot.auth.active_source||'none'"></b></p>
+            <div class="flex items-center gap-2 mt-3"><button @click="copilotLogin()" class="btn btn-primary text-sm px-3.5 py-2">Sign in (device code)</button><button @click="copilotLogout()" class="btn btn-ghost text-sm px-3.5 py-2">Log out</button></div>
+            <div x-show="cp.code" class="mt-4 p-4 rounded bg-hl border border-sep"><div class="text-sm text-fg">Open <a class="lnk" :href="cp.uri" target="_blank" x-text="cp.uri"></a> and enter</div><div class="text-3xl font-bold tracking-[.2em] text-hi my-2" x-text="cp.code"></div><div class="text-sm text-mut" x-text="cp.status"></div></div></div>
+          <div class="card p-5"><h3 class="label mb-3">Auth &amp; storage</h3><div class="text-sm text-fg space-y-1">
+            <div>API auth: <b class="text-hi" x-text="s.auth_required?'required (bearer key)':'open — local only'"></b></div>
+            <div>Control plane: <code class="text-accent">~/.llmgw/gateway.db</code> (SQLite WAL, hashed keys). Provider secrets remain encrypted/separate.</div><div>SSO: <b class="text-hi" x-text="s.sso?.enabled?('enabled · '+s.sso.admin_group):'disabled'"></b></div></div></div>
+        </section>
+
+        <!-- DOCS -->
+        <section x-show="page==='help'" class="doc">
+          <div class="flex gap-7">
+            <!-- topic sidebar -->
+            <nav class="hidden lg:block w-48 shrink-0">
+              <div class="sticky top-20 space-y-4">
+                <template x-for="grp in docNav" :key="grp.g">
+                  <div><div class="label mb-1.5" x-text="grp.g"></div>
+                    <div class="space-y-0.5"><template x-for="it in grp.items" :key="it.id">
+                      <button @click="doc=it.id" class="doclink w-full text-left px-2.5 py-1.5" :class="doc===it.id&&'doclink-active'" x-text="it.label"></button>
+                    </template></div></div>
+                </template>
+              </div>
+            </nav>
+            <!-- mobile topic picker -->
+            <select x-model="doc" class="lg:hidden inp px-3 py-2 text-sm w-full mb-2"><template x-for="grp in docNav" :key="grp.g"><optgroup :label="grp.g"><template x-for="it in grp.items" :key="it.id"><option :value="it.id" x-text="it.label"></option></template></optgroup></template></select>
+
+            <div class="min-w-0 flex-1 max-w-2xl">
+              <!-- OVERVIEW -->
+              <div x-show="doc==='overview'" class="space-y-5">
+                <div><h3>What llm-gateway is</h3>
+                  <p class="mt-2">A small, self-hosted proxy that sits between your coding CLIs and every model provider you use. Point Claude&nbsp;Code, Codex, or any OpenAI/Anthropic-compatible tool at this one endpoint, and it routes each request to a real upstream — automatically failing over to the next when a provider throttles or errors. That's how you spread work across subscriptions instead of burning through one.</p></div>
+                <div><h4 class="mb-2">The mental model</h4>
+                  <div class="flow">
+                    <div class="flow-box"><div class="label mb-1">Your CLIs</div><p class="!text-sm !leading-snug">Claude Code, Codex, Copilot CLI, scripts</p></div>
+                    <div class="flow-arrow">&#8594;</div>
+                    <div class="flow-box" style="border-color:var(--accent)"><div class="label mb-1" style="color:var(--accent)">llm-gateway</div><p class="!text-sm !leading-snug">One base URL + one key. Resolves the model, does failover, records usage.</p></div>
+                    <div class="flow-arrow">&#8594;</div>
+                    <div class="flow-box"><div class="label mb-1">Providers</div><p class="!text-sm !leading-snug">Copilot, Bedrock, OpenAI-compatible, Ollama…</p></div>
+                  </div></div>
+                <div class="space-y-3"><h4>Three things to know</h4>
+                  <div class="step"><div class="step-n">1</div><p><b class="text-hi">Providers</b> are your upstreams — an id + type + key. Keys never touch the config file; they live in a 0600 secrets store. Manage them on <a class="lnk" @click="go('providers')">Providers</a>.</p></div>
+                  <div class="step"><div class="step-n">2</div><p><b class="text-hi">Categories</b> are the model names your CLIs actually request. Each is an <i>ordered failover chain</i> of pinned <code>provider/model</code> targets — e.g. a <code>smart</code> category that tries Claude first, then a local model. Build them on <a class="lnk" @click="go('categories')">Categories</a>.</p></div>
+                  <div class="step"><div class="step-n">3</div><p><b class="text-hi">Keys</b> are per-project bearer tokens you mint here. Every request is attributed to a project + key so <a class="lnk" @click="go('usage')">Usage</a> can show cost and failover behaviour per project.</p></div>
+                </div>
+                <div class="callout callout-tip"><span>&#128161;</span><span>New here? Head to <b class="text-hi">Getting started → Quickstart</b> for the three-minute setup.</span></div>
+              </div>
+
+              <!-- QUICKSTART -->
+              <div x-show="doc==='quickstart'" class="space-y-5">
+                <div><h3>Quickstart</h3><p class="mt-2">Get a CLI talking to the gateway in three steps. Your gateway base URL is <code x-text="orig()"></code>.</p></div>
+                <div class="space-y-4">
+                  <div class="step"><div class="step-n">1</div><div class="flex-1"><h4>Mint a project key</h4><p class="mt-1">On <a class="lnk" @click="go('keys')">Keys</a>, enter a project and key name, then <b>Mint key</b>. Copy the <code>llmgw_…</code> token — it's shown once.</p></div></div>
+                  <div class="step"><div class="step-n">2</div><div class="flex-1"><h4>Make sure a model is reachable</h4><p class="mt-1">Add at least one <a class="lnk" @click="go('providers')">provider</a>, then either request a pinned <code>provider/model</code> directly or wrap a few into a <a class="lnk" @click="go('categories')">category</a> like <code>smart</code>. Check <a class="lnk" @click="go('models')">Models</a> to see every name you can request.</p></div></div>
+                  <div class="step"><div class="step-n">3</div><div class="flex-1"><h4>Point your CLI at the gateway</h4><p class="mt-1">Set the base URL + token as environment variables, then use a category or <code>provider/model</code> as the model. Full per-CLI recipes are under <a class="lnk" @click="doc='connect'">Guides → Connect a CLI</a>.</p>
+                    <div class="cbwrap mt-2"><button class="copy" @click="copy(snOpenAI())">copy</button><pre class="cb"><code x-text="snOpenAI()"></code></pre></div></div></div>
+                </div>
+              </div>
+
+              <!-- CONNECT A CLI -->
+              <div x-show="doc==='connect'" class="space-y-5">
+                <div><h3>Connect a coding CLI</h3><p class="mt-2">The gateway speaks both the OpenAI and Anthropic wire formats, so most tools just need two environment variables: the base URL and your minted key. Use a <b class="text-hi">category</b> (e.g. <code>smart</code>) or a <code>provider/model</code> as the model name.</p></div>
+                <div><h4 class="mb-1.5">OpenAI-style — Codex, OpenAI SDKs, most tools</h4>
+                  <div class="cbwrap"><button class="copy" @click="copy(snOpenAI())">copy</button><pre class="cb"><code x-text="snOpenAI()"></code></pre></div></div>
+                <div><h4 class="mb-1.5">Anthropic-style — Claude Code / <code>claude</code> CLI</h4>
+                  <div class="cbwrap"><button class="copy" @click="copy(snAnthropic())">copy</button><pre class="cb"><code x-text="snAnthropic()"></code></pre></div>
+                  <p class="mt-1.5 text-sub">Claude Code reads <code>ANTHROPIC_BASE_URL</code> + <code>ANTHROPIC_AUTH_TOKEN</code>; requests hit <code>/v1/messages</code> natively.</p></div>
+                <div><h4 class="mb-1.5">Verify the connection</h4>
+                  <div class="cbwrap"><button class="copy" @click="copy(snCurl())">copy</button><pre class="cb"><code x-text="snCurl()"></code></pre></div>
+                  <p class="mt-1.5">A JSON list of models means you're wired up. Getting <code>401</code>? See <a class="lnk" @click="doc='troubleshooting'">Troubleshooting</a>.</p></div>
+                <div class="callout callout-note"><span>&#8505;</span><span>Point <code>github_copilot</code> here as a <i>provider</i> (Settings → device login) to lend its models to your other CLIs — the reason this gateway exists.</span></div>
+              </div>
+
+              <!-- ADD A PROVIDER -->
+              <div x-show="doc==='providers'" class="space-y-5">
+                <div><h3>Add a provider</h3><p class="mt-2">A provider is one upstream you can route to. Open <a class="lnk" @click="go('providers')">Providers → + Add provider</a>, pick a preset (which pre-fills the base URL) or a type, then save. Hit <b>Test</b> afterwards to confirm the gateway can reach it and list models.</p></div>
+                <div class="callout callout-warn"><span>&#9888;</span><span><b class="text-hi">Always double-check the base URL.</b> Providers change paths and some drop the trailing <code>/v1</code>; a preset is a starting point, not a guarantee. Confirm it against the provider's current docs and your plan/region before relying on it.</span></div>
+                <div class="space-y-2"><h4>Provider types</h4>
+                  <p><b class="text-hi">openai_compatible</b> — base URL + API key. Works with any OpenAI drop-in (OpenRouter, Groq, Together, Fireworks, and the rest).</p>
+                  <p><b class="text-hi">anthropic</b> — native Anthropic Messages upstream (<code>https://api.anthropic.com</code>) + key.</p>
+                  <p><b class="text-hi">bedrock</b> — region + a Bedrock API key; see <a class="lnk" @click="doc='bedrock'">Amazon Bedrock</a>.</p>
+                  <p><b class="text-hi">github_copilot</b> — no key; sign in with a device code on <a class="lnk" @click="go('settings')">Settings</a>, then it lends its models to your CLIs.</p>
+                  <p><b class="text-hi">ollama</b> — local &amp; keyless; see <a class="lnk" @click="doc='ollama'">Ollama</a>.</p></div>
+                <div class="callout callout-tip"><span>&#128274;</span><span>Keys are stored in <code>~/.llmgw/secrets.json</code> (0600), keyed by provider id — never written to the committed config file.</span></div>
+                <div><h4 class="mb-2">Well-known base URLs</h4>
+                  <div class="overflow-hidden rounded border border-sep"><table class="w-full text-sm">
+                    <thead><tr class="label"><th class="text-left font-medium px-4 py-2">Provider</th><th class="text-left font-medium px-4 py-2">Base URL</th></tr></thead>
+                    <tbody class="text-fg"><template x-for="p in presets.filter(x=>x.default_base_url)" :key="p.id"><tr class="border-t border-sep"><td class="px-4 py-1.5" x-text="p.label"></td><td class="px-4 py-1.5"><code x-text="p.default_base_url"></code></td></tr></template></tbody>
+                  </table></div></div>
+              </div>
+
+              <!-- BEDROCK -->
+              <div x-show="doc==='bedrock'" class="space-y-5">
+                <div><h3>Amazon Bedrock</h3><p class="mt-2">Bedrock now exposes an OpenAI-compatible endpoint that accepts a plain <b class="text-hi">bearer token</b>, so this gateway reaches every Bedrock model over ordinary HTTP — <b class="text-hi">no boto3, no SigV4 signing, no AWS SDK</b> in the image.</p></div>
+                <div class="space-y-4">
+                  <div class="step"><div class="step-n">1</div><div class="flex-1"><h4>Create a Bedrock API key</h4><p class="mt-1">In the AWS console: <b>Amazon Bedrock → API keys → Generate</b>. You get a long-lived <code>AWS_BEARER_TOKEN_BEDROCK</code>. Make sure the models you want are enabled in that region under <b>Model access</b>.</p></div></div>
+                  <div class="step"><div class="step-n">2</div><div class="flex-1"><h4>Add the provider</h4><p class="mt-1">On <a class="lnk" @click="go('providers')">Providers</a>, add one of type <code>bedrock</code>, set the <b>region</b> (e.g. <code>us-east-1</code>), and paste the API key. The endpoint is templated to <code>https://bedrock-runtime.&lt;region&gt;.amazonaws.com/v1</code>.</p></div></div>
+                  <div class="step"><div class="step-n">3</div><div class="flex-1"><h4>Request Bedrock models</h4><p class="mt-1">Click <b>Test</b> / <b>Models</b> to enumerate, then use ids like <code>us.anthropic.claude-sonnet-4-6</code> or <code>openai.gpt-oss-120b</code> — directly, or pinned into a category.</p></div></div>
+                </div>
+                <div class="callout callout-note"><span>&#8505;</span><span>Need a VPC endpoint or the newer <code>bedrock-mantle</code> host? Set the drawer's <b>Base URL (advanced override)</b> and it wins over the region template.</span></div>
+                <div class="callout callout-warn"><span>&#9888;</span><span>The IAM-role / SigV4 path is intentionally not bundled — it would drag in botocore/boto3 (tens of MB) for nothing the API key doesn't already do. If you truly need role-based auth, front the gateway with an AWS SigV4 proxy.</span></div>
+              </div>
+
+              <!-- OLLAMA -->
+              <div x-show="doc==='ollama'" class="space-y-5">
+                <div><h3>Ollama (local models)</h3><p class="mt-2">Ollama runs models on your own machine — free and keyless. The gateway auto-detects it and speaks its native <code>/api/chat</code>, including tool-calling.</p></div>
+                <div class="space-y-4">
+                  <div class="step"><div class="step-n">1</div><div class="flex-1"><h4>Auto-detect</h4><p class="mt-1">Click <b>Detect local</b> on <a class="lnk" @click="go('providers')">Providers</a>. It probes the usual addresses — Ollama and OpenAI-compatible servers (LocalAI, LM Studio, vLLM, …) — and, importantly when the gateway runs in Docker, <code>host.docker.internal</code>, surfacing whatever answers so you can add it with one click.</p></div></div>
+                  <div class="step"><div class="step-n">2</div><div class="flex-1"><h4>Or add it manually</h4><p class="mt-1">Add a provider of type <code>ollama</code> and set a custom base URL if your daemon lives elsewhere. No key required.</p></div></div>
+                </div>
+                <div class="callout callout-tip"><span>&#128161;</span><span>A local Ollama model makes a great <i>last</i> link in a failover chain — when your paid providers all throttle, requests still complete for free.</span></div>
+              </div>
+
+              <!-- COPILOT -->
+              <div x-show="doc==='copilot'" class="space-y-5">
+                <div><h3>GitHub Copilot as a provider</h3><p class="mt-2">If you have a Copilot subscription, the gateway can proxy its models to your other CLIs — no API key, just a one-time device login.</p></div>
+                <div class="space-y-4">
+                  <div class="step"><div class="step-n">1</div><div class="flex-1"><h4>Sign in</h4><p class="mt-1">On <a class="lnk" @click="go('settings')">Settings</a>, click <b>Sign in (device code)</b>, open the shown URL and enter the code. The OAuth token is cached under <code>~/.llmgw/cache/</code> and refreshed automatically.</p></div></div>
+                  <div class="step"><div class="step-n">2</div><div class="flex-1"><h4>Use its models</h4><p class="mt-1">Once signed in, <code>copilot/…</code> models appear in <a class="lnk" @click="go('models')">Models</a> and can be pinned into categories like any other provider.</p></div></div>
+                </div>
+                <div class="callout callout-note"><span>&#8505;</span><span>The Copilot provider is gated behind <code>allow_copilot_proxy</code> / <code>LLMGW_EXPERIMENTAL_COPILOT_PROVIDER=1</code>. Respect GitHub's terms for your subscription.</span></div>
+                <div class="callout callout-tip"><span>&#128161;</span><span>Some Copilot models speak <b>only</b> the Responses API (<code>gpt-5.5</code>, <code>gpt-5.4-mini</code>, <code>gpt-5.3-codex</code>) and reject <code>/chat/completions</code>. The gateway can translate for them — but only when you opt in. See <a class="lnk" @click="doc='adaptation'">API adaptation</a>; off by default your CLI gets the provider's real error.</span></div>
+              </div>
+
+              <!-- API ADAPTATION -->
+              <div x-show="doc==='adaptation'" class="space-y-5">
+                <div><h3>API adaptation <span class="chip chip-mut">experimental</span></h3><p class="mt-2">Some models speak only one OpenAI-family API. GPT-5.x on Copilot (<code>gpt-5.5</code>, <code>gpt-5.4-mini</code>, <code>gpt-5.3-codex</code>) is reachable only via the <b>Responses API</b> and rejects <code>/chat/completions</code>. When you opt in, the gateway translates your Chat Completions request to the model's native endpoint and translates the reply back — so your CLI keeps speaking one API.</p></div>
+                <div class="callout callout-note"><span>&#8505;</span><span>Off by default. Adaptation forces non-native behavior, so it is deliberately opt-in — unadapted, the gateway passes the provider's real error straight through (status + detail), it does not mask it.</span></div>
+                <div class="space-y-4">
+                  <div class="step"><div class="step-n">1</div><div class="flex-1"><h4>Enable per provider</h4><p class="mt-1">Set <code>force_api_support: true</code> on a provider in <code>config.yaml</code>. Every model that provider serves becomes adaptation-<i>eligible</i>, but only models whose catalog says they need it are actually translated — <code>gpt-4o</code>, Claude, etc. are untouched.</p></div></div>
+                  <div class="step"><div class="step-n">2</div><div class="flex-1"><h4>Or per request</h4><p class="mt-1">Send <code>"force_api_support": true</code> in the request body. A request value overrides the provider config (send <code>false</code> to force it off). The gateway strips the field before calling upstream.</p></div></div>
+                  <div class="step"><div class="step-n">3</div><div class="flex-1"><h4>How the target is chosen</h4><p class="mt-1">Deterministically from the model's published <code>supported_endpoints</code> in the <a class="lnk" @click="go('models')">catalog</a> — never trial-and-error. A Responses-only model gets Chat&#8594;Responses; a reasoning model that requires <code>max_completion_tokens</code> gets <code>max_tokens</code> renamed.</p></div></div>
+                </div>
+                <div class="callout callout-tip"><span>&#128161;</span><span>An adapted response carries the <code>X-LLMGW-Adapted</code> header (e.g. <code>chat-&gt;responses</code>). If you set the flag on the <i>request</i>, the body also echoes a no-op <code>forced_support</code> object; config-triggered adaptation stays header-only so strict clients aren't surprised.</span></div>
+                <div class="callout callout-note"><span>&#9888;</span><span>GPT-5.x are reasoning models — a small <code>max_tokens</code> is consumed by hidden reasoning tokens and can return empty with <code>finish_reason: length</code>. Give them &#8805; 200.</span></div>
+              </div>
+
+              <!-- CATEGORIES -->
+              <div x-show="doc==='categories'" class="space-y-5">
+                <div><h3>Categories &amp; failover</h3><p class="mt-2">A <b class="text-hi">category</b> is a named, ordered chain of pinned <code>provider/model</code> targets. Your CLIs request the category name; the gateway tries each target in order and advances to the next on a throttle or error — <i>before the first streamed byte</i>, so failover is invisible to the client. This is the mechanism for juggling subscription limits.</p></div>
+                <div><h4 class="mb-1.5">Example</h4>
+                  <div class="cbwrap"><pre class="cb"><code>smart:
+  1. copilot / claude-sonnet-4.5     &larr; try premium first
+  2. bedrock / us.anthropic.claude-sonnet-4-6
+  3. ollama  / llama3.1               &larr; free local fallback</code></pre></div></div>
+                <div class="space-y-2"><h4>How resolution works</h4>
+                  <p>&bull; A <b class="text-hi">category name</b> (<code>smart</code>) runs its whole chain.</p>
+                  <p>&bull; A <b class="text-hi">provider/model</b> (<code>copilot/gpt-4o-mini</code>) targets exactly that one model.</p>
+                  <p>&bull; Anything else returns <code>404</code> with the list of valid names.</p></div>
+                <div class="callout callout-tip"><span>&#128161;</span><span>Same-provider members cascade on throttle; cross-provider members fail over to a different subscription. Build chains on <a class="lnk" @click="go('categories')">Categories</a> and watch what actually fired on <a class="lnk" @click="go('usage')">Usage → Throttling &amp; fallback</a>.</span></div>
+              </div>
+
+              <!-- KEYS -->
+              <div x-show="doc==='keys'" class="space-y-5">
+                <div><h3>Projects &amp; API keys</h3><p class="mt-2">Mint bearer tokens scoped to a <b class="text-hi">project</b> and a <b class="text-hi">key name</b>. Each request carries one, so the gateway can attribute cost and failover behaviour back to the project that made it.</p></div>
+                <div class="space-y-2">
+                  <p>&bull; <b class="text-hi">Mint</b> on <a class="lnk" @click="go('keys')">Keys</a> — the <code>llmgw_…</code> token is shown once; copy it then.</p>
+                  <p>&bull; <b class="text-hi">Use</b> it as the Bearer token / API key in any CLI (see <a class="lnk" @click="doc='connect'">Connect a CLI</a>).</p>
+                  <p>&bull; <b class="text-hi">Attribution</b> shows up on <a class="lnk" @click="go('usage')">Usage → By project &amp; key</a>.</p>
+                  <p>&bull; <b class="text-hi">Revoke</b> anytime from the Keys table — the token stops working immediately.</p>
+                  <p>&bull; <b class="text-hi">Governance</b> (optional, per key): an expiry, model/provider allowlists, a requests/minute rate limit and a daily budget, plus an instant disable toggle — set on mint or edit later.</p></div>
+                <div class="callout callout-note"><span>&#8505;</span><span>Keys live in <code>~/.llmgw/keys.json</code> (0600). The admin key (or open-local mode) is separate and always works for this panel.</span></div>
+              </div>
+
+              <!-- AUDIO & VISION -->
+              <div x-show="doc==='multimodal'" class="space-y-5">
+                <div><h3>Audio &amp; vision</h3><p class="mt-2">The gateway proxies audio and routes image requests to capable models. Audio needs an OpenAI-compatible provider that serves it — e.g. a local <b class="text-hi">LocalAI</b> with whisper (speech-to-text) and piper (text-to-speech).</p></div>
+                <div class="space-y-4">
+                  <div class="step"><div class="step-n">1</div><div class="flex-1"><h4>Transcribe (STT)</h4><p class="mt-1"><code>POST /v1/audio/transcriptions</code> (multipart: <code>file</code> + <code>model</code>). Address the model as <code>provider/model</code>, e.g. <code>localai/whisper-base</code>.</p></div></div>
+                  <div class="step"><div class="step-n">2</div><div class="flex-1"><h4>Speak (TTS)</h4><p class="mt-1"><code>POST /v1/audio/speech</code> with <code>{model, input, voice}</code> — returns audio bytes, e.g. <code>localai/vits-piper-en_US-amy-sherpa</code>.</p></div></div>
+                  <div class="step"><div class="step-n">3</div><div class="flex-1"><h4>Vision</h4><p class="mt-1">Send image parts in a chat message as usual. A multimodal request is routed to a <b class="text-hi">vision-capable</b> target (from the <a class="lnk" @click="go('models')">catalog</a>); if the route has none it fails clearly. Copilot vision is unlocked automatically.</p></div></div>
+                </div>
+                <div class="callout callout-tip"><span>&#128161;</span><span>Audio is reverse-proxied to the resolved provider with its auth; per-key model allowlists apply. Install a local audio stack to keep speech fully offline.</span></div>
+              </div>
+
+              <!-- ENDPOINTS -->
+              <div x-show="doc==='endpoints'" class="space-y-5">
+                <div><h3>API endpoints</h3><p class="mt-2">Standard surfaces your CLIs already know. All except <code>/health</code> require a bearer key.</p></div>
+                <div class="overflow-hidden rounded border border-sep"><table class="w-full text-sm">
+                  <thead><tr class="label"><th class="text-left font-medium px-4 py-2">Method</th><th class="text-left font-medium px-4 py-2">Path</th><th class="text-left font-medium px-4 py-2">Purpose</th></tr></thead>
+                  <tbody class="text-fg">
+                    <tr class="border-t border-sep"><td class="px-4 py-1.5">GET</td><td class="px-4 py-1.5"><code>/v1/models</code></td><td class="px-4 py-1.5">List categories + <code>provider/model</code> names</td></tr>
+                    <tr class="border-t border-sep"><td class="px-4 py-1.5">POST</td><td class="px-4 py-1.5"><code>/v1/chat/completions</code></td><td class="px-4 py-1.5">OpenAI chat (streaming supported)</td></tr>
+                    <tr class="border-t border-sep"><td class="px-4 py-1.5">POST</td><td class="px-4 py-1.5"><code>/v1/responses</code></td><td class="px-4 py-1.5">OpenAI Responses API</td></tr>
+                    <tr class="border-t border-sep"><td class="px-4 py-1.5">POST</td><td class="px-4 py-1.5"><code>/v1/messages</code></td><td class="px-4 py-1.5">Anthropic Messages (native)</td></tr>
+                    <tr class="border-t border-sep"><td class="px-4 py-1.5">GET</td><td class="px-4 py-1.5"><code>/health</code></td><td class="px-4 py-1.5">Liveness (no auth)</td></tr>
+                  </tbody></table></div>
+              </div>
+
+              <!-- MODEL NAMING -->
+              <div x-show="doc==='models'" class="space-y-5">
+                <div><h3>Model naming</h3><p class="mt-2">The <code>model</code> field in a request is either a category or a fully-qualified target. <a class="lnk" @click="go('models')">Models</a> lists every valid value.</p></div>
+                <div class="space-y-2">
+                  <p><b class="text-hi">Category</b> — a name you defined, e.g. <code>smart</code> or <code>cheap</code>. Runs its failover chain. Best for day-to-day use.</p>
+                  <p><b class="text-hi">provider/model</b> — a specific pinned model, e.g. <code>copilot/gpt-4o-mini</code> or <code>bedrock/us.anthropic.claude-sonnet-4-6</code>. No failover; goes straight to that upstream.</p>
+                  <p><b class="text-hi">Real names only</b> — models are listed exactly as the upstream names them; the gateway does not invent aliases.</p></div>
+                <div class="callout callout-note"><span>&#8505;</span><span>A bare unknown model returns <code>404</code> with the list of valid names, so a mistyped model fails fast and legibly.</span></div>
+              </div>
+
+              <!-- STORAGE -->
+              <div x-show="doc==='storage'" class="space-y-5">
+                <div><h3>Storage &amp; file layout</h3><p class="mt-2">All state lives under <code>~/.llmgw/</code> (override with <code>LLMGW_STATE_DIR</code>). Secrets are written <code>0600</code>.</p></div>
+                <div class="overflow-hidden rounded border border-sep"><table class="w-full text-sm">
+                  <thead><tr class="label"><th class="text-left font-medium px-4 py-2">Path</th><th class="text-left font-medium px-4 py-2">Contents</th></tr></thead>
+                  <tbody class="text-fg">
+                    <tr class="border-t border-sep"><td class="px-4 py-1.5"><code>config.yaml</code></td><td class="px-4 py-1.5">Providers, categories, policies (no keys) — safe to read/commit</td></tr>
+                    <tr class="border-t border-sep"><td class="px-4 py-1.5"><code>secrets.json</code></td><td class="px-4 py-1.5">Provider API keys, 0600</td></tr>
+                    <tr class="border-t border-sep"><td class="px-4 py-1.5"><code>keys.json</code></td><td class="px-4 py-1.5">Minted project keys, 0600</td></tr>
+                    <tr class="border-t border-sep"><td class="px-4 py-1.5"><code>usage.db</code></td><td class="px-4 py-1.5">Cost/usage ledger (project + key)</td></tr>
+                    <tr class="border-t border-sep"><td class="px-4 py-1.5"><code>telemetry.db</code></td><td class="px-4 py-1.5">Throttle / failover events</td></tr>
+                    <tr class="border-t border-sep"><td class="px-4 py-1.5"><code>cache/</code></td><td class="px-4 py-1.5">Copilot OAuth token cache</td></tr>
+                  </tbody></table></div>
+              </div>
+
+              <!-- TROUBLESHOOTING -->
+              <div x-show="doc==='troubleshooting'" class="space-y-4">
+                <div><h3>Troubleshooting</h3><p class="mt-2">The usual suspects and how to clear them.</p></div>
+                <div class="card p-4"><h4><code>401 Unauthorized</code></h4><p class="mt-1">The bearer token is missing or wrong. Mint one on <a class="lnk" @click="go('keys')">Keys</a> and set it as <code>OPENAI_API_KEY</code> / <code>ANTHROPIC_AUTH_TOKEN</code>. In open-local mode auth is off entirely.</p></div>
+                <div class="card p-4"><h4><code>404</code> — model not a category or provider/model</h4><p class="mt-1">The requested model name isn't known. Check exact spelling on <a class="lnk" @click="go('models')">Models</a>; use a category name or <code>provider/model</code>.</p></div>
+                <div class="card p-4"><h4>Provider <b>Test</b> shows 0 models</h4><p class="mt-1">Usually a wrong base URL, a missing/invalid key, or the upstream not exposing a catalog. Re-check the URL (trailing <code>/v1</code>?) and the key; for Copilot, sign in on Settings.</p></div>
+                <div class="card p-4"><h4>Requests keep failing over / <code>429</code></h4><p class="mt-1">A provider is throttling. That's the gateway working — check <a class="lnk" @click="go('usage')">Usage → Throttling &amp; fallback</a> to see which target throttled and add a healthier fallback to the category.</p></div>
+                <div class="card p-4"><h4>Detect local finds nothing</h4><p class="mt-1">Ensure the local server is running (e.g. <code>ollama serve</code>, or LocalAI/LM Studio listening). In Docker, start the container with <code>--add-host host.docker.internal:host-gateway</code> so it can reach host services.</p></div>
+              </div>
+            </div>
+          </div>
+        </section>
+      </div>
+    </main>
+  </div>
+
+  <!-- Add-provider drawer -->
+  <div x-show="drawer" x-cloak class="fixed inset-0 z-30" @keydown.escape.window="drawer=false">
+    <div class="absolute inset-0 bg-black/50" @click="drawer=false"></div>
+    <div class="absolute right-0 inset-y-0 w-full max-w-md bg-card border-l border-bd p-6 overflow-y-auto" x-show="drawer" x-transition:enter="transition ease-out duration-200" x-transition:enter-start="translate-x-full" x-transition:enter-end="translate-x-0">
+      <div class="flex items-center justify-between mb-5"><h2 class="text-base font-semibold text-hi">Add provider</h2><button @click="drawer=false" class="text-mut hover:text-hi">&#10005;</button></div>
+      <div class="space-y-4">
+        <div><div class="label mb-1.5">Quick presets</div><div class="flex flex-wrap gap-1.5">
+          <template x-for="p in presets" :key="p.id"><button @click="applyPreset(p)" class="text-xs px-2.5 py-1 rounded border border-bd hover:bg-hl" :disabled="p.availability!=='available'" :class="p.availability!=='available'&&'opacity-45 cursor-not-allowed'" :title="p.description" x-text="p.label"></button></template></div></div>
+        <label class="block text-sm text-mut">ID<input x-model="form.id" placeholder="e.g. copilot, openrouter, groq" class="mt-1 w-full inp px-3 py-2 text-sm"></label>
+        <label class="block text-sm text-mut">Type<select x-model="form.type" class="mt-1 w-full inp px-3 py-2 text-sm"><template x-for="t in s.provider_types" :key="t"><option x-text="t"></option></template></select></label>
+        <label class="block text-sm text-mut" x-show="needsRegion()">AWS region<input x-model="form.region" placeholder="us-east-1" class="mt-1 w-full inp px-3 py-2 text-sm"><span class="text-xs text-sub">Endpoint becomes https://bedrock-runtime.&lt;region&gt;.amazonaws.com/v1</span></label>
+        <label class="block text-sm text-mut" x-show="needsUrl() || (needsRegion() && form.base_url)"><span x-text="needsRegion()?'Base URL (advanced override)':'Base URL'"></span><input x-model="form.base_url" placeholder="https://…/v1" class="mt-1 w-full inp px-3 py-2 text-sm"></label>
+        <label class="block text-sm text-mut" x-show="needsKey()"><span x-text="needsRegion()?'Bedrock API key (bearer token)':'API key'"></span><input x-model="form.api_key" type="password" :placeholder="needsRegion()?'AWS_BEARER_TOKEN_BEDROCK':'sk-…'" class="mt-1 w-full inp px-3 py-2 text-sm"><span class="text-xs text-sub">Stored in ~/.llmgw/secrets.json — never the config file.</span></label>
+        <div class="text-xs bg-hl border rounded p-3 space-y-1" style="border-color:var(--warn-soft)" x-show="disclaimer && (needsUrl() || needsRegion())">
+          <div class="flex items-start gap-2"><span class="text-warn">&#9888;</span><span class="text-fg" x-show="!needsRegion()">Double-check this <b class="text-hi">Base URL</b> matches your account, plan and region — providers change paths and some drop the trailing <code>/v1</code>. Test the provider after saving.</span>
+          <span class="text-fg" x-show="needsRegion()">Confirm the <b class="text-hi">region</b> has Bedrock model access enabled and your API key is scoped to it. Test the provider after saving.</span></div>
+          <button @click="go('help'); drawer=false" class="lnk text-xs">Provider setup guide &#8594;</button></div>
+        <p class="text-xs text-mut bg-hl border border-sep rounded p-3" x-show="form.type==='github_copilot'">Copilot needs no key — after adding, go to <b>Settings</b> and sign in with the device code.</p>
+        <p class="text-xs text-mut bg-hl border border-sep rounded p-3" x-show="form.type==='ollama'">Ollama is local &amp; keyless — you can also just click <b>Detect local</b> on the Providers page.</p>
+        <label class="flex items-start gap-2.5 text-sm text-mut cursor-pointer" x-show="supportsAdapt()"><input type="checkbox" x-model="form.force_api_support" class="mt-0.5">
+          <span>Force API support <span class="chip chip-mut">experimental</span><br><span class="text-xs text-sub">Let the gateway translate to a model's native OpenAI-family endpoint (e.g. Responses-only <code>gpt-5.5</code>) instead of failing. Off = the provider's real error is passed through. <a class="lnk" @click="doc='adaptation';go('help');drawer=false">Learn more</a>.</span></span></label>
+        <div class="flex gap-2 pt-2"><button @click="addProvider()" class="btn btn-primary px-4 py-2 text-sm flex-1">Save provider</button><button @click="drawer=false" class="btn btn-ghost px-4 py-2 text-sm">Cancel</button></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="fixed bottom-5 right-5 space-y-2 z-40"><template x-for="t in toasts" :key="t.id"><div class="chip px-4 py-2.5 text-sm shadow-lg" :class="t.ok?'chip-ok':'chip-bad'"><span x-text="t.ok?'&#10003;':'&#10007;'"></span><span x-text="t.msg"></span></div></template></div>
+</div>
+
+<script>
+const IC={
+  overview:'<svg width=17 height=17 viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/></svg>',
+  providers:'<svg width=17 height=17 viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="6" rx="2"/><rect x="3" y="14" width="18" height="6" rx="2"/><path d="M7 7h.01M7 17h.01"/></svg>',
+  categories:'<svg width=17 height=17 viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3l9 5-9 5-9-5 9-5zM3 13l9 5 9-5"/></svg>',
+  models:'<svg width=17 height=17 viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 16V8l-9-5-9 5v8l9 5 9-5zM3.3 7.3L12 12l8.7-4.7M12 22V12"/></svg>',
+  keys:'<svg width=17 height=17 viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="7.5" cy="15.5" r="4.5"/><path d="M10.5 12.5L20 3M17 6l3 3M14 9l2 2"/></svg>',
+  identity:'<svg width=17 height=17 viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="9" cy="8" r="4"/><path d="M2 21a7 7 0 0 1 14 0M17 8h5M19.5 5.5v5"/></svg>',
+  usage:'<svg width=17 height=17 viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 3v18h18"/><path d="M7 14l3-3 3 3 4-5"/></svg>',
+  settings:'<svg width=17 height=17 viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.6 1.6 0 0 0 .3 1.8M4.6 9A1.6 1.6 0 0 0 4.3 7"/></svg>',
+  help:'<svg width=17 height=17 viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M9.1 9a3 3 0 0 1 5.8 1c0 2-3 2.5-3 4"/><path d="M12 17h.01"/></svg>',
+};
+function app(){
+  return {
+    page:'overview', loading:false, s:null, drawer:false, scheme:'dark',
+    nav:[{id:'overview',label:'Overview',icon:IC.overview},{id:'providers',label:'Providers',icon:IC.providers},{id:'categories',label:'Categories',icon:IC.categories},{id:'models',label:'Models',icon:IC.models},{id:'identity',label:'Identity',icon:IC.identity},{id:'keys',label:'Keys',icon:IC.keys},{id:'usage',label:'Usage',icon:IC.usage},{id:'settings',label:'Settings',icon:IC.settings},{id:'help',label:'Docs',icon:IC.help}],
+    titles:{overview:{t:'Overview',d:'Your gateway at a glance'},providers:{t:'Providers',d:'Connected upstreams — keys stay in the secrets store'},categories:{t:'Categories',d:'Named, ordered failover chains of pinned models'},models:{t:'Models',d:'What your CLIs can request'},identity:{t:'Identity & projects',d:'Humans, services, memberships and BYOC credentials'},keys:{t:'API keys',d:'Hashed one-time keys assigned to a principal and project'},usage:{t:'Usage & telemetry',d:'Cost by project/key + throttle/fallback learning'},settings:{t:'Settings',d:'Auth, Copilot sign-in, storage'},help:{t:'Documentation',d:'Guides and reference for running your gateway'}},
+    form:{id:'',registry_id:'',type:'openai_compatible',base_url:'',api_key:'',region:'',force_api_support:false},
+    newCat:'', editing:{}, pick:{provider:'',model:''}, pmodels:{}, tests:{}, catalog:[], q:'', discovered:[],
+    keyForm:{projectID:'',principalID:'',name:'',rpm:0,daily:0,monthly:0,dailyIn:0,dailyOut:0,monthlyTokens:0,dailyUSD:0,monthlyUSD:0,dailyCredits:0,monthlyCredits:0,expiresDays:0,allowedModels:'',allowedProviders:'',showGov:false}, minted:'', usage:null, tele:null, alerts:[],outbox:[],alertForm:{projectID:'',metric:'requests',period:'day',threshold:80},disclaimer:false,
+    identityForm:{kind:'human',name:'',email:'',subject:''}, projectForm:{name:'',slug:''}, membershipForm:{projectID:'',principalID:'',role:'member'}, connectionForm:{principalID:'',providerID:'',name:'default',secret:'',makeDefault:true}, byoc:{principalID:'',name:'',code:'',uri:'',device:'',status:''},
+    doc:'overview',
+    docNav:[
+      {g:'Getting started',items:[{id:'overview',label:'Overview'},{id:'quickstart',label:'Quickstart'}]},
+      {g:'Guides',items:[{id:'connect',label:'Connect a CLI'},{id:'providers',label:'Add a provider'},{id:'bedrock',label:'Amazon Bedrock'},{id:'ollama',label:'Ollama (local)'},{id:'copilot',label:'GitHub Copilot'},{id:'adaptation',label:'API adaptation'},{id:'categories',label:'Categories & failover'},{id:'keys',label:'Projects & keys'},{id:'multimodal',label:'Audio & vision'}]},
+      {g:'Reference',items:[{id:'endpoints',label:'API endpoints'},{id:'models',label:'Model naming'},{id:'storage',label:'Storage & files'},{id:'troubleshooting',label:'Troubleshooting'}]},
+    ],
+    cp:{code:'',uri:'',status:'',device:''}, toasts:[],
+    async init(){ this.scheme=document.documentElement.dataset.scheme||'dark'; const q=new URLSearchParams(location.search); const pg=q.get('page'); if(pg&&this.nav.some(n=>n.id===pg))this.page=pg; const dc=q.get('doc'); if(dc)this.doc=dc; await this.load(); this.loadCatalog(); if(this.page==='usage')this.loadUsage(); },
+    get presets(){ return this.s?.provider_registry||[]; },
+    toggleScheme(){ this.scheme=this.scheme==='dark'?'light':'dark'; document.documentElement.dataset.scheme=this.scheme; localStorage.setItem('llmgw_scheme',this.scheme); },
+    go(p){ this.page=p; if(p==='models')this.loadCatalog(); if(p==='usage')this.loadUsage(); },
+    key(){ return localStorage.getItem('llmgw_key')||''; },
+    hdr(x){ const h=Object.assign({'Content-Type':'application/json'},x||{}); if(this.key())h['Authorization']='Bearer '+this.key(); return h; },
+    async api(path,opts={}){ opts.headers=this.hdr(opts.headers); let r=await fetch(path,opts); if(r.status===401){ const k=prompt('API key (LLMGW_API_KEY):'); if(k){localStorage.setItem('llmgw_key',k);return this.api(path,opts);} } return r; },
+    async load(spin){ if(spin)this.loading=true; const r=await this.api('/admin/api/state'); if(r.ok)this.s=await r.json(); if(spin)setTimeout(()=>this.loading=false,300); },
+    toast(m,ok=true){ const id=Date.now()+Math.random(); this.toasts.push({id,msg:m,ok}); setTimeout(()=>this.toasts=this.toasts.filter(t=>t.id!==id),3200); },
+    async copy(t){ try{ await navigator.clipboard.writeText(t); this.toast('copied'); }catch(e){ this.toast('copy failed',false); } },
+    fmtTime(ts){ try{ return new Date(ts*1000).toLocaleString(); }catch(e){ return ts; } },
+    orig(){ return location.origin; },
+    snOpenAI(){ return 'export OPENAI_BASE_URL='+location.origin+'/v1\nexport OPENAI_API_KEY=llmgw_your_key\n# then request a category or provider/model as the model name'; },
+    snAnthropic(){ return 'export ANTHROPIC_BASE_URL='+location.origin+'\nexport ANTHROPIC_AUTH_TOKEN=llmgw_your_key\n# Claude Code / claude CLI now route through the gateway'; },
+    snCurl(){ return 'curl '+location.origin+'/v1/models \\\n  -H "Authorization: Bearer llmgw_your_key"'; },
+    typeColor(t){ return {github_copilot:'#c8b06a',openai_compatible:'#4ea88a',openai:'#4ea88a',anthropic:'#d98a4a',bedrock:'#d98a4a',ollama:'#4aa5c0',litellm:'#b06ac8',echo:'#8a94a5'}[t]||'#8a94a5'; },
+    stats(){ const s=this.s; return [{k:'Providers',v:s.providers.length,icon:IC.providers},{k:'Categories',v:Object.keys(s.categories).length,icon:IC.categories},{k:'Models',v:this.catalog.length||'…',icon:IC.models},{k:'Saved',v:'$'+s.savings.savings_usd,icon:IC.usage}]; },
+    openDrawer(){ this.form={id:'',registry_id:'',type:'openai_compatible',base_url:'',api_key:'',region:'',force_api_support:false}; this.disclaimer=false; this.drawer=true; },
+    applyPreset(p){ if(p.availability!=='available')return; this.form.registry_id=p.id; this.form.id=p.default_provider_id; this.form.type=p.runtime_type; this.form.base_url=p.default_base_url||''; this.form.region=p.default_region||''; this.form.force_api_support=false; this.disclaimer=true; },
+    needsUrl(){ return ['openai_compatible','anthropic','ollama'].includes(this.form.type); },
+    needsRegion(){ return this.form.type==='bedrock'; },
+    needsKey(){ return ['openai_compatible','anthropic','bedrock'].includes(this.form.type); },
+    supportsAdapt(t){ return ['openai_compatible','openai','bedrock','litellm','github_copilot'].includes(t||this.form.type); },
+    modelCards(){ const g={}; for(const m of this.catalog){ if(m.owned_by==='category')continue; (g[m.owned_by]=g[m.owned_by]||[]).push(m); } return g; },
+    capChips(m){ const c=m.capabilities||{}; const out=[]; if(c.vision)out.push('vision'); if(c.tool_calls)out.push('tools'); if(Array.isArray(c.reasoning_effort)&&c.reasoning_effort.length)out.push('reasoning'); if(c.context_window)out.push((Math.round(c.context_window/1000))+'k ctx'); return out; },
+    endpointBadges(m){ const e=m.supported_endpoints||[]; const has=x=>e.some(v=>v.toLowerCase()===x); if(!e.length)return [{t:'chat',ok:true}]; return [{t:'chat',ok:has('/chat/completions')},{t:'responses',ok:has('/responses')}]; },
+    async refreshProvider(id){ this.toast('refreshing '+id+'…'); const r=await this.api('/admin/api/providers/'+encodeURIComponent(id)+'/refresh',{method:'POST'}); const d=await r.json(); this.toast(id+': '+(d.count||0)+' models'); await this.load(); this.loadCatalog(); },
+    async addProvider(){ if(!this.form.id){this.toast('id required',false);return;} const r=await this.api('/admin/api/providers',{method:'POST',body:JSON.stringify(this.form)}); if(r.ok){this.toast('provider added');this.drawer=false;await this.load();this.loadCatalog();} else {this.toast((await r.json()).detail||'save failed',false);} },
+    async delProvider(id){ if(!confirm('Delete provider '+id+'?'))return; await this.api('/admin/api/providers/'+encodeURIComponent(id),{method:'DELETE'}); await this.load(); this.loadCatalog(); this.toast('deleted'); },
+    async detectLocal(){ this.toast('scanning localhost…'); const r=await this.api('/admin/api/detect',{method:'POST'}); const d=await r.json(); const found=(d.candidates||[]).filter(c=>!this.s.providers.some(p=>p.id===c.id||(p.base_url&&p.base_url.replace(/\/$/,'')===c.base_url.replace(/\/$/,'')))); this.discovered=found; if(found.length){this.toast('found '+found.length+' local provider'+(found.length>1?'s':''));} else {this.toast('no local providers found',false);} },
+    async addDiscovered(c){ const body={id:c.id,type:c.type,base_url:c.base_url}; const r=await this.api('/admin/api/providers',{method:'POST',body:JSON.stringify(body)}); if(r.ok){this.discovered=this.discovered.filter(x=>x.base_url!==c.base_url);this.toast('added '+c.id);await this.load();this.loadCatalog();} else {this.toast((await r.json()).detail||'add failed',false);} },
+    async testProvider(id){ this.tests[id]={connected:false,model_count:'…'}; const r=await this.api('/admin/api/providers/'+encodeURIComponent(id)+'/test',{method:'POST'}); this.tests[id]=await r.json(); },
+    async listModels(id){ const r=await this.api('/admin/api/providers/'+encodeURIComponent(id)+'/models',{method:'POST'}); const d=await r.json(); this.pmodels[id]=d.models||[]; this.toast(id+': '+(d.count||0)+' models'); this.go('categories'); },
+    async ensureModels(id){ if(id && !this.pmodels[id]){ const r=await this.api('/admin/api/providers/'+encodeURIComponent(id)+'/models',{method:'POST'}); const d=await r.json(); this.pmodels[id]=d.models||[]; } },
+    async createCat(){ if(!this.newCat.trim())return; const r=await this.api('/admin/api/categories',{method:'POST',body:JSON.stringify({name:this.newCat.trim(),failover:[]})}); if(r.ok){this.newCat='';await this.load();this.toast('category created');} else {this.toast((await r.json()).detail||'failed',false);} },
+    startEdit(name){ this.editing[name]=JSON.parse(JSON.stringify(this.s.categories[name].failover)); },
+    addMember(name){ if(!this.pick.provider||!this.pick.model){this.toast('pick provider + model',false);return;} this.editing[name].push({provider:this.pick.provider,model:this.pick.model}); this.pick.model=''; },
+    move(name,i,d){ const a=this.editing[name]; const j=i+d; if(j<0||j>=a.length)return; [a[i],a[j]]=[a[j],a[i]]; },
+    async saveCat(name){ const r=await this.api('/admin/api/categories',{method:'POST',body:JSON.stringify({name,failover:this.editing[name]})}); if(r.ok){delete this.editing[name];await this.load();this.loadCatalog();this.toast('saved '+name);} else {this.toast('save failed',false);} },
+    async delCat(name){ if(!confirm('Delete category '+name+'?'))return; await this.api('/admin/api/categories/'+encodeURIComponent(name),{method:'DELETE'}); await this.load(); this.loadCatalog(); this.toast('deleted'); },
+    async loadCatalog(){ const r=await this.api('/admin/api/models'); if(r.ok)this.catalog=(await r.json()).data||[]; },
+    async mintKey(){ const f=this.keyForm,n=f.name.trim()||'key'; if(!f.projectID||!f.principalID){this.toast('select project + principal',false);return;} const body={project_id:f.projectID,principal_id:f.principalID,name:n}; if(f.rpm)body.rpm=+f.rpm;if(f.daily)body.daily_requests=+f.daily;if(f.monthly)body.monthly_requests=+f.monthly;if(f.dailyIn)body.daily_input_tokens=+f.dailyIn;if(f.dailyOut)body.daily_output_tokens=+f.dailyOut;if(f.monthlyTokens)body.monthly_total_tokens=+f.monthlyTokens;if(f.dailyUSD)body.daily_cost_microusd=Math.round(f.dailyUSD*1e6);if(f.monthlyUSD)body.monthly_cost_microusd=Math.round(f.monthlyUSD*1e6);if(f.dailyCredits)body.daily_credits_milli=Math.round(f.dailyCredits*1000);if(f.monthlyCredits)body.monthly_credits_milli=Math.round(f.monthlyCredits*1000);if(f.expiresDays)body.expires_at=Math.floor(Date.now()/1000)+Math.round(f.expiresDays*86400); const am=(f.allowedModels||'').split(',').map(s=>s.trim()).filter(Boolean); if(am.length)body.allowed_models=am; const ap=(f.allowedProviders||'').split(',').map(s=>s.trim()).filter(Boolean); if(ap.length)body.allowed_providers=ap; const r=await this.api('/admin/api/keys',{method:'POST',body:JSON.stringify(body)}); if(r.ok){ const d=await r.json(); this.minted=d.token; this.keyForm={projectID:'',principalID:'',name:'',rpm:0,daily:0,monthly:0,dailyIn:0,dailyOut:0,monthlyTokens:0,dailyUSD:0,monthlyUSD:0,dailyCredits:0,monthlyCredits:0,expiresDays:0,allowedModels:'',allowedProviders:'',showGov:f.showGov}; await this.load(); this.toast('key minted (copy it now)'); } else {this.toast((await r.json()).error?.message||'mint failed',false);} },
+    async toggleKey(k){ const disabled=k.status!=='disabled'; const r=await this.api('/admin/api/keys/update',{method:'POST',body:JSON.stringify({id:k.id,disabled})}); if(r.ok){await this.load(); this.toast(disabled?'key disabled':'key enabled');} else {this.toast('update failed',false);} },
+    keyLimits(k){ const p=[]; if(k.rpm)p.push(k.rpm+'/min');if(k.daily_requests)p.push(k.daily_requests+'/day');if(k.monthly_requests)p.push(k.monthly_requests+'/mo');if(k.daily_input_tokens)p.push(k.daily_input_tokens+' in/day');if(k.daily_output_tokens)p.push(k.daily_output_tokens+' out/day');if(k.monthly_total_tokens)p.push(k.monthly_total_tokens+' tok/mo');if(k.daily_cost_microusd)p.push('$'+this.microUSD(k.daily_cost_microusd)+'/day');if(k.monthly_cost_microusd)p.push('$'+this.microUSD(k.monthly_cost_microusd)+'/mo');if(k.daily_credits_milli)p.push((k.daily_credits_milli/1000)+' cr/day');if(k.expires_at)p.push('exp '+new Date(k.expires_at*1000).toLocaleDateString());if((k.allowed_models||[]).length)p.push(k.allowed_models.length+' models');if((k.allowed_providers||[]).length)p.push(k.allowed_providers.length+' prov');return p.length?p.join(' \u00b7 '):'unrestricted'; },
+    async revokeKey(id){ if(!confirm('Revoke this key?'))return; await this.api('/admin/api/keys?id='+encodeURIComponent(id),{method:'DELETE'}); await this.load(); this.toast('revoked'); },
+    async createPrincipal(){ const f=this.identityForm; const r=await this.api('/admin/api/principals',{method:'POST',body:JSON.stringify({kind:f.kind,display_name:f.name,external_subject:f.subject,email:f.email})}); if(r.ok){this.identityForm={kind:'human',name:'',email:'',subject:''};await this.load();this.toast('principal created');}else this.toast((await r.json()).error?.message||'create failed',false); },
+    async createProject(){ const f=this.projectForm; const r=await this.api('/admin/api/projects',{method:'POST',body:JSON.stringify({slug:f.slug||f.name,name:f.name})}); if(r.ok){this.projectForm={name:'',slug:''};await this.load();this.toast('project created');}else this.toast((await r.json()).error?.message||'create failed',false); },
+    async setMembership(){ const f=this.membershipForm;if(!f.projectID||!f.principalID){this.toast('select project + principal',false);return;} const r=await this.api('/admin/api/memberships',{method:'POST',body:JSON.stringify({project_id:f.projectID,principal_id:f.principalID,role:f.role})}); if(r.ok){await this.load();this.toast('membership assigned');}else this.toast('assignment failed',false); },
+    async togglePrincipal(p){ const status=p.status==='active'?'disabled':'active'; const r=await this.api('/admin/api/principals/status',{method:'POST',body:JSON.stringify({id:p.id,status})}); if(r.ok){await this.load();this.toast('principal '+status);}else this.toast('update failed',false); },
+    principalProjects(id){ const ms=(this.s?.memberships||[]).filter(m=>m.principal_id===id); return ms.map(m=>{const p=(this.s.projects||[]).find(x=>x.id===m.project_id);return (p?.name||m.project_id)+' ('+m.role+')'}).join(', ')||'-'; },
+    projectMembers(id){ const ms=(this.s?.memberships||[]).filter(m=>m.project_id===id); return ms.map(m=>{const p=(this.s.principals||[]).find(x=>x.id===m.principal_id);return (p?.display_name||m.principal_id)+' ('+m.role+')'}).join(', ')||'-'; },
+    hasCredential(principalID,providerID){ return (this.s?.provider_credentials||[]).some(c=>c.principal_id===principalID&&c.provider_id===providerID&&c.status==='active'); },
+    personalConnections(){ return (this.s?.provider_connections||[]).filter(c=>c.principal_kind==='human'); },
+    async createConnection(){ const f=this.connectionForm;if(!f.principalID||!f.providerID||!f.secret){this.toast('principal, provider and API key required',false);return;}const r=await this.api('/admin/api/principals/'+encodeURIComponent(f.principalID)+'/connections',{method:'POST',body:JSON.stringify({provider_id:f.providerID,connection_name:f.name||'default',secret:f.secret,make_default:f.makeDefault})});if(r.ok){this.connectionForm={principalID:'',providerID:'',name:'default',secret:'',makeDefault:true};await this.load();this.toast('personal connection saved');}else this.toast((await r.json()).detail||'connection failed',false);},
+    async revokeConnection(c){if(!confirm('Revoke '+c.connection_name+' for '+this.principalName(c.principal_id)+'?'))return;const r=await this.api('/admin/api/principals/'+encodeURIComponent(c.principal_id)+'/connections/'+encodeURIComponent(c.id),{method:'DELETE'});if(r.ok){await this.load();this.toast('connection revoked');}else this.toast('revoke failed',false);},
+    async startPrincipalCopilot(p){ const r=await this.api('/admin/api/principals/'+encodeURIComponent(p.id)+'/copilot/login/start',{method:'POST'}); const d=await r.json(); if(!r.ok){this.toast(d.error?.message||'login failed',false);return;} this.byoc={principalID:p.id,name:p.display_name,code:d.user_code,uri:d.verification_uri,device:d.device_code,status:'waiting for authorization…'}; const started=Date.now(); const iv=setInterval(async()=>{if(Date.now()-started>d.expires_in*1000){clearInterval(iv);this.byoc.status='code expired';return;}const pr=await this.api('/admin/api/principals/'+encodeURIComponent(p.id)+'/copilot/login/poll',{method:'POST',body:JSON.stringify({device_code:d.device_code})});const ps=await pr.json();if(ps.status==='authorized'){clearInterval(iv);this.byoc.status='connected';await this.load();this.toast('Copilot connected for '+p.display_name);}else if(ps.status==='denied'||ps.status==='error'){clearInterval(iv);this.byoc.status=ps.status+' '+(ps.error||'');}},Math.max(2,d.interval)*1000); },
+    usageCards(){const t=this.usage?.control_plane?.totals||{};return [['Requests',t.requests||0,''],['Tokens',(t.input_tokens||0)+(t.output_tokens||0),''],['Estimated cost',this.microUSD(t.cost_microusd||0),'$'],['Avg latency',t.average_latency_ms||0,' ms']];},
+    usageGroup(name){return this.usage?.control_plane?.groups?.[name]||[];},
+    microUSD(v){return ((v||0)/1e6).toFixed(4);},
+    projectName(id){return (this.s?.projects||[]).find(x=>x.id===id)?.name||id||'-';},
+    principalName(id){return (this.s?.principals||[]).find(x=>x.id===id)?.display_name||id||'-';},
+    async loadUsage(){ const [u,t,a,o]=await Promise.all([this.api('/admin/api/usage'),this.api('/admin/api/telemetry'),this.api('/admin/api/alerts'),this.api('/admin/api/outbox')]); if(u.ok)this.usage=await u.json();if(t.ok)this.tele=await t.json();if(a.ok)this.alerts=(await a.json()).rules||[];if(o.ok)this.outbox=(await o.json()).events||[]; },
+    async createAlert(){const f=this.alertForm;const r=await this.api('/admin/api/alerts',{method:'POST',body:JSON.stringify({project_id:f.projectID||'',kind:'quota_usage',metric:f.metric,threshold:+f.threshold,period:f.period})});if(r.ok){await this.loadUsage();this.toast('alert created');}else this.toast((await r.json()).error?.message||'alert failed',false);},
+    async deleteAlert(id){if(!confirm('Delete alert?'))return;await this.api('/admin/api/alerts/'+encodeURIComponent(id),{method:'DELETE'});await this.loadUsage();this.toast('alert deleted');},
+    async copilotLogin(){ const r=await this.api('/admin/api/copilot/login/start',{method:'POST'}); const d=await r.json(); if(d.error){this.toast(d.error,false);return;} this.cp={code:d.user_code,uri:d.verification_uri,device:d.device_code,status:'waiting for authorization…'}; const started=Date.now(); const iv=setInterval(async()=>{ if(Date.now()-started>d.expires_in*1000){clearInterval(iv);this.cp.status='code expired';return;} const pr=await this.api('/admin/api/copilot/login/poll',{method:'POST',body:JSON.stringify({device_code:d.device_code})}); const ps=await pr.json(); if(ps.status==='authorized'){clearInterval(iv);this.cp.status='authorized ✓';this.toast('Copilot authorized');this.load();} else if(ps.status==='denied'||ps.status==='error'){clearInterval(iv);this.cp.status=ps.status+' '+(ps.error||'');} }, Math.max(2,d.interval)*1000); },
+    async copilotLogout(){ await this.api('/admin/api/copilot/logout',{method:'POST'}); this.cp={code:'',uri:'',status:'',device:''}; await this.load(); this.toast('logged out'); },
+  };
+}
+</script>
+</body>
+</html>

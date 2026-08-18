@@ -1,0 +1,251 @@
+package router
+
+import (
+	"testing"
+
+	"llmgw/internal/config"
+	"llmgw/internal/iam"
+	"llmgw/internal/providers"
+)
+
+func setupEcho(t *testing.T) {
+	t.Setenv("LLMGW_STATE_DIR", t.TempDir())
+	config.Update(func(s *config.Settings) {
+		s.Savings.Enabled = false
+		s.Providers = map[string]*config.ProviderConfig{
+			"echo":  {Type: "echo"},
+			"echo2": {Type: "echo"},
+			"bad":   {Type: "openai_compatible", BaseURL: "http://127.0.0.1:1/v1"},
+		}
+		s.Categories = map[string]*config.CategoryConfig{
+			"smart":    {Failover: []config.CategoryMember{{Provider: "echo", Model: "echo-default"}}},
+			"failover": {Failover: []config.CategoryMember{{Provider: "bad", Model: "x"}, {Provider: "echo", Model: "echo-default"}}},
+			"empty":    {Failover: nil},
+		}
+	})
+	providers.ResetProviders()
+	ResetTelemetryState()
+	ResetSavingsState()
+	t.Cleanup(func() {
+		ResetTelemetryState()
+		ResetSavingsState()
+	})
+}
+
+func TestResolveTargets(t *testing.T) {
+	setupEcho(t)
+
+	// category
+	resolution, err := ResolveForPrincipal("SMART", nil)
+	if err != nil || resolution.Category != "smart" || len(resolution.Targets) != 1 || resolution.Targets[0].Provider != "echo" {
+		t.Fatalf("category resolve wrong: %+v %v", resolution, err)
+	}
+	targets := resolution.Targets
+	// provider/model
+	targets, err = ResolveTargets("echo/echo-strong")
+	if err != nil || len(targets) != 1 || targets[0].Model != "echo-strong" {
+		t.Fatalf("provider/model resolve wrong: %v %v", targets, err)
+	}
+	// unknown -> 404
+	if _, err := ResolveTargets("does-not-exist"); err == nil {
+		t.Error("unknown model should error")
+	} else if _, ok := err.(*ModelNotFoundError); !ok {
+		t.Errorf("want ModelNotFoundError, got %T", err)
+	}
+	// empty category -> 404
+	if _, err := ResolveTargets("empty"); err == nil {
+		t.Error("empty category should error")
+	}
+}
+
+func TestResolveCategoryRejectsAmbiguousCaseVariants(t *testing.T) {
+	setupEcho(t)
+	config.Update(func(s *config.Settings) {
+		s.Categories["SMART"] = &config.CategoryConfig{
+			Failover: []config.CategoryMember{{Provider: "echo2", Model: "echo-deep"}},
+		}
+	})
+
+	lower, err := ResolveForPrincipal("smart", nil)
+	if err != nil || lower.Category != "smart" || lower.Targets[0].Provider != "echo" {
+		t.Fatalf("exact lower-case route resolve wrong: %+v %v", lower, err)
+	}
+	upper, err := ResolveForPrincipal("SMART", nil)
+	if err != nil || upper.Category != "SMART" || upper.Targets[0].Provider != "echo2" {
+		t.Fatalf("exact upper-case route resolve wrong: %+v %v", upper, err)
+	}
+	if _, err := ResolveForPrincipal("SmArT", nil); err == nil {
+		t.Fatal("ambiguous case-insensitive route lookup should fail")
+	} else if _, ok := err.(*AmbiguousCategoryError); !ok {
+		t.Fatalf("want AmbiguousCategoryError, got %T: %v", err, err)
+	}
+}
+
+func TestNativeKey(t *testing.T) {
+	// picker's dashed native form and the catalog's dotted form must match
+	if nativeKey("claude-opus-4.8") != nativeKey("claude-opus-4-8") {
+		t.Errorf("dotted vs dashed should match: %q vs %q", nativeKey("claude-opus-4.8"), nativeKey("claude-opus-4-8"))
+	}
+	if nativeKey("Claude-Sonnet-4.5") != nativeKey("claude-sonnet-4-5") {
+		t.Error("case + dot/dash should match")
+	}
+	// but a retired opus-4 must NOT collide with opus-4.8
+	if nativeKey("claude-opus-4.8") == nativeKey("claude-opus-4") {
+		t.Error("opus-4.8 must not equal retired opus-4")
+	}
+}
+
+func TestResolveNativeAlias(t *testing.T) {
+	setupEcho(t)
+	// a bare catalog name (no provider prefix, not a category) resolves; with
+	// two echo providers the sorted-order winner is deterministic ("echo").
+	targets, err := ResolveTargets("echo-strong")
+	if err != nil || len(targets) != 1 || targets[0].Provider != "echo" || targets[0].Model != "echo-strong" {
+		t.Fatalf("bare-name resolve wrong: %v %v", targets, err)
+	}
+	// a "[1m]"-style context-variant tag is stripped before matching
+	targets, err = ResolveTargets("echo-strong[1m]")
+	if err != nil || len(targets) != 1 || targets[0].Model != "echo-strong" {
+		t.Fatalf("tagged-name resolve wrong: %v %v", targets, err)
+	}
+	// case-insensitive
+	if targets, err := ResolveTargets("ECHO-DEEP"); err != nil || len(targets) != 1 || targets[0].Model != "echo-deep" {
+		t.Fatalf("case-insensitive resolve wrong: %v %v", targets, err)
+	}
+	// discovery-alias prefix strip: "claude-<non-claude>" falls back to the real
+	// model after a direct match fails (surfaces non-Claude models in the picker).
+	if targets, err := ResolveTargets("claude-echo-strong"); err != nil || len(targets) != 1 || targets[0].Model != "echo-strong" {
+		t.Fatalf("prefix-strip resolve wrong: %v %v", targets, err)
+	}
+	// genuinely unknown still 404s
+	if _, err := ResolveTargets("totally-unknown-9"); err == nil {
+		t.Error("unknown should still 404")
+	}
+}
+
+func TestExecuteCompleteEcho(t *testing.T) {
+	setupEcho(t)
+	targets, _ := ResolveTargets("smart")
+	resp, served, err := ExecuteComplete(targets, []providers.Message{{"role": "user", "content": "hi"}}, "smart", nil, providers.Kwargs{})
+	if err != nil {
+		t.Fatalf("execute failed: %v", err)
+	}
+	if served.Provider != "echo" {
+		t.Errorf("served wrong: %v", served)
+	}
+	choices := resp["choices"].([]any)
+	msg := choices[0].(map[string]any)["message"].(map[string]any)
+	if msg["content"] != "echo:hi" {
+		t.Errorf("content wrong: %v", msg["content"])
+	}
+}
+
+func TestExecuteCompleteFailover(t *testing.T) {
+	setupEcho(t)
+	targets, _ := ResolveTargets("failover")
+	resp, served, err := ExecuteComplete(targets, []providers.Message{{"role": "user", "content": "hi"}}, "failover", &config.Principal{Project: "p", Key: "k"}, providers.Kwargs{})
+	if err != nil {
+		t.Fatalf("failover should succeed via echo: %v", err)
+	}
+	if served.Provider != "echo" {
+		t.Errorf("should have failed over to echo, served %v", served)
+	}
+	_ = resp
+	// telemetry should have recorded the failover chain
+	stats := TelemetryStats()
+	if stats["events"].(int64) != 1 {
+		t.Errorf("want 1 telemetry event, got %v", stats["events"])
+	}
+	recent := RecentTelemetry(10)
+	if len(recent) != 1 {
+		t.Fatalf("want 1 recent event, got %d", len(recent))
+	}
+	attempts := recent[0]["attempts"].([]map[string]any)
+	if len(attempts) != 2 {
+		t.Errorf("want 2 attempts, got %d", len(attempts))
+	}
+	if recent[0]["served"] != "echo/echo-default" {
+		t.Errorf("served wrong in telemetry: %v", recent[0]["served"])
+	}
+}
+
+func TestExecuteStreamEcho(t *testing.T) {
+	setupEcho(t)
+	targets, _ := ResolveTargets("smart")
+	it, served, err := ExecuteStream(targets, []providers.Message{{"role": "user", "content": "hi"}}, "smart", nil, providers.Kwargs{})
+	if err != nil {
+		t.Fatalf("stream failed: %v", err)
+	}
+
+	if served.Provider != "echo" {
+		t.Errorf("served wrong: %v", served)
+	}
+	count := 0
+	for {
+		_, more := it.Next()
+		if !more {
+			break
+		}
+		count++
+	}
+	if count == 0 {
+		t.Error("expected stream chunks")
+	}
+}
+
+func TestResponsesFallbackRejectsUnsupportedToolConstraints(t *testing.T) {
+	setupEcho(t)
+	config.Update(func(settings *config.Settings) {
+		settings.Providers["anthropic"] = &config.ProviderConfig{Type: "anthropic"}
+	})
+	target := Target{Provider: "anthropic", Model: "claude"}
+	messages := []providers.Message{{"role": "user", "content": "hi"}}
+	for name, kw := range map[string]providers.Kwargs{
+		"tool choice": {
+			"tools": []any{map[string]any{
+				"type": "function", "function": map[string]any{
+					"name": "lookup", "parameters": map[string]any{"type": "object"},
+				},
+			}},
+			"tool_choice": "required",
+		},
+		"strict tool": {
+			"tools": []any{map[string]any{
+				"type": "function", "function": map[string]any{
+					"name": "lookup", "strict": true,
+					"parameters": map[string]any{"type": "object"},
+				},
+			}},
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			if err := responsesFallbackCompatibility(target, nil, messages, kw); err == nil {
+				t.Fatal("unsupported tool constraint was accepted")
+			}
+		})
+	}
+}
+
+func TestRecordUsageWritesControlPlaneLedger(t *testing.T) {
+	t.Setenv("LLMGW_STATE_DIR", t.TempDir())
+	iam.ResetForTests()
+	ResetSavingsState()
+	t.Cleanup(func() {
+		iam.ResetForTests()
+		ResetSavingsState()
+	})
+	config.Update(func(s *config.Settings) {
+		s.Savings.Enabled = false
+	})
+	RecordUsage(UsageRecord{
+		Endpoint: "openai.chat", RequestedModel: "smart", RoutedModel: "echo-default",
+		Provider: "echo", InputTokens: 3, OutputTokens: 2, LatencyMS: 5,
+	})
+	stats, err := iam.UsageStats(0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := stats["totals"].(iam.UsageTotals).Requests; got != 1 {
+		t.Fatalf("control-plane requests=%d, want 1", got)
+	}
+}

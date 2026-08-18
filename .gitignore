@@ -1,0 +1,31 @@
+# env / secrets
+.env
+*.env
+!.env.example
+!*.env.example
+config.local.yaml
+test/integration/.env.test
+test/uat/.env.uat
+# Tracked on purpose — placeholders only. Negated because a global ignore
+# (core.excludesFile) commonly carries a broad `.env.*` rule.
+!test/integration/.env.test.example
+!test/uat/.env.uat.example
+
+# runtime state
+*.db
+*.sqlite3
+deploy/state/
+
+# tooling / agent scratch
+.playwright-cli/
+.playwright-mcp/
+.quality-run/
+
+# editors / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# Local frontend installation; generated dist is intentionally committed for Go embedding.
+go/internal/web/console/node_modules/
