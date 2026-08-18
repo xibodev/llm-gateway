@@ -82,6 +82,20 @@ type serviceAccountJSON struct {
 	TokenURI     string `json:"token_uri"`
 }
 
+// LooksLikeServiceAccount reports whether raw is a service-account key document.
+// It is deliberately cheap and total: callers use it to pick a credential kind
+// before validating, so anything that is not such a document answers false
+// rather than failing.
+func LooksLikeServiceAccount(raw string) bool {
+	var probe struct {
+		Type string `json:"type"`
+	}
+	if err := json.Unmarshal([]byte(raw), &probe); err != nil {
+		return false
+	}
+	return probe.Type == "service_account"
+}
+
 // Parse reads a service-account key. It rejects the other credential shapes
 // Google hands out (authorized_user, external_account) by name, because those
 // fail much later and far less clearly when treated as a service account.

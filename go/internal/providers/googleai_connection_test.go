@@ -148,3 +148,36 @@ func TestVertexWithoutAnyCredentialFailsClearly(t *testing.T) {
 		}
 	}
 }
+
+// TestVertexSystemConnectionServesAPIKeyCallers covers the path an LLMGW_API_KEY
+// request takes. That auth mode builds a principal with no id, so the personal
+// connection lookup is skipped entirely and only the system connection is
+// consulted -- a key stored against a human principal cannot serve these calls.
+func TestVertexSystemConnectionServesAPIKeyCallers(t *testing.T) {
+	setupVertexIAM(t)
+	server := stubTokenEndpoint(t)
+
+	if _, err := iam.PutSystemProviderConnection(
+		"vertex_ai", gcpauth.CredentialKind, serviceAccountFixture(t, server.URL),
+	); err != nil {
+		t.Fatalf("store system service account connection: %v", err)
+	}
+
+	// An admin-key request: project and key set, principal id deliberately empty.
+	provider, err := GetProviderForPrincipal(
+		"vertex_ai", &config.Principal{Project: "admin", Key: "admin"},
+	)
+	if err != nil {
+		t.Fatalf("build provider for an API-key caller: %v", err)
+	}
+	vertex, ok := provider.(GoogleAIProvider)
+	if !ok {
+		t.Fatalf("provider type=%T", provider)
+	}
+	if vertex.bearerToken != "ya29.stored-path" {
+		t.Fatalf("bearerToken=%q, want the token minted from the system key", vertex.bearerToken)
+	}
+	if vertex.apiKey != "" {
+		t.Fatalf("apiKey=%q, want empty", vertex.apiKey)
+	}
+}
