@@ -152,7 +152,11 @@ func providerStatusSnapshots(
 		} else if entry.Availability != providers.ProviderAvailable {
 			status = "unavailable"
 		} else if len(matches) > 0 {
-			status = matches[0].status
+			// A tile aggregates instances; it is not one. Adopting matches[0]'s
+			// status let a healthy first instance mask a broken second, so the
+			// tile reports only that it is configured and the console renders
+			// the composition from instance_status_counts.
+			status = "configured"
 		}
 		modelCount := 0
 		connectionCount := 0
@@ -163,6 +167,8 @@ func providerStatusSnapshots(
 		var lastCheck *iam.ProviderCheck
 		var lastVerify *iam.ProviderCheck
 		configurationIssues := make([]string, 0)
+		instances := make([]map[string]any, 0, len(matches))
+		instanceStatusCounts := map[string]int{}
 		for _, match := range matches {
 			ids = append(ids, match.id)
 			if match.disabled {
@@ -183,6 +189,13 @@ func providerStatusSnapshots(
 			if match.configurationIssue != "" {
 				configurationIssues = append(configurationIssues, match.configurationIssue)
 			}
+			instanceStatusCounts[match.status]++
+			instances = append(instances, providerSnapshotRow(map[string]any{
+				"id": match.id, "status": match.status,
+				"model_count": match.modelCount, "connection_count": match.connectionCount,
+				"catalog_state": match.catalogState, "catalog_refreshed": match.catalogRefresh,
+				"disabled": match.disabled, "configuration_issue": match.configurationIssue,
+			}, match.lastCheck, match.lastVerify))
 		}
 		snapshots = append(snapshots, providerSnapshotRow(map[string]any{
 			"id": entry.ID, "label": entry.Label, "description": entry.Description,
@@ -193,6 +206,7 @@ func providerStatusSnapshots(
 			"connection_count": connectionCount, "model_count": modelCount,
 			"catalog_state": catalogState, "catalog_refreshed": catalogRefreshed,
 			"configuration_issue": strings.Join(configurationIssues, " "),
+			"instances": instances, "instance_status_counts": instanceStatusCounts,
 		}, lastCheck, lastVerify))
 	}
 	for _, snapshot := range configured {
