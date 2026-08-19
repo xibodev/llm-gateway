@@ -49,6 +49,9 @@ export function ProviderDetail({ entryID, data, mode, onChanged, onBack, onOpenP
   const [modelPage, setModelPage] = useState(0);
 
   const providerIDs = configuredProviderIDs(entry);
+  // The upsert route is keyed on the provider id alone: a suggested id must
+  // avoid every configured provider, not only the ones under this tile.
+  const allProviderIDs = asList(data.providers).map(asRecord).map((provider) => stringValue(provider.id)).filter(Boolean);
   // A multi-instance tile has no per-instance OAuth binder yet: "" here disables
   // the Add account action rather than guessing which instance to bind.
   const oauthProviderID = providerIDs.length > 1 ? "" : (providerIDs[0] ?? stringValue(entry.id));
@@ -185,7 +188,7 @@ export function ProviderDetail({ entryID, data, mode, onChanged, onBack, onOpenP
         </tbody></table></div>}
       </section> : null}
       {!configured && !isClient && !unavailable ? <section class="surface"><EmptyState title="Not connected yet" detail={supportsOAuth ? "Add an account with the official OAuth flow to configure this integration." : "Connect this integration to sync its catalog and route requests through it."} action={mode === "admin" && !supportsOAuth ? <button class="button button--primary" type="button" onClick={() => setConnectOpen(true)}><Plug size={16} /> Connect</button> : undefined} /></section> : null}
-      {connectOpen ? <ConnectDialog entry={{ ...entry, provider_config: providerConfig }} mode={configured ? "edit" : "create"} onClose={() => setConnectOpen(false)} onConfigured={onChanged} /> : null}
+      {connectOpen ? <ConnectDialog entry={{ ...entry, provider_config: providerConfig }} mode={configured ? "edit" : "create"} takenIDs={allProviderIDs} onClose={() => setConnectOpen(false)} onConfigured={onChanged} /> : null}
       {privateKeyOpen ? <PrivateAPIKeyDialog entry={entry} providerID={providerIDs.length === 1 ? providerIDs[0] : ""} onClose={() => setPrivateKeyOpen(false)} onConfigured={onChanged} /> : null}
       {oauthOpen ? <OAuthConnectDialog entry={entry} providerID={oauthProviderID} data={data} mode={mode} onClose={() => setOAuthOpen(false)} onComplete={onChanged} /> : null}
     </div>
