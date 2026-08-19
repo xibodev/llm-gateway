@@ -49,6 +49,7 @@ export function ProviderDetail({ entryID, data, mode, onChanged, onBack, onOpenP
   const [modelPage, setModelPage] = useState(0);
 
   const providerIDs = configuredProviderIDs(entry);
+  const instances = asList(entry.instances).map(asRecord);
   const providerConfig = configuredProviderConfig(entry, data);
   const disabledProviderIDs = new Set(asList(entry.disabled_provider_ids).map(String));
   const [toggleBusy, setToggleBusy] = useState("");
@@ -143,10 +144,12 @@ export function ProviderDetail({ entryID, data, mode, onChanged, onBack, onOpenP
         <div class="section-heading"><div><p class="eyebrow">Configured gateway providers</p><h2>Checks and lifecycle</h2></div><span>{providerIDs.length} provider{providerIDs.length === 1 ? "" : "s"}</span></div>
         <p class="muted-copy">Each action states exactly what it proves. A reachability check exercises only the catalog API; only a test completion verifies that inference works end to end. Clear cache &amp; retry resets local provider state — it cannot fix a wrong credential or endpoint.</p>
         <div class="table-wrap"><table><thead><tr><th>Provider ID</th><th>Catalog</th><th>Freshness</th><th>Actions</th></tr></thead><tbody>
-          {providerIDs.map((providerID) => <tr key={providerID}>
-            <td><strong class="technical">{providerID}</strong>{disabledProviderIDs.has(providerID) ? <small class="table-subtitle">Disabled — requests 404 until re-enabled</small> : null}</td>
-            <td>{numberValue(entry.model_count)} model{numberValue(entry.model_count) === 1 ? "" : "s"} · {stringValue(entry.catalog_state, "unknown")}</td>
-            <td class="technical">{stringValue(entry.catalog_refreshed, "Never synced")}</td>
+          {instances.map((instance) => {
+            const providerID = stringValue(instance.id);
+            return <tr key={providerID}>
+            <td><strong class="technical">{providerID}</strong>{boolValue(instance.disabled) ? <small class="table-subtitle">Disabled — requests 404 until re-enabled</small> : null}</td>
+            <td>{numberValue(instance.model_count)} model{numberValue(instance.model_count) === 1 ? "" : "s"} · {stringValue(instance.catalog_state, "unknown")}</td>
+            <td class="technical">{stringValue(instance.catalog_refreshed, "Never synced")}</td>
             <td><div class="provider-actions">
               <button class="button button--secondary" type="button" title="Take the provider in or out of service without deleting its configuration or credentials" disabled={toggleBusy === providerID} onClick={() => void toggleEnabled(providerID)}><Power size={15} /> {disabledProviderIDs.has(providerID) ? "Enable" : "Disable"}</button>
               <button class="button button--secondary" type="button" title="Confirm the endpoint answers the catalog API — does not run a completion" disabled={active(providerID, "test") || (supportsOAuth && !ownerID)} onClick={() => void runLifecycle(entry, "test", providerID)}><Plug size={15} /> Check reachability</button>
@@ -155,7 +158,8 @@ export function ProviderDetail({ entryID, data, mode, onChanged, onBack, onOpenP
               <button class="button button--secondary" type="button" title="Reset cached provider and catalog state, then refetch — cannot repair credentials or endpoints" disabled={active(providerID, "repair") || (supportsOAuth && !ownerID)} onClick={() => void runLifecycle(entry, "repair", providerID)}><Wrench size={15} /> Clear cache &amp; retry</button>
               <button class="button button--danger" type="button" disabled={active(providerID, "delete")} onClick={() => void runLifecycle(entry, "delete", providerID)}><Trash2 size={15} /> Remove</button>
             </div></td>
-          </tr>)}
+            </tr>;
+          })}
         </tbody></table></div>
         {models.length ? <label class="verify-model-select">Test completion model<select value={verifyModel} onInput={(event) => setVerifyModel((event.currentTarget as HTMLSelectElement).value)}><option value="">Automatic (first catalog model)</option>{models.map((row) => <option value={stringValue(row.id).split("/").pop()} key={stringValue(row.id)}>{stringValue(row.id)}</option>)}</select></label> : null}
         <dl class="compact-facts provider-check-facts">
