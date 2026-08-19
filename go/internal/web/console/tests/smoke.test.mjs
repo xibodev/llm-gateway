@@ -499,6 +499,19 @@ test("credential and lifecycle actions name an explicit instance", () => {
   assert.doesNotMatch(shared, /providerIDs\[0\] \?\? stringValue\(entry\.id\)/);
 });
 
+test("official OAuth account binding also names an explicit instance", () => {
+  const oauth = readFileSync(resolve(root, "src/components/providers/OAuthConnectDialog.tsx"), "utf8");
+  const hub = readFileSync(resolve(root, "src/components/providers/ProviderHub.tsx"), "utf8");
+  const detail = readFileSync(resolve(root, "src/pages/ProviderDetail.tsx"), "utf8");
+  // Same rule as the private-key dialog: OAuthConnectDialog must be TOLD its
+  // target. It has no legitimate reason to resolve configuredProviderIDs
+  // itself — every caller passes a resolved providerID prop instead.
+  assert.match(oauth, /function OAuthConnectDialog\(\{\s*entry,\s*providerID,/);
+  assert.doesNotMatch(oauth, /configuredProviderIDs/);
+  assert.match(hub, /<OAuthConnectDialog entry=\{oauthEntry\.entry\} providerID=\{oauthEntry\.providerID\}/);
+  assert.match(detail, /<OAuthConnectDialog entry=\{entry\} providerID=\{oauthProviderID\}/);
+});
+
 test("connect dialog allows creating an additional instance of a configured type", () => {
   const hub = readFileSync(resolve(root, "src/components/providers/ProviderHub.tsx"), "utf8");
   // The ID field must lock only when editing an existing instance, never merely

@@ -30,15 +30,6 @@ type DeviceFlow = {
 
 type OAuthStage = "intro" | "starting" | "waiting" | "testing" | "success" | "error";
 
-function configuredProviderIDs(entry: JSONRecord): string[] {
-  const ids = asList(entry.configured_provider_ids).map(String).filter(Boolean);
-  if (!ids.length && boolValue(entry.configured)) {
-    const id = stringValue(entry.id);
-    if (id) ids.push(id);
-  }
-  return ids;
-}
-
 function formatRemaining(expiresAt: number, now: number): string {
   const seconds = Math.max(0, Math.ceil((expiresAt - now) / 1000));
   const minutes = Math.floor(seconds / 60);
@@ -48,12 +39,14 @@ function formatRemaining(expiresAt: number, now: number): string {
 
 export function OAuthConnectDialog({
   entry,
+  providerID,
   data,
   mode,
   onClose,
   onComplete,
 }: {
   entry: JSONRecord;
+  providerID: string;
   data: JSONRecord;
   mode: ConsoleMode;
   onClose: () => void;
@@ -98,13 +91,12 @@ export function OAuthConnectDialog({
   useEffect(() => closePopup, [closePopup]);
 
   const label = stringValue(entry.label, "Provider");
-  const providerRef = configuredProviderIDs(entry)[0] ?? stringValue(entry.id);
   const endpoint = useCallback(
     (suffix: string) =>
       mode === "portal"
-        ? `/connections/${encodeURIComponent(providerRef)}/oauth/${suffix}`
-        : `/principals/${encodeURIComponent(ownerID)}/connections/${encodeURIComponent(providerRef)}/oauth/${suffix}`,
-    [mode, ownerID, providerRef],
+        ? `/connections/${encodeURIComponent(providerID)}/oauth/${suffix}`
+        : `/principals/${encodeURIComponent(ownerID)}/connections/${encodeURIComponent(providerID)}/oauth/${suffix}`,
+    [mode, ownerID, providerID],
   );
 
   useEffect(() => {
@@ -237,7 +229,7 @@ export function OAuthConnectDialog({
         Date.now() + Math.max(60, numberValue(response.expires_in, 900)) * 1000;
       const verificationURI = stringValue(response.verification_uri);
       const nextFlow = {
-        providerID: stringValue(response.provider_id, providerRef),
+        providerID: stringValue(response.provider_id, providerID),
         deviceCode: stringValue(response.device_code),
         userCode: stringValue(response.user_code),
         verificationURI,

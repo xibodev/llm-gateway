@@ -49,6 +49,9 @@ export function ProviderDetail({ entryID, data, mode, onChanged, onBack, onOpenP
   const [modelPage, setModelPage] = useState(0);
 
   const providerIDs = configuredProviderIDs(entry);
+  // A multi-instance tile has no per-instance OAuth binder yet: "" here disables
+  // the Add account action rather than guessing which instance to bind.
+  const oauthProviderID = providerIDs.length > 1 ? "" : (providerIDs[0] ?? stringValue(entry.id));
   const instances = asList(entry.instances).map(asRecord);
   const providerConfig = configuredProviderConfig(entry, data);
   const disabledProviderIDs = new Set(asList(entry.disabled_provider_ids).map(String));
@@ -132,9 +135,9 @@ export function ProviderDetail({ entryID, data, mode, onChanged, onBack, onOpenP
         </div>
         {mode === "admin" && !isClient && !unavailable ? <div class="detail-heading__actions">
           {supportsOAuth || configured ? <label class="owner-select">Catalog owner<select value={ownerID} onInput={(event) => setOwnerID((event.currentTarget as HTMLSelectElement).value)}><option value="">No private owner selected</option>{owners.map((owner) => <option value={stringValue(owner.id)} key={stringValue(owner.id)}>{stringValue(owner.display_name, stringValue(owner.id))}</option>)}</select></label> : null}
-          {supportsOAuth ? <button class="button button--primary" type="button" disabled={!ownerID} onClick={() => setOAuthOpen(true)}><Plug size={15} /> Add account</button> : <button class="button button--primary" type="button" onClick={() => setConnectOpen(true)}><Plug size={15} /> {configured ? "Edit configuration" : "Connect"}</button>}
+          {supportsOAuth ? <button class="button button--primary" type="button" disabled={!ownerID || !oauthProviderID} title={!oauthProviderID ? "Multiple instances are configured for this integration; resolve to a single instance before adding an OAuth account." : undefined} onClick={() => setOAuthOpen(true)}><Plug size={15} /> Add account</button> : <button class="button button--primary" type="button" onClick={() => setConnectOpen(true)}><Plug size={15} /> {configured ? "Edit configuration" : "Connect"}</button>}
         </div> : mode === "portal" && !isClient && !unavailable ? <div class="detail-heading__actions">
-          {supportsOAuth || configured ? <button class="button button--primary" type="button" disabled={!supportsOAuth && providerIDs.length !== 1} title={!supportsOAuth && providerIDs.length > 1 ? "Multiple instances are configured for this integration; ask an administrator to add a private connection for a specific instance." : undefined} onClick={() => (supportsOAuth ? setOAuthOpen(true) : setPrivateKeyOpen(true))}><Plug size={15} /> {connections.length ? "Add or replace account" : "Connect"}</button> : <span class="provider-card__meta">Administrator setup required</span>}
+          {supportsOAuth || configured ? <button class="button button--primary" type="button" disabled={supportsOAuth ? !oauthProviderID : providerIDs.length !== 1} title={supportsOAuth ? (!oauthProviderID ? "Multiple instances are configured for this integration; resolve to a single instance before adding an OAuth account." : undefined) : (providerIDs.length > 1 ? "Multiple instances are configured for this integration; ask an administrator to add a private connection for a specific instance." : undefined)} onClick={() => (supportsOAuth ? setOAuthOpen(true) : setPrivateKeyOpen(true))}><Plug size={15} /> {connections.length ? "Add or replace account" : "Connect"}</button> : <span class="provider-card__meta">Administrator setup required</span>}
         </div> : null}
       </header>
       <ResultNotice result={result} />
@@ -184,7 +187,7 @@ export function ProviderDetail({ entryID, data, mode, onChanged, onBack, onOpenP
       {!configured && !isClient && !unavailable ? <section class="surface"><EmptyState title="Not connected yet" detail={supportsOAuth ? "Add an account with the official OAuth flow to configure this integration." : "Connect this integration to sync its catalog and route requests through it."} action={mode === "admin" && !supportsOAuth ? <button class="button button--primary" type="button" onClick={() => setConnectOpen(true)}><Plug size={16} /> Connect</button> : undefined} /></section> : null}
       {connectOpen ? <ConnectDialog entry={{ ...entry, provider_config: providerConfig }} mode={configured ? "edit" : "create"} onClose={() => setConnectOpen(false)} onConfigured={onChanged} /> : null}
       {privateKeyOpen ? <PrivateAPIKeyDialog entry={entry} providerID={providerIDs.length === 1 ? providerIDs[0] : ""} onClose={() => setPrivateKeyOpen(false)} onConfigured={onChanged} /> : null}
-      {oauthOpen ? <OAuthConnectDialog entry={entry} data={data} mode={mode} onClose={() => setOAuthOpen(false)} onComplete={onChanged} /> : null}
+      {oauthOpen ? <OAuthConnectDialog entry={entry} providerID={oauthProviderID} data={data} mode={mode} onClose={() => setOAuthOpen(false)} onComplete={onChanged} /> : null}
     </div>
   );
 }
