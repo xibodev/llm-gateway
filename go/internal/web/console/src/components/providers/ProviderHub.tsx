@@ -24,6 +24,7 @@ import {
   configuredProviderConfig,
   configuredProviderIDs,
   groupFor,
+  tileStatus,
   useProviderLifecycle,
 } from "./shared";
 
@@ -262,7 +263,7 @@ export function ProviderHub({ data, mode, onChanged, onOpenDetail }: { data: JSO
         return <section class="provider-group" key={group}><header><p class="eyebrow">{group}</p><span>{groupEntries.length} integration{groupEntries.length === 1 ? "" : "s"}</span></header><div class="provider-card-grid">{groupEntries.map((entry) => {
           const id = stringValue(entry.id);
           const label = stringValue(entry.label, id);
-          const status = stringValue(entry.status, "not_configured");
+          const status = tileStatus(entry);
           const configured = boolValue(entry.configured);
           const isClient = boolValue(entry.client_only);
           const unavailable = stringValue(entry.availability) !== "available" && !isClient;

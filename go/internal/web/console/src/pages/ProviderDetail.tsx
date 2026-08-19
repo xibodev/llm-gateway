@@ -15,6 +15,7 @@ import {
   configuredProviderConfig,
   configuredProviderIDs,
   groupFor,
+  tileStatus,
   useProviderLifecycle,
 } from "../components/providers/shared";
 
@@ -124,7 +125,7 @@ export function ProviderDetail({ entryID, data, mode, onChanged, onBack, onOpenP
       <header class="detail-heading surface">
         <ProviderMark id={entryID} label={label} />
         <div class="detail-heading__body">
-          <div class="detail-heading__title"><h1>{label}</h1><StatusBadge status={stringValue(entry.status, "not_configured")} /></div>
+          <div class="detail-heading__title"><h1>{label}</h1><StatusBadge status={tileStatus(entry)} /></div>
           <p>{stringValue(entry.description, "Gateway integration.")}</p>
           <dl class="compact-facts">
             <div><dt>Group</dt><dd>{groupFor(entry)}</dd></div>
@@ -149,11 +150,12 @@ export function ProviderDetail({ entryID, data, mode, onChanged, onBack, onOpenP
       {configured && mode === "admin" ? <section class="surface">
         <div class="section-heading"><div><p class="eyebrow">Configured gateway providers</p><h2>Checks and lifecycle</h2></div><span>{providerIDs.length} provider{providerIDs.length === 1 ? "" : "s"}</span></div>
         <p class="muted-copy">Each action states exactly what it proves. A reachability check exercises only the catalog API; only a test completion verifies that inference works end to end. Clear cache &amp; retry resets local provider state — it cannot fix a wrong credential or endpoint.</p>
-        <div class="table-wrap"><table><thead><tr><th>Provider ID</th><th>Catalog</th><th>Freshness</th><th>Actions</th></tr></thead><tbody>
+        <div class="table-wrap"><table><thead><tr><th>Provider ID</th><th>Status</th><th>Catalog</th><th>Freshness</th><th>Actions</th></tr></thead><tbody>
           {instances.map((instance) => {
             const providerID = stringValue(instance.id);
             return <tr key={providerID}>
             <td><strong class="technical">{providerID}</strong>{boolValue(instance.disabled) ? <small class="table-subtitle">Disabled — requests 404 until re-enabled</small> : null}</td>
+            <td><StatusBadge status={stringValue(instance.status, "configured")} /></td>
             <td>{numberValue(instance.model_count)} model{numberValue(instance.model_count) === 1 ? "" : "s"} · {stringValue(instance.catalog_state, "unknown")}</td>
             <td class="technical">{stringValue(instance.catalog_refreshed, "Never synced")}</td>
             <td><div class="provider-actions">

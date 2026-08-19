@@ -569,3 +569,18 @@ test("the create dialog never claims a key from another instance", () => {
   // the guard it disables belong to edit mode only.
   assert.match(hub, /const apiKeySet = mode === "edit" && boolValue\(providerConfig\.api_key_set\)/);
 });
+
+test("per-instance status is rendered and the tile pill follows the composition", () => {
+  const shared = readFileSync(resolve(root, "src/components/providers/shared.tsx"), "utf8");
+  const hub = readFileSync(resolve(root, "src/components/providers/ProviderHub.tsx"), "utf8");
+  const detail = readFileSync(resolve(root, "src/pages/ProviderDetail.tsx"), "utf8");
+  // The server emits every instance's own status; nothing read it, so a tile
+  // whose instance had failed its check wore the same grey pill as a verified
+  // one and the operator had no way to find out which instance failed.
+  assert.match(detail, /<th>Status<\/th>/);
+  assert.match(detail, /<StatusBadge status=\{stringValue\(instance\.status/);
+  assert.match(shared, /export function tileStatus/);
+  assert.match(shared, /instances_attention/);
+  assert.match(hub, /const status = tileStatus\(entry\)/);
+  assert.doesNotMatch(hub, /const status = stringValue\(entry\.status/);
+});
