@@ -584,3 +584,14 @@ test("per-instance status is rendered and the tile pill follows the composition"
   assert.match(hub, /const status = tileStatus\(entry\)/);
   assert.doesNotMatch(hub, /const status = stringValue\(entry\.status/);
 });
+
+test("configuration issues are read per instance, not as one joined sentence", () => {
+  const hub = readFileSync(resolve(root, "src/components/providers/ProviderHub.tsx"), "utf8");
+  const detail = readFileSync(resolve(root, "src/pages/ProviderDetail.tsx"), "utf8");
+  // The server made configuration_issue per-instance; both surfaces still
+  // rendered only the tile's space-joined string, so two misconfigured
+  // instances produced exactly the concatenation the change set out to remove.
+  assert.match(detail, /stringValue\(instance\.configuration_issue\)/);
+  assert.match(detail, /const tileConfigurationIssue = instances\.length > 1 \? ""/);
+  assert.match(hub, /const tileConfigurationIssue = instanceCount > 1 \? ""/);
+});
