@@ -474,3 +474,10 @@ test("generation-only models never offer a chat composer", () => {
   assert.match(picker, /out.has\("image"\) \|\| out.has\("video"\)/);
   assert.match(picker, /out.delete\("chat"\)/);
 });
+
+test("provider detail rows render each instance's own catalog data", () => {
+  const detail = readFileSync(resolve(root, "src/pages/ProviderDetail.tsx"), "utf8");
+  // Rows must iterate instance records, not bare ids paired with aggregate fields.
+  assert.match(detail, /asList\(entry\.instances\)/);
+  assert.doesNotMatch(detail, /<td>\{numberValue\(entry\.model_count\)\}/);
+});
