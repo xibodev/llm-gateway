@@ -76,7 +76,9 @@ export function useProviderLifecycle(ownerID: string, onChanged: () => Promise<v
 
   const runLifecycle = async (entry: JSONRecord, operation: LifecycleOperation, providerIDOverride?: string, model?: string) => {
     const providerIDs = configuredProviderIDs(entry);
-    const providerID = providerIDOverride ?? providerIDs[0] ?? stringValue(entry.id);
+    // Never guess which instance the operator meant: acting on [0] silently
+    // tested, synced, or DELETED the wrong upstream on a multi-instance tile.
+    const providerID = providerIDOverride ?? (providerIDs.length === 1 ? providerIDs[0] : "");
     if (!providerID) return;
     const query = new URLSearchParams();
     if (ownerID) query.set("principal_id", ownerID);

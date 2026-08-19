@@ -488,6 +488,17 @@ test("provider tiles show instance composition rather than one rolled-up status"
   assert.match(hub, /instance\{.*=== 1 \? "" : "s"\}/);
 });
 
+test("credential and lifecycle actions name an explicit instance", () => {
+  const shared = readFileSync(resolve(root, "src/components/providers/shared.tsx"), "utf8");
+  const hub = readFileSync(resolve(root, "src/components/providers/ProviderHub.tsx"), "utf8");
+  // The dialog must be TOLD its target. A caller that has already established
+  // the tile has exactly one instance may still index [0] at the call site —
+  // what must not survive is the dialog silently choosing for itself.
+  assert.match(hub, /function PrivateAPIKeyDialog\(\{ entry, providerID/);
+  assert.doesNotMatch(hub, /const providerID = configuredProviderIDs\(entry\)\[0\]/);
+  assert.doesNotMatch(shared, /providerIDs\[0\] \?\? stringValue\(entry\.id\)/);
+});
+
 test("connect dialog allows creating an additional instance of a configured type", () => {
   const hub = readFileSync(resolve(root, "src/components/providers/ProviderHub.tsx"), "utf8");
   // The ID field must lock only when editing an existing instance, never merely
