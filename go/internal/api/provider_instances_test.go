@@ -248,3 +248,90 @@ func TestInstanceConfigurationIssuesStaySeparate(t *testing.T) {
 	}
 	t.Fatal("vertex_ai tile missing")
 }
+
+// A configured provider that no curated tile claims is still an instance. It
+// used to arrive carrying only `configured: true`, which left the console's
+// lifecycle table with nothing to render: Enable/Disable, test completion and
+// cache reset exist nowhere else, so a disabled custom provider could never be
+// re-enabled from the UI.
+func TestCustomProviderRowCarriesItsOwnInstance(t *testing.T) {
+	t.Setenv("LLMGW_STATE_DIR", t.TempDir())
+	iam.ResetForTests()
+	router.ResetSavingsState()
+	router.ResetTelemetryState()
+	t.Cleanup(func() {
+		iam.ResetForTests()
+		router.ResetSavingsState()
+		router.ResetTelemetryState()
+	})
+	if _, err := iam.Initialize(); err != nil {
+		t.Fatal(err)
+	}
+	// A non-canonical id with no explicit registry_id resolves to no registry
+	// entry, so this provider is emitted by the non-registry loop.
+	config.Update(func(s *config.Settings) {
+		s.APIKey = "admin-secret"
+		s.AllowUnauthenticatedAPI = false
+		s.Categories = map[string]*config.CategoryConfig{}
+		s.Providers = map[string]*config.ProviderConfig{
+			"my-openai": {Type: "openai", BaseURL: "http://127.0.0.1:1/v1", Disabled: true},
+		}
+	})
+	providers.ResetProviders()
+	t.Cleanup(providers.ResetProviders)
+
+	server := httptest.NewServer(NewServer())
+	defer server.Close()
+
+	_, state := jsonRequest(t, server.URL+"/admin/api/state", http.MethodGet, "admin-secret", nil)
+
+	var row map[string]any
+	for _, raw := range state["provider_statuses"].([]any) {
+		candidate := raw.(map[string]any)
+		if candidate["id"] == "my-openai" {
+			row = candidate
+			break
+		}
+	}
+	if row == nil {
+		t.Fatal("my-openai missing from provider_statuses")
+	}
+
+	ids, ok := row["configured_provider_ids"].([]any)
+	if !ok || len(ids) != 1 || stringOf(ids[0]) != "my-openai" {
+		t.Fatalf("configured_provider_ids=%#v, want [my-openai]", row["configured_provider_ids"])
+	}
+
+	instances, ok := row["instances"].([]any)
+	if !ok || len(instances) != 1 {
+		t.Fatalf("instances=%#v, want exactly one", row["instances"])
+	}
+	instance := instances[0].(map[string]any)
+	if stringOf(instance["id"]) != "my-openai" {
+		t.Fatalf("instance id=%v, want my-openai", instance["id"])
+	}
+	// The lifecycle table renders every one of these; a missing key is a blank
+	// cell or a dead action, so each is asserted by name.
+	for _, field := range []string{
+		"status", "model_count", "connection_count",
+		"catalog_state", "catalog_refreshed", "disabled", "configuration_issue",
+	} {
+		if _, present := instance[field]; !present {
+			t.Fatalf("instance missing %q: %#v", field, instance)
+		}
+	}
+	if instance["disabled"] != true {
+		t.Fatalf("instance disabled=%v, want true", instance["disabled"])
+	}
+	if stringOf(instance["status"]) != stringOf(row["status"]) {
+		t.Fatalf("instance status=%v, row status=%v; a one-instance row must agree with itself", instance["status"], row["status"])
+	}
+
+	counts, ok := row["instance_status_counts"].(map[string]any)
+	if !ok {
+		t.Fatalf("instance_status_counts missing or wrong type: %T", row["instance_status_counts"])
+	}
+	if len(counts) != 1 || counts[stringOf(row["status"])] != float64(1) {
+		t.Fatalf("instance_status_counts=%#v, want {%q: 1}", counts, stringOf(row["status"]))
+	}
+}

@@ -40,13 +40,12 @@ export function ResultNotice({ result }: { result: ActionResult }) {
   return <section class={`action-notice ${result.success ? "action-notice--success" : "action-notice--warning"}`} role="status"><strong>{result.title}</strong><span>{result.detail}</span></section>;
 }
 
+// Every configured row — curated tile or custom provider — carries the ids of
+// the instances it is configured as. Inferring an instance from a bare
+// "configured" flag is what let a custom provider claim a tile's id while its
+// instance list stayed empty, so there is deliberately no fallback here.
 export function configuredProviderIDs(entry: JSONRecord): string[] {
-  const ids = asList(entry.configured_provider_ids).map(String).filter(Boolean);
-  if (!ids.length && boolValue(entry.configured)) {
-    const id = stringValue(entry.id);
-    if (id) ids.push(id);
-  }
-  return ids;
+  return asList(entry.configured_provider_ids).map(String).filter(Boolean);
 }
 
 export function configuredProviderConfig(entry: JSONRecord, data: JSONRecord): JSONRecord {

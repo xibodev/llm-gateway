@@ -529,3 +529,13 @@ test("connect dialog allows creating an additional instance of a configured type
   assert.match(hub, /mode === "edit"/);
   assert.match(hub, /Add instance/);
 });
+
+test("instance identity is never inferred from a bare configured flag", () => {
+  const shared = readFileSync(resolve(root, "src/components/providers/shared.tsx"), "utf8");
+  // Every configured row — curated tile or custom provider — carries the ids of
+  // its instances. The fallback that invented the tile id as an instance made
+  // configuredProviderIDs and entry.instances disagree, so the lifecycle table
+  // rendered no rows at all for a custom provider.
+  assert.doesNotMatch(shared, /boolValue\(entry\.configured\)/);
+  assert.match(shared, /return asList\(entry\.configured_provider_ids\)/);
+});
