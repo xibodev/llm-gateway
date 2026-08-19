@@ -539,3 +539,15 @@ test("instance identity is never inferred from a bare configured flag", () => {
   assert.doesNotMatch(shared, /boolValue\(entry\.configured\)/);
   assert.match(shared, /return asList\(entry\.configured_provider_ids\)/);
 });
+
+test("a suggested instance id never names a provider configured elsewhere", () => {
+  const hub = readFileSync(resolve(root, "src/components/providers/ProviderHub.tsx"), "utf8");
+  const detail = readFileSync(resolve(root, "src/pages/ProviderDetail.tsx"), "utf8");
+  // The create route is an upsert keyed on the id alone, so a default that is
+  // merely free under this tile can still overwrite another tile's provider.
+  assert.match(hub, /takenIDs = \[\]/);
+  assert.match(hub, /const taken = new Set\(\[\.\.\.configuredProviderIDs\(entry\), \.\.\.takenIDs\]/);
+  assert.match(hub, /takenIDs=\{allProviderIDs\}/);
+  assert.match(detail, /takenIDs=\{allProviderIDs\}/);
+  assert.doesNotMatch(hub, /existingIDs/);
+});

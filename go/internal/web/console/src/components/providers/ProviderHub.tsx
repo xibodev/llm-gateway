@@ -27,15 +27,19 @@ import {
   useProviderLifecycle,
 } from "./shared";
 
-export function ConnectDialog({ entry, onClose, onConfigured, mode = "create" }: { entry: JSONRecord; onClose: () => void; onConfigured: () => Promise<void>; mode?: "create" | "edit" }) {
+export function ConnectDialog({ entry, onClose, onConfigured, mode = "create", takenIDs = [] }: { entry: JSONRecord; onClose: () => void; onConfigured: () => Promise<void>; mode?: "create" | "edit"; takenIDs?: string[] }) {
   const providerConfig = asRecord(entry.provider_config);
-  const existingIDs = configuredProviderIDs(entry);
+  // POST /admin/api/providers is an upsert keyed on the id alone. An id that is
+  // merely free under THIS tile can still name a provider configured elsewhere,
+  // and accepting the pre-filled default would replace its type, endpoint and
+  // stored credential. So every configured id is taken, not just the tile's.
+  const taken = new Set([...configuredProviderIDs(entry), ...takenIDs].filter(Boolean));
   const suggestedID = (() => {
     const base = stringValue(entry.default_provider_id, stringValue(entry.id));
-    if (!existingIDs.includes(base)) return base;
+    if (!taken.has(base)) return base;
     for (let n = 2; ; n += 1) {
       const candidate = `${base}-${n}`;
-      if (!existingIDs.includes(candidate)) return candidate;
+      if (!taken.has(candidate)) return candidate;
     }
   })();
   const [providerID, setProviderID] = useState(mode === "edit" ? stringValue(providerConfig.id) : suggestedID);
@@ -150,6 +154,9 @@ export function ProviderHub({ data, mode, onChanged, onOpenDetail }: { data: JSO
   const { busy, result, setResult, runLifecycle } = useProviderLifecycle(ownerID, onChanged);
   const registry = asList(data.provider_registry).map(asRecord);
   const statuses = asList(data.provider_statuses).map(asRecord);
+  // Tile-independent: the upsert route is keyed on the provider id alone, so a
+  // suggested id must avoid every configured provider, not only this tile's.
+  const allProviderIDs = asList(data.providers).map(asRecord).map((provider) => stringValue(provider.id)).filter(Boolean);
   const statusByID = new Map(statuses.map((status) => [stringValue(status.id), status]));
   const privateProviderIDs = new Set(asList(data.provider_connections).map(asRecord)
     .filter((connection) => stringValue(connection.status, "active") === "active")
@@ -265,7 +272,7 @@ export function ProviderHub({ data, mode, onChanged, onOpenDetail }: { data: JSO
           return <article class="provider-card provider-card--rich provider-card--clickable" key={id} role="link" tabIndex={0} aria-label={`Open ${label} details`} onClick={(event) => openDetail(event, id)} onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); onOpenDetail(id); } }}><header><ProviderMark id={id} label={label} /><div><h2>{label}</h2><p>{stringValue(entry.description, "Gateway integration.")}</p></div><StatusBadge status={status} /></header><dl><div><dt>Catalog</dt><dd>{numberValue(entry.model_count)} model{numberValue(entry.model_count) === 1 ? "" : "s"} · {stringValue(entry.catalog_state, "unknown")}</dd></div><div><dt>Connection</dt><dd>{numberValue(entry.connection_count)} private record{numberValue(entry.connection_count) === 1 ? "" : "s"}</dd></div><div><dt>Instances</dt><dd>{instanceCount} instance{instanceCount === 1 ? "" : "s"}{compositionText ? ` · ${compositionText}` : ""}</dd></div><div><dt>Protocol</dt><dd>{stringValue(entry.protocol, "gateway")}</dd></div><div><dt>Auth</dt><dd>{methods.join(" · ") || "Gateway credential"}</dd></div></dl>{stringValue(entry.configuration_issue) ? <p class="form-error" role="alert">{stringValue(entry.configuration_issue)}</p> : null}{isClient ? <div class="provider-client-note"><ShieldCheck size={16} /><span>Client setup only. No provider OAuth action is available.</span></div> : null}<footer>{configured && mode === "admin" ? <div class="provider-actions"><button class="button button--secondary" type="button" title="Configure another instance of this integration" onClick={() => connect(entry, "create")}><Plug size={15} /> Add instance</button>{supportsOAuth ? <button class="button button--primary" type="button" disabled={!ownerID || instanceCount > 1} title={instanceCount > 1 ? "Multiple instances are configured; add an OAuth account from an unambiguous single-instance tile" : undefined} onClick={() => connect(entry)}><Plug size={15} /> Add account</button> : null}{instanceCount > 1 ? <button class="button button--secondary" type="button" title="Grid actions are ambiguous across instances; manage each instance from its own row" onClick={() => onOpenDetail(id)}><Plug size={15} /> Manage {instanceCount} instances</button> : <><button class="button button--secondary" type="button" title="Confirm the endpoint answers the catalog API — does not run a completion" disabled={active("test") || (supportsOAuth && !ownerID)} onClick={() => void runLifecycle(entry, "test")}><Plug size={15} /> Check reachability</button><button class="button button--secondary" type="button" title="Refresh this provider's model catalog" disabled={active("refresh") || (supportsOAuth && !ownerID)} onClick={() => void runLifecycle(entry, "refresh")}><RefreshCw size={15} /> Sync catalog</button><button class="button button--danger" type="button" disabled={active("delete")} title="Remove the configured provider and its system connection" onClick={() => void runLifecycle(entry, "delete")}><Trash2 size={15} /> Remove</button></>}</div> : mode === "portal" && !isClient ? unavailable ? <span class="provider-card__meta">Integration not available</span> : portalRequiresAdminSetup ? <span class="provider-card__meta">Administrator setup required</span> : <button class="button button--primary" type="button" disabled={supportsOAuth && instanceCount > 1} title={supportsOAuth && instanceCount > 1 ? "Multiple instances are configured; add an OAuth account from an unambiguous single-instance tile" : undefined} onClick={() => connect(entry)}><Plug size={16} /> {hasPrivateConnection ? "Add or replace account" : "Connect"}</button> : !configured && !unavailable ? <button class="button button--primary" type="button" onClick={() => connect(entry)}><Plug size={16} /> {isClient ? "View setup" : "Connect"}</button> : <span class="provider-card__meta">{unavailable ? "Integration not available" : "Connection managed privately"}</span>}<span class="technical provider-card__freshness">{stringValue(entry.catalog_refreshed, "Catalog not synced")}</span></footer></article>;
         })}</div></section>;
       })}
-      {connectEntry ? <ConnectDialog entry={connectEntry.entry} mode={connectEntry.mode} onClose={() => setConnectEntry(null)} onConfigured={onChanged} /> : null}
+      {connectEntry ? <ConnectDialog entry={connectEntry.entry} mode={connectEntry.mode} takenIDs={allProviderIDs} onClose={() => setConnectEntry(null)} onConfigured={onChanged} /> : null}
       {privateKeyEntry ? <PrivateAPIKeyDialog entry={privateKeyEntry.entry} providerID={privateKeyEntry.providerID} onClose={() => setPrivateKeyEntry(null)} onConfigured={onChanged} /> : null}
       {oauthEntry ? <OAuthConnectDialog entry={oauthEntry.entry} providerID={oauthEntry.providerID} data={data} mode={mode} onClose={() => setOAuthEntry(null)} onComplete={onChanged} /> : null}
     </div>
