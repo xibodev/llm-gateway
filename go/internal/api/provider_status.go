@@ -206,7 +206,7 @@ func providerStatusSnapshots(
 			"connection_count": connectionCount, "model_count": modelCount,
 			"catalog_state": catalogState, "catalog_refreshed": catalogRefreshed,
 			"configuration_issue": strings.Join(configurationIssues, " "),
-			"instances": instances, "instance_status_counts": instanceStatusCounts,
+			"instances":           instances, "instance_status_counts": instanceStatusCounts,
 		}, lastCheck, lastVerify))
 	}
 	for _, snapshot := range configured {
@@ -217,14 +217,27 @@ func providerStatusSnapshots(
 		if snapshot.disabled {
 			disabledIDs = append(disabledIDs, snapshot.id)
 		}
+		// A custom provider is a tile of exactly one instance — itself. Emitting
+		// the instance keys here too means the console never has to infer an
+		// instance from a bare "configured" flag: every row that is configured
+		// carries the instance it is configured as, and the lifecycle table has
+		// a row to render for it.
+		instance := providerSnapshotRow(map[string]any{
+			"id": snapshot.id, "status": snapshot.status,
+			"model_count": snapshot.modelCount, "connection_count": snapshot.connectionCount,
+			"catalog_state": snapshot.catalogState, "catalog_refreshed": snapshot.catalogRefresh,
+			"disabled": snapshot.disabled, "configuration_issue": snapshot.configurationIssue,
+		}, snapshot.lastCheck, snapshot.lastVerify)
 		snapshots = append(snapshots, providerSnapshotRow(map[string]any{
 			"id": snapshot.id, "registry_id": snapshot.registryID, "label": snapshot.id, "description": "Custom configured provider.",
 			"protocol": "gateway", "availability": providers.ProviderAvailable,
 			"auth_methods": []string{}, "configured": true, "status": snapshot.status,
-			"disabled_provider_ids": disabledIDs,
-			"connection_count":      snapshot.connectionCount, "model_count": snapshot.modelCount,
+			"configured_provider_ids": []string{snapshot.id}, "disabled_provider_ids": disabledIDs,
+			"connection_count": snapshot.connectionCount, "model_count": snapshot.modelCount,
 			"catalog_state": snapshot.catalogState, "catalog_refreshed": snapshot.catalogRefresh,
-			"configuration_issue": snapshot.configurationIssue,
+			"configuration_issue":    snapshot.configurationIssue,
+			"instances":              []map[string]any{instance},
+			"instance_status_counts": map[string]int{snapshot.status: 1},
 		}, snapshot.lastCheck, snapshot.lastVerify))
 	}
 	sort.Slice(snapshots, func(i, j int) bool {
