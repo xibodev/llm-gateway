@@ -198,7 +198,11 @@ func TestInstanceConfigurationIssuesStaySeparate(t *testing.T) {
 		t.Fatal(err)
 	}
 	// vertex_ai without a project is a configuration error, so both instances
-	// report an issue and we can prove they are not joined.
+	// report an issue. Each instance's message must be its own single
+	// complaint, not the tile-level join of both instances' messages — a
+	// regression that handed every instance the tile's joined string would
+	// leave the "present" check green, so we also compare instance-to-instance
+	// and instance-to-tile.
 	config.Update(func(s *config.Settings) {
 		s.APIKey = "admin-secret"
 		s.AllowUnauthenticatedAPI = false
@@ -220,11 +224,25 @@ func TestInstanceConfigurationIssuesStaySeparate(t *testing.T) {
 		if row["id"] != "vertex_ai" {
 			continue
 		}
+		tileIssue := stringOf(row["configuration_issue"])
+		issueByInstance := map[string]string{}
 		for _, instRaw := range row["instances"].([]any) {
 			inst := instRaw.(map[string]any)
-			if _, present := inst["configuration_issue"]; !present {
+			issue := stringOf(inst["configuration_issue"])
+			if issue == "" {
 				t.Fatalf("instance %v missing configuration_issue", inst["id"])
 			}
+			issueByInstance[stringOf(inst["id"])] = issue
+		}
+		a, b := issueByInstance["vertex-a"], issueByInstance["vertex-b"]
+		if a != b {
+			t.Fatalf("vertex-a issue %q != vertex-b issue %q; both are configured identically", a, b)
+		}
+		// The tile joins both instances' messages with a space, so a correct
+		// per-instance value is strictly shorter than the tile's. Equal length
+		// (or equal value) means the instance row picked up the joined string.
+		if len(a) >= len(tileIssue) {
+			t.Fatalf("instance issue %q is not shorter than tile issue %q; instances appear to carry the joined value", a, tileIssue)
 		}
 		return
 	}
