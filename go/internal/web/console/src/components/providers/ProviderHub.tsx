@@ -167,7 +167,11 @@ export function ProviderHub({ data, mode, onChanged, onOpenDetail }: { data: JSO
   // Tile-independent: the upsert route is keyed on the provider id alone, so a
   // suggested id must avoid every configured provider, not only this tile's.
   const allProviderIDs = asList(data.providers).map(asRecord).map((provider) => stringValue(provider.id)).filter(Boolean);
-  const statusByID = new Map(statuses.map((status) => [stringValue(status.id), status]));
+  // Only a registry-tile row may dress a curated tile. A configured provider is
+  // free to be named after a registry id it does not implement, and keying the
+  // map on id alone let that provider's row overwrite the curated entry's status
+  // — the OpenAI tile then wore an unrelated provider's data.
+  const statusByID = new Map(statuses.filter((status) => !boolValue(status.custom)).map((status) => [stringValue(status.id), status]));
   const privateProviderIDs = new Set(asList(data.provider_connections).map(asRecord)
     .filter((connection) => stringValue(connection.status, "active") === "active")
     .map((connection) => stringValue(connection.provider_id))
@@ -183,9 +187,17 @@ export function ProviderHub({ data, mode, onChanged, onOpenDetail }: { data: JSO
     // A tile owns every configured instance that claims its registry id. Keying
     // "custom" on the provider id instead orphaned any instance not named after
     // its registry entry — which is every second instance an operator adds.
+    // The grid also renders one tile per id, because the detail route is keyed
+    // by id: a second <article> under the same key is a duplicate React key and
+    // an ambiguous route, and the registry tile is the one that owns the id.
+    const taken = new Set(registryIDs);
     const custom = statuses.filter((status) => {
-      const claimed = stringValue(status.registry_id, stringValue(status.id));
-      return !registryIDs.has(claimed);
+      if (!boolValue(status.custom)) return false;
+      const id = stringValue(status.id);
+      const claimed = stringValue(status.registry_id) || id;
+      if (registryIDs.has(claimed) || taken.has(id)) return false;
+      taken.add(id);
+      return true;
     });
     return [...curated, ...custom];
   }, [data.provider_registry, data.provider_statuses]);

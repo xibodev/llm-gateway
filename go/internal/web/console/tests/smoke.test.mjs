@@ -123,7 +123,7 @@ test("provider hub includes configured advanced providers outside the curated re
   const hub = readFileSync(resolve(root, "src/components/providers/ProviderHub.tsx"), "utf8");
   assert.match(hub, /const registryIDs = new Set/);
   assert.match(hub, /statuses\.filter\(\(status\) => \{/);
-  assert.match(hub, /!registryIDs\.has\(claimed\)/);
+  assert.match(hub, /if \(registryIDs\.has\(claimed\) \|\| taken\.has\(id\)\) return false/);
   assert.match(hub, /return \[\.\.\.curated, \.\.\.custom\]/);
 });
 
@@ -594,4 +594,16 @@ test("configuration issues are read per instance, not as one joined sentence", (
   assert.match(detail, /stringValue\(instance\.configuration_issue\)/);
   assert.match(detail, /const tileConfigurationIssue = instances\.length > 1 \? ""/);
   assert.match(hub, /const tileConfigurationIssue = instanceCount > 1 \? ""/);
+});
+
+test("one tile per id, and a custom row never dresses a curated tile", () => {
+  const hub = readFileSync(resolve(root, "src/components/providers/ProviderHub.tsx"), "utf8");
+  const detail = readFileSync(resolve(root, "src/pages/ProviderDetail.tsx"), "utf8");
+  // A configured provider may be named after a registry id it does not
+  // implement. Keyed on id alone that row overwrote the curated tile's status
+  // and added a second <article> under the same React key.
+  assert.match(hub, /statuses\.filter\(\(status\) => !boolValue\(status\.custom\)\)\.map/);
+  assert.match(hub, /if \(!boolValue\(status\.custom\)\) return false/);
+  assert.match(hub, /const taken = new Set\(registryIDs\)/);
+  assert.match(detail, /!\(registryEntry && boolValue\(candidate\.custom\)\)/);
 });

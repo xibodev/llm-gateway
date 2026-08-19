@@ -36,7 +36,10 @@ export function ProviderDetail({ entryID, data, mode, onChanged, onBack, onOpenP
   const registry = asList(data.provider_registry).map(asRecord);
   const statuses = asList(data.provider_statuses).map(asRecord);
   const registryEntry = registry.find((candidate) => stringValue(candidate.id) === entryID);
-  const statusEntry = statuses.find((candidate) => stringValue(candidate.id) === entryID);
+  // Same rule as the grid: where a registry entry owns this id, only its own
+  // status row may describe it. A configured provider named after a registry id
+  // it does not implement must not dress the curated tile.
+  const statusEntry = statuses.find((candidate) => stringValue(candidate.id) === entryID && !(registryEntry && boolValue(candidate.custom)));
   const entry = useMemo(() => ({ ...(registryEntry ?? {}), ...(statusEntry ?? {}) }), [registryEntry, statusEntry]);
 
   const owners = asList(data.principals).map(asRecord).filter((principal) => stringValue(principal.kind) === "human" && stringValue(principal.status, "active") === "active");
