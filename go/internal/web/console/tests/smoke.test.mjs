@@ -122,8 +122,17 @@ test("portal provider actions use the current principal private connections", ()
 test("provider hub includes configured advanced providers outside the curated registry", () => {
   const hub = readFileSync(resolve(root, "src/components/providers/ProviderHub.tsx"), "utf8");
   assert.match(hub, /const registryIDs = new Set/);
-  assert.match(hub, /statuses\.filter\(\(status\) => !registryIDs\.has/);
+  assert.match(hub, /statuses\.filter\(\(status\) => \{/);
+  assert.match(hub, /!registryIDs\.has\(claimed\)/);
   assert.match(hub, /return \[\.\.\.curated, \.\.\.custom\]/);
+});
+
+test("configured instances are not orphaned into custom tiles by their id", () => {
+  const hub = readFileSync(resolve(root, "src/components/providers/ProviderHub.tsx"), "utf8");
+  // Custom tiles are those with no registry entry of their own — not merely
+  // those whose provider id differs from the registry id.
+  assert.doesNotMatch(hub, /statuses\.filter\(\(status\) => !registryIDs\.has\(stringValue\(status\.id\)\)\)/);
+  assert.match(hub, /registry_id/);
 });
 
 test("overview next step is state-aware and navigates to the recommended workflow", () => {

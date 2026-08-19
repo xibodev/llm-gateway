@@ -218,7 +218,7 @@ func providerStatusSnapshots(
 			disabledIDs = append(disabledIDs, snapshot.id)
 		}
 		snapshots = append(snapshots, providerSnapshotRow(map[string]any{
-			"id": snapshot.id, "label": snapshot.id, "description": "Custom configured provider.",
+			"id": snapshot.id, "registry_id": snapshot.registryID, "label": snapshot.id, "description": "Custom configured provider.",
 			"protocol": "gateway", "availability": providers.ProviderAvailable,
 			"auth_methods": []string{}, "configured": true, "status": snapshot.status,
 			"disabled_provider_ids": disabledIDs,
