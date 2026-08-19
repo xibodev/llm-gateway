@@ -182,7 +182,7 @@ export function ProviderDetail({ entryID, data, mode, onChanged, onBack, onOpenP
         </tbody></table></div>}
       </section> : null}
       {!configured && !isClient && !unavailable ? <section class="surface"><EmptyState title="Not connected yet" detail={supportsOAuth ? "Add an account with the official OAuth flow to configure this integration." : "Connect this integration to sync its catalog and route requests through it."} action={mode === "admin" && !supportsOAuth ? <button class="button button--primary" type="button" onClick={() => setConnectOpen(true)}><Plug size={16} /> Connect</button> : undefined} /></section> : null}
-      {connectOpen ? <ConnectDialog entry={{ ...entry, provider_config: providerConfig }} onClose={() => setConnectOpen(false)} onConfigured={onChanged} /> : null}
+      {connectOpen ? <ConnectDialog entry={{ ...entry, provider_config: providerConfig }} mode={configured ? "edit" : "create"} onClose={() => setConnectOpen(false)} onConfigured={onChanged} /> : null}
       {privateKeyOpen ? <PrivateAPIKeyDialog entry={entry} onClose={() => setPrivateKeyOpen(false)} onConfigured={onChanged} /> : null}
       {oauthOpen ? <OAuthConnectDialog entry={entry} data={data} mode={mode} onClose={() => setOAuthOpen(false)} onComplete={onChanged} /> : null}
     </div>

@@ -487,3 +487,12 @@ test("provider tiles show instance composition rather than one rolled-up status"
   assert.match(hub, /instance_status_counts/);
   assert.match(hub, /instance\{.*=== 1 \? "" : "s"\}/);
 });
+
+test("connect dialog allows creating an additional instance of a configured type", () => {
+  const hub = readFileSync(resolve(root, "src/components/providers/ProviderHub.tsx"), "utf8");
+  // The ID field must lock only when editing an existing instance, never merely
+  // because the type already has one.
+  assert.doesNotMatch(hub, /disabled=\{configured\}/);
+  assert.match(hub, /mode === "edit"/);
+  assert.match(hub, /Add instance/);
+});
