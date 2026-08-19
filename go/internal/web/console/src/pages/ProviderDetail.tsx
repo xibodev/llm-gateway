@@ -57,6 +57,10 @@ export function ProviderDetail({ entryID, data, mode, onChanged, onBack, onOpenP
   // the Add account action rather than guessing which instance to bind.
   const oauthProviderID = providerIDs.length > 1 ? "" : (providerIDs[0] ?? stringValue(entry.id));
   const instances = asList(entry.instances).map(asRecord);
+  // The tile's configuration_issue is a space-join of every instance's message —
+  // the unreadable concatenation the per-instance field exists to replace. Keep
+  // it only where it is one instance's own words; rows carry the rest.
+  const tileConfigurationIssue = instances.length > 1 ? "" : stringValue(entry.configuration_issue);
   const providerConfig = configuredProviderConfig(entry, data);
   const disabledProviderIDs = new Set(asList(entry.disabled_provider_ids).map(String));
   const [toggleBusy, setToggleBusy] = useState("");
@@ -135,7 +139,7 @@ export function ProviderDetail({ entryID, data, mode, onChanged, onBack, onOpenP
             {docsURL ? <div><dt>Docs</dt><dd><a href={docsURL} target="_blank" rel="noreferrer noopener">Provider documentation <ExternalLink size={13} /></a></dd></div> : null}
           </dl>
           {stringValue(entry.risk_notice) ? <p class="form-help">{stringValue(entry.risk_notice)}</p> : null}
-          {stringValue(entry.configuration_issue) ? <p class="form-error" role="alert">{stringValue(entry.configuration_issue)}</p> : null}
+          {tileConfigurationIssue ? <p class="form-error" role="alert">{tileConfigurationIssue}</p> : null}
         </div>
         {mode === "admin" && !isClient && !unavailable ? <div class="detail-heading__actions">
           {supportsOAuth || configured ? <label class="owner-select">Catalog owner<select value={ownerID} onInput={(event) => setOwnerID((event.currentTarget as HTMLSelectElement).value)}><option value="">No private owner selected</option>{owners.map((owner) => <option value={stringValue(owner.id)} key={stringValue(owner.id)}>{stringValue(owner.display_name, stringValue(owner.id))}</option>)}</select></label> : null}
@@ -155,7 +159,7 @@ export function ProviderDetail({ entryID, data, mode, onChanged, onBack, onOpenP
             const providerID = stringValue(instance.id);
             return <tr key={providerID}>
             <td><strong class="technical">{providerID}</strong>{boolValue(instance.disabled) ? <small class="table-subtitle">Disabled — requests 404 until re-enabled</small> : null}</td>
-            <td><StatusBadge status={stringValue(instance.status, "configured")} /></td>
+            <td><StatusBadge status={stringValue(instance.status, "configured")} />{stringValue(instance.configuration_issue) ? <small class="table-subtitle">{stringValue(instance.configuration_issue)}</small> : null}</td>
             <td>{numberValue(instance.model_count)} model{numberValue(instance.model_count) === 1 ? "" : "s"} · {stringValue(instance.catalog_state, "unknown")}</td>
             <td class="technical">{stringValue(instance.catalog_refreshed, "Never synced")}</td>
             <td><div class="provider-actions">
