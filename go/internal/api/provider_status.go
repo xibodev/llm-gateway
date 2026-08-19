@@ -232,6 +232,12 @@ func providerStatusSnapshots(
 			"id": snapshot.id, "registry_id": snapshot.registryID, "label": snapshot.id, "description": "Custom configured provider.",
 			"protocol": "gateway", "availability": providers.ProviderAvailable,
 			"auth_methods": []string{}, "configured": true, "status": snapshot.status,
+			// Marks the row as a configured provider rather than a registry tile.
+			// A provider may be named after a registry id it does not implement
+			// (a provider called "openai" running anthropic), so id alone cannot
+			// tell the two rows apart and the console needs to know which row may
+			// dress a curated tile.
+			"custom":                  true,
 			"configured_provider_ids": []string{snapshot.id}, "disabled_provider_ids": disabledIDs,
 			"connection_count": snapshot.connectionCount, "model_count": snapshot.modelCount,
 			"catalog_state": snapshot.catalogState, "catalog_refreshed": snapshot.catalogRefresh,

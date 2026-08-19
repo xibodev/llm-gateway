@@ -335,3 +335,67 @@ func TestCustomProviderRowCarriesItsOwnInstance(t *testing.T) {
 		t.Fatalf("instance_status_counts=%#v, want {%q: 1}", counts, stringOf(row["status"]))
 	}
 }
+
+// A configured provider is free to be named after a registry id it does not
+// implement. Both rows then arrive under the same id, so the payload has to say
+// which of them is the curated tile — otherwise the console keys them together
+// and the tile wears the unrelated provider's data.
+func TestCustomRowIsDistinguishableFromACollidingTile(t *testing.T) {
+	t.Setenv("LLMGW_STATE_DIR", t.TempDir())
+	iam.ResetForTests()
+	router.ResetSavingsState()
+	router.ResetTelemetryState()
+	t.Cleanup(func() {
+		iam.ResetForTests()
+		router.ResetSavingsState()
+		router.ResetTelemetryState()
+	})
+	if _, err := iam.Initialize(); err != nil {
+		t.Fatal(err)
+	}
+	// Named "openai" but running the anthropic runtime, so it resolves to no
+	// registry entry and is emitted by the non-registry loop under that id.
+	config.Update(func(s *config.Settings) {
+		s.APIKey = "admin-secret"
+		s.AllowUnauthenticatedAPI = false
+		s.Categories = map[string]*config.CategoryConfig{}
+		s.Providers = map[string]*config.ProviderConfig{
+			"openai": {Type: "anthropic"},
+		}
+	})
+	providers.ResetProviders()
+	t.Cleanup(providers.ResetProviders)
+
+	server := httptest.NewServer(NewServer())
+	defer server.Close()
+
+	_, state := jsonRequest(t, server.URL+"/admin/api/state", http.MethodGet, "admin-secret", nil)
+
+	rows := []map[string]any{}
+	for _, raw := range state["provider_statuses"].([]any) {
+		row := raw.(map[string]any)
+		if row["id"] == "openai" {
+			rows = append(rows, row)
+		}
+	}
+	if len(rows) != 2 {
+		t.Fatalf("rows with id openai=%d, want 2 (the curated tile and the custom provider)", len(rows))
+	}
+	tiles, customs := 0, 0
+	for _, row := range rows {
+		if row["custom"] == true {
+			customs++
+			if row["configured"] != true {
+				t.Fatalf("custom row is not configured: %#v", row)
+			}
+			continue
+		}
+		tiles++
+		if row["configured"] != false {
+			t.Fatalf("curated tile claims the unrelated provider as its own: %#v", row["configured"])
+		}
+	}
+	if tiles != 1 || customs != 1 {
+		t.Fatalf("tiles=%d customs=%d, want exactly one of each", tiles, customs)
+	}
+}
