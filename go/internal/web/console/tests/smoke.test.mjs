@@ -551,3 +551,13 @@ test("a suggested instance id never names a provider configured elsewhere", () =
   assert.match(detail, /takenIDs=\{allProviderIDs\}/);
   assert.doesNotMatch(hub, /existingIDs/);
 });
+
+test("add instance appears only where a credential-based create can succeed", () => {
+  const hub = readFileSync(resolve(root, "src/components/providers/ProviderHub.tsx"), "utf8");
+  // Gate on capability, not on a hardcoded list of ids: an OAuth-only tile fell
+  // through to the account flow and a custom tile posts its provider id as a
+  // registry id, which the server answers with a 400.
+  assert.match(hub, /const CREDENTIAL_AUTH_METHODS = new Set/);
+  assert.match(hub, /const canAddInstance = registryIDs\.has\(id\) && methods\.some/);
+  assert.match(hub, /\{canAddInstance \? <button[^>]*title="Configure another instance/);
+});
