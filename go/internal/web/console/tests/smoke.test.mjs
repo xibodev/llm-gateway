@@ -561,3 +561,11 @@ test("add instance appears only where a credential-based create can succeed", ()
   assert.match(hub, /const canAddInstance = registryIDs\.has\(id\) && methods\.some/);
   assert.match(hub, /\{canAddInstance \? <button[^>]*title="Configure another instance/);
 });
+
+test("the create dialog never claims a key from another instance", () => {
+  const hub = readFileSync(resolve(root, "src/components/providers/ProviderHub.tsx"), "utf8");
+  // provider_config carries the first configured instance's record. A new
+  // instance has no stored key, so the "keep the current key" affordance and
+  // the guard it disables belong to edit mode only.
+  assert.match(hub, /const apiKeySet = mode === "edit" && boolValue\(providerConfig\.api_key_set\)/);
+});
