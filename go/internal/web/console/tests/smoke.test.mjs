@@ -481,3 +481,9 @@ test("provider detail rows render each instance's own catalog data", () => {
   assert.match(detail, /asList\(entry\.instances\)/);
   assert.doesNotMatch(detail, /<td>\{numberValue\(entry\.model_count\)\}/);
 });
+
+test("provider tiles show instance composition rather than one rolled-up status", () => {
+  const hub = readFileSync(resolve(root, "src/components/providers/ProviderHub.tsx"), "utf8");
+  assert.match(hub, /instance_status_counts/);
+  assert.match(hub, /instance\{.*=== 1 \? "" : "s"\}/);
+});
