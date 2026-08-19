@@ -152,7 +152,11 @@ func providerStatusSnapshots(
 		} else if entry.Availability != providers.ProviderAvailable {
 			status = "unavailable"
 		} else if len(matches) > 0 {
-			status = matches[0].status
+			// A tile aggregates instances; it is not one. Adopting matches[0]'s
+			// status let a healthy first instance mask a broken second, so the
+			// tile reports only that it is configured and the console renders
+			// the composition from instance_status_counts.
+			status = "configured"
 		}
 		modelCount := 0
 		connectionCount := 0
@@ -163,6 +167,8 @@ func providerStatusSnapshots(
 		var lastCheck *iam.ProviderCheck
 		var lastVerify *iam.ProviderCheck
 		configurationIssues := make([]string, 0)
+		instances := make([]map[string]any, 0, len(matches))
+		instanceStatusCounts := map[string]int{}
 		for _, match := range matches {
 			ids = append(ids, match.id)
 			if match.disabled {
@@ -183,6 +189,13 @@ func providerStatusSnapshots(
 			if match.configurationIssue != "" {
 				configurationIssues = append(configurationIssues, match.configurationIssue)
 			}
+			instanceStatusCounts[match.status]++
+			instances = append(instances, providerSnapshotRow(map[string]any{
+				"id": match.id, "status": match.status,
+				"model_count": match.modelCount, "connection_count": match.connectionCount,
+				"catalog_state": match.catalogState, "catalog_refreshed": match.catalogRefresh,
+				"disabled": match.disabled, "configuration_issue": match.configurationIssue,
+			}, match.lastCheck, match.lastVerify))
 		}
 		snapshots = append(snapshots, providerSnapshotRow(map[string]any{
 			"id": entry.ID, "label": entry.Label, "description": entry.Description,
@@ -193,6 +206,7 @@ func providerStatusSnapshots(
 			"connection_count": connectionCount, "model_count": modelCount,
 			"catalog_state": catalogState, "catalog_refreshed": catalogRefreshed,
 			"configuration_issue": strings.Join(configurationIssues, " "),
+			"instances":           instances, "instance_status_counts": instanceStatusCounts,
 		}, lastCheck, lastVerify))
 	}
 	for _, snapshot := range configured {
@@ -203,14 +217,33 @@ func providerStatusSnapshots(
 		if snapshot.disabled {
 			disabledIDs = append(disabledIDs, snapshot.id)
 		}
+		// A custom provider is a tile of exactly one instance — itself. Emitting
+		// the instance keys here too means the console never has to infer an
+		// instance from a bare "configured" flag: every row that is configured
+		// carries the instance it is configured as, and the lifecycle table has
+		// a row to render for it.
+		instance := providerSnapshotRow(map[string]any{
+			"id": snapshot.id, "status": snapshot.status,
+			"model_count": snapshot.modelCount, "connection_count": snapshot.connectionCount,
+			"catalog_state": snapshot.catalogState, "catalog_refreshed": snapshot.catalogRefresh,
+			"disabled": snapshot.disabled, "configuration_issue": snapshot.configurationIssue,
+		}, snapshot.lastCheck, snapshot.lastVerify)
 		snapshots = append(snapshots, providerSnapshotRow(map[string]any{
-			"id": snapshot.id, "label": snapshot.id, "description": "Custom configured provider.",
+			"id": snapshot.id, "registry_id": snapshot.registryID, "label": snapshot.id, "description": "Custom configured provider.",
 			"protocol": "gateway", "availability": providers.ProviderAvailable,
 			"auth_methods": []string{}, "configured": true, "status": snapshot.status,
-			"disabled_provider_ids": disabledIDs,
-			"connection_count":      snapshot.connectionCount, "model_count": snapshot.modelCount,
+			// Marks the row as a configured provider rather than a registry tile.
+			// A provider may be named after a registry id it does not implement
+			// (a provider called "openai" running anthropic), so id alone cannot
+			// tell the two rows apart and the console needs to know which row may
+			// dress a curated tile.
+			"custom":                  true,
+			"configured_provider_ids": []string{snapshot.id}, "disabled_provider_ids": disabledIDs,
+			"connection_count": snapshot.connectionCount, "model_count": snapshot.modelCount,
 			"catalog_state": snapshot.catalogState, "catalog_refreshed": snapshot.catalogRefresh,
-			"configuration_issue": snapshot.configurationIssue,
+			"configuration_issue":    snapshot.configurationIssue,
+			"instances":              []map[string]any{instance},
+			"instance_status_counts": map[string]int{snapshot.status: 1},
 		}, snapshot.lastCheck, snapshot.lastVerify))
 	}
 	sort.Slice(snapshots, func(i, j int) bool {

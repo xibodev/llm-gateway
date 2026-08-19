@@ -1,6 +1,6 @@
 import { useState } from "preact/hooks";
 import { sendJSON, type JSONRecord } from "../../lib/api";
-import { asList, asRecord, stringValue } from "../../lib/records";
+import { asList, asRecord, numberValue, stringValue } from "../../lib/records";
 
 export type ActionResult = { title: string; success: boolean; detail: string } | null;
 
@@ -26,11 +26,28 @@ export function statusLabel(status: string): string {
     disabled: "Disabled",
     needs_credentials: "Needs credentials",
     not_configured: "Not configured", client_setup: "Client setup", unavailable: "Unavailable",
+    instances_ready: "All instances ready", instances_attention: "An instance needs attention",
   }[status] ?? status.replaceAll("_", " ");
 }
 
+// A tile aggregates instances rather than being one. With a single instance
+// there is nothing to mask, so the tile states that instance's real status;
+// with several it states the composition's severity and the detail table names
+// which instance is which. The flat "configured" the tile used to report made a
+// tile whose instance had failed its check look exactly like a healthy one.
+export function tileStatus(entry: JSONRecord): string {
+  const counts = asRecord(entry.instance_status_counts);
+  const states = Object.keys(counts).filter((state) => numberValue(counts[state]) > 0);
+  const total = states.reduce((sum, state) => sum + numberValue(counts[state]), 0);
+  if (!total) return stringValue(entry.status, "not_configured");
+  if (total === 1) return states[0];
+  if (states.some((state) => state === "check_failed" || state === "misconfigured")) return "instances_attention";
+  if (states.every((state) => state === "verified" || state === "catalog_synced")) return "instances_ready";
+  return stringValue(entry.status, "not_configured");
+}
+
 export function StatusBadge({ status }: { status: string }) {
-  const ready = status === "verified" || status === "catalog_synced";
+  const ready = status === "verified" || status === "catalog_synced" || status === "instances_ready";
   const muted = status === "not_configured" || status === "unavailable" || status === "client_setup" || status === "configured" || status === "disabled";
   return <span class={`status-pill ${ready ? "status-pill--ready" : muted ? "status-pill--muted" : "status-pill--attention"}`}>{statusLabel(status)}</span>;
 }
@@ -40,13 +57,12 @@ export function ResultNotice({ result }: { result: ActionResult }) {
   return <section class={`action-notice ${result.success ? "action-notice--success" : "action-notice--warning"}`} role="status"><strong>{result.title}</strong><span>{result.detail}</span></section>;
 }
 
+// Every configured row — curated tile or custom provider — carries the ids of
+// the instances it is configured as. Inferring an instance from a bare
+// "configured" flag is what let a custom provider claim a tile's id while its
+// instance list stayed empty, so there is deliberately no fallback here.
 export function configuredProviderIDs(entry: JSONRecord): string[] {
-  const ids = asList(entry.configured_provider_ids).map(String).filter(Boolean);
-  if (!ids.length && boolValue(entry.configured)) {
-    const id = stringValue(entry.id);
-    if (id) ids.push(id);
-  }
-  return ids;
+  return asList(entry.configured_provider_ids).map(String).filter(Boolean);
 }
 
 export function configuredProviderConfig(entry: JSONRecord, data: JSONRecord): JSONRecord {
@@ -76,7 +92,9 @@ export function useProviderLifecycle(ownerID: string, onChanged: () => Promise<v
 
   const runLifecycle = async (entry: JSONRecord, operation: LifecycleOperation, providerIDOverride?: string, model?: string) => {
     const providerIDs = configuredProviderIDs(entry);
-    const providerID = providerIDOverride ?? providerIDs[0] ?? stringValue(entry.id);
+    // Never guess which instance the operator meant: acting on [0] silently
+    // tested, synced, or DELETED the wrong upstream on a multi-instance tile.
+    const providerID = providerIDOverride ?? (providerIDs.length === 1 ? providerIDs[0] : "");
     if (!providerID) return;
     const query = new URLSearchParams();
     if (ownerID) query.set("principal_id", ownerID);

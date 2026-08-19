@@ -122,8 +122,17 @@ test("portal provider actions use the current principal private connections", ()
 test("provider hub includes configured advanced providers outside the curated registry", () => {
   const hub = readFileSync(resolve(root, "src/components/providers/ProviderHub.tsx"), "utf8");
   assert.match(hub, /const registryIDs = new Set/);
-  assert.match(hub, /statuses\.filter\(\(status\) => !registryIDs\.has/);
+  assert.match(hub, /statuses\.filter\(\(status\) => \{/);
+  assert.match(hub, /if \(registryIDs\.has\(claimed\) \|\| taken\.has\(id\)\) return false/);
   assert.match(hub, /return \[\.\.\.curated, \.\.\.custom\]/);
+});
+
+test("configured instances are not orphaned into custom tiles by their id", () => {
+  const hub = readFileSync(resolve(root, "src/components/providers/ProviderHub.tsx"), "utf8");
+  // Custom tiles are those with no registry entry of their own — not merely
+  // those whose provider id differs from the registry id.
+  assert.doesNotMatch(hub, /statuses\.filter\(\(status\) => !registryIDs\.has\(stringValue\(status\.id\)\)\)/);
+  assert.match(hub, /registry_id/);
 });
 
 test("overview next step is state-aware and navigates to the recommended workflow", () => {
@@ -473,4 +482,128 @@ test("generation-only models never offer a chat composer", () => {
   const picker = readFileSync(resolve(root, "src/components/ModelPicker.tsx"), "utf8");
   assert.match(picker, /out.has\("image"\) \|\| out.has\("video"\)/);
   assert.match(picker, /out.delete\("chat"\)/);
+});
+
+test("provider detail rows render each instance's own catalog data", () => {
+  const detail = readFileSync(resolve(root, "src/pages/ProviderDetail.tsx"), "utf8");
+  // Rows must iterate instance records, not bare ids paired with aggregate fields.
+  assert.match(detail, /asList\(entry\.instances\)/);
+  assert.doesNotMatch(detail, /<td>\{numberValue\(entry\.model_count\)\}/);
+});
+
+test("provider tiles show instance composition rather than one rolled-up status", () => {
+  const hub = readFileSync(resolve(root, "src/components/providers/ProviderHub.tsx"), "utf8");
+  assert.match(hub, /instance_status_counts/);
+  assert.match(hub, /instance\{.*=== 1 \? "" : "s"\}/);
+});
+
+test("credential and lifecycle actions name an explicit instance", () => {
+  const shared = readFileSync(resolve(root, "src/components/providers/shared.tsx"), "utf8");
+  const hub = readFileSync(resolve(root, "src/components/providers/ProviderHub.tsx"), "utf8");
+  // The dialog must be TOLD its target. A caller that has already established
+  // the tile has exactly one instance may still index [0] at the call site —
+  // what must not survive is the dialog silently choosing for itself.
+  assert.match(hub, /function PrivateAPIKeyDialog\(\{ entry, providerID/);
+  assert.doesNotMatch(hub, /const providerID = configuredProviderIDs\(entry\)\[0\]/);
+  assert.doesNotMatch(shared, /providerIDs\[0\] \?\? stringValue\(entry\.id\)/);
+});
+
+test("official OAuth account binding also names an explicit instance", () => {
+  const oauth = readFileSync(resolve(root, "src/components/providers/OAuthConnectDialog.tsx"), "utf8");
+  const hub = readFileSync(resolve(root, "src/components/providers/ProviderHub.tsx"), "utf8");
+  const detail = readFileSync(resolve(root, "src/pages/ProviderDetail.tsx"), "utf8");
+  // Same rule as the private-key dialog: OAuthConnectDialog must be TOLD its
+  // target. It has no legitimate reason to resolve configuredProviderIDs
+  // itself — every caller passes a resolved providerID prop instead.
+  assert.match(oauth, /function OAuthConnectDialog\(\{\s*entry,\s*providerID,/);
+  assert.doesNotMatch(oauth, /configuredProviderIDs/);
+  assert.match(hub, /<OAuthConnectDialog entry=\{oauthEntry\.entry\} providerID=\{oauthEntry\.providerID\}/);
+  assert.match(detail, /<OAuthConnectDialog entry=\{entry\} providerID=\{oauthProviderID\}/);
+});
+
+test("connect dialog allows creating an additional instance of a configured type", () => {
+  const hub = readFileSync(resolve(root, "src/components/providers/ProviderHub.tsx"), "utf8");
+  // The ID field must lock only when editing an existing instance, never merely
+  // because the type already has one.
+  assert.doesNotMatch(hub, /disabled=\{configured\}/);
+  assert.match(hub, /mode === "edit"/);
+  assert.match(hub, /Add instance/);
+});
+
+test("instance identity is never inferred from a bare configured flag", () => {
+  const shared = readFileSync(resolve(root, "src/components/providers/shared.tsx"), "utf8");
+  // Every configured row — curated tile or custom provider — carries the ids of
+  // its instances. The fallback that invented the tile id as an instance made
+  // configuredProviderIDs and entry.instances disagree, so the lifecycle table
+  // rendered no rows at all for a custom provider.
+  assert.doesNotMatch(shared, /boolValue\(entry\.configured\)/);
+  assert.match(shared, /return asList\(entry\.configured_provider_ids\)/);
+});
+
+test("a suggested instance id never names a provider configured elsewhere", () => {
+  const hub = readFileSync(resolve(root, "src/components/providers/ProviderHub.tsx"), "utf8");
+  const detail = readFileSync(resolve(root, "src/pages/ProviderDetail.tsx"), "utf8");
+  // The create route is an upsert keyed on the id alone, so a default that is
+  // merely free under this tile can still overwrite another tile's provider.
+  assert.match(hub, /takenIDs = \[\]/);
+  assert.match(hub, /const taken = new Set\(\[\.\.\.configuredProviderIDs\(entry\), \.\.\.takenIDs\]/);
+  assert.match(hub, /takenIDs=\{allProviderIDs\}/);
+  assert.match(detail, /takenIDs=\{allProviderIDs\}/);
+  assert.doesNotMatch(hub, /existingIDs/);
+});
+
+test("add instance appears only where a credential-based create can succeed", () => {
+  const hub = readFileSync(resolve(root, "src/components/providers/ProviderHub.tsx"), "utf8");
+  // Gate on capability, not on a hardcoded list of ids: an OAuth-only tile fell
+  // through to the account flow and a custom tile posts its provider id as a
+  // registry id, which the server answers with a 400.
+  assert.match(hub, /const CREDENTIAL_AUTH_METHODS = new Set/);
+  assert.match(hub, /const canAddInstance = registryIDs\.has\(id\) && methods\.some/);
+  assert.match(hub, /\{canAddInstance \? <button[^>]*title="Configure another instance/);
+});
+
+test("the create dialog never claims a key from another instance", () => {
+  const hub = readFileSync(resolve(root, "src/components/providers/ProviderHub.tsx"), "utf8");
+  // provider_config carries the first configured instance's record. A new
+  // instance has no stored key, so the "keep the current key" affordance and
+  // the guard it disables belong to edit mode only.
+  assert.match(hub, /const apiKeySet = mode === "edit" && boolValue\(providerConfig\.api_key_set\)/);
+});
+
+test("per-instance status is rendered and the tile pill follows the composition", () => {
+  const shared = readFileSync(resolve(root, "src/components/providers/shared.tsx"), "utf8");
+  const hub = readFileSync(resolve(root, "src/components/providers/ProviderHub.tsx"), "utf8");
+  const detail = readFileSync(resolve(root, "src/pages/ProviderDetail.tsx"), "utf8");
+  // The server emits every instance's own status; nothing read it, so a tile
+  // whose instance had failed its check wore the same grey pill as a verified
+  // one and the operator had no way to find out which instance failed.
+  assert.match(detail, /<th>Status<\/th>/);
+  assert.match(detail, /<StatusBadge status=\{stringValue\(instance\.status/);
+  assert.match(shared, /export function tileStatus/);
+  assert.match(shared, /instances_attention/);
+  assert.match(hub, /const status = tileStatus\(entry\)/);
+  assert.doesNotMatch(hub, /const status = stringValue\(entry\.status/);
+});
+
+test("configuration issues are read per instance, not as one joined sentence", () => {
+  const hub = readFileSync(resolve(root, "src/components/providers/ProviderHub.tsx"), "utf8");
+  const detail = readFileSync(resolve(root, "src/pages/ProviderDetail.tsx"), "utf8");
+  // The server made configuration_issue per-instance; both surfaces still
+  // rendered only the tile's space-joined string, so two misconfigured
+  // instances produced exactly the concatenation the change set out to remove.
+  assert.match(detail, /stringValue\(instance\.configuration_issue\)/);
+  assert.match(detail, /const tileConfigurationIssue = instances\.length > 1 \? ""/);
+  assert.match(hub, /const tileConfigurationIssue = instanceCount > 1 \? ""/);
+});
+
+test("one tile per id, and a custom row never dresses a curated tile", () => {
+  const hub = readFileSync(resolve(root, "src/components/providers/ProviderHub.tsx"), "utf8");
+  const detail = readFileSync(resolve(root, "src/pages/ProviderDetail.tsx"), "utf8");
+  // A configured provider may be named after a registry id it does not
+  // implement. Keyed on id alone that row overwrote the curated tile's status
+  // and added a second <article> under the same React key.
+  assert.match(hub, /statuses\.filter\(\(status\) => !boolValue\(status\.custom\)\)\.map/);
+  assert.match(hub, /if \(!boolValue\(status\.custom\)\) return false/);
+  assert.match(hub, /const taken = new Set\(registryIDs\)/);
+  assert.match(detail, /!\(registryEntry && boolValue\(candidate\.custom\)\)/);
 });

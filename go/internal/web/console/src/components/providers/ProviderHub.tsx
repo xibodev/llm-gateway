@@ -24,13 +24,26 @@ import {
   configuredProviderConfig,
   configuredProviderIDs,
   groupFor,
+  tileStatus,
   useProviderLifecycle,
 } from "./shared";
 
-export function ConnectDialog({ entry, onClose, onConfigured }: { entry: JSONRecord; onClose: () => void; onConfigured: () => Promise<void> }) {
+export function ConnectDialog({ entry, onClose, onConfigured, mode = "create", takenIDs = [] }: { entry: JSONRecord; onClose: () => void; onConfigured: () => Promise<void>; mode?: "create" | "edit"; takenIDs?: string[] }) {
   const providerConfig = asRecord(entry.provider_config);
-  const configured = stringValue(providerConfig.id) !== "";
-  const [providerID, setProviderID] = useState(stringValue(providerConfig.id, stringValue(entry.default_provider_id, stringValue(entry.id))));
+  // POST /admin/api/providers is an upsert keyed on the id alone. An id that is
+  // merely free under THIS tile can still name a provider configured elsewhere,
+  // and accepting the pre-filled default would replace its type, endpoint and
+  // stored credential. So every configured id is taken, not just the tile's.
+  const taken = new Set([...configuredProviderIDs(entry), ...takenIDs].filter(Boolean));
+  const suggestedID = (() => {
+    const base = stringValue(entry.default_provider_id, stringValue(entry.id));
+    if (!taken.has(base)) return base;
+    for (let n = 2; ; n += 1) {
+      const candidate = `${base}-${n}`;
+      if (!taken.has(candidate)) return candidate;
+    }
+  })();
+  const [providerID, setProviderID] = useState(mode === "edit" ? stringValue(providerConfig.id) : suggestedID);
   const [apiKey, setAPIKey] = useState("");
   const [baseURL, setBaseURL] = useState(stringValue(providerConfig.base_url) || stringValue(entry.default_base_url));
   const [region, setRegion] = useState(stringValue(providerConfig.region) || stringValue(entry.default_region));
@@ -39,7 +52,11 @@ export function ConnectDialog({ entry, onClose, onConfigured }: { entry: JSONRec
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
   const requiresKey = boolValue(entry.requires_api_key);
-  const apiKeySet = boolValue(providerConfig.api_key_set);
+  // providerConfig is the FIRST configured instance's record, which says nothing
+  // about the instance being created. Trusting it when adding an instance
+  // promised "leave blank to keep the current key" for a provider that has no
+  // key, and skipped the guard, so the operator submitted blank and got a 400.
+  const apiKeySet = mode === "edit" && boolValue(providerConfig.api_key_set);
   const takesServiceAccount = new Set(asList(entry.auth_methods).map(String)).has(SERVICE_ACCOUNT_KIND);
   const fields = new Set(asList(entry.onboarding_fields).map(String));
   const label = stringValue(entry.label, "Provider");
@@ -75,11 +92,16 @@ export function ConnectDialog({ entry, onClose, onConfigured }: { entry: JSONRec
     }
   };
 
-  return <div class="dialog-backdrop" role="presentation"><section ref={dialogRef} class="dialog" role="dialog" aria-modal="true" aria-labelledby="connect-provider-title" tabIndex={-1}><header><div><p class="eyebrow">Guided onboarding</p><h2 id="connect-provider-title">{configured ? "Edit" : "Connect"} {label}</h2></div><button class="icon-button" type="button" aria-label="Close dialog" onClick={onClose}><X size={18} /></button></header><form class="form-stack" onSubmit={submit}><p class="muted-copy">Credential input is write-only. The console does not display or retrieve the value after setup.</p><label>Gateway provider ID<input value={providerID} disabled={configured} onInput={(event) => setProviderID((event.currentTarget as HTMLInputElement).value)} autoComplete="off" /></label>{requiresKey ? <><label>{takesServiceAccount ? "API key or service account JSON" : "API key"}{apiKeySet ? " (leave blank to keep the current key)" : ""}{takesServiceAccount ? <textarea value={apiKey} rows={6} spellcheck={false} onInput={(event) => setAPIKey((event.currentTarget as HTMLTextAreaElement).value)} autoComplete="off" /> : <input type="password" value={apiKey} onInput={(event) => setAPIKey((event.currentTarget as HTMLInputElement).value)} autoComplete="off" />}</label>{takesServiceAccount ? <p class="form-help">Paste an API key, or the whole service account JSON file. The key type is detected from what you paste.</p> : null}</> : <p class="form-help">This integration does not require an API key. Confirm the local or self-hosted endpoint is reachable before continuing.</p>}{fields.has("base_url") ? <label>Base URL<input value={baseURL} onInput={(event) => setBaseURL((event.currentTarget as HTMLInputElement).value)} autoComplete="url" /></label> : null}{fields.has("region") ? <label>Region<input value={region} onInput={(event) => setRegion((event.currentTarget as HTMLInputElement).value)} autoComplete="off" /></label> : null}{fields.has("project") ? <label>Google Cloud project ID<input value={project} onInput={(event) => setProject((event.currentTarget as HTMLInputElement).value)} autoComplete="off" /></label> : null}{fields.has("location") ? <label>Location<input value={location} onInput={(event) => setLocation((event.currentTarget as HTMLInputElement).value)} placeholder="global" autoComplete="off" /></label> : null}{error ? <p class="form-error" role="alert">{error}</p> : null}<footer><button class="button button--secondary" type="button" onClick={onClose}>Cancel</button><button class="button button--primary" type="submit" disabled={busy}>{busy ? <LoaderCircle class="spin" size={16} /> : <ShieldCheck size={16} />} {configured ? "Save configuration" : "Connect provider"}</button></footer></form></section></div>;
+  return <div class="dialog-backdrop" role="presentation"><section ref={dialogRef} class="dialog" role="dialog" aria-modal="true" aria-labelledby="connect-provider-title" tabIndex={-1}><header><div><p class="eyebrow">Guided onboarding</p><h2 id="connect-provider-title">{mode === "edit" ? "Edit" : "Connect"} {label}</h2></div><button class="icon-button" type="button" aria-label="Close dialog" onClick={onClose}><X size={18} /></button></header><form class="form-stack" onSubmit={submit}><p class="muted-copy">Credential input is write-only. The console does not display or retrieve the value after setup.</p><label>Gateway provider ID<input value={providerID} disabled={mode === "edit"} onInput={(event) => setProviderID((event.currentTarget as HTMLInputElement).value)} autoComplete="off" /></label>{requiresKey ? <><label>{takesServiceAccount ? "API key or service account JSON" : "API key"}{apiKeySet ? " (leave blank to keep the current key)" : ""}{takesServiceAccount ? <textarea value={apiKey} rows={6} spellcheck={false} onInput={(event) => setAPIKey((event.currentTarget as HTMLTextAreaElement).value)} autoComplete="off" /> : <input type="password" value={apiKey} onInput={(event) => setAPIKey((event.currentTarget as HTMLInputElement).value)} autoComplete="off" />}</label>{takesServiceAccount ? <p class="form-help">Paste an API key, or the whole service account JSON file. The key type is detected from what you paste.</p> : null}</> : <p class="form-help">This integration does not require an API key. Confirm the local or self-hosted endpoint is reachable before continuing.</p>}{fields.has("base_url") ? <label>Base URL<input value={baseURL} onInput={(event) => setBaseURL((event.currentTarget as HTMLInputElement).value)} autoComplete="url" /></label> : null}{fields.has("region") ? <label>Region<input value={region} onInput={(event) => setRegion((event.currentTarget as HTMLInputElement).value)} autoComplete="off" /></label> : null}{fields.has("project") ? <label>Google Cloud project ID<input value={project} onInput={(event) => setProject((event.currentTarget as HTMLInputElement).value)} autoComplete="off" /></label> : null}{fields.has("location") ? <label>Location<input value={location} onInput={(event) => setLocation((event.currentTarget as HTMLInputElement).value)} placeholder="global" autoComplete="off" /></label> : null}{error ? <p class="form-error" role="alert">{error}</p> : null}<footer><button class="button button--secondary" type="button" onClick={onClose}>Cancel</button><button class="button button--primary" type="submit" disabled={busy}>{busy ? <LoaderCircle class="spin" size={16} /> : <ShieldCheck size={16} />} {mode === "edit" ? "Save configuration" : "Connect provider"}</button></footer></form></section></div>;
 }
 
 // SERVICE_ACCOUNT_KIND matches gcpauth.CredentialKind on the server.
 const SERVICE_ACCOUNT_KIND = "gcp_service_account";
+
+// The auth methods ConnectDialog can actually collect. An oauth_device tile has
+// no credential to type in and a gateway_client tile is not an upstream at all,
+// so neither has a credential-based create path to offer.
+const CREDENTIAL_AUTH_METHODS = new Set(["api_key", "none", SERVICE_ACCOUNT_KIND]);
 
 // isServiceAccountJSON catches the common paste mistakes (an OAuth client file,
 // a fragment, a path) in the browser, so the key is never sent to be rejected.
@@ -92,8 +114,7 @@ function isServiceAccountJSON(raw: string): boolean {
   }
 }
 
-export function PrivateAPIKeyDialog({ entry, onClose, onConfigured }: { entry: JSONRecord; onClose: () => void; onConfigured: () => Promise<void> }) {
-  const providerID = configuredProviderIDs(entry)[0] ?? "";
+export function PrivateAPIKeyDialog({ entry, providerID, onClose, onConfigured }: { entry: JSONRecord; providerID: string; onClose: () => void; onConfigured: () => Promise<void> }) {
   const authMethods = new Set(asList(entry.auth_methods).map(String));
   const allowsServiceAccount = authMethods.has(SERVICE_ACCOUNT_KIND);
   const allowsAPIKey = authMethods.has("api_key");
@@ -132,9 +153,9 @@ export function PrivateAPIKeyDialog({ entry, onClose, onConfigured }: { entry: J
 export function ProviderHub({ data, mode, onChanged, onOpenDetail }: { data: JSONRecord; mode: ConsoleMode; onChanged: () => Promise<void>; onOpenDetail: (entryID: string) => void }) {
   const [search, setSearch] = useState("");
   const [filter, setFilter] = useState("all");
-  const [connectEntry, setConnectEntry] = useState<JSONRecord | null>(null);
-  const [privateKeyEntry, setPrivateKeyEntry] = useState<JSONRecord | null>(null);
-  const [oauthEntry, setOAuthEntry] = useState<JSONRecord | null>(null);
+  const [connectEntry, setConnectEntry] = useState<{ entry: JSONRecord; mode: "create" | "edit" } | null>(null);
+  const [privateKeyEntry, setPrivateKeyEntry] = useState<{ entry: JSONRecord; providerID: string } | null>(null);
+  const [oauthEntry, setOAuthEntry] = useState<{ entry: JSONRecord; providerID: string } | null>(null);
   const [detectBusy, setDetectBusy] = useState(false);
   const [detectResult, setDetectResult] = useState<ActionResult>(null);
   const [localCandidates, setLocalCandidates] = useState<JSONRecord[]>([]);
@@ -143,19 +164,41 @@ export function ProviderHub({ data, mode, onChanged, onOpenDetail }: { data: JSO
   const { busy, result, setResult, runLifecycle } = useProviderLifecycle(ownerID, onChanged);
   const registry = asList(data.provider_registry).map(asRecord);
   const statuses = asList(data.provider_statuses).map(asRecord);
-  const statusByID = new Map(statuses.map((status) => [stringValue(status.id), status]));
+  // Tile-independent: the upsert route is keyed on the provider id alone, so a
+  // suggested id must avoid every configured provider, not only this tile's.
+  const allProviderIDs = asList(data.providers).map(asRecord).map((provider) => stringValue(provider.id)).filter(Boolean);
+  // Only a registry-tile row may dress a curated tile. A configured provider is
+  // free to be named after a registry id it does not implement, and keying the
+  // map on id alone let that provider's row overwrite the curated entry's status
+  // — the OpenAI tile then wore an unrelated provider's data.
+  const statusByID = new Map(statuses.filter((status) => !boolValue(status.custom)).map((status) => [stringValue(status.id), status]));
   const privateProviderIDs = new Set(asList(data.provider_connections).map(asRecord)
     .filter((connection) => stringValue(connection.status, "active") === "active")
     .map((connection) => stringValue(connection.provider_id))
     .filter(Boolean));
 
+  const registryIDs = new Set(registry.map((entry) => stringValue(entry.id)));
+
   const entries = useMemo(() => {
-    const registryIDs = new Set(registry.map((entry) => stringValue(entry.id)));
     const curated = registry.map((entry) => ({
       ...entry,
       ...statusByID.get(stringValue(entry.id)),
     }));
-    const custom = statuses.filter((status) => !registryIDs.has(stringValue(status.id)));
+    // A tile owns every configured instance that claims its registry id. Keying
+    // "custom" on the provider id instead orphaned any instance not named after
+    // its registry entry — which is every second instance an operator adds.
+    // The grid also renders one tile per id, because the detail route is keyed
+    // by id: a second <article> under the same key is a duplicate React key and
+    // an ambiguous route, and the registry tile is the one that owns the id.
+    const taken = new Set(registryIDs);
+    const custom = statuses.filter((status) => {
+      if (!boolValue(status.custom)) return false;
+      const id = stringValue(status.id);
+      const claimed = stringValue(status.registry_id) || id;
+      if (registryIDs.has(claimed) || taken.has(id)) return false;
+      taken.add(id);
+      return true;
+    });
     return [...curated, ...custom];
   }, [data.provider_registry, data.provider_statuses]);
   const filtered = entries.filter((entry) => {
@@ -177,25 +220,40 @@ export function ProviderHub({ data, mode, onChanged, onOpenDetail }: { data: JSO
     } finally { setDetectBusy(false); }
   };
 
-  const connect = (entry: JSONRecord) => {
+  const connect = (entry: JSONRecord, connectMode: "create" | "edit" = "create") => {
     if (boolValue(entry.client_only)) {
       setResult({ title: "Gateway client setup", success: true, detail: "Claude Code uses the documented Anthropic gateway protocol. Configure an Anthropic API key or supported gateway credential; no personal Claude OAuth is offered." });
       return;
     }
     const methods = asList(entry.auth_methods).map(String);
     if (methods.some((method) => method.startsWith("oauth"))) {
-      setOAuthEntry(entry);
+      const oauthProviderIDs = configuredProviderIDs(entry);
+      // A multi-instance tile has no per-instance OAuth binder yet; refuse
+      // rather than silently bind the new account to instance [0].
+      if (oauthProviderIDs.length > 1) {
+        setResult({ title: "Official OAuth", success: false, detail: "Multiple instances are configured for this integration. Resolve to a single instance before adding an OAuth account." });
+        return;
+      }
+      setOAuthEntry({ entry, providerID: oauthProviderIDs[0] ?? stringValue(entry.id) });
       return;
     }
     if (mode === "portal") {
-      if (!configuredProviderIDs(entry).length) {
+      const providerIDs = configuredProviderIDs(entry);
+      if (!providerIDs.length) {
         setResult({ title: "Private connection", success: false, detail: "Administrator setup is required before a private API key can be added." });
         return;
       }
-      setPrivateKeyEntry(entry);
+      // A tile with several instances has no per-instance picker here yet; send
+      // the operator to the detail page rather than guessing which instance the
+      // key belongs to.
+      if (providerIDs.length > 1) {
+        onOpenDetail(stringValue(entry.id));
+        return;
+      }
+      setPrivateKeyEntry({ entry, providerID: providerIDs[0] });
       return;
     }
-    setConnectEntry({ ...entry, provider_config: configuredProviderConfig(entry, data) });
+    setConnectEntry({ entry: { ...entry, provider_config: configuredProviderConfig(entry, data) }, mode: connectMode });
   };
 
   const openDetail = (event: Event, entryID: string) => {
@@ -217,7 +275,7 @@ export function ProviderHub({ data, mode, onChanged, onOpenDetail }: { data: JSO
         return <section class="provider-group" key={group}><header><p class="eyebrow">{group}</p><span>{groupEntries.length} integration{groupEntries.length === 1 ? "" : "s"}</span></header><div class="provider-card-grid">{groupEntries.map((entry) => {
           const id = stringValue(entry.id);
           const label = stringValue(entry.label, id);
-          const status = stringValue(entry.status, "not_configured");
+          const status = tileStatus(entry);
           const configured = boolValue(entry.configured);
           const isClient = boolValue(entry.client_only);
           const unavailable = stringValue(entry.availability) !== "available" && !isClient;
@@ -227,12 +285,30 @@ export function ProviderHub({ data, mode, onChanged, onOpenDetail }: { data: JSO
           const hasPrivateConnection = mode === "portal" && providerIDs.some((providerID) => privateProviderIDs.has(providerID));
           const portalRequiresAdminSetup = mode === "portal" && !isClient && !supportsOAuth && providerIDs.length === 0;
           const active = (operation: string) => busy === `${providerIDs[0] ?? id}-${operation}`;
-          return <article class="provider-card provider-card--rich provider-card--clickable" key={id} role="link" tabIndex={0} aria-label={`Open ${label} details`} onClick={(event) => openDetail(event, id)} onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); onOpenDetail(id); } }}><header><ProviderMark id={id} label={label} /><div><h2>{label}</h2><p>{stringValue(entry.description, "Gateway integration.")}</p></div><StatusBadge status={status} /></header><dl><div><dt>Catalog</dt><dd>{numberValue(entry.model_count)} model{numberValue(entry.model_count) === 1 ? "" : "s"} · {stringValue(entry.catalog_state, "unknown")}</dd></div><div><dt>Connection</dt><dd>{numberValue(entry.connection_count)} private record{numberValue(entry.connection_count) === 1 ? "" : "s"}</dd></div><div><dt>Protocol</dt><dd>{stringValue(entry.protocol, "gateway")}</dd></div><div><dt>Auth</dt><dd>{methods.join(" · ") || "Gateway credential"}</dd></div></dl>{stringValue(entry.configuration_issue) ? <p class="form-error" role="alert">{stringValue(entry.configuration_issue)}</p> : null}{isClient ? <div class="provider-client-note"><ShieldCheck size={16} /><span>Client setup only. No provider OAuth action is available.</span></div> : null}<footer>{configured && mode === "admin" ? <div class="provider-actions">{supportsOAuth ? <button class="button button--primary" type="button" disabled={!ownerID} onClick={() => connect(entry)}><Plug size={15} /> Add account</button> : null}<button class="button button--secondary" type="button" title="Confirm the endpoint answers the catalog API — does not run a completion" disabled={active("test") || (supportsOAuth && !ownerID)} onClick={() => void runLifecycle(entry, "test")}><Plug size={15} /> Check reachability</button><button class="button button--secondary" type="button" title="Refresh this provider's model catalog" disabled={active("refresh") || (supportsOAuth && !ownerID)} onClick={() => void runLifecycle(entry, "refresh")}><RefreshCw size={15} /> Sync catalog</button><button class="button button--danger" type="button" disabled={active("delete")} title="Remove the configured provider and its system connection" onClick={() => void runLifecycle(entry, "delete")}><Trash2 size={15} /> Remove</button></div> : mode === "portal" && !isClient ? unavailable ? <span class="provider-card__meta">Integration not available</span> : portalRequiresAdminSetup ? <span class="provider-card__meta">Administrator setup required</span> : <button class="button button--primary" type="button" onClick={() => connect(entry)}><Plug size={16} /> {hasPrivateConnection ? "Add or replace account" : "Connect"}</button> : !configured && !unavailable ? <button class="button button--primary" type="button" onClick={() => connect(entry)}><Plug size={16} /> {isClient ? "View setup" : "Connect"}</button> : <span class="provider-card__meta">{unavailable ? "Integration not available" : "Connection managed privately"}</span>}<span class="technical provider-card__freshness">{stringValue(entry.catalog_refreshed, "Catalog not synced")}</span></footer></article>;
+          const statusCounts = asRecord(entry.instance_status_counts);
+          const instanceCount = asList(entry.instances).length;
+          // Offer "Add instance" only where a credential-based create can
+          // succeed. ConnectDialog posts the tile id as registry_id, so a custom
+          // tile is a guaranteed 400; and on an OAuth-only tile the action fell
+          // through to the account flow, a mislabeled duplicate of "Add account"
+          // that adds no instance.
+          const canAddInstance = registryIDs.has(id) && methods.some((method) => CREDENTIAL_AUTH_METHODS.has(method));
+          // Composition, not a rollup: a tile is an aggregator, so it reports what
+          // its instances are rather than adopting one instance's status.
+          const compositionText = Object.entries(statusCounts)
+            .map(([state, count]) => `${numberValue(count)} ${state}`)
+            .join(" · ");
+          // The tile's configuration_issue is a space-join of every instance's
+          // message — the unreadable concatenation the per-instance field exists
+          // to replace. Keep it only where it is one instance's own words; the
+          // detail rows name the instance each message belongs to.
+          const tileConfigurationIssue = instanceCount > 1 ? "" : stringValue(entry.configuration_issue);
+          return <article class="provider-card provider-card--rich provider-card--clickable" key={id} role="link" tabIndex={0} aria-label={`Open ${label} details`} onClick={(event) => openDetail(event, id)} onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); onOpenDetail(id); } }}><header><ProviderMark id={id} label={label} /><div><h2>{label}</h2><p>{stringValue(entry.description, "Gateway integration.")}</p></div><StatusBadge status={status} /></header><dl><div><dt>Catalog</dt><dd>{numberValue(entry.model_count)} model{numberValue(entry.model_count) === 1 ? "" : "s"} · {stringValue(entry.catalog_state, "unknown")}</dd></div><div><dt>Connection</dt><dd>{numberValue(entry.connection_count)} private record{numberValue(entry.connection_count) === 1 ? "" : "s"}</dd></div><div><dt>Instances</dt><dd>{instanceCount} instance{instanceCount === 1 ? "" : "s"}{compositionText ? ` · ${compositionText}` : ""}</dd></div><div><dt>Protocol</dt><dd>{stringValue(entry.protocol, "gateway")}</dd></div><div><dt>Auth</dt><dd>{methods.join(" · ") || "Gateway credential"}</dd></div></dl>{tileConfigurationIssue ? <p class="form-error" role="alert">{tileConfigurationIssue}</p> : null}{isClient ? <div class="provider-client-note"><ShieldCheck size={16} /><span>Client setup only. No provider OAuth action is available.</span></div> : null}<footer>{configured && mode === "admin" ? <div class="provider-actions">{canAddInstance ? <button class="button button--secondary" type="button" title="Configure another instance of this integration" onClick={() => connect(entry, "create")}><Plug size={15} /> Add instance</button> : null}{supportsOAuth ? <button class="button button--primary" type="button" disabled={!ownerID || instanceCount > 1} title={instanceCount > 1 ? "Multiple instances are configured; add an OAuth account from an unambiguous single-instance tile" : undefined} onClick={() => connect(entry)}><Plug size={15} /> Add account</button> : null}{instanceCount > 1 ? <button class="button button--secondary" type="button" title="Grid actions are ambiguous across instances; manage each instance from its own row" onClick={() => onOpenDetail(id)}><Plug size={15} /> Manage {instanceCount} instances</button> : <><button class="button button--secondary" type="button" title="Confirm the endpoint answers the catalog API — does not run a completion" disabled={active("test") || (supportsOAuth && !ownerID)} onClick={() => void runLifecycle(entry, "test")}><Plug size={15} /> Check reachability</button><button class="button button--secondary" type="button" title="Refresh this provider's model catalog" disabled={active("refresh") || (supportsOAuth && !ownerID)} onClick={() => void runLifecycle(entry, "refresh")}><RefreshCw size={15} /> Sync catalog</button><button class="button button--danger" type="button" disabled={active("delete")} title="Remove the configured provider and its system connection" onClick={() => void runLifecycle(entry, "delete")}><Trash2 size={15} /> Remove</button></>}</div> : mode === "portal" && !isClient ? unavailable ? <span class="provider-card__meta">Integration not available</span> : portalRequiresAdminSetup ? <span class="provider-card__meta">Administrator setup required</span> : <button class="button button--primary" type="button" disabled={supportsOAuth && instanceCount > 1} title={supportsOAuth && instanceCount > 1 ? "Multiple instances are configured; add an OAuth account from an unambiguous single-instance tile" : undefined} onClick={() => connect(entry)}><Plug size={16} /> {hasPrivateConnection ? "Add or replace account" : "Connect"}</button> : !configured && !unavailable ? <button class="button button--primary" type="button" onClick={() => connect(entry)}><Plug size={16} /> {isClient ? "View setup" : "Connect"}</button> : <span class="provider-card__meta">{unavailable ? "Integration not available" : "Connection managed privately"}</span>}<span class="technical provider-card__freshness">{stringValue(entry.catalog_refreshed, "Catalog not synced")}</span></footer></article>;
         })}</div></section>;
       })}
-      {connectEntry ? <ConnectDialog entry={connectEntry} onClose={() => setConnectEntry(null)} onConfigured={onChanged} /> : null}
-      {privateKeyEntry ? <PrivateAPIKeyDialog entry={privateKeyEntry} onClose={() => setPrivateKeyEntry(null)} onConfigured={onChanged} /> : null}
-      {oauthEntry ? <OAuthConnectDialog entry={oauthEntry} data={data} mode={mode} onClose={() => setOAuthEntry(null)} onComplete={onChanged} /> : null}
+      {connectEntry ? <ConnectDialog entry={connectEntry.entry} mode={connectEntry.mode} takenIDs={allProviderIDs} onClose={() => setConnectEntry(null)} onConfigured={onChanged} /> : null}
+      {privateKeyEntry ? <PrivateAPIKeyDialog entry={privateKeyEntry.entry} providerID={privateKeyEntry.providerID} onClose={() => setPrivateKeyEntry(null)} onConfigured={onChanged} /> : null}
+      {oauthEntry ? <OAuthConnectDialog entry={oauthEntry.entry} providerID={oauthEntry.providerID} data={data} mode={mode} onClose={() => setOAuthEntry(null)} onComplete={onChanged} /> : null}
     </div>
   );
 }
