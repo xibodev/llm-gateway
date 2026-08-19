@@ -162,7 +162,13 @@ export function ProviderHub({ data, mode, onChanged, onOpenDetail }: { data: JSO
       ...entry,
       ...statusByID.get(stringValue(entry.id)),
     }));
-    const custom = statuses.filter((status) => !registryIDs.has(stringValue(status.id)));
+    // A tile owns every configured instance that claims its registry id. Keying
+    // "custom" on the provider id instead orphaned any instance not named after
+    // its registry entry — which is every second instance an operator adds.
+    const custom = statuses.filter((status) => {
+      const claimed = stringValue(status.registry_id, stringValue(status.id));
+      return !registryIDs.has(claimed);
+    });
     return [...curated, ...custom];
   }, [data.provider_registry, data.provider_statuses]);
   const filtered = entries.filter((entry) => {
