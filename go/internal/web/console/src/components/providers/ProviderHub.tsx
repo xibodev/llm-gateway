@@ -51,7 +51,11 @@ export function ConnectDialog({ entry, onClose, onConfigured, mode = "create", t
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
   const requiresKey = boolValue(entry.requires_api_key);
-  const apiKeySet = boolValue(providerConfig.api_key_set);
+  // providerConfig is the FIRST configured instance's record, which says nothing
+  // about the instance being created. Trusting it when adding an instance
+  // promised "leave blank to keep the current key" for a provider that has no
+  // key, and skipped the guard, so the operator submitted blank and got a 400.
+  const apiKeySet = mode === "edit" && boolValue(providerConfig.api_key_set);
   const takesServiceAccount = new Set(asList(entry.auth_methods).map(String)).has(SERVICE_ACCOUNT_KIND);
   const fields = new Set(asList(entry.onboarding_fields).map(String));
   const label = stringValue(entry.label, "Provider");
