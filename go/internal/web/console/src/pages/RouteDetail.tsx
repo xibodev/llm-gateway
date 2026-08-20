@@ -2,7 +2,7 @@ import { useState } from "preact/hooks";
 import { ArrowDown, ArrowLeft, LoaderCircle, Play, Trash2 } from "lucide-preact";
 import { sendJSON, type JSONRecord } from "../lib/api";
 import type { ConsoleMode } from "../lib/mode";
-import { asList, asRecord, numberValue, stringValue } from "../lib/records";
+import { asList, asRecord, endpointsOf, numberValue, stringValue } from "../lib/records";
 import { EmptyState, ErrorState, PageHeading } from "../components/PageState";
 
 type RouteMember = { provider: string; model: string };
@@ -14,8 +14,8 @@ export function RouteDetail({ routeName, data, mode, onChanged, onBack }: {
   onChanged: () => Promise<void>;
   onBack: () => void;
 }) {
-  const categories = asRecord(data.categories);
-  const routeValue = categories[routeName];
+  const endpoints = endpointsOf(data);
+  const routeValue = endpoints[routeName];
   const members: RouteMember[] = asList(asRecord(routeValue).failover).map(asRecord)
     .map((member) => ({ provider: stringValue(member.provider), model: stringValue(member.model) }));
 
@@ -63,7 +63,7 @@ export function RouteDetail({ routeName, data, mode, onChanged, onBack }: {
     if (!window.confirm(`Delete route ${routeName}?`)) return;
     setDeleteBusy(true);
     try {
-      await sendJSON<JSONRecord>("admin", `/categories/${encodeURIComponent(routeName)}`, "DELETE");
+      await sendJSON<JSONRecord>("admin", `/endpoints/${encodeURIComponent(routeName)}`, "DELETE");
       await onChanged();
       onBack();
     } catch (cause) {
@@ -79,7 +79,7 @@ export function RouteDetail({ routeName, data, mode, onChanged, onBack }: {
   return (
     <div class="page-stack">
       <nav class="detail-breadcrumb"><button class="button button--secondary" type="button" onClick={onBack}><ArrowLeft size={16} /> Routes</button></nav>
-      <PageHeading eyebrow="Category route" title={routeName} detail="The ordered failover chain below is exactly what the gateway walks for this route name: the first healthy member serves the request." actions={<button class="button button--danger" type="button" disabled={deleteBusy} onClick={() => void removeRoute()}><Trash2 size={16} /> Delete route</button>} />
+      <PageHeading eyebrow="Endpoint route" title={routeName} detail="The ordered failover chain below is exactly what the gateway walks for this route name: the first healthy member serves the request." actions={<button class="button button--danger" type="button" disabled={deleteBusy} onClick={() => void removeRoute()}><Trash2 size={16} /> Delete route</button>} />
       <section class="surface">
         <div class="section-heading"><div><p class="eyebrow">Failover chain</p><h2>Members in order</h2></div><span>{members.length} member{members.length === 1 ? "" : "s"}</span></div>
         <ol class="route-chain">{members.map((member, index) => <li key={`${index}-${member.provider}-${member.model}`}><span class="route-order">{index + 1}</span><span class="technical">{member.provider}/{member.model}</span>{index < members.length - 1 ? <ArrowDown size={16} aria-label="then" /> : <span class="route-terminal">served</span>}</li>)}</ol>

@@ -63,6 +63,143 @@ func providerStatus(credentialPresent bool, modelCount int, checks []iam.Provide
 	return "configured", lastCheck, lastVerify
 }
 
+// catalogNotDiscoverable recognizes a persisted check that failed with
+// providers.CatalogFailure's "catalog_not_discoverable" code — a catalog that
+// no credential can list, not merely one nobody has synced yet. ProviderCheck
+// carries no structured failure code, only the human-readable Detail that
+// providerCheckDetail's default case builds as "Provider check failed
+// (<code>)."; that literal text is the only channel this failure reaches a
+// field the catalog cell reads, and both sides of the match are produced by
+// this package, so the comparison stays exact even though it reads a prose
+// field.
+//
+// The check handed here must be the latest CATALOG-FACING one, not the latest
+// check overall — see latestCatalogCheck.
+func catalogNotDiscoverable(check *iam.ProviderCheck) bool {
+	if check == nil || check.Success || !catalogFacingOperation(check.Operation) {
+		return false
+	}
+	return strings.Contains(check.Detail, "catalog_not_discoverable")
+}
+
+// catalogFacingOperation reports whether an operation actually fetches the
+// catalog, and so can establish (or clear) that the catalog is undiscoverable.
+//
+// All three qualify. CheckReachability ("test") and CheckCatalogSync
+// ("refresh") call providers.RefreshCatalogForPrincipalWithError directly;
+// CheckCacheReset ("repair") forgets cached state first but then falls into
+// that exact same unconditional call (runProviderProbe:341) — it is
+// catalog-facing too, just with extra cache invalidation in front. Only
+// CheckVerify never touches the catalog fetch and stays excluded: it runs one
+// inference request and can succeed against a provider whose catalog still
+// cannot be listed by any credential.
+func catalogFacingOperation(operation string) bool {
+	switch operation {
+	case iam.CheckReachability, iam.CheckCatalogSync, iam.CheckCacheReset:
+		return true
+	}
+	return false
+}
+
+// latestCatalogCheck picks the most recent catalog-facing check, which is not
+// the same thing as the most recent check. providerStatus's lastCheck is the
+// latest check of ANY operation, so reading the not-discoverable state off it
+// meant a later successful verify — an operation that never probes the catalog
+// — silently cleared a state only a catalog fetch can establish or refute.
+// Selecting from the full history keeps the two independent: the ladder still
+// reports what happened last, while the catalog cell reports what the last
+// attempt to LIST it found.
+func latestCatalogCheck(checks []iam.ProviderCheck) *iam.ProviderCheck {
+	var latest *iam.ProviderCheck
+	for index := range checks {
+		check := &checks[index]
+		if !catalogFacingOperation(check.Operation) {
+			continue
+		}
+		if latest == nil || check.CheckedAt >= latest.CheckedAt {
+			latest = check
+		}
+	}
+	return latest
+}
+
+// catalogUndiscoverableEverywhere reports whether a provider's catalog is
+// unlistable for EVERY scope that has tried to list it.
+//
+// checks routinely span scopes: LastProviderChecks("") — the administrator
+// view — returns every principal's checks for the provider, and CatalogSnapshot
+// likewise reports the freshest catalog across scopes. Reading the state off the
+// single latest catalog-facing check therefore let one principal's API-key-only
+// failure label the whole instance, and its tile, undiscoverable while another
+// principal's service-account credential was listing models perfectly well. A
+// catalog is only genuinely unlistable when no credential can list it, so each
+// scope is judged on its own latest catalog-facing check and one scope that
+// still discovers models refutes the state for all of them.
+//
+// The refresh comparisons keep a later successful lazy refresh — which records
+// no check of its own — authoritative over an older failed check: a scope's own
+// cached catalog answers its own failure, and the cross-scope snapshot answers
+// for a scope that has cached models without ever recording a check.
+//
+// viewScope is the scope the caller is rendering for, and it decides how wide
+// that last comparison may reach. Empty is the administrator's aggregate view,
+// where checks genuinely span principals and the cross-scope CatalogSnapshot is
+// the right answer. A human principal id is the portal, where checks and cached
+// models are already narrowed to that one person — and consulting the operator-
+// wide snapshot there let ANOTHER principal's newer catalog clear this user's
+// not_discoverable state while this user's own API-key-only credential still
+// could not list a thing. Outside the aggregate view only the viewed scope's
+// own refresh may speak.
+//
+// Only catalog-facing checks count: a verify runs one inference request and
+// says nothing at all about whether the catalog can still be listed.
+func catalogUndiscoverableEverywhere(
+	providerID string, checks []iam.ProviderCheck, viewScope string,
+) bool {
+	byScope := map[string][]iam.ProviderCheck{}
+	for _, check := range checks {
+		if !catalogFacingOperation(check.Operation) {
+			continue
+		}
+		byScope[check.ScopeKey] = append(byScope[check.ScopeKey], check)
+	}
+	if len(byScope) == 0 {
+		return false
+	}
+	var newestFailure time.Time
+	for scopeKey, scoped := range byScope {
+		latest := latestCatalogCheck(scoped)
+		if !catalogNotDiscoverable(latest) {
+			return false
+		}
+		checkedAt := time.Unix(latest.CheckedAt, 0)
+		if catalogRefreshForScope(providerID, scopeKey).After(checkedAt) {
+			return false
+		}
+		if checkedAt.After(newestFailure) {
+			newestFailure = checkedAt
+		}
+	}
+	if viewScope != "" {
+		return !catalogRefreshForScope(providerID, viewScope).After(newestFailure)
+	}
+	_, snapshotRefreshed := providers.CatalogSnapshot(providerID)
+	return !snapshotRefreshed.After(newestFailure)
+}
+
+// catalogRefreshForScope reads one scope's own cached catalog refresh time. A
+// check's scope key is the human principal id runProviderProbe ran as, or empty
+// for the gateway's own credential — the same two shapes providerStatusSnapshots
+// resolves a catalog with.
+func catalogRefreshForScope(providerID, scopeKey string) time.Time {
+	if scopeKey == "" {
+		return providers.CatalogRefreshedAt(providerID)
+	}
+	return providers.CatalogRefreshedAtForPrincipal(
+		providerID, &config.Principal{PrincipalID: scopeKey, PrincipalKind: "human"},
+	)
+}
+
 // providerStatusSnapshots joins the curated registry with safe runtime facts.
 // It intentionally exposes no credential payloads or token-derived identifiers.
 func providerStatusSnapshots(
@@ -120,11 +257,21 @@ func providerStatusSnapshots(
 		refreshedAt := ""
 		if !refreshed.IsZero() {
 			refreshedAt = refreshed.UTC().Format(time.RFC3339)
-			if time.Since(refreshed) > time.Hour {
-				catalogState = "stale"
-			} else {
-				catalogState = "fresh"
-			}
+		}
+		switch {
+		// "Nobody could ask" outranks "somebody asked a while ago". The upstream
+		// cannot be listed at all (Vertex with only an API key; Azure when its
+		// deployments route fails), and nothing cached can have come from a
+		// discovery that is impossible — so cached rows must not downgrade the
+		// verdict to a routine "stale", which reads as "a refresh will fix it".
+		case catalogUndiscoverableEverywhere(providerID, allChecks[providerID], checkScope):
+			catalogState = "not_discoverable"
+		case refreshed.IsZero():
+			// Nobody has synced yet, and no check says they could not.
+		case time.Since(refreshed) > time.Hour:
+			catalogState = "stale"
+		default:
+			catalogState = "fresh"
 		}
 		registryID := providers.EffectiveRegistryID(
 			providerID, providerConfig.RegistryID, providerConfig.Type,
@@ -328,7 +475,7 @@ func runProviderProbe(providerID, operation string, principal *config.Principal)
 	if cfg := config.Get().Providers[providerID]; cfg != nil &&
 		providers.EffectiveRegistryID(providerID, cfg.RegistryID, cfg.Type) == "vertex_ai" &&
 		catalogErr == nil && len(rows) > 0 {
-		details = "The configured Vertex project/location unlocked the curated publisher-model catalog. Vertex has no equivalent public catalog endpoint, so this does not verify the credential or model access — run a test completion."
+		details = "Vertex listed this location's publisher models. That route refuses API keys, so a successful listing confirms an accepted OAuth credential and a usable project/location — but the catalog is region-wide, not an entitlement check, so it does not confirm access to any individual model. Run a test completion for that."
 	}
 	failureCode := ""
 	if catalogErr != nil {

@@ -20,7 +20,7 @@ var (
 // (echo is an internal test stub, intentionally not listed.)
 var ProviderTypes = []string{
 	"openai_compatible", "anthropic", "bedrock", "github_copilot", "ollama", "litellm", "edge_tts",
-	"ai_studio", "vertex_ai",
+	"ai_studio", "vertex_ai", "azure_openai",
 }
 
 func instantiate(
@@ -78,6 +78,25 @@ func instantiate(
 		return OpenAIProvider{auth: bearerAuth{
 			base: strings.TrimRight(base, "/"), apiKey: apiKey, observation: observation,
 		}, Timeout: timeout, forceAdapt: cfg.ForceApiSupport, providerID: providerID, principal: principal}, nil
+	case "azure_openai":
+		// Normalised, not merely checked for emptiness: the catalog derives the
+		// deployments route from scheme+host alone while inference appends to
+		// base_url verbatim, so a bare resource endpoint used to pass setup,
+		// populate the catalog, and 404 every completion.
+		baseURL, err := azureInferenceBaseURL(cfg.BaseURL)
+		if err != nil {
+			return nil, &ConfigError{Msg: fmt.Sprintf("provider '%s': %v", providerID, err)}
+		}
+		apiKey, observation, err := resolveAPIKeyObserved(providerID, cfg, principal)
+		if err != nil {
+			return nil, err
+		}
+		return AzureOpenAIProvider{
+			BaseURL:     baseURL,
+			APIKey:      apiKey,
+			Timeout:     timeout,
+			observation: observation,
+		}, nil
 	case "anthropic":
 		apiKey, err := resolveAPIKey(providerID, cfg, principal)
 		if err != nil {

@@ -275,8 +275,12 @@ func (p OpenAIProvider) ListModelsWithError() (
 		if caps := extractCapabilities(m["capabilities"]); len(caps) > 0 {
 			row.Capabilities = caps
 		}
+		// "supported_endpoints" is the field name this generic OpenAI-compatible
+		// upstream (openai_compatible/bedrock/litellm/github_copilot) advertises
+		// in its own catalog response — not this gateway's wire key, so it is
+		// read as-is regardless of the supported_surfaces rename below.
 		if eps := stringList(m["supported_endpoints"]); len(eps) > 0 {
-			row.SupportedEndpoints = eps
+			row.SupportedSurfaces = eps
 		}
 		out = append(out, row)
 	}
@@ -366,7 +370,7 @@ func (p OpenAIProvider) planAdapt(model string) adaptPlan {
 	if !ok {
 		return adaptPlan{endpoint: "chat"}
 	}
-	ep := translate.PreferredEndpoint(mi.SupportedEndpoints)
+	ep := translate.PreferredEndpoint(mi.SupportedSurfaces)
 	rename := ep == "chat" && hasCapability(mi, "reasoning_effort")
 	return adaptPlan{endpoint: ep, renameMaxTokens: rename}
 }
@@ -509,7 +513,7 @@ func (p OpenAIProvider) supportsNativeResponses(model string) bool {
 	if !ok {
 		return false
 	}
-	for _, endpoint := range info.SupportedEndpoints {
+	for _, endpoint := range info.SupportedSurfaces {
 		switch strings.ToLower(strings.TrimSpace(endpoint)) {
 		case "/responses", "/v1/responses", "ws:/responses":
 			return true

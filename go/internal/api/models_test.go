@@ -8,6 +8,7 @@ import (
 	"llmgw/internal/config"
 	"llmgw/internal/iam"
 	"llmgw/internal/providers"
+	"llmgw/internal/router"
 )
 
 func TestIsChatModel(t *testing.T) {
@@ -18,11 +19,11 @@ func TestIsChatModel(t *testing.T) {
 	}{
 		{"claude via caps", providers.ModelInfo{ID: "claude-opus-4.8", Capabilities: map[string]any{"context_window": 1000000, "tool_calls": true}}, true},
 		{"gpt via caps", providers.ModelInfo{ID: "gpt-4o-mini", Capabilities: map[string]any{"context_window": 128000}}, true},
-		{"chat via endpoint only", providers.ModelInfo{ID: "some-chat", SupportedEndpoints: []string{"/v1/messages"}}, true},
-		{"responses endpoint", providers.ModelInfo{ID: "gpt-5.5", SupportedEndpoints: []string{"/responses", "ws:/responses"}}, true},
+		{"chat via endpoint only", providers.ModelInfo{ID: "some-chat", SupportedSurfaces: []string{"/v1/messages"}}, true},
+		{"responses endpoint", providers.ModelInfo{ID: "gpt-5.5", SupportedSurfaces: []string{"/responses", "ws:/responses"}}, true},
 		{"embedding caps family only", providers.ModelInfo{ID: "text-embedding-3-small", Capabilities: map[string]any{"family": "embed"}}, false},
-		{"utility trajectory-compaction has chat caps but excluded", providers.ModelInfo{ID: "trajectory-compaction", Capabilities: map[string]any{"context_window": 262144, "tool_calls": true, "family": "trajectory-compaction"}, SupportedEndpoints: []string{"/chat/completions"}}, false},
-		{"mai-code coding model kept", providers.ModelInfo{ID: "mai-code-1-flash-picker", Capabilities: map[string]any{"context_window": 256000, "tool_calls": true, "family": "oswe-vscode-modelD"}, SupportedEndpoints: []string{"/responses"}}, true},
+		{"utility trajectory-compaction has chat caps but excluded", providers.ModelInfo{ID: "trajectory-compaction", Capabilities: map[string]any{"context_window": 262144, "tool_calls": true, "family": "trajectory-compaction"}, SupportedSurfaces: []string{"/chat/completions"}}, false},
+		{"mai-code coding model kept", providers.ModelInfo{ID: "mai-code-1-flash-picker", Capabilities: map[string]any{"context_window": 256000, "tool_calls": true, "family": "oswe-vscode-modelD"}, SupportedSurfaces: []string{"/responses"}}, true},
 		{"local audio no metadata", providers.ModelInfo{ID: "vits-piper-en_US-amy-medium.tar.bz2"}, false},
 		{"whisper no metadata", providers.ModelInfo{ID: "whisper-base"}, false},
 	}
@@ -153,6 +154,44 @@ func TestCommonCategoryPresentationMetadata(t *testing.T) {
 	}
 }
 
+// setSurfaces is the sole place /v1/models writes the HTTP-surfaces field, so
+// this is what guarantees the wire format actually carries both the canonical
+// supported_surfaces key and the deprecated supported_endpoints key, with
+// identical values, for the one-release migration window.
+func TestSetSurfacesEmitsBothKeysWithEqualValues(t *testing.T) {
+	entry := map[string]any{}
+	setSurfaces(entry, []string{"/v1/chat/completions", "/v1/messages"})
+
+	surfaces, ok := entry["supported_surfaces"].([]string)
+	if !ok {
+		t.Fatalf("supported_surfaces missing or wrong type: %+v", entry)
+	}
+	endpoints, ok := entry["supported_endpoints"].([]string)
+	if !ok {
+		t.Fatalf("supported_endpoints missing or wrong type: %+v", entry)
+	}
+	if len(surfaces) != 2 || len(endpoints) != 2 {
+		t.Fatalf("expected 2 values in both keys, got surfaces=%v endpoints=%v", surfaces, endpoints)
+	}
+	for i := range surfaces {
+		if surfaces[i] != endpoints[i] {
+			t.Fatalf("supported_surfaces=%v does not equal supported_endpoints=%v", surfaces, endpoints)
+		}
+	}
+
+	// An empty surface list sets neither key, matching the pre-rename behavior
+	// (omitted rather than an empty array) so unrelated wire snapshots don't
+	// gain new empty fields.
+	empty := map[string]any{}
+	setSurfaces(empty, nil)
+	if _, ok := empty["supported_surfaces"]; ok {
+		t.Fatalf("supported_surfaces set for an empty surface list: %+v", empty)
+	}
+	if _, ok := empty["supported_endpoints"]; ok {
+		t.Fatalf("supported_endpoints set for an empty surface list: %+v", empty)
+	}
+}
+
 func TestModelListRespectsKeyAndProjectPolicy(t *testing.T) {
 	t.Setenv("LLMGW_STATE_DIR", t.TempDir())
 	iam.ResetForTests()
@@ -162,8 +201,8 @@ func TestModelListRespectsKeyAndProjectPolicy(t *testing.T) {
 		s.AllowUnauthenticatedAPI = false
 		s.APIKey = "admin-secret"
 		s.Providers = map[string]*config.ProviderConfig{"echo": {Type: "echo"}}
-		s.Categories = map[string]*config.CategoryConfig{
-			"smart": {Failover: []config.CategoryMember{{Provider: "echo", Model: "echo-default"}}},
+		s.Endpoints = map[string]*config.EndpointConfig{
+			"smart": {Failover: []config.EndpointMember{{Provider: "echo", Model: "echo-default"}}},
 		}
 	})
 	providers.ResetProviders()
@@ -196,5 +235,88 @@ func TestModelListRespectsKeyAndProjectPolicy(t *testing.T) {
 	rows := payload["data"].([]any)
 	if len(rows) != 1 || rows[0].(map[string]any)["id"] != "echo/echo-strong" {
 		t.Fatalf("policy-filtered models=%+v", rows)
+	}
+}
+
+// A routing chain is surfaced into /v1/models as a pseudo-model row. Its
+// owned_by is client-visible, so the rename shows up in the wire format.
+func TestEndpointRowsAreOwnedByEndpoint(t *testing.T) {
+	t.Setenv("LLMGW_STATE_DIR", t.TempDir())
+	iam.ResetForTests()
+	router.ResetSavingsState()
+	router.ResetTelemetryState()
+	t.Cleanup(func() {
+		iam.ResetForTests()
+		router.ResetSavingsState()
+		router.ResetTelemetryState()
+	})
+	if _, err := iam.Initialize(); err != nil {
+		t.Fatal(err)
+	}
+	config.Update(func(s *config.Settings) {
+		s.AllowUnauthenticatedAPI = true
+		s.Providers = map[string]*config.ProviderConfig{"echo": {Type: "echo"}}
+		s.Endpoints = map[string]*config.EndpointConfig{
+			"smart": {Failover: []config.EndpointMember{{Provider: "echo", Model: "echo-default"}}},
+		}
+	})
+	providers.ResetProviders()
+	t.Cleanup(providers.ResetProviders)
+
+	server := httptest.NewServer(NewServer())
+	defer server.Close()
+	status, payload := jsonRequest(t, server.URL+"/v1/models", http.MethodGet, "", nil)
+	if status != http.StatusOK {
+		t.Fatalf("models status=%d payload=%+v", status, payload)
+	}
+	rows := payload["data"].([]any)
+
+	var endpointRow map[string]any
+	for _, r := range rows {
+		row := r.(map[string]any)
+		if row["id"] == "smart" {
+			endpointRow = row
+		}
+		if row["owned_by"] == "category" {
+			t.Fatalf("row still carries the pre-rename owned_by=%q: %+v", "category", row)
+		}
+	}
+	if endpointRow == nil {
+		t.Fatalf("no row for endpoint chain %q: rows=%+v", "smart", rows)
+	}
+	if endpointRow["owned_by"] != "endpoint" {
+		t.Fatalf("endpoint row owned_by=%v, want %q", endpointRow["owned_by"], "endpoint")
+	}
+}
+
+// The admin model-card route hands out the same catalog rows, and the README
+// documents the dual-key window for the field itself, not for one route. This
+// is the guard against it regressing to marshalling providers.ModelInfo
+// directly, which emits only the canonical key.
+func TestAdminCatalogRowsCarryBothSurfaceKeys(t *testing.T) {
+	rows := catalogRowsWithLegacySurfaces([]providers.ModelInfo{
+		{ID: "gpt-5.5", Label: "GPT-5.5", SupportedSurfaces: []string{"/responses"}},
+		{ID: "bare-model"},
+	})
+	if len(rows) != 2 {
+		t.Fatalf("rows=%+v", rows)
+	}
+	if rows[0]["id"] != "gpt-5.5" || rows[0]["label"] != "GPT-5.5" {
+		t.Fatalf("row lost its canonical fields: %+v", rows[0])
+	}
+	surfaces, _ := rows[0]["supported_surfaces"].([]any)
+	if len(surfaces) != 1 || surfaces[0] != "/responses" {
+		t.Fatalf("supported_surfaces missing: %+v", rows[0])
+	}
+	legacy, _ := rows[0]["supported_endpoints"].([]string)
+	if len(legacy) != 1 || legacy[0] != "/responses" {
+		t.Fatalf("deprecated supported_endpoints missing: %+v", rows[0])
+	}
+	// A row with no surfaces gains neither key, matching setSurfaces.
+	if _, ok := rows[1]["supported_surfaces"]; ok {
+		t.Fatalf("empty surface list emitted a key: %+v", rows[1])
+	}
+	if _, ok := rows[1]["supported_endpoints"]; ok {
+		t.Fatalf("empty surface list emitted the deprecated key: %+v", rows[1])
 	}
 }

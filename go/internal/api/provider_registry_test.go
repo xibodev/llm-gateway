@@ -6,6 +6,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"llmgw/internal/config"
 	"llmgw/internal/iam"
@@ -30,7 +31,7 @@ func TestAdminCreatesProviderFromRegistry(t *testing.T) {
 		s.APIKey = "admin-secret"
 		s.AllowUnauthenticatedAPI = false
 		s.Providers = map[string]*config.ProviderConfig{}
-		s.Categories = map[string]*config.CategoryConfig{}
+		s.Endpoints = map[string]*config.EndpointConfig{}
 	})
 	providers.ResetProviders()
 	t.Cleanup(providers.ResetProviders)
@@ -307,5 +308,82 @@ func TestPortalProviderStatusUsesOnlyItsPrincipalCatalog(t *testing.T) {
 	}
 	if got := modelCount(secondRows); got != 0 {
 		t.Fatalf("second principal saw another catalog: %d", got)
+	}
+}
+
+// Portal mode renders one human's view, and the not-discoverable verdict must
+// be settled inside that scope. checks and cached models are already narrowed
+// to the selected principal, but the final comparison reached for the
+// operator-wide CatalogSnapshot, which reports the freshest catalog across ALL
+// scopes — so another principal's newer catalog cleared this user's
+// not_discoverable state while this user's own credential still could not list
+// a thing.
+func TestPortalNotDiscoverableSurvivesAnotherPrincipalsNewerCatalog(t *testing.T) {
+	t.Setenv("LLMGW_STATE_DIR", t.TempDir())
+	iam.ResetForTests()
+	t.Cleanup(iam.ResetForTests)
+	settings := config.Defaults()
+	settings.Providers = map[string]*config.ProviderConfig{
+		"echo": {Type: "echo"},
+	}
+	config.Update(func(current *config.Settings) { *current = *settings })
+	t.Cleanup(func() {
+		defaults := config.Defaults()
+		config.Update(func(current *config.Settings) { *current = *defaults })
+	})
+	providers.ResetProviders()
+	t.Cleanup(providers.ResetProviders)
+
+	viewer, err := iam.CreatePrincipal("human", "fixture:portal-viewer", "", "Viewer")
+	if err != nil {
+		t.Fatal(err)
+	}
+	other, err := iam.CreatePrincipal("human", "fixture:other-principal", "", "Other")
+	if err != nil {
+		t.Fatal(err)
+	}
+	// The viewer's own catalog-facing check found the catalog unlistable.
+	generation, err := iam.ProviderCheckGeneration("echo", viewer.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := iam.RecordProviderCheck(iam.ProviderCheck{
+		ProviderID: "echo", Operation: iam.CheckCatalogSync, ScopeKey: viewer.ID,
+		Generation: generation, Success: false,
+		Detail:    providerCheckDetail(false, "catalog_not_discoverable"),
+		CheckedAt: time.Now().Add(-10 * time.Minute).Unix(),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	// Another principal then listed models. That catalog is newer than the
+	// viewer's failure and belongs to somebody else's credential.
+	otherPrincipal := &config.Principal{PrincipalID: other.ID, PrincipalKind: other.Kind}
+	if models := providers.RefreshCatalogForPrincipal("echo", otherPrincipal); len(models) == 0 {
+		t.Fatal("other principal catalog did not refresh")
+	}
+
+	rows, err := providerStatusSnapshots(settings, nil, nil, viewer.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var row map[string]any
+	for _, candidate := range rows {
+		if candidate["id"] == "echo" {
+			row = candidate
+			break
+		}
+	}
+	if row == nil {
+		t.Fatalf("echo row missing from %+v", rows)
+	}
+	if got := stringOf(row["catalog_state"]); got != "not_discoverable" {
+		t.Fatalf("portal catalog_state=%q, want \"not_discoverable\" — another principal's catalog cleared it", got)
+	}
+	instances, ok := row["instances"].([]map[string]any)
+	if !ok || len(instances) != 1 {
+		t.Fatalf("instances=%#v, want exactly one", row["instances"])
+	}
+	if got := stringOf(instances[0]["catalog_state"]); got != "not_discoverable" {
+		t.Fatalf("portal instance catalog_state=%q, want \"not_discoverable\"", got)
 	}
 }

@@ -30,8 +30,8 @@ func TestProviderRegistryIsUniqueAndRunnable(t *testing.T) {
 			}
 		}
 	}
-	if len(seen) != 18 {
-		t.Fatalf("embedded registry has %d entries, want 18", len(seen))
+	if len(seen) != 19 {
+		t.Fatalf("embedded registry has %d entries, want 19", len(seen))
 	}
 }
 

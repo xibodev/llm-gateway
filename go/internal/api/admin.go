@@ -2,9 +2,12 @@ package api
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 
@@ -35,6 +38,145 @@ func adminAuthed(w http.ResponseWriter, r *http.Request) bool {
 
 func decodeBody(r *http.Request, v any) bool {
 	return json.NewDecoder(r.Body).Decode(v) == nil
+}
+
+// maxCredentialBodyBytes bounds the entire request body decodeBodyOrForm will
+// read, JSON or multipart alike. A service-account key is a few KB of JSON;
+// this leaves comfortable headroom for it plus multipart framing overhead
+// without leaving the body effectively unbounded. The bound is enforced by
+// wrapping r.Body in http.MaxBytesReader before any parsing touches it --
+// ParseMultipartForm's own maxMemory argument only caps what stays resident
+// in memory, it is not a request-size limit: a file part larger than it
+// spills to a disk-backed temp file with no upper bound, so passing a small
+// maxMemory alone does nothing to stop a multi-gigabyte upload.
+const maxCredentialBodyBytes = 256 << 10 // 256 KiB
+
+// errBodyTooLarge marks a decodeBodyOrForm failure caused by exceeding
+// maxCredentialBodyBytes, so the caller can answer 413 instead of a generic 400.
+var errBodyTooLarge = errors.New("request body too large")
+
+// errInvalidBody marks any other decodeBodyOrForm parse failure.
+var errInvalidBody = errors.New("invalid body")
+
+// decodeBodyOrForm accepts the same payload as JSON or as multipart/form-data.
+// A file-shaped credential (a service-account key is a multi-line PEM-bearing
+// JSON document) survives a file part intact, whereas embedding it in a JSON
+// string requires the caller to escape it correctly — which shell pipelines
+// routinely get wrong, destroying the key before the request is even built.
+func decodeBodyOrForm(w http.ResponseWriter, r *http.Request, v any) error {
+	r.Body = http.MaxBytesReader(w, r.Body, maxCredentialBodyBytes)
+	// RFC 9110 makes the media type case-insensitive, and real clients send
+	// "Multipart/Form-Data". Matching the raw header sent those into the JSON
+	// branch, which then failed with a generic 400 on a perfectly legal request.
+	contentType := strings.ToLower(r.Header.Get("Content-Type"))
+	if !strings.HasPrefix(contentType, "multipart/form-data") {
+		decoder := json.NewDecoder(r.Body)
+		if err := decoder.Decode(v); err != nil {
+			return classifyDecodeError(err)
+		}
+		// Decode stops at the end of the first complete JSON value and never
+		// touches the rest of the body, so MaxBytesReader alone does not bound
+		// the JSON path: a small valid object followed by megabytes of
+		// whitespace decoded successfully and the limit was never crossed.
+		// Reading on forces it to be. The read also rejects a second value --
+		// one request carries one payload, and silently ignoring whatever
+		// follows is how a padded or smuggled body gets through.
+		var trailing json.RawMessage
+		if err := decoder.Decode(&trailing); !errors.Is(err, io.EOF) {
+			if err == nil {
+				return errInvalidBody
+			}
+			return classifyDecodeError(err)
+		}
+		return nil
+	}
+	if err := r.ParseMultipartForm(maxCredentialBodyBytes); err != nil {
+		return classifyDecodeError(err)
+	}
+	// Read straight from the parsed form's own maps rather than through
+	// r.FormValue/r.FormFile: those also consult r.Form, which net/http
+	// populates with the URL query string ahead of the multipart values, so
+	// FormValue silently returns a query parameter instead of the submitted
+	// form field when both are present. Reading MultipartForm directly means
+	// only what the caller actually put in the body is ever used.
+	fields := map[string]string{}
+	for name, values := range r.MultipartForm.Value {
+		if len(values) > 0 {
+			fields[name] = values[0]
+		}
+	}
+	// A field may arrive as either a value part or a file part; the file part
+	// wins, since that is the form a caller reaches for when the value is a file.
+	for name, headers := range r.MultipartForm.File {
+		if len(headers) == 0 {
+			continue
+		}
+		file, err := headers[0].Open()
+		if err != nil {
+			return errInvalidBody
+		}
+		content, err := io.ReadAll(file)
+		file.Close()
+		if err != nil {
+			return classifyDecodeError(err)
+		}
+		fields[name] = string(content)
+	}
+	encoded, err := json.Marshal(fields)
+	if err != nil {
+		return errInvalidBody
+	}
+	if err := json.Unmarshal(encoded, v); err != nil {
+		return errInvalidBody
+	}
+	return nil
+}
+
+// classifyDecodeError distinguishes a size-limit failure from any other parse
+// failure, so decodeBodyOrForm's caller can answer 413 rather than a generic
+// 400 when the body was rejected only for being too large.
+func classifyDecodeError(err error) error {
+	var tooLarge *http.MaxBytesError
+	if errors.As(err, &tooLarge) {
+		return errBodyTooLarge
+	}
+	return errInvalidBody
+}
+
+// writeDecodeError answers a decodeBodyOrForm failure with the status code it
+// implies: 413 when the body exceeded the size limit, 400 otherwise.
+func writeDecodeError(w http.ResponseWriter, err error) {
+	status := http.StatusBadRequest
+	if errors.Is(err, errBodyTooLarge) {
+		status = http.StatusRequestEntityTooLarge
+	}
+	writeError(w, status, err.Error())
+}
+
+// flexBool decodes a JSON boolean, matching the JSON wire contract exactly, or
+// (as a fallback) the string "true"/"false" that decodeBodyOrForm produces for
+// a multipart checkbox field — multipart has no boolean type, so the field
+// arrives as text and would otherwise fail json.Unmarshal and reject the whole
+// request. A JSON caller sending a literal true/false never reaches the
+// fallback, so the wire contract for existing clients is unchanged.
+type flexBool bool
+
+func (b *flexBool) UnmarshalJSON(data []byte) error {
+	var v bool
+	if err := json.Unmarshal(data, &v); err == nil {
+		*b = flexBool(v)
+		return nil
+	}
+	var s string
+	if err := json.Unmarshal(data, &s); err != nil {
+		return err
+	}
+	parsed, err := strconv.ParseBool(s)
+	if err != nil {
+		return err
+	}
+	*b = flexBool(parsed)
+	return nil
 }
 
 // GET /admin/api/state
@@ -75,7 +217,7 @@ func handleState(w http.ResponseWriter, r *http.Request) {
 		provList = append(provList, entry)
 	}
 	cats := map[string]any{}
-	for name, cat := range s.Categories {
+	for name, cat := range s.Endpoints {
 		fo := []any{}
 		for _, m := range cat.Failover {
 			fo = append(fo, map[string]any{"provider": m.Provider, "model": m.Model})
@@ -159,7 +301,8 @@ func handleState(w http.ResponseWriter, r *http.Request) {
 		"provider_connections":         connections,
 		"memberships":                  memberships,
 		"providers":                    provList,
-		"categories":                   cats,
+		"categories":                   cats, // deprecated, removed in a future release — use "endpoints"
+		"endpoints":                    cats,
 		"policies": map[string]any{
 			"defaults":  s.Policies.Defaults,
 			"overrides": s.Policies.Overrides,
@@ -170,15 +313,15 @@ func handleState(w http.ResponseWriter, r *http.Request) {
 }
 
 type providerBody struct {
-	ID              string `json:"id"`
-	RegistryID      string `json:"registry_id"`
-	Type            string `json:"type"`
-	BaseURL         string `json:"base_url"`
-	APIKey          string `json:"api_key"`
-	Region          string `json:"region"`
-	Project         string `json:"project"`
-	Location        string `json:"location"`
-	ForceApiSupport bool   `json:"force_api_support"`
+	ID              string   `json:"id"`
+	RegistryID      string   `json:"registry_id"`
+	Type            string   `json:"type"`
+	BaseURL         string   `json:"base_url"`
+	APIKey          string   `json:"api_key"`
+	Region          string   `json:"region"`
+	Project         string   `json:"project"`
+	Location        string   `json:"location"`
+	ForceApiSupport flexBool `json:"force_api_support"`
 }
 
 // POST /admin/api/providers
@@ -187,8 +330,8 @@ func handleUpsertProvider(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var body providerBody
-	if !decodeBody(r, &body) {
-		writeError(w, 400, "invalid body")
+	if err := decodeBodyOrForm(w, r, &body); err != nil {
+		writeDecodeError(w, err)
 		return
 	}
 	registryID := strings.ToLower(strings.TrimSpace(body.RegistryID))
@@ -285,7 +428,7 @@ func handleUpsertProvider(w http.ResponseWriter, r *http.Request) {
 		next := &config.ProviderConfig{
 			Type: body.Type, RegistryID: registryID, BaseURL: emptyNil(body.BaseURL),
 			Region: emptyNil(body.Region), Project: emptyNil(body.Project),
-			Location: emptyNil(body.Location), ForceApiSupport: body.ForceApiSupport,
+			Location: emptyNil(body.Location), ForceApiSupport: bool(body.ForceApiSupport),
 		}
 		if previous := s.Providers[pid]; previous != nil {
 			next.Timeout = previous.Timeout
@@ -453,6 +596,33 @@ func handleProviderModels(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 200, map[string]any{"models": ids, "count": len(rows)})
 }
 
+// catalogRowsWithLegacySurfaces renders catalog rows for the wire while keeping
+// the same one-release dual-key window GET /v1/models honours (see setSurfaces).
+// Marshalling providers.ModelInfo directly emits only "supported_surfaces",
+// which would silently change this route's shape for anything still reading the
+// pre-rename key while the documented deprecation says both are emitted.
+//
+// Rows round-trip through the struct's own JSON tags rather than being rebuilt
+// field by field, so the two shapes cannot drift when ModelInfo gains a field.
+func catalogRowsWithLegacySurfaces(rows []providers.ModelInfo) []map[string]any {
+	out := make([]map[string]any, 0, len(rows))
+	for _, row := range rows {
+		entry := map[string]any{}
+		raw, err := json.Marshal(row)
+		if err != nil {
+			continue
+		}
+		if err := json.Unmarshal(raw, &entry); err != nil {
+			continue
+		}
+		if len(row.SupportedSurfaces) > 0 {
+			entry["supported_endpoints"] = row.SupportedSurfaces // Deprecated: use supported_surfaces.
+		}
+		out = append(out, entry)
+	}
+	return out
+}
+
 // GET /admin/api/providers/{id}/catalog â€” full model rows for the model-card page.
 func handleProviderCatalog(w http.ResponseWriter, r *http.Request) {
 	if !adminAuthed(w, r) {
@@ -469,10 +639,7 @@ func handleProviderCatalog(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	rows := providers.CatalogModelsForPrincipal(pid, principal)
-	if rows == nil {
-		rows = []providers.ModelInfo{}
-	}
-	resp := map[string]any{"models": rows}
+	resp := map[string]any{"models": catalogRowsWithLegacySurfaces(rows)}
 	if t := providers.CatalogRefreshedAtForPrincipal(pid, principal); !t.IsZero() {
 		resp["refreshed_at"] = t.UTC().Format(time.RFC3339)
 	}
@@ -533,42 +700,44 @@ func handleRepairProvider(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 200, runProviderProbe(pid, "repair", principal))
 }
 
-type categoryBody struct {
+type endpointBody struct {
 	Name     string           `json:"name"`
 	Failover []map[string]any `json:"failover"`
 }
 
-func storeCategory(name string, members []config.CategoryMember) error {
+func storeEndpoint(name string, members []config.EndpointMember) error {
 	var collision error
 	config.Update(func(s *config.Settings) {
-		for existingName := range s.Categories {
+		for existingName := range s.Endpoints {
 			if existingName != name && strings.EqualFold(existingName, name) {
-				collision = fmt.Errorf("category name collides with existing category %q; names are case-insensitive", existingName)
+				collision = fmt.Errorf("endpoint name collides with existing endpoint %q; names are case-insensitive", existingName)
 				return
 			}
 		}
-		s.Categories[name] = &config.CategoryConfig{Failover: members}
+		s.Endpoints[name] = &config.EndpointConfig{Failover: members}
 	})
 	return collision
 }
 
-// POST /admin/api/categories
-func handleUpsertCategory(w http.ResponseWriter, r *http.Request) {
+// handleUpsertEndpoint backs both POST /admin/api/endpoints (canonical) and
+// the deprecated POST /admin/api/categories (see server.go route
+// registration) — the two must never diverge in behaviour.
+func handleUpsertEndpoint(w http.ResponseWriter, r *http.Request) {
 	if !adminAuthed(w, r) {
 		return
 	}
-	var body categoryBody
+	var body endpointBody
 	if !decodeBody(r, &body) {
 		writeError(w, 400, "invalid body")
 		return
 	}
 	name := strings.TrimSpace(body.Name)
 	if name == "" {
-		writeError(w, 400, "category name required")
+		writeError(w, 400, "endpoint name required")
 		return
 	}
 	if _, isProvider := config.Get().Providers[name]; isProvider || strings.Contains(name, "/") {
-		writeError(w, 400, "category name must not contain '/' or collide with a provider id")
+		writeError(w, 400, "endpoint name must not contain '/' or collide with a provider id")
 		return
 	}
 	principal, err := selectedCatalogPrincipal(r)
@@ -576,7 +745,7 @@ func handleUpsertCategory(w http.ResponseWriter, r *http.Request) {
 		writeError(w, 400, err.Error())
 		return
 	}
-	members := make([]config.CategoryMember, 0, len(body.Failover))
+	members := make([]config.EndpointMember, 0, len(body.Failover))
 	for index, member := range body.Failover {
 		providerRaw, _ := member["provider"].(string)
 		modelRaw, _ := member["model"].(string)
@@ -598,13 +767,13 @@ func handleUpsertCategory(w http.ResponseWriter, r *http.Request) {
 			writeError(w, 400, fmt.Sprintf("route member %d has unknown model %q for provider %q", index+1, modelID, providerID))
 			return
 		}
-		members = append(members, config.CategoryMember{Provider: providerID, Model: modelID})
+		members = append(members, config.EndpointMember{Provider: providerID, Model: modelID})
 	}
 	if len(members) == 0 {
 		writeError(w, 400, "a route requires at least one provider/model member")
 		return
 	}
-	if err := storeCategory(name, members); err != nil {
+	if err := storeEndpoint(name, members); err != nil {
 		writeError(w, 400, err.Error())
 		return
 	}
@@ -612,13 +781,15 @@ func handleUpsertCategory(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 200, map[string]any{"ok": true, "name": name, "members": len(members)})
 }
 
-// DELETE /admin/api/categories/{name}
-func handleDeleteCategory(w http.ResponseWriter, r *http.Request) {
+// handleDeleteEndpoint backs both DELETE /admin/api/endpoints/{name}
+// (canonical) and the deprecated DELETE /admin/api/categories/{name} (see
+// server.go route registration) — the two must never diverge in behaviour.
+func handleDeleteEndpoint(w http.ResponseWriter, r *http.Request) {
 	if !adminAuthed(w, r) {
 		return
 	}
 	name := r.PathValue("name")
-	config.Update(func(s *config.Settings) { delete(s.Categories, name) })
+	config.Update(func(s *config.Settings) { delete(s.Endpoints, name) })
 	persist()
 	writeJSON(w, 200, map[string]any{"ok": true})
 }

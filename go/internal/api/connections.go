@@ -12,11 +12,11 @@ import (
 )
 
 type connectionBody struct {
-	ProviderID  string `json:"provider_id"`
-	Name        string `json:"connection_name"`
-	Kind        string `json:"credential_kind"`
-	Secret      string `json:"secret"`
-	MakeDefault bool   `json:"make_default"`
+	ProviderID  string   `json:"provider_id"`
+	Name        string   `json:"connection_name"`
+	Kind        string   `json:"credential_kind"`
+	Secret      string   `json:"secret"`
+	MakeDefault flexBool `json:"make_default"`
 }
 
 func handleListPrincipalConnections(w http.ResponseWriter, r *http.Request) {
@@ -47,8 +47,8 @@ func handleCreatePrincipalConnection(w http.ResponseWriter, r *http.Request) {
 	}
 	principalID := strings.TrimSpace(r.PathValue("id"))
 	var body connectionBody
-	if !decodeBody(r, &body) {
-		writeError(w, 400, "invalid body")
+	if err := decodeBodyOrForm(w, r, &body); err != nil {
+		writeDecodeError(w, err)
 		return
 	}
 	connection, err := createPersonalProviderConnection(principalID, body, iam.ConnectionSourceAdmin)
@@ -124,8 +124,8 @@ func handleUserCreateConnection(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var body connectionBody
-	if !decodeBody(r, &body) {
-		writeError(w, 400, "invalid body")
+	if err := decodeBodyOrForm(w, r, &body); err != nil {
+		writeDecodeError(w, err)
 		return
 	}
 	connection, err := createPersonalProviderConnection(
@@ -190,6 +190,39 @@ func handleUserRevokeConnection(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 200, map[string]any{"ok": true})
 }
 
+// runtimeTypeAcceptsAPIKey answers, for a provider configured WITHOUT a
+// registry id (the shape the legacy admin page's addProvider() posts, and the
+// shape any hand-written config takes), whether its runtime type can consume an
+// API-key connection.
+//
+// It asks the registry manifest rather than a hand-maintained list, because
+// that list has now been the bug twice: vertex_ai was missing until a custom
+// Vertex provider was found refusing the credential the identical
+// registry-configured provider accepts, and azure_openai arrived after that fix
+// and was missing again. A manifest that declares auth_methods: ["api_key"] is
+// the same statement the registry-id branch above already trusts, so trusting
+// it here closes the class instead of the instance.
+//
+// The literal cases remain for runtimes the manifest cannot speak for: legacy
+// type spellings, and litellm, which has no registry entry of its own.
+func runtimeTypeAcceptsAPIKey(runtimeType string) bool {
+	normalized := strings.ToLower(strings.TrimSpace(runtimeType))
+	switch normalized {
+	case "openai_compatible", "openai", "litellm":
+		return true
+	}
+	for _, entry := range providers.ProviderRegistry() {
+		if entry.Availability != providers.ProviderAvailable {
+			continue
+		}
+		if providers.RegistryRuntimeMatches(entry, normalized) &&
+			contains(entry.AuthMethods, "api_key") {
+			return true
+		}
+	}
+	return false
+}
+
 func createPersonalProviderConnection(
 	principalID string, body connectionBody, source string,
 ) (iam.ProviderConnection, error) {
@@ -217,7 +250,7 @@ func createPersonalProviderConnection(
 		return iam.PutProviderConnection(iam.ProviderConnectionCreate{
 			PrincipalID: principalID, ProviderID: providerID, Name: body.Name,
 			Kind: kind, Secret: body.Secret, Source: source,
-			MakeDefault: body.MakeDefault,
+			MakeDefault: bool(body.MakeDefault),
 		})
 	}
 	if kind != "api_key" {
@@ -238,18 +271,14 @@ func createPersonalProviderConnection(
 				Msg: "this provider integration does not accept API-key connections",
 			}
 		}
-	} else {
-		switch strings.ToLower(strings.TrimSpace(providerConfig.Type)) {
-		case "openai_compatible", "openai", "litellm", "anthropic", "bedrock":
-		default:
-			return iam.ProviderConnection{}, &providers.ConfigError{
-				Msg: "this provider type does not consume an API-key connection",
-			}
+	} else if !runtimeTypeAcceptsAPIKey(providerConfig.Type) {
+		return iam.ProviderConnection{}, &providers.ConfigError{
+			Msg: "this provider type does not consume an API-key connection",
 		}
 	}
 	return iam.PutProviderConnection(iam.ProviderConnectionCreate{
 		PrincipalID: principalID, ProviderID: providerID, Name: body.Name,
 		Kind: kind, Secret: body.Secret, Source: source,
-		MakeDefault: body.MakeDefault,
+		MakeDefault: bool(body.MakeDefault),
 	})
 }

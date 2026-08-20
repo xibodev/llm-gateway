@@ -94,7 +94,7 @@
 
     <div class="terminal">
       <div class="bar"><i></i><i></i><i></i></div>
-<pre><span class="c"># point your CLI at the gateway, then address any model as a category&hellip;</span>
+<pre><span class="c"># point your CLI at the gateway, then address any model as an endpoint&hellip;</span>
 <span class="k">curl</span> http://127.0.0.1:8787/v1/chat/completions \
   -H <span class="s">"Content-Type: application/json"</span> \
   -d <span class="s">'{"model":"smart","messages":[{"role":"user","content":"hi"}]}'</span>
@@ -108,10 +108,10 @@
 <section id="features">
   <div class="wrap">
     <h2>Built to juggle providers</h2>
-    <p class="sub">Address a real model as <code>provider/model</code>, or define <b class="hi">categories</b> &mdash; named,
+    <p class="sub">Address a real model as <code>provider/model</code>, or define <b class="hi">endpoints</b> &mdash; named,
       ordered failover chains that cascade across your providers on throttle, error, or timeout.</p>
     <div class="grid">
-      <div class="feat"><div class="ic">&#128260;</div><h3>Categories &amp; failover</h3>
+      <div class="feat"><div class="ic">&#128260;</div><h3>Endpoints &amp; failover</h3>
         <p>One model name, an ordered chain of real targets. Fails over before the first streamed byte &mdash; invisible to the client.</p></div>
       <div class="feat"><div class="ic">&#129517;</div><h3>API adaptation</h3>
         <p>Opt-in: reach Responses-only models (like <code>gpt-5.5</code>) over the standard chat API &mdash; the gateway translates, deterministically, from each model's published capabilities.</p></div>
@@ -138,10 +138,10 @@
   llm-gateway-go</pre></div>
       <div class="step"><div class="n">2</div><h3>Connect providers</h3>
 <pre><span class="c"># open the panel, add providers,</span>
-<span class="c"># sign into Copilot, build categories</span>
+<span class="c"># sign into Copilot, build endpoints</span>
 http://127.0.0.1:8787/<span class="k">admin</span></pre></div>
       <div class="step"><div class="n">3</div><h3>Address a model</h3>
-<pre><span class="c"># a category name&hellip;</span>
+<pre><span class="c"># an endpoint name&hellip;</span>
 <span class="s">"model": "smart"</span>
 <span class="c"># &hellip;or an exact provider/model</span>
 <span class="s">"model": "copilot/gpt-4o-mini"</span></pre></div>
@@ -163,8 +163,8 @@ http://127.0.0.1:8787/<span class="k">admin</span></pre></div>
 <pre><span class="k">COPILOT_PROVIDER_BASE_URL</span>=http://127.0.0.1:8787/v1
 <span class="k">COPILOT_PROVIDER_API_KEY</span>=<span class="s">&lt;your key&gt;</span></pre></div>
     </div>
-    <div class="note"><span>&#128161;</span><span>Pick a <code>provider/model</code> or a category name from <code>GET /v1/models</code>.
-      Everything &mdash; providers, categories, keys, Copilot login, usage &amp; savings &mdash; is managed from <code>/admin</code>.</span></div>
+    <div class="note"><span>&#128161;</span><span>Pick a <code>provider/model</code> or an endpoint name from <code>GET /v1/models</code>.
+      Everything &mdash; providers, endpoints, keys, Copilot login, usage &amp; savings &mdash; is managed from <code>/admin</code>.</span></div>
   </div>
 </section>
 </main>

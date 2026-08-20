@@ -2,7 +2,7 @@ import { useState } from "preact/hooks";
 import { ArrowRight, CheckCircle2, Circle, X } from "lucide-preact";
 import type { JSONRecord } from "../lib/api";
 import type { PageID } from "../lib/navigation";
-import { asList, asRecord, numberValue, stringValue } from "../lib/records";
+import { asList, asRecord, endpointsOf, numberValue, stringValue } from "../lib/records";
 
 const dismissKey = "llmgw.console.setup-guide-dismissed";
 
@@ -32,7 +32,7 @@ export function buildGuideSteps(data: JSONRecord): GuideStep[] {
   const providers = asList(data.providers);
   const statuses = asList(data.provider_statuses).map(asRecord);
   const keys = asList(data.keys);
-  const routes = Object.keys(asRecord(data.categories));
+  const routes = Object.keys(endpointsOf(data));
   const activeHumanIDs = new Set(humans.map((principal) => stringValue(principal.id)));
   const activeProjectIDs = new Set(projects.map((project) => stringValue(project.id)));
   const hasProjectOwner = memberships.some((membership) => {

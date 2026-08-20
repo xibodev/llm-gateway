@@ -357,6 +357,34 @@
     "docs_url": "https://docs.aws.amazon.com/bedrock/latest/userguide/api-keys.html"
   },
   {
+    "id": "azure_openai",
+    "label": "Azure OpenAI",
+    "description": "An Azure OpenAI resource's own deployments, addressed with an api-key credential. The catalog is read from the resource's deployments, never the shared Azure model list.",
+    "categories": [
+      "chat",
+      "api-key",
+      "enterprise"
+    ],
+    "runtime_type": "azure_openai",
+    "protocol": "openai",
+    "availability": "available",
+    "auth_methods": [
+      "api_key"
+    ],
+    "connection_scope": "system_or_personal",
+    "default_provider_id": "azure_openai",
+    "requires_base_url": true,
+    "requires_api_key": true,
+    "supports_model_discovery": true,
+    "onboarding_fields": [
+      "api_key",
+      "base_url"
+    ],
+    "risk_level": "yellow",
+    "risk_notice": "Requires an existing Azure OpenAI resource with at least one deployment already created; the request model id is the deployment name, not the underlying model name. Model discovery depends on a legacy, pinned Azure api-version (2023-03-15-preview) for listing deployments — if Microsoft removes that route, the catalog becomes undiscoverable until Entra-based discovery is added.",
+    "docs_url": "https://learn.microsoft.com/en-us/azure/ai-services/openai/reference"
+  },
+  {
     "id": "ollama",
     "label": "Ollama",
     "description": "Local Ollama models without a credential.",

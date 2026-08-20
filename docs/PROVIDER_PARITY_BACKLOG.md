@@ -193,7 +193,7 @@ flowchart LR
 | ID | Deliverable | Status | Depends on | Acceptance evidence |
 | --- | --- | --- | --- | --- |
 | PP-011 | Additive model-override schema and API | `planned` | PP-F02, PP-009, PP-041 | Persist provider/account scope, real model ID, visibility, display label, custom IDs/aliases, source/target dialect, translator capability state, supported endpoints, and parameter policy separately from `catalog.json`; empty and upgraded DB migrations are idempotent. |
-| PP-012 | Visibility, custom-ID, and alias enforcement | `planned` | PP-011 | Hidden models do not appear in `/v1/models`, admin/user model APIs, native-name resolution, manual routes/categories, combos, or quota virtual models; aliases resolve deterministically without changing the upstream model ID. |
+| PP-012 | Visibility, custom-ID, and alias enforcement | `planned` | PP-011 | Hidden models do not appear in `/v1/models`, admin/user model APIs, native-name resolution, manual routes/endpoints, combos, or quota virtual models; aliases resolve deterministically without changing the upstream model ID. |
 | PP-013 | Compatibility and parameter-policy engine | `planned` | PP-011, PP-039 | Blocked/allowed parameters and source/target dialect compatibility are enforced server-side; opt-in unsupported-parameter learning accepts only explicit upstream 400 evidence and records an audit event. |
 | PP-014 | Provider-scoped model management UI | `planned` | PP-011, PP-012, PP-013, PP-P03 | Import/sync, copy, hide/show, custom ID/alias, compatibility, parameter policy, and Play actions are available from provider detail; console tests cover mutation and refresh persistence. |
 
@@ -222,7 +222,7 @@ flowchart LR
 | PP-023 | Fixed account plus priority/failover selection | `planned` | PP-010, PP-022 | Routes can pin an account or select by priority while preserving current default-connection behavior for legacy routes; failures update health and fallback to eligible accounts deterministically. |
 | PP-024 | Balanced account strategies | `planned` | PP-023 | Weighted, round-robin, power-of-two-choices, least-used, and last-known-good pass deterministic concurrency tests and never select disabled, revoked, cooling, or policy-ineligible accounts. |
 | PP-025 | Quota and cost strategies | `planned` | PP-021, PP-023 | Cost-first, reset-aware, and headroom use fresh verified inputs; stale/unknown data follows configured deterministic fallback; threshold exclusions and reset transitions are tested. |
-| PP-026 | Route/category strategy API and console editor | `planned` | PP-012, PP-023, PP-024, PP-025 | Existing ordered failover remains backward compatible; editor supports fixed/dynamic account selection and strategy parameters; hidden/disallowed models cannot be saved or executed; invalid or ambiguous configurations are rejected atomically. |
+| PP-026 | Route/endpoint strategy API and console editor | `planned` | PP-012, PP-023, PP-024, PP-025 | Existing ordered failover remains backward compatible; editor supports fixed/dynamic account selection and strategy parameters; hidden/disallowed models cannot be saved or executed; invalid or ambiguous configurations are rejected atomically. |
 
 ### G. Quota sharing and automatic combos
 

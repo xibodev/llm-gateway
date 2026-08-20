@@ -184,8 +184,8 @@ func (p EdgeTTSProvider) ListModels() []ModelInfo {
 		}
 		models = append(models, ModelInfo{
 			ID: voice.ShortName, Vendor: "microsoft", Label: label,
-			Capabilities:       map[string]any{"tts": true, "audio": true},
-			SupportedEndpoints: []string{"/v1/audio/speech"},
+			Capabilities:      map[string]any{"tts": true, "audio": true},
+			SupportedSurfaces: []string{"/v1/audio/speech"},
 		})
 	}
 	return models

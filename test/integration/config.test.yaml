@@ -34,8 +34,10 @@ providers:
     api_key: sk-test-fallback-uat-key-000004
     timeout: 10.0
 
-# Categories — each covers a distinct UAT scenario
-categories:
+# Endpoints — each covers a distinct UAT scenario. (The pre-rename "categories:"
+# key still loads — deprecated, removed in a future release — but "endpoints:"
+# is canonical.)
+endpoints:
   # Scenario A: 429 failover (primary 429 → fallback succeeds)
   cat-429-failover:
     failover:

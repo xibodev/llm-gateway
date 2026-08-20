@@ -140,3 +140,9 @@ export function sendJSON<T>(mode: ConsoleMode, path: string, method: "POST" | "D
     body: body === undefined ? undefined : JSON.stringify(body),
   });
 }
+
+// sendForm posts multipart/form-data. requestJSON deliberately leaves
+// Content-Type unset for a FormData body so the browser can supply the boundary.
+export function sendForm<T>(mode: ConsoleMode, path: string, body: FormData): Promise<T> {
+  return requestJSON<T>(mode, path, { method: "POST", body });
+}

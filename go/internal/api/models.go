@@ -145,7 +145,7 @@ func buildModelList(principal *config.Principal) (map[string]any, error) {
 				continue
 			}
 			seen[namespaced] = true
-			capabilities, endpoints := modelPresentationMetadata(providerID, row)
+			capabilities, surfaces := modelPresentationMetadata(providerID, row)
 			entry := map[string]any{"id": namespaced, "object": "model", "owned_by": providerID}
 			if row.Label != "" {
 				entry["display_name"] = row.Label
@@ -153,14 +153,12 @@ func buildModelList(principal *config.Principal) (map[string]any, error) {
 			if len(capabilities) > 0 {
 				entry["capabilities"] = capabilities
 			}
-			if len(endpoints) > 0 {
-				entry["supported_endpoints"] = endpoints
-			}
+			setSurfaces(entry, surfaces)
 			data = append(data, entry)
 		}
 	}
 
-	for name, cat := range s.Categories {
+	for name, cat := range s.Endpoints {
 		if !modelAllowed(principal, projectPolicy, name) {
 			continue
 		}
@@ -169,7 +167,7 @@ func buildModelList(principal *config.Principal) (map[string]any, error) {
 		}
 		seen[name] = true
 		fo := []any{}
-		presentationMembers := []config.CategoryMember{}
+		presentationMembers := []config.EndpointMember{}
 		for _, m := range cat.Failover {
 			authorized, err := providers.ProviderCredentialAuthorized(m.Provider, principal)
 			if err != nil {
@@ -184,14 +182,18 @@ func buildModelList(principal *config.Principal) (map[string]any, error) {
 		if len(fo) == 0 {
 			continue
 		}
+		// owned_by is "endpoint", not "category": GET /v1/models is a public,
+		// client-visible wire format, and live traffic has been observed
+		// filtering on this field. This rename is deliberate — it tracks the
+		// EndpointConfig/EndpointMember rename elsewhere — not a typo.
 		categoryEntry := map[string]any{
-			"id": name, "object": "model", "owned_by": "category", "failover": fo,
+			"id": name, "object": "model", "owned_by": "endpoint", "failover": fo,
 		}
-		if capabilities, endpoints := categoryPresentationMetadata(
+		if capabilities, surfaces := categoryPresentationMetadata(
 			principal, presentationMembers,
 		); len(capabilities) > 0 {
 			categoryEntry["capabilities"] = capabilities
-			categoryEntry["supported_endpoints"] = endpoints
+			setSurfaces(categoryEntry, surfaces)
 		}
 		data = append(data, categoryEntry)
 	}
@@ -244,6 +246,21 @@ func buildModelList(principal *config.Principal) (map[string]any, error) {
 	return map[string]any{"object": "list", "data": data}, nil
 }
 
+// setSurfaces stores a model row's HTTP surfaces under both the canonical
+// "supported_surfaces" key and the pre-rename "supported_endpoints" key, with
+// identical values. GET /v1/models is public and client-visible, and a live
+// gateway showed supported_endpoints present on only 488 of 5,229 rows
+// (9.3%) — consumers already tolerate its absence — so the deprecated key is
+// kept for one release to avoid breaking anything still reading it, then
+// should be removed.
+func setSurfaces(entry map[string]any, surfaces []string) {
+	if len(surfaces) == 0 {
+		return
+	}
+	entry["supported_surfaces"] = surfaces
+	entry["supported_endpoints"] = surfaces // Deprecated: use supported_surfaces.
+}
+
 func discoveryAliasID(s *config.Settings, modelID string) (string, bool) {
 	low := strings.ToLower(modelID)
 	isClaude := strings.HasPrefix(low, "claude") || strings.HasPrefix(low, "anthropic")
@@ -263,10 +280,10 @@ func modelPresentationMetadata(
 	for key, value := range row.Capabilities {
 		capabilities[key] = value
 	}
-	endpoints := append([]string(nil), row.SupportedEndpoints...)
-	hasEndpoint := func(wanted string) bool {
-		for _, endpoint := range endpoints {
-			if strings.EqualFold(strings.TrimSpace(endpoint), wanted) {
+	surfaces := append([]string(nil), row.SupportedSurfaces...)
+	hasSurface := func(wanted string) bool {
+		for _, surface := range surfaces {
+			if strings.EqualFold(strings.TrimSpace(surface), wanted) {
 				return true
 			}
 		}
@@ -276,20 +293,20 @@ func modelPresentationMetadata(
 
 	// Embeddings are inferred BEFORE the audio branch and independently of it.
 	// A provider that reports nothing (LocalAI returns a bare `{"id": ...}`)
-	// otherwise lists its embedding model with no capabilities and no endpoints —
+	// otherwise lists its embedding model with no capabilities and no surfaces —
 	// which is exactly how `localai/granite-embedding-107m-multilingual` came to
-	// be advertised by `GET /v1/models` while no endpoint would accept it.
+	// be advertised by `GET /v1/models` while no surface would accept it.
 	// Note this is a name-shape inference and is therefore not authoritative: a
 	// provider that DOES report `embedding` in its capabilities (googleai does,
-	// at googleai.go:703) keeps its own answer and only gains the endpoint.
+	// at googleai.go:703) keeps its own answer and only gains the surface.
 	if declared, _ := row.Capabilities["embedding"].(bool); declared || looksLikeEmbeddingModel(haystack) {
 		capabilities["embedding"] = true
-		if !hasEndpoint("/v1/embeddings") {
-			endpoints = append(endpoints, "/v1/embeddings")
+		if !hasSurface("/v1/embeddings") {
+			surfaces = append(surfaces, "/v1/embeddings")
 		}
 		// An embedding model is not a chat model, and claiming both would put it
 		// into failover chains that would try to converse with it.
-		return capabilities, endpoints
+		return capabilities, surfaces
 	}
 
 	explicitAudio := false
@@ -300,14 +317,14 @@ func modelPresentationMetadata(
 			explicitAudio = true
 		}
 	}
-	for _, endpoint := range endpoints {
-		if strings.Contains(strings.ToLower(endpoint), "/audio/") {
+	for _, surface := range surfaces {
+		if strings.Contains(strings.ToLower(surface), "/audio/") {
 			explicitAudio = true
 		}
 	}
 	providerConfig := config.Get().Providers[providerID]
 	if explicitAudio || !providerInfersAudioCapabilities(providerID, providerConfig) {
-		return capabilities, endpoints
+		return capabilities, surfaces
 	}
 	switch {
 	case strings.Contains(haystack, "whisper") ||
@@ -316,19 +333,19 @@ func modelPresentationMetadata(
 		strings.Contains(haystack, "-stt") ||
 		strings.Contains(haystack, "-asr"):
 		capabilities["transcription"] = true
-		if !hasEndpoint("/v1/audio/transcriptions") {
-			endpoints = append(endpoints, "/v1/audio/transcriptions")
+		if !hasSurface("/v1/audio/transcriptions") {
+			surfaces = append(surfaces, "/v1/audio/transcriptions")
 		}
 	case strings.Contains(haystack, "piper") ||
 		strings.Contains(haystack, "vits") ||
 		strings.Contains(haystack, "text-to-speech") ||
 		strings.Contains(haystack, "-tts"):
 		capabilities["tts"] = true
-		if !hasEndpoint("/v1/audio/speech") {
-			endpoints = append(endpoints, "/v1/audio/speech")
+		if !hasSurface("/v1/audio/speech") {
+			surfaces = append(surfaces, "/v1/audio/speech")
 		}
 	}
-	return capabilities, endpoints
+	return capabilities, surfaces
 }
 
 func providerInfersAudioCapabilities(
@@ -347,7 +364,7 @@ func providerInfersAudioCapabilities(
 
 func categoryPresentationMetadata(
 	principal *config.Principal,
-	members []config.CategoryMember,
+	members []config.EndpointMember,
 ) (map[string]any, []string) {
 	modalities := make([]map[string]bool, 0, len(members))
 	for _, member := range members {
@@ -357,8 +374,8 @@ func categoryPresentationMetadata(
 		if !found {
 			return nil, nil
 		}
-		capabilities, endpoints := modelPresentationMetadata(member.Provider, row)
-		current := modalitySet(capabilities, endpoints)
+		capabilities, surfaces := modelPresentationMetadata(member.Provider, row)
+		current := modalitySet(capabilities, surfaces)
 		if len(current) == 0 {
 			return nil, nil
 		}
@@ -386,21 +403,21 @@ func commonCategoryPresentationMetadata(
 	}
 	for _, modality := range []string{"transcription", "tts", "image", "video", "embedding"} {
 		if shared[modality] {
-			endpoint := map[string]string{
+			surface := map[string]string{
 				"transcription": "/v1/audio/transcriptions",
 				"tts":           "/v1/audio/speech",
 				"image":         "/v1/images/generations",
 				"video":         "/v1/videos/generations",
 				"embedding":     "/v1/embeddings",
 			}[modality]
-			return map[string]any{modality: true}, []string{endpoint}
+			return map[string]any{modality: true}, []string{surface}
 		}
 	}
 	return nil, nil
 }
 
 func modalitySet(
-	capabilities map[string]any, endpoints []string,
+	capabilities map[string]any, surfaces []string,
 ) map[string]bool {
 	out := map[string]bool{}
 	for key, value := range capabilities {
@@ -420,17 +437,17 @@ func modalitySet(
 			out["embedding"] = true
 		}
 	}
-	for _, endpoint := range endpoints {
+	for _, surface := range surfaces {
 		switch {
-		case strings.Contains(endpoint, "/audio/transcriptions"):
+		case strings.Contains(surface, "/audio/transcriptions"):
 			out["transcription"] = true
-		case strings.Contains(endpoint, "/audio/speech"):
+		case strings.Contains(surface, "/audio/speech"):
 			out["tts"] = true
-		case strings.Contains(endpoint, "/images/generations"):
+		case strings.Contains(surface, "/images/generations"):
 			out["image"] = true
-		case strings.Contains(endpoint, "/videos/generations"):
+		case strings.Contains(surface, "/videos/generations"):
 			out["video"] = true
-		case strings.Contains(endpoint, "/embeddings"):
+		case strings.Contains(surface, "/embeddings"):
 			out["embedding"] = true
 		}
 	}
@@ -471,9 +488,9 @@ func modelAllowed(
 	return matches(principal.AllowedModels) && matches(project.AllowedModels)
 }
 
-// chatEndpoints are the OpenAI/Anthropic chat surfaces; a model that declares any
+// chatSurfaces are the OpenAI/Anthropic chat surfaces; a model that declares any
 // of them is conversational (as opposed to an embedding or audio model).
-var chatEndpoints = map[string]bool{
+var chatSurfaces = map[string]bool{
 	"/chat/completions": true, "/v1/chat/completions": true,
 	"/messages": true, "/v1/messages": true,
 	"/responses": true, "/v1/responses": true, "ws:/responses": true,
@@ -499,7 +516,7 @@ var nonChatNameHints = []string{
 // isChatModel reports whether a catalog model is a chat/coding model (vs an
 // embedding, TTS/STT, reranker, or other non-chat model). It keeps Claude Code's
 // /model picker free of non-chat noise. A model qualifies if it declares a chat
-// endpoint or a conversational capability AND is not a known utility model;
+// surface or a conversational capability AND is not a known utility model;
 // models with no such metadata (e.g. local audio/embedding models that expose
 // only an id) are excluded.
 func isChatModel(row providers.ModelInfo) bool {
@@ -512,8 +529,8 @@ func isChatModel(row providers.ModelInfo) bool {
 			return false
 		}
 	}
-	for _, ep := range row.SupportedEndpoints {
-		if chatEndpoints[strings.TrimSpace(strings.ToLower(ep))] {
+	for _, surface := range row.SupportedSurfaces {
+		if chatSurfaces[strings.TrimSpace(strings.ToLower(surface))] {
 			return true
 		}
 	}

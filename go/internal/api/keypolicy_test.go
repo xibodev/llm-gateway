@@ -20,11 +20,11 @@ func TestEnforceKeyPolicy_ModelAllowlist(t *testing.T) {
 }
 
 func TestModelPolicyAllowsEquivalentDirectModelIDsButRequiresRouteName(t *testing.T) {
-	oldCategories := config.Get().Categories
-	t.Cleanup(func() { config.Update(func(s *config.Settings) { s.Categories = oldCategories }) })
+	oldEndpoints := config.Get().Endpoints
+	t.Cleanup(func() { config.Update(func(s *config.Settings) { s.Endpoints = oldEndpoints }) })
 	config.Update(func(s *config.Settings) {
-		s.Categories = map[string]*config.CategoryConfig{
-			"smart": {Failover: []config.CategoryMember{{Provider: "copilot", Model: "gpt-4o"}}},
+		s.Endpoints = map[string]*config.EndpointConfig{
+			"smart": {Failover: []config.EndpointMember{{Provider: "copilot", Model: "gpt-4o"}}},
 		}
 	})
 	targets := []router.Target{{Provider: "copilot", Model: "gpt-4o"}}
@@ -66,8 +66,8 @@ func TestModelPolicyAllowsEquivalentDirectModelIDsButRequiresRouteName(t *testin
 	}
 
 	config.Update(func(s *config.Settings) {
-		s.Categories["SMART"] = &config.CategoryConfig{
-			Failover: []config.CategoryMember{{Provider: "copilot", Model: "gpt-4.1"}},
+		s.Endpoints["SMART"] = &config.EndpointConfig{
+			Failover: []config.EndpointMember{{Provider: "copilot", Model: "gpt-4.1"}},
 		}
 	})
 	resolution, err = router.ResolveForPrincipal("SMART", nil)

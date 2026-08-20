@@ -18,11 +18,11 @@ func TestAdminRouteRejectsUnknownMembersAndPreservesOrder(t *testing.T) {
 	iam.ResetForTests()
 	providers.ResetProviders()
 	t.Cleanup(func() { iam.ResetForTests(); providers.ResetProviders() })
-	oldProviders, oldCategories := config.Get().Providers, config.Get().Categories
+	oldProviders, oldEndpoints := config.Get().Providers, config.Get().Endpoints
 	oldKey, oldAllow := config.Get().APIKey, config.Get().AllowUnauthenticatedAPI
 	t.Cleanup(func() {
 		config.Update(func(s *config.Settings) {
-			s.Providers, s.Categories = oldProviders, oldCategories
+			s.Providers, s.Endpoints = oldProviders, oldEndpoints
 			s.APIKey, s.AllowUnauthenticatedAPI = oldKey, oldAllow
 		})
 	})
@@ -30,7 +30,7 @@ func TestAdminRouteRejectsUnknownMembersAndPreservesOrder(t *testing.T) {
 		s.APIKey = "admin-secret"
 		s.AllowUnauthenticatedAPI = false
 		s.Providers = map[string]*config.ProviderConfig{"echo": {Type: "echo"}}
-		s.Categories = map[string]*config.CategoryConfig{}
+		s.Endpoints = map[string]*config.EndpointConfig{}
 	})
 	if _, err := iam.Initialize(); err != nil {
 		t.Fatal(err)
@@ -62,24 +62,24 @@ func TestAdminRouteRejectsUnknownMembersAndPreservesOrder(t *testing.T) {
 	if status != http.StatusBadRequest || duplicate["error"] == nil {
 		t.Fatalf("case-colliding route status=%d payload=%+v", status, duplicate)
 	}
-	route := config.Get().Categories["coding"]
+	route := config.Get().Endpoints["coding"]
 	if route == nil || len(route.Failover) != 2 || route.Failover[0].Model != "echo-strong" || route.Failover[1].Model != "echo-small" {
 		t.Fatalf("saved route=%+v", route)
 	}
 }
 
 func TestStoreCategoryAtomicallyRejectsCaseCollisions(t *testing.T) {
-	oldCategories := config.Get().Categories
+	oldEndpoints := config.Get().Endpoints
 	t.Cleanup(func() {
 		config.Update(func(s *config.Settings) {
-			s.Categories = oldCategories
+			s.Endpoints = oldEndpoints
 		})
 	})
 	config.Update(func(s *config.Settings) {
-		s.Categories = map[string]*config.CategoryConfig{}
+		s.Endpoints = map[string]*config.EndpointConfig{}
 	})
 
-	members := []config.CategoryMember{{Provider: "echo", Model: "echo-strong"}}
+	members := []config.EndpointMember{{Provider: "echo", Model: "echo-strong"}}
 	start := make(chan struct{})
 	results := make(chan error, 2)
 	var ready sync.WaitGroup
@@ -88,7 +88,7 @@ func TestStoreCategoryAtomicallyRejectsCaseCollisions(t *testing.T) {
 		go func(name string) {
 			ready.Done()
 			<-start
-			results <- storeCategory(name, members)
+			results <- storeEndpoint(name, members)
 		}(name)
 	}
 	ready.Wait()
@@ -100,8 +100,8 @@ func TestStoreCategoryAtomicallyRejectsCaseCollisions(t *testing.T) {
 			successes++
 		}
 	}
-	if successes != 1 || len(config.Get().Categories) != 1 {
-		t.Fatalf("successes=%d categories=%+v", successes, config.Get().Categories)
+	if successes != 1 || len(config.Get().Endpoints) != 1 {
+		t.Fatalf("successes=%d categories=%+v", successes, config.Get().Endpoints)
 	}
 }
 
@@ -145,12 +145,12 @@ func TestAdminCodexCatalogAndRouteValidationArePrincipalScoped(t *testing.T) {
 	providers.ResetProviders()
 	t.Cleanup(func() { iam.ResetForTests(); providers.ResetProviders() })
 	key := make([]byte, 32)
-	oldProviders, oldCategories := config.Get().Providers, config.Get().Categories
+	oldProviders, oldEndpoints := config.Get().Providers, config.Get().Endpoints
 	oldAPIKey, oldAllow := config.Get().APIKey, config.Get().AllowUnauthenticatedAPI
 	oldCredentialKey, oldClientID := config.Get().CredentialEncryptionKey, config.Get().OpenAICodexClientID
 	t.Cleanup(func() {
 		config.Update(func(s *config.Settings) {
-			s.Providers, s.Categories = oldProviders, oldCategories
+			s.Providers, s.Endpoints = oldProviders, oldEndpoints
 			s.APIKey, s.AllowUnauthenticatedAPI = oldAPIKey, oldAllow
 			s.CredentialEncryptionKey, s.OpenAICodexClientID = oldCredentialKey, oldClientID
 		})
@@ -160,7 +160,7 @@ func TestAdminCodexCatalogAndRouteValidationArePrincipalScoped(t *testing.T) {
 		s.CredentialEncryptionKey = base64.RawURLEncoding.EncodeToString(key)
 		s.OpenAICodexClientID = "fixture-client"
 		s.Providers = map[string]*config.ProviderConfig{"codex": {Type: "openai_compatible", RegistryID: "openai_codex"}}
-		s.Categories = map[string]*config.CategoryConfig{}
+		s.Endpoints = map[string]*config.EndpointConfig{}
 	})
 	if _, err := iam.Initialize(); err != nil {
 		t.Fatal(err)

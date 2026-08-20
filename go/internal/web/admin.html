@@ -143,7 +143,7 @@ tailwind.config={theme:{extend:{
       <template x-if="page==='providers'"><div class="flex gap-2">
         <button @click="detectLocal()" class="btn btn-ghost px-3 py-1.5 text-sm">Detect local</button>
         <button @click="openDrawer()" class="btn btn-primary px-3.5 py-1.5 text-sm">+ Add provider</button></div></template>
-      <template x-if="page==='categories'"><div class="flex gap-2"><input x-model="newCat" @keydown.enter="createCat()" placeholder="new category" class="inp px-3 py-1.5 text-sm w-40">
+      <template x-if="page==='categories'"><div class="flex gap-2"><input x-model="newCat" @keydown.enter="createCat()" placeholder="new endpoint" class="inp px-3 py-1.5 text-sm w-40">
         <button @click="createCat()" class="btn btn-primary px-3.5 py-1.5 text-sm">+ Create</button></div></template>
       <template x-if="page==='keys'"><div class="flex gap-2">
         <select x-model="keyForm.projectID" class="inp px-3 py-1.5 text-sm w-40"><option value="">project</option><template x-for="p in (s?.projects||[])" :key="p.id"><option :value="p.id" x-text="p.name"></option></template></select>
@@ -174,9 +174,9 @@ tailwind.config={theme:{extend:{
                 <span class="w-6 h-6 rounded grid place-items-center text-xs font-bold" :style="'background:'+typeColor(p.type)+'22;color:'+typeColor(p.type)" x-text="p.type[0].toUpperCase()"></span>
                 <span class="text-sm text-hi" x-text="p.id"></span><span class="text-xs text-sub" x-text="p.type"></span></div></template>
               <p x-show="s.providers.length===0" class="text-sm text-mut py-4">No providers yet.</p></div>
-            <div class="card p-5"><div class="flex items-center justify-between mb-3"><h3 class="label">Categories</h3><button @click="go('categories')" class="text-xs text-accent hover:underline">manage &#8594;</button></div>
-              <template x-for="(cat,name) in s.categories" :key="name"><div class="py-2 border-t border-sep first:border-0"><code class="text-sm text-accent" x-text="name"></code> <span class="text-xs text-sub" x-text="cat.failover.length+' models'"></span></div></template>
-              <p x-show="Object.keys(s.categories).length===0" class="text-sm text-mut py-4">No categories yet.</p></div>
+            <div class="card p-5"><div class="flex items-center justify-between mb-3"><h3 class="label">Endpoints</h3><button @click="go('categories')" class="text-xs text-accent hover:underline">manage &#8594;</button></div>
+              <template x-for="(cat,name) in s.endpoints" :key="name"><div class="py-2 border-t border-sep first:border-0"><code class="text-sm text-accent" x-text="name"></code> <span class="text-xs text-sub" x-text="cat.failover.length+' models'"></span></div></template>
+              <p x-show="Object.keys(s.endpoints).length===0" class="text-sm text-mut py-4">No endpoints yet.</p></div>
           </div>
         </section>
 
@@ -216,9 +216,9 @@ tailwind.config={theme:{extend:{
             <div class="flex gap-2 justify-center"><button @click="detectLocal()" class="btn btn-ghost px-4 py-2 text-sm">Detect local</button><button @click="openDrawer()" class="btn btn-primary px-4 py-2 text-sm">+ Add provider</button></div></div>
         </section>
 
-        <!-- CATEGORIES -->
+        <!-- ENDPOINTS -->
         <section x-show="page==='categories'" class="space-y-4">
-          <template x-for="(cat,name) in s.categories" :key="name"><div class="card p-5">
+          <template x-for="(cat,name) in s.endpoints" :key="name"><div class="card p-5">
             <div class="flex items-center justify-between"><div class="flex items-center gap-2"><span class="label">/v1 model</span><code class="text-accent font-medium" x-text="name"></code><span class="text-xs text-sub" x-text="cat.failover.length+' in chain'"></span></div>
               <div class="flex gap-2"><button x-show="!editing[name]" @click="startEdit(name)" class="btn btn-ghost text-xs px-3 py-1">Edit</button><button @click="delCat(name)" class="btn btn-ghost text-xs px-2 py-1 hover:!text-neg">Delete</button></div></div>
             <div x-show="!editing[name]" class="flex flex-wrap items-center gap-2 mt-4">
@@ -235,8 +235,8 @@ tailwind.config={theme:{extend:{
                 <button @click="saveCat(name)" class="btn btn-primary text-sm px-4 py-2">Save</button><button @click="delete editing[name]" class="btn btn-ghost text-sm px-3 py-2">Cancel</button></div>
               <p class="text-xs text-sub">Order = failover order. Same-provider members cascade on throttle; cross-provider members fail over.</p></div>
           </div></template>
-          <div x-show="Object.keys(s.categories).length===0" class="card p-12 text-center"><div class="w-11 h-11 rounded tile grid place-items-center mx-auto mb-4">&#9939;</div>
-            <h3 class="text-hi font-medium">No categories</h3><p class="text-sm text-mut mt-1">Create one, then pin real models (from any provider) into an ordered failover chain.<br>Tip: open a provider's <b>Models</b> first so they appear in the picker.</p></div>
+          <div x-show="Object.keys(s.endpoints).length===0" class="card p-12 text-center"><div class="w-11 h-11 rounded tile grid place-items-center mx-auto mb-4">&#9939;</div>
+            <h3 class="text-hi font-medium">No endpoints</h3><p class="text-sm text-mut mt-1">Create one, then pin real models (from any provider) into an ordered failover chain.<br>Tip: open a provider's <b>Models</b> first so they appear in the picker.</p></div>
         </section>
 
         <!-- MODELS -->
@@ -262,15 +262,15 @@ tailwind.config={theme:{extend:{
             <p x-show="(modelCards()[p.id]||[]).length===0" class="text-sm text-mut py-2">No catalog yet — click <b>Refresh</b> (or <b>Test</b> on Providers).</p>
           </div></template>
 
-          <!-- category virtual models -->
-          <div class="card p-5" x-show="catalog.some(m=>m.owned_by==='category')">
-            <h3 class="text-hi font-medium mb-3">Categories <span class="text-xs text-sub font-normal">— virtual models that fail over</span></h3>
-            <div class="flex flex-wrap gap-2"><template x-for="m in catalog.filter(x=>x.owned_by==='category' && (!q||x.id.toLowerCase().includes(q.toLowerCase())))" :key="m.id">
+          <!-- endpoint virtual models -->
+          <div class="card p-5" x-show="catalog.some(m=>m.owned_by==='endpoint')">
+            <h3 class="text-hi font-medium mb-3">Endpoints <span class="text-xs text-sub font-normal">— virtual models that fail over</span></h3>
+            <div class="flex flex-wrap gap-2"><template x-for="m in catalog.filter(x=>x.owned_by==='endpoint' && (!q||x.id.toLowerCase().includes(q.toLowerCase())))" :key="m.id">
               <span class="inline-flex items-center gap-2 text-sm bg-hl border border-sep rounded px-3 py-1.5"><code class="text-accent" x-text="m.id"></code><span class="text-xs text-sub" x-text="(m.failover||[]).length+' in chain'"></span></span></template></div>
           </div>
 
           <div x-show="catalog.length===0" class="card p-12 text-center"><div class="w-11 h-11 rounded tile grid place-items-center mx-auto mb-4">&#128230;</div>
-            <h3 class="text-hi font-medium">No models yet</h3><p class="text-sm text-mut mt-1">Add a provider and click <b>Refresh</b> / <b>Test</b>, or create a category.</p></div>
+            <h3 class="text-hi font-medium">No models yet</h3><p class="text-sm text-mut mt-1">Add a provider and click <b>Refresh</b> / <b>Test</b>, or create an endpoint.</p></div>
         </section>
 
         <!-- IDENTITY -->
@@ -369,7 +369,7 @@ tailwind.config={theme:{extend:{
               <tbody><template x-for="(e,i) in (tele?.recent||[])" :key="i"><tr class="border-t border-sep align-top"><td class="px-5 py-2 text-mut whitespace-nowrap" x-text="fmtTime(e.ts)"></td><td class="px-5 py-2"><code class="text-accent" x-text="e.requested"></code><span x-show="e.throttled" class="chip chip-warn ml-2">throttled</span></td>
                 <td class="px-5 py-2"><div class="flex flex-wrap gap-1.5">
                   <template x-for="(a,j) in e.attempts" :key="j"><span class="chip" :class="a.ok?'chip-ok':'chip-bad'" :title="a.error||''"><span x-text="a.ok?'&#10003;':'&#10007;'"></span><span x-text="a.provider+'/'+a.model"></span><span x-show="a.throttled" class="text-warn">&#183;429</span></span></template></div></td></tr></template></tbody></table>
-              <p x-show="!tele||tele.recent.length===0" class="text-sm text-mut px-5 py-6 text-center">No failover events yet. They appear when a category retries past a failed/throttled target.</p></div></div>
+              <p x-show="!tele||tele.recent.length===0" class="text-sm text-mut px-5 py-6 text-center">No failover events yet. They appear when an endpoint retries past a failed/throttled target.</p></div></div>
           <div class="grid lg:grid-cols-2 gap-4">
             <div class="card p-4"><h3 class="label mb-3">Alert rules</h3><div class="grid grid-cols-2 gap-2"><select x-model="alertForm.projectID" class="inp px-2 py-1.5 text-sm"><option value="">all projects</option><template x-for="p in (s?.projects||[])" :key="p.id"><option :value="p.id" x-text="p.name"></option></template></select><select x-model="alertForm.metric" class="inp px-2 py-1.5 text-sm"><option>requests</option><option>input_tokens</option><option>output_tokens</option><option>total_tokens</option><option>cost_microusd</option><option>credits_milli</option></select><select x-model="alertForm.period" class="inp px-2 py-1.5 text-sm"><option>day</option><option>month</option></select><input type="number" min="1" max="100" x-model.number="alertForm.threshold" class="inp px-2 py-1.5 text-sm" placeholder="percent"><button @click="createAlert()" class="btn btn-primary px-3 py-1.5 text-sm">Add quota alert</button></div><div class="mt-3"><template x-for="a in alerts" :key="a.id"><div class="border-t border-sep py-2 text-sm flex"><span x-text="(a.project_id?projectName(a.project_id):'all')+' · '+a.metric+' '+a.threshold+'%/'+a.period"></span><button @click="deleteAlert(a.id)" class="ml-auto text-xs text-neg">delete</button></div></template></div></div>
             <div class="card p-4"><h3 class="label mb-3">Notification outbox</h3><template x-for="e in outbox" :key="e.id"><div class="border-t border-sep py-2 text-sm"><div class="flex"><span class="chip chip-warn" x-text="e.kind"></span><span class="ml-auto text-xs text-mut" x-text="fmtTime(e.ts)"></span></div><div class="text-xs text-mut mt-1" x-text="JSON.stringify(e.payload)"></div></div></template><p x-show="outbox.length===0" class="text-sm text-mut">No pending notifications.</p></div>
@@ -419,7 +419,7 @@ tailwind.config={theme:{extend:{
                   </div></div>
                 <div class="space-y-3"><h4>Three things to know</h4>
                   <div class="step"><div class="step-n">1</div><p><b class="text-hi">Providers</b> are your upstreams — an id + type + key. Keys never touch the config file; they live in a 0600 secrets store. Manage them on <a class="lnk" @click="go('providers')">Providers</a>.</p></div>
-                  <div class="step"><div class="step-n">2</div><p><b class="text-hi">Categories</b> are the model names your CLIs actually request. Each is an <i>ordered failover chain</i> of pinned <code>provider/model</code> targets — e.g. a <code>smart</code> category that tries Claude first, then a local model. Build them on <a class="lnk" @click="go('categories')">Categories</a>.</p></div>
+                  <div class="step"><div class="step-n">2</div><p><b class="text-hi">Endpoints</b> are the model names your CLIs actually request. Each is an <i>ordered failover chain</i> of pinned <code>provider/model</code> targets — e.g. a <code>smart</code> endpoint that tries Claude first, then a local model. Build them on <a class="lnk" @click="go('categories')">Endpoints</a>.</p></div>
                   <div class="step"><div class="step-n">3</div><p><b class="text-hi">Keys</b> are per-project bearer tokens you mint here. Every request is attributed to a project + key so <a class="lnk" @click="go('usage')">Usage</a> can show cost and failover behaviour per project.</p></div>
                 </div>
                 <div class="callout callout-tip"><span>&#128161;</span><span>New here? Head to <b class="text-hi">Getting started → Quickstart</b> for the three-minute setup.</span></div>
@@ -430,15 +430,15 @@ tailwind.config={theme:{extend:{
                 <div><h3>Quickstart</h3><p class="mt-2">Get a CLI talking to the gateway in three steps. Your gateway base URL is <code x-text="orig()"></code>.</p></div>
                 <div class="space-y-4">
                   <div class="step"><div class="step-n">1</div><div class="flex-1"><h4>Mint a project key</h4><p class="mt-1">On <a class="lnk" @click="go('keys')">Keys</a>, enter a project and key name, then <b>Mint key</b>. Copy the <code>llmgw_…</code> token — it's shown once.</p></div></div>
-                  <div class="step"><div class="step-n">2</div><div class="flex-1"><h4>Make sure a model is reachable</h4><p class="mt-1">Add at least one <a class="lnk" @click="go('providers')">provider</a>, then either request a pinned <code>provider/model</code> directly or wrap a few into a <a class="lnk" @click="go('categories')">category</a> like <code>smart</code>. Check <a class="lnk" @click="go('models')">Models</a> to see every name you can request.</p></div></div>
-                  <div class="step"><div class="step-n">3</div><div class="flex-1"><h4>Point your CLI at the gateway</h4><p class="mt-1">Set the base URL + token as environment variables, then use a category or <code>provider/model</code> as the model. Full per-CLI recipes are under <a class="lnk" @click="doc='connect'">Guides → Connect a CLI</a>.</p>
+                  <div class="step"><div class="step-n">2</div><div class="flex-1"><h4>Make sure a model is reachable</h4><p class="mt-1">Add at least one <a class="lnk" @click="go('providers')">provider</a>, then either request a pinned <code>provider/model</code> directly or wrap a few into an <a class="lnk" @click="go('categories')">endpoint</a> like <code>smart</code>. Check <a class="lnk" @click="go('models')">Models</a> to see every name you can request.</p></div></div>
+                  <div class="step"><div class="step-n">3</div><div class="flex-1"><h4>Point your CLI at the gateway</h4><p class="mt-1">Set the base URL + token as environment variables, then use an endpoint or <code>provider/model</code> as the model. Full per-CLI recipes are under <a class="lnk" @click="doc='connect'">Guides → Connect a CLI</a>.</p>
                     <div class="cbwrap mt-2"><button class="copy" @click="copy(snOpenAI())">copy</button><pre class="cb"><code x-text="snOpenAI()"></code></pre></div></div></div>
                 </div>
               </div>
 
               <!-- CONNECT A CLI -->
               <div x-show="doc==='connect'" class="space-y-5">
-                <div><h3>Connect a coding CLI</h3><p class="mt-2">The gateway speaks both the OpenAI and Anthropic wire formats, so most tools just need two environment variables: the base URL and your minted key. Use a <b class="text-hi">category</b> (e.g. <code>smart</code>) or a <code>provider/model</code> as the model name.</p></div>
+                <div><h3>Connect a coding CLI</h3><p class="mt-2">The gateway speaks both the OpenAI and Anthropic wire formats, so most tools just need two environment variables: the base URL and your minted key. Use an <b class="text-hi">endpoint</b> (e.g. <code>smart</code>) or a <code>provider/model</code> as the model name.</p></div>
                 <div><h4 class="mb-1.5">OpenAI-style — Codex, OpenAI SDKs, most tools</h4>
                   <div class="cbwrap"><button class="copy" @click="copy(snOpenAI())">copy</button><pre class="cb"><code x-text="snOpenAI()"></code></pre></div></div>
                 <div><h4 class="mb-1.5">Anthropic-style — Claude Code / <code>claude</code> CLI</h4>
@@ -474,7 +474,7 @@ tailwind.config={theme:{extend:{
                 <div class="space-y-4">
                   <div class="step"><div class="step-n">1</div><div class="flex-1"><h4>Create a Bedrock API key</h4><p class="mt-1">In the AWS console: <b>Amazon Bedrock → API keys → Generate</b>. You get a long-lived <code>AWS_BEARER_TOKEN_BEDROCK</code>. Make sure the models you want are enabled in that region under <b>Model access</b>.</p></div></div>
                   <div class="step"><div class="step-n">2</div><div class="flex-1"><h4>Add the provider</h4><p class="mt-1">On <a class="lnk" @click="go('providers')">Providers</a>, add one of type <code>bedrock</code>, set the <b>region</b> (e.g. <code>us-east-1</code>), and paste the API key. The endpoint is templated to <code>https://bedrock-runtime.&lt;region&gt;.amazonaws.com/v1</code>.</p></div></div>
-                  <div class="step"><div class="step-n">3</div><div class="flex-1"><h4>Request Bedrock models</h4><p class="mt-1">Click <b>Test</b> / <b>Models</b> to enumerate, then use ids like <code>us.anthropic.claude-sonnet-4-6</code> or <code>openai.gpt-oss-120b</code> — directly, or pinned into a category.</p></div></div>
+                  <div class="step"><div class="step-n">3</div><div class="flex-1"><h4>Request Bedrock models</h4><p class="mt-1">Click <b>Test</b> / <b>Models</b> to enumerate, then use ids like <code>us.anthropic.claude-sonnet-4-6</code> or <code>openai.gpt-oss-120b</code> — directly, or pinned into an endpoint.</p></div></div>
                 </div>
                 <div class="callout callout-note"><span>&#8505;</span><span>Need a VPC endpoint or the newer <code>bedrock-mantle</code> host? Set the drawer's <b>Base URL (advanced override)</b> and it wins over the region template.</span></div>
                 <div class="callout callout-warn"><span>&#9888;</span><span>The IAM-role / SigV4 path is intentionally not bundled — it would drag in botocore/boto3 (tens of MB) for nothing the API key doesn't already do. If you truly need role-based auth, front the gateway with an AWS SigV4 proxy.</span></div>
@@ -495,7 +495,7 @@ tailwind.config={theme:{extend:{
                 <div><h3>GitHub Copilot as a provider</h3><p class="mt-2">If you have a Copilot subscription, the gateway can proxy its models to your other CLIs — no API key, just a one-time device login.</p></div>
                 <div class="space-y-4">
                   <div class="step"><div class="step-n">1</div><div class="flex-1"><h4>Sign in</h4><p class="mt-1">On <a class="lnk" @click="go('settings')">Settings</a>, click <b>Sign in (device code)</b>, open the shown URL and enter the code. The OAuth token is cached under <code>~/.llmgw/cache/</code> and refreshed automatically.</p></div></div>
-                  <div class="step"><div class="step-n">2</div><div class="flex-1"><h4>Use its models</h4><p class="mt-1">Once signed in, <code>copilot/…</code> models appear in <a class="lnk" @click="go('models')">Models</a> and can be pinned into categories like any other provider.</p></div></div>
+                  <div class="step"><div class="step-n">2</div><div class="flex-1"><h4>Use its models</h4><p class="mt-1">Once signed in, <code>copilot/…</code> models appear in <a class="lnk" @click="go('models')">Models</a> and can be pinned into endpoints like any other provider.</p></div></div>
                 </div>
                 <div class="callout callout-note"><span>&#8505;</span><span>The Copilot provider is gated behind <code>allow_copilot_proxy</code> / <code>LLMGW_EXPERIMENTAL_COPILOT_PROVIDER=1</code>. Respect GitHub's terms for your subscription.</span></div>
                 <div class="callout callout-tip"><span>&#128161;</span><span>Some Copilot models speak <b>only</b> the Responses API (<code>gpt-5.5</code>, <code>gpt-5.4-mini</code>, <code>gpt-5.3-codex</code>) and reject <code>/chat/completions</code>. The gateway can translate for them — but only when you opt in. See <a class="lnk" @click="doc='adaptation'">API adaptation</a>; off by default your CLI gets the provider's real error.</span></div>
@@ -508,25 +508,25 @@ tailwind.config={theme:{extend:{
                 <div class="space-y-4">
                   <div class="step"><div class="step-n">1</div><div class="flex-1"><h4>Enable per provider</h4><p class="mt-1">Set <code>force_api_support: true</code> on a provider in <code>config.yaml</code>. Every model that provider serves becomes adaptation-<i>eligible</i>, but only models whose catalog says they need it are actually translated — <code>gpt-4o</code>, Claude, etc. are untouched.</p></div></div>
                   <div class="step"><div class="step-n">2</div><div class="flex-1"><h4>Or per request</h4><p class="mt-1">Send <code>"force_api_support": true</code> in the request body. A request value overrides the provider config (send <code>false</code> to force it off). The gateway strips the field before calling upstream.</p></div></div>
-                  <div class="step"><div class="step-n">3</div><div class="flex-1"><h4>How the target is chosen</h4><p class="mt-1">Deterministically from the model's published <code>supported_endpoints</code> in the <a class="lnk" @click="go('models')">catalog</a> — never trial-and-error. A Responses-only model gets Chat&#8594;Responses; a reasoning model that requires <code>max_completion_tokens</code> gets <code>max_tokens</code> renamed.</p></div></div>
+                  <div class="step"><div class="step-n">3</div><div class="flex-1"><h4>How the target is chosen</h4><p class="mt-1">Deterministically from the model's published <code>supported_surfaces</code> (<code>supported_endpoints</code>, deprecated) in the <a class="lnk" @click="go('models')">catalog</a> — never trial-and-error. A Responses-only model gets Chat&#8594;Responses; a reasoning model that requires <code>max_completion_tokens</code> gets <code>max_tokens</code> renamed.</p></div></div>
                 </div>
                 <div class="callout callout-tip"><span>&#128161;</span><span>An adapted response carries the <code>X-LLMGW-Adapted</code> header (e.g. <code>chat-&gt;responses</code>). If you set the flag on the <i>request</i>, the body also echoes a no-op <code>forced_support</code> object; config-triggered adaptation stays header-only so strict clients aren't surprised.</span></div>
                 <div class="callout callout-note"><span>&#9888;</span><span>GPT-5.x are reasoning models — a small <code>max_tokens</code> is consumed by hidden reasoning tokens and can return empty with <code>finish_reason: length</code>. Give them &#8805; 200.</span></div>
               </div>
 
-              <!-- CATEGORIES -->
+              <!-- ENDPOINTS -->
               <div x-show="doc==='categories'" class="space-y-5">
-                <div><h3>Categories &amp; failover</h3><p class="mt-2">A <b class="text-hi">category</b> is a named, ordered chain of pinned <code>provider/model</code> targets. Your CLIs request the category name; the gateway tries each target in order and advances to the next on a throttle or error — <i>before the first streamed byte</i>, so failover is invisible to the client. This is the mechanism for juggling subscription limits.</p></div>
+                <div><h3>Endpoints &amp; failover</h3><p class="mt-2">An <b class="text-hi">endpoint</b> is a named, ordered chain of pinned <code>provider/model</code> targets. Your CLIs request the endpoint name; the gateway tries each target in order and advances to the next on a throttle or error — <i>before the first streamed byte</i>, so failover is invisible to the client. This is the mechanism for juggling subscription limits.</p></div>
                 <div><h4 class="mb-1.5">Example</h4>
                   <div class="cbwrap"><pre class="cb"><code>smart:
   1. copilot / claude-sonnet-4.5     &larr; try premium first
   2. bedrock / us.anthropic.claude-sonnet-4-6
   3. ollama  / llama3.1               &larr; free local fallback</code></pre></div></div>
                 <div class="space-y-2"><h4>How resolution works</h4>
-                  <p>&bull; A <b class="text-hi">category name</b> (<code>smart</code>) runs its whole chain.</p>
+                  <p>&bull; An <b class="text-hi">endpoint name</b> (<code>smart</code>) runs its whole chain.</p>
                   <p>&bull; A <b class="text-hi">provider/model</b> (<code>copilot/gpt-4o-mini</code>) targets exactly that one model.</p>
                   <p>&bull; Anything else returns <code>404</code> with the list of valid names.</p></div>
-                <div class="callout callout-tip"><span>&#128161;</span><span>Same-provider members cascade on throttle; cross-provider members fail over to a different subscription. Build chains on <a class="lnk" @click="go('categories')">Categories</a> and watch what actually fired on <a class="lnk" @click="go('usage')">Usage → Throttling &amp; fallback</a>.</span></div>
+                <div class="callout callout-tip"><span>&#128161;</span><span>Same-provider members cascade on throttle; cross-provider members fail over to a different subscription. Build chains on <a class="lnk" @click="go('categories')">Endpoints</a> and watch what actually fired on <a class="lnk" @click="go('usage')">Usage → Throttling &amp; fallback</a>.</span></div>
               </div>
 
               <!-- KEYS -->
@@ -558,7 +558,7 @@ tailwind.config={theme:{extend:{
                 <div class="overflow-hidden rounded border border-sep"><table class="w-full text-sm">
                   <thead><tr class="label"><th class="text-left font-medium px-4 py-2">Method</th><th class="text-left font-medium px-4 py-2">Path</th><th class="text-left font-medium px-4 py-2">Purpose</th></tr></thead>
                   <tbody class="text-fg">
-                    <tr class="border-t border-sep"><td class="px-4 py-1.5">GET</td><td class="px-4 py-1.5"><code>/v1/models</code></td><td class="px-4 py-1.5">List categories + <code>provider/model</code> names</td></tr>
+                    <tr class="border-t border-sep"><td class="px-4 py-1.5">GET</td><td class="px-4 py-1.5"><code>/v1/models</code></td><td class="px-4 py-1.5">List endpoints + <code>provider/model</code> names</td></tr>
                     <tr class="border-t border-sep"><td class="px-4 py-1.5">POST</td><td class="px-4 py-1.5"><code>/v1/chat/completions</code></td><td class="px-4 py-1.5">OpenAI chat (streaming supported)</td></tr>
                     <tr class="border-t border-sep"><td class="px-4 py-1.5">POST</td><td class="px-4 py-1.5"><code>/v1/responses</code></td><td class="px-4 py-1.5">OpenAI Responses API</td></tr>
                     <tr class="border-t border-sep"><td class="px-4 py-1.5">POST</td><td class="px-4 py-1.5"><code>/v1/messages</code></td><td class="px-4 py-1.5">Anthropic Messages (native)</td></tr>
@@ -568,9 +568,9 @@ tailwind.config={theme:{extend:{
 
               <!-- MODEL NAMING -->
               <div x-show="doc==='models'" class="space-y-5">
-                <div><h3>Model naming</h3><p class="mt-2">The <code>model</code> field in a request is either a category or a fully-qualified target. <a class="lnk" @click="go('models')">Models</a> lists every valid value.</p></div>
+                <div><h3>Model naming</h3><p class="mt-2">The <code>model</code> field in a request is either an endpoint or a fully-qualified target. <a class="lnk" @click="go('models')">Models</a> lists every valid value.</p></div>
                 <div class="space-y-2">
-                  <p><b class="text-hi">Category</b> — a name you defined, e.g. <code>smart</code> or <code>cheap</code>. Runs its failover chain. Best for day-to-day use.</p>
+                  <p><b class="text-hi">Endpoint</b> — a name you defined, e.g. <code>smart</code> or <code>cheap</code>. Runs its failover chain. Best for day-to-day use.</p>
                   <p><b class="text-hi">provider/model</b> — a specific pinned model, e.g. <code>copilot/gpt-4o-mini</code> or <code>bedrock/us.anthropic.claude-sonnet-4-6</code>. No failover; goes straight to that upstream.</p>
                   <p><b class="text-hi">Real names only</b> — models are listed exactly as the upstream names them; the gateway does not invent aliases.</p></div>
                 <div class="callout callout-note"><span>&#8505;</span><span>A bare unknown model returns <code>404</code> with the list of valid names, so a mistyped model fails fast and legibly.</span></div>
@@ -582,7 +582,7 @@ tailwind.config={theme:{extend:{
                 <div class="overflow-hidden rounded border border-sep"><table class="w-full text-sm">
                   <thead><tr class="label"><th class="text-left font-medium px-4 py-2">Path</th><th class="text-left font-medium px-4 py-2">Contents</th></tr></thead>
                   <tbody class="text-fg">
-                    <tr class="border-t border-sep"><td class="px-4 py-1.5"><code>config.yaml</code></td><td class="px-4 py-1.5">Providers, categories, policies (no keys) — safe to read/commit</td></tr>
+                    <tr class="border-t border-sep"><td class="px-4 py-1.5"><code>config.yaml</code></td><td class="px-4 py-1.5">Providers, endpoints, policies (no keys) — safe to read/commit</td></tr>
                     <tr class="border-t border-sep"><td class="px-4 py-1.5"><code>secrets.json</code></td><td class="px-4 py-1.5">Provider API keys, 0600</td></tr>
                     <tr class="border-t border-sep"><td class="px-4 py-1.5"><code>keys.json</code></td><td class="px-4 py-1.5">Minted project keys, 0600</td></tr>
                     <tr class="border-t border-sep"><td class="px-4 py-1.5"><code>usage.db</code></td><td class="px-4 py-1.5">Cost/usage ledger (project + key)</td></tr>
@@ -595,9 +595,9 @@ tailwind.config={theme:{extend:{
               <div x-show="doc==='troubleshooting'" class="space-y-4">
                 <div><h3>Troubleshooting</h3><p class="mt-2">The usual suspects and how to clear them.</p></div>
                 <div class="card p-4"><h4><code>401 Unauthorized</code></h4><p class="mt-1">The bearer token is missing or wrong. Mint one on <a class="lnk" @click="go('keys')">Keys</a> and set it as <code>OPENAI_API_KEY</code> / <code>ANTHROPIC_AUTH_TOKEN</code>. In open-local mode auth is off entirely.</p></div>
-                <div class="card p-4"><h4><code>404</code> — model not a category or provider/model</h4><p class="mt-1">The requested model name isn't known. Check exact spelling on <a class="lnk" @click="go('models')">Models</a>; use a category name or <code>provider/model</code>.</p></div>
+                <div class="card p-4"><h4><code>404</code> — model not an endpoint or provider/model</h4><p class="mt-1">The requested model name isn't known. Check exact spelling on <a class="lnk" @click="go('models')">Models</a>; use an endpoint name or <code>provider/model</code>.</p></div>
                 <div class="card p-4"><h4>Provider <b>Test</b> shows 0 models</h4><p class="mt-1">Usually a wrong base URL, a missing/invalid key, or the upstream not exposing a catalog. Re-check the URL (trailing <code>/v1</code>?) and the key; for Copilot, sign in on Settings.</p></div>
-                <div class="card p-4"><h4>Requests keep failing over / <code>429</code></h4><p class="mt-1">A provider is throttling. That's the gateway working — check <a class="lnk" @click="go('usage')">Usage → Throttling &amp; fallback</a> to see which target throttled and add a healthier fallback to the category.</p></div>
+                <div class="card p-4"><h4>Requests keep failing over / <code>429</code></h4><p class="mt-1">A provider is throttling. That's the gateway working — check <a class="lnk" @click="go('usage')">Usage → Throttling &amp; fallback</a> to see which target throttled and add a healthier fallback to the endpoint.</p></div>
                 <div class="card p-4"><h4>Detect local finds nothing</h4><p class="mt-1">Ensure the local server is running (e.g. <code>ollama serve</code>, or LocalAI/LM Studio listening). In Docker, start the container with <code>--add-host host.docker.internal:host-gateway</code> so it can reach host services.</p></div>
               </div>
             </div>
@@ -618,6 +618,8 @@ tailwind.config={theme:{extend:{
         <label class="block text-sm text-mut">ID<input x-model="form.id" placeholder="e.g. copilot, openrouter, groq" class="mt-1 w-full inp px-3 py-2 text-sm"></label>
         <label class="block text-sm text-mut">Type<select x-model="form.type" class="mt-1 w-full inp px-3 py-2 text-sm"><template x-for="t in s.provider_types" :key="t"><option x-text="t"></option></template></select></label>
         <label class="block text-sm text-mut" x-show="needsRegion()">AWS region<input x-model="form.region" placeholder="us-east-1" class="mt-1 w-full inp px-3 py-2 text-sm"><span class="text-xs text-sub">Endpoint becomes https://bedrock-runtime.&lt;region&gt;.amazonaws.com/v1</span></label>
+        <label class="block text-sm text-mut" x-show="needsProject()">Google Cloud project ID<input x-model="form.project" placeholder="your-project-id" class="mt-1 w-full inp px-3 py-2 text-sm"></label>
+        <label class="block text-sm text-mut" x-show="needsLocation()">Location<input x-model="form.location" placeholder="global" class="mt-1 w-full inp px-3 py-2 text-sm"></label>
         <label class="block text-sm text-mut" x-show="needsUrl() || (needsRegion() && form.base_url)"><span x-text="needsRegion()?'Base URL (advanced override)':'Base URL'"></span><input x-model="form.base_url" placeholder="https://…/v1" class="mt-1 w-full inp px-3 py-2 text-sm"></label>
         <label class="block text-sm text-mut" x-show="needsKey()"><span x-text="needsRegion()?'Bedrock API key (bearer token)':'API key'"></span><input x-model="form.api_key" type="password" :placeholder="needsRegion()?'AWS_BEARER_TOKEN_BEDROCK':'sk-…'" class="mt-1 w-full inp px-3 py-2 text-sm"><span class="text-xs text-sub">Stored in ~/.llmgw/secrets.json — never the config file.</span></label>
         <div class="text-xs bg-hl border rounded p-3 space-y-1" style="border-color:var(--warn-soft)" x-show="disclaimer && (needsUrl() || needsRegion())">
@@ -651,16 +653,16 @@ const IC={
 function app(){
   return {
     page:'overview', loading:false, s:null, drawer:false, scheme:'dark',
-    nav:[{id:'overview',label:'Overview',icon:IC.overview},{id:'providers',label:'Providers',icon:IC.providers},{id:'categories',label:'Categories',icon:IC.categories},{id:'models',label:'Models',icon:IC.models},{id:'identity',label:'Identity',icon:IC.identity},{id:'keys',label:'Keys',icon:IC.keys},{id:'usage',label:'Usage',icon:IC.usage},{id:'settings',label:'Settings',icon:IC.settings},{id:'help',label:'Docs',icon:IC.help}],
-    titles:{overview:{t:'Overview',d:'Your gateway at a glance'},providers:{t:'Providers',d:'Connected upstreams — keys stay in the secrets store'},categories:{t:'Categories',d:'Named, ordered failover chains of pinned models'},models:{t:'Models',d:'What your CLIs can request'},identity:{t:'Identity & projects',d:'Humans, services, memberships and BYOC credentials'},keys:{t:'API keys',d:'Hashed one-time keys assigned to a principal and project'},usage:{t:'Usage & telemetry',d:'Cost by project/key + throttle/fallback learning'},settings:{t:'Settings',d:'Auth, Copilot sign-in, storage'},help:{t:'Documentation',d:'Guides and reference for running your gateway'}},
-    form:{id:'',registry_id:'',type:'openai_compatible',base_url:'',api_key:'',region:'',force_api_support:false},
+    nav:[{id:'overview',label:'Overview',icon:IC.overview},{id:'providers',label:'Providers',icon:IC.providers},{id:'categories',label:'Endpoints',icon:IC.categories},{id:'models',label:'Models',icon:IC.models},{id:'identity',label:'Identity',icon:IC.identity},{id:'keys',label:'Keys',icon:IC.keys},{id:'usage',label:'Usage',icon:IC.usage},{id:'settings',label:'Settings',icon:IC.settings},{id:'help',label:'Docs',icon:IC.help}],
+    titles:{overview:{t:'Overview',d:'Your gateway at a glance'},providers:{t:'Providers',d:'Connected upstreams — keys stay in the secrets store'},categories:{t:'Endpoints',d:'Named, ordered failover chains of pinned models'},models:{t:'Models',d:'What your CLIs can request'},identity:{t:'Identity & projects',d:'Humans, services, memberships and BYOC credentials'},keys:{t:'API keys',d:'Hashed one-time keys assigned to a principal and project'},usage:{t:'Usage & telemetry',d:'Cost by project/key + throttle/fallback learning'},settings:{t:'Settings',d:'Auth, Copilot sign-in, storage'},help:{t:'Documentation',d:'Guides and reference for running your gateway'}},
+    form:{id:'',registry_id:'',type:'openai_compatible',base_url:'',api_key:'',region:'',project:'',location:'',force_api_support:false},
     newCat:'', editing:{}, pick:{provider:'',model:''}, pmodels:{}, tests:{}, catalog:[], q:'', discovered:[],
     keyForm:{projectID:'',principalID:'',name:'',rpm:0,daily:0,monthly:0,dailyIn:0,dailyOut:0,monthlyTokens:0,dailyUSD:0,monthlyUSD:0,dailyCredits:0,monthlyCredits:0,expiresDays:0,allowedModels:'',allowedProviders:'',showGov:false}, minted:'', usage:null, tele:null, alerts:[],outbox:[],alertForm:{projectID:'',metric:'requests',period:'day',threshold:80},disclaimer:false,
     identityForm:{kind:'human',name:'',email:'',subject:''}, projectForm:{name:'',slug:''}, membershipForm:{projectID:'',principalID:'',role:'member'}, connectionForm:{principalID:'',providerID:'',name:'default',secret:'',makeDefault:true}, byoc:{principalID:'',name:'',code:'',uri:'',device:'',status:''},
     doc:'overview',
     docNav:[
       {g:'Getting started',items:[{id:'overview',label:'Overview'},{id:'quickstart',label:'Quickstart'}]},
-      {g:'Guides',items:[{id:'connect',label:'Connect a CLI'},{id:'providers',label:'Add a provider'},{id:'bedrock',label:'Amazon Bedrock'},{id:'ollama',label:'Ollama (local)'},{id:'copilot',label:'GitHub Copilot'},{id:'adaptation',label:'API adaptation'},{id:'categories',label:'Categories & failover'},{id:'keys',label:'Projects & keys'},{id:'multimodal',label:'Audio & vision'}]},
+      {g:'Guides',items:[{id:'connect',label:'Connect a CLI'},{id:'providers',label:'Add a provider'},{id:'bedrock',label:'Amazon Bedrock'},{id:'ollama',label:'Ollama (local)'},{id:'copilot',label:'GitHub Copilot'},{id:'adaptation',label:'API adaptation'},{id:'categories',label:'Endpoints & failover'},{id:'keys',label:'Projects & keys'},{id:'multimodal',label:'Audio & vision'}]},
       {g:'Reference',items:[{id:'endpoints',label:'API endpoints'},{id:'models',label:'Model naming'},{id:'storage',label:'Storage & files'},{id:'troubleshooting',label:'Troubleshooting'}]},
     ],
     cp:{code:'',uri:'',status:'',device:''}, toasts:[],
@@ -671,25 +673,29 @@ function app(){
     key(){ return localStorage.getItem('llmgw_key')||''; },
     hdr(x){ const h=Object.assign({'Content-Type':'application/json'},x||{}); if(this.key())h['Authorization']='Bearer '+this.key(); return h; },
     async api(path,opts={}){ opts.headers=this.hdr(opts.headers); let r=await fetch(path,opts); if(r.status===401){ const k=prompt('API key (LLMGW_API_KEY):'); if(k){localStorage.setItem('llmgw_key',k);return this.api(path,opts);} } return r; },
-    async load(spin){ if(spin)this.loading=true; const r=await this.api('/admin/api/state'); if(r.ok)this.s=await r.json(); if(spin)setTimeout(()=>this.loading=false,300); },
+    async load(spin){ if(spin)this.loading=true; const r=await this.api('/admin/api/state'); if(r.ok){ const d=await r.json(); /* "endpoints" is canonical; "categories" is the deprecated alias this build still mirrors it under and a later release removes. Normalising here is the only read of the alias left, so the rest of this page survives that removal, and an older server still renders. */ if(!d.endpoints)d.endpoints=d.categories||{}; this.s=d; } if(spin)setTimeout(()=>this.loading=false,300); },
     toast(m,ok=true){ const id=Date.now()+Math.random(); this.toasts.push({id,msg:m,ok}); setTimeout(()=>this.toasts=this.toasts.filter(t=>t.id!==id),3200); },
     async copy(t){ try{ await navigator.clipboard.writeText(t); this.toast('copied'); }catch(e){ this.toast('copy failed',false); } },
     fmtTime(ts){ try{ return new Date(ts*1000).toLocaleString(); }catch(e){ return ts; } },
     orig(){ return location.origin; },
-    snOpenAI(){ return 'export OPENAI_BASE_URL='+location.origin+'/v1\nexport OPENAI_API_KEY=llmgw_your_key\n# then request a category or provider/model as the model name'; },
+    snOpenAI(){ return 'export OPENAI_BASE_URL='+location.origin+'/v1\nexport OPENAI_API_KEY=llmgw_your_key\n# then request an endpoint or provider/model as the model name'; },
     snAnthropic(){ return 'export ANTHROPIC_BASE_URL='+location.origin+'\nexport ANTHROPIC_AUTH_TOKEN=llmgw_your_key\n# Claude Code / claude CLI now route through the gateway'; },
     snCurl(){ return 'curl '+location.origin+'/v1/models \\\n  -H "Authorization: Bearer llmgw_your_key"'; },
     typeColor(t){ return {github_copilot:'#c8b06a',openai_compatible:'#4ea88a',openai:'#4ea88a',anthropic:'#d98a4a',bedrock:'#d98a4a',ollama:'#4aa5c0',litellm:'#b06ac8',echo:'#8a94a5'}[t]||'#8a94a5'; },
-    stats(){ const s=this.s; return [{k:'Providers',v:s.providers.length,icon:IC.providers},{k:'Categories',v:Object.keys(s.categories).length,icon:IC.categories},{k:'Models',v:this.catalog.length||'…',icon:IC.models},{k:'Saved',v:'$'+s.savings.savings_usd,icon:IC.usage}]; },
-    openDrawer(){ this.form={id:'',registry_id:'',type:'openai_compatible',base_url:'',api_key:'',region:'',force_api_support:false}; this.disclaimer=false; this.drawer=true; },
-    applyPreset(p){ if(p.availability!=='available')return; this.form.registry_id=p.id; this.form.id=p.default_provider_id; this.form.type=p.runtime_type; this.form.base_url=p.default_base_url||''; this.form.region=p.default_region||''; this.form.force_api_support=false; this.disclaimer=true; },
-    needsUrl(){ return ['openai_compatible','anthropic','ollama'].includes(this.form.type); },
-    needsRegion(){ return this.form.type==='bedrock'; },
-    needsKey(){ return ['openai_compatible','anthropic','bedrock'].includes(this.form.type); },
+    stats(){ const s=this.s; return [{k:'Providers',v:s.providers.length,icon:IC.providers},{k:'Endpoints',v:Object.keys(s.endpoints).length,icon:IC.categories},{k:'Models',v:this.catalog.length||'…',icon:IC.models},{k:'Saved',v:'$'+s.savings.savings_usd,icon:IC.usage}]; },
+    openDrawer(){ this.form={id:'',registry_id:'',type:'openai_compatible',base_url:'',api_key:'',region:'',project:'',location:'',force_api_support:false}; this.disclaimer=false; this.drawer=true; },
+    applyPreset(p){ if(p.availability!=='available')return; this.form.registry_id=p.id; this.form.id=p.default_provider_id; this.form.type=p.runtime_type; this.form.base_url=p.default_base_url||''; this.form.region=p.default_region||''; this.form.project=''; this.form.location=p.default_location||''; this.form.force_api_support=false; this.disclaimer=true; },
+    /* Which inputs a setup needs is the registry's answer, not this page's. onboarding_fields ships in the state payload for exactly this, and the hard-coded type lists that used to stand here hid both required inputs the day azure_openai was added — the form then posted an empty URL and key and the server rejected it. The preset the operator picked is authoritative; when they changed the type by hand instead, every available entry that runs on that type answers for it. */
+    onboardingFields(){ const chosen=this.presets.find(p=>p.id===this.form.registry_id&&p.runtime_type===this.form.type); const entries=chosen?[chosen]:this.presets.filter(p=>p.runtime_type===this.form.type&&p.availability==='available'); const out=new Set(); for(const e of entries)for(const f of (e.onboarding_fields||[]))out.add(f); return out; },
+    needsUrl(){ return this.onboardingFields().has('base_url'); },
+    needsRegion(){ return this.onboardingFields().has('region'); },
+    needsKey(){ return this.onboardingFields().has('api_key'); },
+    needsProject(){ return this.onboardingFields().has('project'); },
+    needsLocation(){ return this.onboardingFields().has('location'); },
     supportsAdapt(t){ return ['openai_compatible','openai','bedrock','litellm','github_copilot'].includes(t||this.form.type); },
-    modelCards(){ const g={}; for(const m of this.catalog){ if(m.owned_by==='category')continue; (g[m.owned_by]=g[m.owned_by]||[]).push(m); } return g; },
+    modelCards(){ const g={}; for(const m of this.catalog){ if(m.owned_by==='endpoint')continue; (g[m.owned_by]=g[m.owned_by]||[]).push(m); } return g; },
     capChips(m){ const c=m.capabilities||{}; const out=[]; if(c.vision)out.push('vision'); if(c.tool_calls)out.push('tools'); if(Array.isArray(c.reasoning_effort)&&c.reasoning_effort.length)out.push('reasoning'); if(c.context_window)out.push((Math.round(c.context_window/1000))+'k ctx'); return out; },
-    endpointBadges(m){ const e=m.supported_endpoints||[]; const has=x=>e.some(v=>v.toLowerCase()===x); if(!e.length)return [{t:'chat',ok:true}]; return [{t:'chat',ok:has('/chat/completions')},{t:'responses',ok:has('/responses')}]; },
+    endpointBadges(m){ const e=m.supported_surfaces||m.supported_endpoints||[]; const has=x=>e.some(v=>v.toLowerCase()===x); if(!e.length)return [{t:'chat',ok:true}]; return [{t:'chat',ok:has('/chat/completions')},{t:'responses',ok:has('/responses')}]; },
     async refreshProvider(id){ this.toast('refreshing '+id+'…'); const r=await this.api('/admin/api/providers/'+encodeURIComponent(id)+'/refresh',{method:'POST'}); const d=await r.json(); this.toast(id+': '+(d.count||0)+' models'); await this.load(); this.loadCatalog(); },
     async addProvider(){ if(!this.form.id){this.toast('id required',false);return;} const r=await this.api('/admin/api/providers',{method:'POST',body:JSON.stringify(this.form)}); if(r.ok){this.toast('provider added');this.drawer=false;await this.load();this.loadCatalog();} else {this.toast((await r.json()).detail||'save failed',false);} },
     async delProvider(id){ if(!confirm('Delete provider '+id+'?'))return; await this.api('/admin/api/providers/'+encodeURIComponent(id),{method:'DELETE'}); await this.load(); this.loadCatalog(); this.toast('deleted'); },
@@ -698,12 +704,12 @@ function app(){
     async testProvider(id){ this.tests[id]={connected:false,model_count:'…'}; const r=await this.api('/admin/api/providers/'+encodeURIComponent(id)+'/test',{method:'POST'}); this.tests[id]=await r.json(); },
     async listModels(id){ const r=await this.api('/admin/api/providers/'+encodeURIComponent(id)+'/models',{method:'POST'}); const d=await r.json(); this.pmodels[id]=d.models||[]; this.toast(id+': '+(d.count||0)+' models'); this.go('categories'); },
     async ensureModels(id){ if(id && !this.pmodels[id]){ const r=await this.api('/admin/api/providers/'+encodeURIComponent(id)+'/models',{method:'POST'}); const d=await r.json(); this.pmodels[id]=d.models||[]; } },
-    async createCat(){ if(!this.newCat.trim())return; const r=await this.api('/admin/api/categories',{method:'POST',body:JSON.stringify({name:this.newCat.trim(),failover:[]})}); if(r.ok){this.newCat='';await this.load();this.toast('category created');} else {this.toast((await r.json()).detail||'failed',false);} },
-    startEdit(name){ this.editing[name]=JSON.parse(JSON.stringify(this.s.categories[name].failover)); },
+    async createCat(){ if(!this.newCat.trim())return; const r=await this.api('/admin/api/endpoints',{method:'POST',body:JSON.stringify({name:this.newCat.trim(),failover:[]})}); if(r.ok){this.newCat='';await this.load();this.toast('endpoint created');} else {this.toast((await r.json()).detail||'failed',false);} },
+    startEdit(name){ this.editing[name]=JSON.parse(JSON.stringify(this.s.endpoints[name].failover)); },
     addMember(name){ if(!this.pick.provider||!this.pick.model){this.toast('pick provider + model',false);return;} this.editing[name].push({provider:this.pick.provider,model:this.pick.model}); this.pick.model=''; },
     move(name,i,d){ const a=this.editing[name]; const j=i+d; if(j<0||j>=a.length)return; [a[i],a[j]]=[a[j],a[i]]; },
-    async saveCat(name){ const r=await this.api('/admin/api/categories',{method:'POST',body:JSON.stringify({name,failover:this.editing[name]})}); if(r.ok){delete this.editing[name];await this.load();this.loadCatalog();this.toast('saved '+name);} else {this.toast('save failed',false);} },
-    async delCat(name){ if(!confirm('Delete category '+name+'?'))return; await this.api('/admin/api/categories/'+encodeURIComponent(name),{method:'DELETE'}); await this.load(); this.loadCatalog(); this.toast('deleted'); },
+    async saveCat(name){ const r=await this.api('/admin/api/endpoints',{method:'POST',body:JSON.stringify({name,failover:this.editing[name]})}); if(r.ok){delete this.editing[name];await this.load();this.loadCatalog();this.toast('saved '+name);} else {this.toast('save failed',false);} },
+    async delCat(name){ if(!confirm('Delete endpoint '+name+'?'))return; await this.api('/admin/api/endpoints/'+encodeURIComponent(name),{method:'DELETE'}); await this.load(); this.loadCatalog(); this.toast('deleted'); },
     async loadCatalog(){ const r=await this.api('/admin/api/models'); if(r.ok)this.catalog=(await r.json()).data||[]; },
     async mintKey(){ const f=this.keyForm,n=f.name.trim()||'key'; if(!f.projectID||!f.principalID){this.toast('select project + principal',false);return;} const body={project_id:f.projectID,principal_id:f.principalID,name:n}; if(f.rpm)body.rpm=+f.rpm;if(f.daily)body.daily_requests=+f.daily;if(f.monthly)body.monthly_requests=+f.monthly;if(f.dailyIn)body.daily_input_tokens=+f.dailyIn;if(f.dailyOut)body.daily_output_tokens=+f.dailyOut;if(f.monthlyTokens)body.monthly_total_tokens=+f.monthlyTokens;if(f.dailyUSD)body.daily_cost_microusd=Math.round(f.dailyUSD*1e6);if(f.monthlyUSD)body.monthly_cost_microusd=Math.round(f.monthlyUSD*1e6);if(f.dailyCredits)body.daily_credits_milli=Math.round(f.dailyCredits*1000);if(f.monthlyCredits)body.monthly_credits_milli=Math.round(f.monthlyCredits*1000);if(f.expiresDays)body.expires_at=Math.floor(Date.now()/1000)+Math.round(f.expiresDays*86400); const am=(f.allowedModels||'').split(',').map(s=>s.trim()).filter(Boolean); if(am.length)body.allowed_models=am; const ap=(f.allowedProviders||'').split(',').map(s=>s.trim()).filter(Boolean); if(ap.length)body.allowed_providers=ap; const r=await this.api('/admin/api/keys',{method:'POST',body:JSON.stringify(body)}); if(r.ok){ const d=await r.json(); this.minted=d.token; this.keyForm={projectID:'',principalID:'',name:'',rpm:0,daily:0,monthly:0,dailyIn:0,dailyOut:0,monthlyTokens:0,dailyUSD:0,monthlyUSD:0,dailyCredits:0,monthlyCredits:0,expiresDays:0,allowedModels:'',allowedProviders:'',showGov:f.showGov}; await this.load(); this.toast('key minted (copy it now)'); } else {this.toast((await r.json()).error?.message||'mint failed',false);} },
     async toggleKey(k){ const disabled=k.status!=='disabled'; const r=await this.api('/admin/api/keys/update',{method:'POST',body:JSON.stringify({id:k.id,disabled})}); if(r.ok){await this.load(); this.toast(disabled?'key disabled':'key enabled');} else {this.toast('update failed',false);} },

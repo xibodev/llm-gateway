@@ -20,7 +20,7 @@ Concurrency is goroutine-based (no GIL), so many simultaneous streams are cheap.
 
 ```
 cmd/llmgw            entrypoint (serve)
-internal/config      settings, providers, categories, keys, secrets, local discovery, bedrock
+internal/config      settings, providers, endpoints, keys, secrets, local discovery, bedrock
 internal/providers   provider stack on two axes — an OpenAI-standard TRANSPORT
                      (openai.go) + native anthropic/ollama, and a pluggable AUTH
                      strategy (openai_auth.go: bearer key | Copilot OAuth). One
@@ -40,8 +40,9 @@ internal/web         embedded admin dashboard (admin.html)
 Some models speak only one OpenAI-family API — Copilot's `gpt-5.5` /
 `gpt-5.4-mini` / `gpt-5.3-codex` are **Responses-API-only** and reject
 `/chat/completions`. Opt in and the gateway translates a Chat Completions
-request to the model's native endpoint (from the catalog's `supported_endpoints`)
-and translates the reply back, so a CLI keeps speaking one API.
+request to the model's native endpoint (from the catalog's `supported_surfaces`,
+formerly `supported_endpoints`) and translates the reply back, so a CLI keeps
+speaking one API.
 
 - **Off by default** — unadapted, the provider's real error (status + detail) is
   passed straight through, never masked.

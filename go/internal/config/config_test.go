@@ -2,7 +2,10 @@ package config
 
 import (
 	"path/filepath"
+	"strings"
 	"testing"
+
+	"gopkg.in/yaml.v3"
 )
 
 func TestBedrockBaseURL(t *testing.T) {
@@ -103,8 +106,8 @@ func TestSaveLoadRoundTrip(t *testing.T) {
 			},
 		}
 		s.OpenAICodexClientID = "codex-client"
-		s.Categories = map[string]*CategoryConfig{
-			"smart": {Failover: []CategoryMember{{Provider: "br", Model: "m1"}}},
+		s.Endpoints = map[string]*EndpointConfig{
+			"smart": {Failover: []EndpointMember{{Provider: "br", Model: "m1"}}},
 		}
 	})
 	if err := Save(); err != nil {
@@ -130,9 +133,9 @@ func TestSaveLoadRoundTrip(t *testing.T) {
 	if reloaded.OpenAICodexClientID != "codex-client" {
 		t.Fatalf("codex client id did not round-trip: %q", reloaded.OpenAICodexClientID)
 	}
-	cat, ok := reloaded.Categories["smart"]
-	if !ok || len(cat.Failover) != 1 || cat.Failover[0].Provider != "br" {
-		t.Fatalf("category round-trip wrong: %+v", cat)
+	ep, ok := reloaded.Endpoints["smart"]
+	if !ok || len(ep.Failover) != 1 || ep.Failover[0].Provider != "br" {
+		t.Fatalf("endpoint round-trip wrong: %+v", ep)
 	}
 }
 
@@ -146,5 +149,121 @@ func TestSecretsIsolation(t *testing.T) {
 	DeleteSecret("prov")
 	if LoadSecrets()["prov"] != "" {
 		t.Error("secret not deleted")
+	}
+}
+
+// parseSettingsForTest applies config.go's own parse path (applyConfig) to a
+// YAML snippet, rather than reimplementing yaml.Unmarshal + field mapping.
+func parseSettingsForTest(t *testing.T, yamlStr string) *Settings {
+	t.Helper()
+	var payload map[string]any
+	if err := yaml.Unmarshal([]byte(yamlStr), &payload); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	s := Defaults()
+	applyConfig(s, payload)
+	return s
+}
+
+// serialiseSettingsForTest applies config.go's own serialise path
+// (configPayload) so the test observes exactly what Save() would write.
+func serialiseSettingsForTest(t *testing.T, s *Settings) string {
+	t.Helper()
+	b, err := yaml.Marshal(configPayload(s))
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	return string(b)
+}
+
+// A config written before the rename must keep loading. This is a config-file
+// first product; silently dropping a user's routing chains on upgrade is not an
+// acceptable migration.
+func TestLegacyCategoriesKeyStillLoads(t *testing.T) {
+	settings := parseSettingsForTest(t, `
+providers:
+  openai:
+    type: openai
+categories:
+  smart:
+    failover:
+      - { provider: openai, model: gpt-4o-mini }
+`)
+	chain, ok := settings.Endpoints["smart"]
+	if !ok {
+		t.Fatalf("legacy categories: key did not populate Endpoints: %+v", settings.Endpoints)
+	}
+	if len(chain.Failover) != 1 || chain.Failover[0].Provider != "openai" {
+		t.Fatalf("failover=%+v", chain.Failover)
+	}
+}
+
+func TestEndpointsKeyLoads(t *testing.T) {
+	settings := parseSettingsForTest(t, `
+providers:
+  openai:
+    type: openai
+endpoints:
+  smart:
+    failover:
+      - { provider: openai, model: gpt-4o-mini }
+`)
+	if _, ok := settings.Endpoints["smart"]; !ok {
+		t.Fatalf("endpoints: key did not load: %+v", settings.Endpoints)
+	}
+}
+
+// When both keys are present the new one wins, and the old one must not
+// silently merge — an operator mid-migration should get a predictable result.
+//
+// "smart" alone would pass under merge semantics too, since a merge that
+// applies endpoints: on top of categories: converges to the same value for a
+// key present in both. legacy-only is the case that tells ignore and merge
+// apart: a merge would carry it through from categories:, an ignore drops it
+// entirely because categories: is never consulted once endpoints: is present.
+func TestEndpointsWinsOverLegacyCategories(t *testing.T) {
+	settings := parseSettingsForTest(t, `
+providers:
+  openai:
+    type: openai
+categories:
+  smart:
+    failover:
+      - { provider: openai, model: legacy-model }
+  legacy-only:
+    failover:
+      - { provider: openai, model: legacy-model }
+endpoints:
+  smart:
+    failover:
+      - { provider: openai, model: current-model }
+`)
+	chain := settings.Endpoints["smart"]
+	if len(chain.Failover) != 1 || chain.Failover[0].Model != "current-model" {
+		t.Fatalf("endpoints: did not take precedence: %+v", chain.Failover)
+	}
+	if _, ok := settings.Endpoints["legacy-only"]; ok {
+		t.Fatalf("categories:-only key leaked through — endpoints: should ignore categories: entirely, not merge: %+v", settings.Endpoints)
+	}
+}
+
+// Round-tripping writes the new key, so a save quietly migrates the file: the
+// legacy key must both appear as endpoints: and disappear as categories:.
+func TestSaveWritesEndpointsKey(t *testing.T) {
+	settings := parseSettingsForTest(t, `
+providers:
+  openai:
+    type: openai
+categories:
+  smart:
+    failover:
+      - { provider: openai, model: gpt-4o-mini }
+`)
+	out := serialiseSettingsForTest(t, settings)
+	if !strings.Contains(out, "endpoints:") {
+		t.Fatalf("serialised config has no endpoints: key:\n%s", out)
+	}
+	if strings.Contains(out, "categories:") {
+		t.Fatalf("serialised config still has the legacy categories: key, save did not migrate it:\n%s", out)
 	}
 }

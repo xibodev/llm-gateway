@@ -43,7 +43,7 @@ docker compose -f test/integration/docker-compose.test.yml \
 
 ## What the stubs cover
 
-`config.test.yaml` defines four providers over WireMock and five categories
+`config.test.yaml` defines four providers over WireMock and five endpoints
 that exercise the failover contract:
 
 | Provider | Behaviour |
@@ -53,7 +53,7 @@ that exercise the failover contract:
 | `timeout` | delayed past the 2s provider timeout |
 | `fallback` | full happy path |
 
-| Category | Asserts |
+| Endpoint | Asserts |
 |---|---|
 | `cat-429-failover` | rate-limit cascade |
 | `cat-5xx-failover` | upstream-error cascade |

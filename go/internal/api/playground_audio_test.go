@@ -62,7 +62,7 @@ func TestPlaygroundSpeechRejectsNonSpeechProvider(t *testing.T) {
 		s.APIKey = "admin-secret"
 		s.AllowUnauthenticatedAPI = false
 		s.Providers = map[string]*config.ProviderConfig{"echo": {Type: "echo"}}
-		s.Categories = map[string]*config.CategoryConfig{}
+		s.Endpoints = map[string]*config.EndpointConfig{}
 	})
 	providers.ResetProviders()
 	t.Cleanup(providers.ResetProviders)
@@ -106,7 +106,7 @@ func TestPlaygroundSpeechProxiesOpenAICompatibleProvider(t *testing.T) {
 				APIKey: providerKey,
 			},
 		}
-		s.Categories = map[string]*config.CategoryConfig{}
+		s.Endpoints = map[string]*config.EndpointConfig{}
 	})
 	providers.ResetProviders()
 	t.Cleanup(providers.ResetProviders)
@@ -153,7 +153,7 @@ func TestPlaygroundSpeechRequiresInputAndScope(t *testing.T) {
 		s.APIKey = "admin-secret"
 		s.AllowUnauthenticatedAPI = false
 		s.Providers = map[string]*config.ProviderConfig{"edge_tts": {Type: "edge_tts"}}
-		s.Categories = map[string]*config.CategoryConfig{}
+		s.Endpoints = map[string]*config.EndpointConfig{}
 	})
 	providers.ResetProviders()
 	t.Cleanup(providers.ResetProviders)
