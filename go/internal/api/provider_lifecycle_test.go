@@ -323,7 +323,7 @@ func TestVerifyProviderRunsRealCompletionAndPersistsCheck(t *testing.T) {
 		s.Providers = map[string]*config.ProviderConfig{
 			"echo-verify": {Type: "echo"},
 		}
-		s.Categories = map[string]*config.CategoryConfig{}
+		s.Endpoints = map[string]*config.EndpointConfig{}
 	})
 	providers.ResetProviders()
 	t.Cleanup(providers.ResetProviders)
@@ -398,7 +398,7 @@ func TestVerifyProviderFailureIsRecordedAndSurfaced(t *testing.T) {
 			// Points at a closed port: instantiation succeeds, completion fails.
 			"dead-upstream": {Type: "openai_compatible", BaseURL: "http://127.0.0.1:1", APIKey: "sk-dead"},
 		}
-		s.Categories = map[string]*config.CategoryConfig{}
+		s.Endpoints = map[string]*config.EndpointConfig{}
 	})
 	providers.ResetProviders()
 	t.Cleanup(providers.ResetProviders)
@@ -460,7 +460,7 @@ func TestProviderEnabledToggleTakesProviderOutOfService(t *testing.T) {
 		s.APIKey = "admin-secret"
 		s.AllowUnauthenticatedAPI = false
 		s.Providers = map[string]*config.ProviderConfig{"echo-toggle": {Type: "echo"}}
-		s.Categories = map[string]*config.CategoryConfig{}
+		s.Endpoints = map[string]*config.EndpointConfig{}
 	})
 	providers.ResetProviders()
 	t.Cleanup(providers.ResetProviders)
@@ -534,7 +534,7 @@ func TestEdgeTTSNeedsNoCredentials(t *testing.T) {
 		s.APIKey = "admin-secret"
 		s.AllowUnauthenticatedAPI = false
 		s.Providers = map[string]*config.ProviderConfig{"edge_tts": {Type: "edge_tts"}}
-		s.Categories = map[string]*config.CategoryConfig{}
+		s.Endpoints = map[string]*config.EndpointConfig{}
 	})
 	providers.ResetProviders()
 	t.Cleanup(providers.ResetProviders)
@@ -578,7 +578,7 @@ func TestUpsertProviderPersistsProjectAndLocation(t *testing.T) {
 		s.APIKey = "admin-secret"
 		s.AllowUnauthenticatedAPI = false
 		s.Providers = map[string]*config.ProviderConfig{}
-		s.Categories = map[string]*config.CategoryConfig{}
+		s.Endpoints = map[string]*config.EndpointConfig{}
 	})
 	providers.ResetProviders()
 	t.Cleanup(providers.ResetProviders)

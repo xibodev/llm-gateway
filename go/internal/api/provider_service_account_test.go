@@ -75,7 +75,7 @@ func TestAdminStoresServiceAccountWithItsOwnKind(t *testing.T) {
 		s.AllowUnauthenticatedAPI = false
 		s.CredentialEncryptionKey = base64.RawURLEncoding.EncodeToString(encryptionKey)
 		s.Providers = map[string]*config.ProviderConfig{}
-		s.Categories = map[string]*config.CategoryConfig{}
+		s.Endpoints = map[string]*config.EndpointConfig{}
 	})
 	providers.ResetProviders()
 
@@ -129,7 +129,7 @@ func TestAdminRejectsServiceAccountForNonGoogleProvider(t *testing.T) {
 		s.AllowUnauthenticatedAPI = false
 		s.CredentialEncryptionKey = base64.RawURLEncoding.EncodeToString(encryptionKey)
 		s.Providers = map[string]*config.ProviderConfig{}
-		s.Categories = map[string]*config.CategoryConfig{}
+		s.Endpoints = map[string]*config.EndpointConfig{}
 	})
 	providers.ResetProviders()
 

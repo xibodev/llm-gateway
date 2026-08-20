@@ -73,7 +73,7 @@ func setupResponsesAPITest(t *testing.T) *httptest.Server {
 		s.APIKey = "test-secret"
 		s.AllowUnauthenticatedAPI = false
 		s.Providers = map[string]*config.ProviderConfig{"echo": {Type: "echo"}}
-		s.Categories = map[string]*config.CategoryConfig{}
+		s.Endpoints = map[string]*config.EndpointConfig{}
 	})
 	providers.ResetProviders()
 	server := httptest.NewServer(NewServer())
@@ -157,11 +157,11 @@ func TestResponsesFallbackRejectsUnsupportedGuaranteesAndStatefulRoutes(t *testi
 		t.Fatalf("unsupported fallback field status=%d", status)
 	}
 	config.Update(func(s *config.Settings) {
-		s.Categories["multi"] = &config.CategoryConfig{Failover: []config.CategoryMember{
+		s.Endpoints["multi"] = &config.EndpointConfig{Failover: []config.EndpointMember{
 			{Provider: "echo", Model: "echo-default"},
 			{Provider: "echo", Model: "echo-strong"},
 		}}
-		s.Categories["echo/stateful"] = &config.CategoryConfig{Failover: []config.CategoryMember{
+		s.Endpoints["echo/stateful"] = &config.EndpointConfig{Failover: []config.EndpointMember{
 			{Provider: "echo", Model: "echo-default"},
 		}}
 	})
@@ -481,7 +481,7 @@ func TestResponsesEndpointPreservesNativeResponsesPayload(t *testing.T) {
 				Type: "openai_compatible", BaseURL: upstream.URL, APIKey: "fixture",
 			},
 		}
-		s.Categories = map[string]*config.CategoryConfig{}
+		s.Endpoints = map[string]*config.EndpointConfig{}
 	})
 	providers.ResetProviders()
 	if models := providers.RefreshCatalog("native"); len(models) != 1 {

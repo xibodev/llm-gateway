@@ -22,11 +22,20 @@ type Kwargs = map[string]any
 
 // ModelInfo is one row of a provider's catalog.
 type ModelInfo struct {
-	ID                 string         `json:"id"`
-	Vendor             string         `json:"vendor,omitempty"`
-	Label              string         `json:"label,omitempty"`
-	Capabilities       map[string]any `json:"capabilities,omitempty"`
-	SupportedEndpoints []string       `json:"supported_endpoints,omitempty"`
+	ID           string         `json:"id"`
+	Vendor       string         `json:"vendor,omitempty"`
+	Label        string         `json:"label,omitempty"`
+	Capabilities map[string]any `json:"capabilities,omitempty"`
+	// SupportedSurfaces are the HTTP surfaces a model can be called through
+	// (e.g. "/v1/chat/completions", "/v1/messages") — distinct from an
+	// "endpoint" in the routing-target sense used elsewhere in this codebase.
+	// The struct tag is the ON-DISK key of the catalog.json cache, and it
+	// changed with the field: a pre-rename file therefore unmarshals into a
+	// nil list here. That is handled by catalogEntry.SchemaVersion, which
+	// discards unstamped entries instead of serving surface-less rows — the
+	// persisted format gets a hard cut-over, not the one-release dual-key
+	// window the public /v1/models response gets (see api/models.go).
+	SupportedSurfaces []string `json:"supported_surfaces,omitempty"`
 }
 
 // StreamIter yields cleaned SSE chunk payloads (data: prefix stripped, [DONE]

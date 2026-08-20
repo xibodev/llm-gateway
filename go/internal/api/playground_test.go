@@ -27,18 +27,18 @@ func TestOwnerPlaygroundUsesRealRouteAndRecordsKeylessProjectUsage(t *testing.T)
 		router.ResetSavingsState()
 		router.ResetTelemetryState()
 	})
-	oldProviders, oldCategories := config.Get().Providers, config.Get().Categories
+	oldProviders, oldEndpoints := config.Get().Providers, config.Get().Endpoints
 	oldSSO, oldSecret, oldAuto := config.Get().SSOEnabled, config.Get().SSOSharedSecret, config.Get().SSOAutoProvision
 	t.Cleanup(func() {
 		config.Update(func(s *config.Settings) {
-			s.Providers, s.Categories = oldProviders, oldCategories
+			s.Providers, s.Endpoints = oldProviders, oldEndpoints
 			s.SSOEnabled, s.SSOSharedSecret, s.SSOAutoProvision = oldSSO, oldSecret, oldAuto
 		})
 	})
 	config.Update(func(s *config.Settings) {
 		s.SSOEnabled, s.SSOSharedSecret, s.SSOAutoProvision = true, "proxy-secret", true
 		s.Providers = map[string]*config.ProviderConfig{"echo": {Type: "echo"}}
-		s.Categories = map[string]*config.CategoryConfig{"owner-route": {Failover: []config.CategoryMember{{Provider: "echo", Model: "echo-default"}}}}
+		s.Endpoints = map[string]*config.EndpointConfig{"owner-route": {Failover: []config.EndpointMember{{Provider: "echo", Model: "echo-default"}}}}
 	})
 	if _, err := iam.Initialize(); err != nil {
 		t.Fatal(err)
@@ -117,7 +117,7 @@ func TestPlaygroundRejectsOtherPrincipalAndExplainsStreamingLimit(t *testing.T) 
 	config.Update(func(s *config.Settings) {
 		s.SSOEnabled, s.SSOSharedSecret, s.SSOAutoProvision = true, "proxy-secret", true
 		s.Providers = map[string]*config.ProviderConfig{"echo": {Type: "echo"}}
-		s.Categories = map[string]*config.CategoryConfig{}
+		s.Endpoints = map[string]*config.EndpointConfig{}
 	})
 	if _, err := iam.Initialize(); err != nil {
 		t.Fatal(err)

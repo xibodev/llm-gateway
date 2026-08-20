@@ -37,7 +37,7 @@ func TestAdminProviderConnectionLifecycle(t *testing.T) {
 				BaseURL: "https://generativelanguage.googleapis.com/v1beta/openai",
 			},
 		}
-		s.Categories = map[string]*config.CategoryConfig{}
+		s.Endpoints = map[string]*config.EndpointConfig{}
 	})
 	if _, err := iam.Initialize(); err != nil {
 		t.Fatal(err)

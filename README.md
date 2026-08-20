@@ -4,7 +4,7 @@ Standalone, multi-provider LLM proxy for coding CLIs (Claude Code, GitHub Copilo
 Codex). A standalone service with no external coordination-plane dependency.
 
 **Purpose:** connect your providers, then juggle subscription limits and survive
-outages. Address any real model as `provider/model`, or define **categories** —
+outages. Address any real model as `provider/model`, or define **endpoints** —
 named, ordered failover chains of pinned real models that cascade on
 429/5xx/timeout, within a provider and/or across providers.
 
@@ -14,7 +14,7 @@ named, ordered failover chains of pinned real models that cascade on
 - `POST /v1/audio/transcriptions`, `POST /v1/audio/speech` — audio STT/TTS (proxied to an OpenAI-compatible provider such as LocalAI, or synthesized natively by the built-in `edge_tts` provider — Microsoft Edge read-aloud voices, no credential; its endpoint/token/voice defaults are baked in and overridable via `base_url`, `api_key`, `default_voice`)
 - `POST /v1/images/generations` — image generation (OpenAI-shaped, returns `b64_json`)
 - `POST /v1/videos/generations` — video generation; starts a long-running job, or polls one when the body carries `operation`
-- `GET /v1/models` — every provider's real models, namespaced `provider/model`, plus your category names
+- `GET /v1/models` — every provider's real models, namespaced `provider/model`, plus your endpoint names
 - `GET /admin` — SSO/admin control plane: providers, users/services, projects,
   memberships, private provider connections, policies, keys, usage, alerts and audit
 - `GET /portal` — SSO self-service: personal keys, usage, provider API-key
@@ -38,7 +38,7 @@ returned to the workload.
 
 ## Model addressing (no tiers, no classifier, no aliases)
 - `provider/model` — that exact model on that provider (e.g. `copilot/gpt-4o-mini`). No failover.
-- a **category** name — cascades through its pinned models in order (failover).
+- an **endpoint** name — cascades through its pinned models in order (failover).
 - a bare **provider-native** name — normalized onto the matching catalog model, so a coding CLI can pass names straight through. Claude Code's `/model` picker sends Anthropic-native rows like `claude-opus-4-8[1m]`; the gateway maps that to `copilot/claude-opus-4.8` (version dots/dashes unified, a `[…]` context tag dropped). A name with no catalog match (e.g. a retired `claude-opus-4`) still `404`s.
 - anything else → `404` (pick from `GET /v1/models`).
 
@@ -54,7 +54,7 @@ build reached parity, and remains in history if you need it.
 cd go
 go run ./cmd/llmgw serve
 ```
-Open the panel at `http://127.0.0.1:8787/admin`. Providers/categories you build there persist to `~/.llmgw/config.yaml`. The IAM,
+Open the panel at `http://127.0.0.1:8787/admin`. Providers/endpoints you build there persist to `~/.llmgw/config.yaml`. The IAM,
 hashed keys, encrypted provider connections, usage, quotas, audit and notification
 outbox live in `~/.llmgw/gateway.db` (SQLite WAL). The legacy system
 `secrets.json` remains a compatibility/config seed; once a system connection is
@@ -62,10 +62,13 @@ seeded, the database is authoritative and later config reloads do not overwrite 
 
 ## Config
 `providers` (curated registry integration or advanced type + base URL) and
-`categories` (failover chains). Fully editable from `/admin`, or hand-edit — see
+`endpoints` (failover chains). Fully editable from `/admin`, or hand-edit — see
 `llmgw.config.example.yaml`. Curated registry metadata supplies known endpoints,
 authentication methods and planned OAuth integrations without embedding a Node
 runtime or a plugin marketplace.
+
+The `endpoints:` config key is canonical; the pre-rename `categories:` key still
+loads (deprecated, removed in a future release — see [Deprecations](#deprecations)).
 
 Human-owned provider connections are named, encrypted and private to that
 principal. A personal connection overrides the system credential only for that
@@ -76,14 +79,14 @@ system principals.
 ## API adaptation (`force_api_support`, experimental)
 Some OpenAI-family models speak only one API (for example, Copilot GPT-5.x models that require `/responses`). Adaptation is **off by default**: without opt-in, the gateway passes the provider's real HTTP status and error detail through.
 
-Opt in per provider with `force_api_support: true` or per request with `"force_api_support": true`. The gateway uses the persisted model catalog's `supported_endpoints` to decide deterministically, translates Chat Completions to Responses when needed, and marks adapted replies with `X-LLMGW-Adapted` (request-level opt-in also echoes `forced_support` in the body).
+Opt in per provider with `force_api_support: true` or per request with `"force_api_support": true`. The gateway uses the persisted model catalog's `supported_surfaces` (the pre-rename `supported_endpoints` field, deprecated) to decide deterministically, translates Chat Completions to Responses when needed, and marks adapted replies with `X-LLMGW-Adapted` (request-level opt-in also echoes `forced_support` in the body).
 
 ## Wire up a CLI
 - **Claude Code:** `ANTHROPIC_BASE_URL=http://127.0.0.1:8787` + `ANTHROPIC_AUTH_TOKEN=<LLMGW_API_KEY>`
 - **Codex:** provider `base_url=http://127.0.0.1:8787/v1`
 - **Copilot CLI (BYOK):** `COPILOT_PROVIDER_BASE_URL=http://127.0.0.1:8787/v1` + `COPILOT_PROVIDER_API_KEY=<LLMGW_API_KEY>`
 
-Pick a `provider/model` or a category name from `GET /v1/models`.
+Pick a `provider/model` or an endpoint name from `GET /v1/models`.
 
 ## Deploy (container)
 ```bash
@@ -133,6 +136,38 @@ per location you need — the model id you use must match the surface.
 - **Claude Code:** a documented Anthropic gateway client. Configure an Anthropic API key or supported gateway credential upstream; the gateway does not implement Claude personal-subscription OAuth.
 
 Automated OAuth tests use only local mocked endpoints and fake tokens. No real provider login is required for development or validation.
+
+## Deprecations
+
+The `categories` → `endpoints` rename is in progress. Most old spellings still
+work alongside the new ones — but one could not be kept, because a single field
+cannot carry two values at once.
+
+### Still accepted or still emitted — deprecated, removed in a future release
+
+| Deprecated | Replacement |
+|---|---|
+| `categories:` config key | `endpoints:` config key |
+| `POST /admin/api/categories`, `DELETE /admin/api/categories/{name}` | `POST /admin/api/endpoints`, `DELETE /admin/api/endpoints/{name}` |
+| `"categories"` key in the `/admin/api/state` payload | `"endpoints"` key (both are currently emitted, same value) |
+| `supported_endpoints` on a model row (`GET /v1/models`, `GET /admin/api/providers/{id}/catalog`) | `supported_surfaces` (both are currently emitted, same value) |
+
+### Already changed — breaking, no compatibility path
+
+| Was | Is now |
+|---|---|
+| `owned_by: "category"` on a `GET /v1/models` routing-chain row | `owned_by: "endpoint"` |
+
+`owned_by` holds exactly one string, so there is no dual-emission window for it:
+from this release a routing-chain row reads `owned_by: "endpoint"`.
+**Upgrade note:** a client that filters or branches on `owned_by == "category"`
+stops matching those rows the moment the gateway is upgraded. Match
+`"endpoint"`, or accept either value while you migrate.
+
+Persisted state has no compatibility window either: the cached provider catalog
+(`catalog.json` in the state directory) carries a schema version, and entries
+written before this release are discarded and re-discovered on first read rather
+than reinterpreted under the new field names.
 
 ## License
 

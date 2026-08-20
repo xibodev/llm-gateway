@@ -398,8 +398,11 @@ func (p CodexProvider) ListModelsWithError() (
 		if caps := extractCapabilities(entry["capabilities"]); len(caps) > 0 {
 			row.Capabilities = caps
 		}
-		if endpoints := stringList(entry["supported_endpoints"]); len(endpoints) > 0 {
-			row.SupportedEndpoints = endpoints
+		// "supported_endpoints" here is the OpenAI Codex backend's own field
+		// name in its catalog response — an upstream vendor contract we do not
+		// control, unrelated to this gateway's supported_surfaces rename.
+		if surfaces := stringList(entry["supported_endpoints"]); len(surfaces) > 0 {
+			row.SupportedSurfaces = surfaces
 		}
 		rows = append(rows, row)
 	}

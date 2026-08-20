@@ -30,9 +30,14 @@ type Resolution struct {
 // provider/model id (HTTP 404).
 type ModelNotFoundError struct{ Requested string }
 
+// The wording is client-visible prose, written verbatim into a 404 body, and it
+// is the only sentence most users ever read about this concept — so it uses the
+// product's current vocabulary ("endpoint", matching owned_by: "endpoint" on the
+// rows GET /v1/models returns). The internal identifiers around it still say
+// "category"; renaming those is a separate, non-user-visible change.
 func (e *ModelNotFoundError) Error() string {
-	return fmt.Sprintf("Model %q is not a category and not a 'provider/model' id. "+
-		"Pick one from GET /v1/models: a category name, or '<provider>/<model>'.", e.Requested)
+	return fmt.Sprintf("Model %q is not an endpoint and not a 'provider/model' id. "+
+		"Pick one from GET /v1/models: an endpoint name, or '<provider>/<model>'.", e.Requested)
 }
 
 // AllTargetsFailed means every failover target for a category failed. Status
@@ -45,8 +50,14 @@ type AllTargetsFailed struct {
 
 func (e *AllTargetsFailed) Error() string { return e.Msg }
 
-// AmbiguousCategoryError reports an invalid configuration containing category
+// AmbiguousCategoryError reports an invalid configuration containing endpoint
 // names that differ only by case.
+//
+// The type name is an internal identifier and still says "category"; the
+// MESSAGE is not internal. It is one of the errors endpoint lookup hands back
+// to the API layer, so an operator whose legacy config carries case-colliding
+// names reads it — and it must use the same vocabulary as ModelNotFoundError
+// and owned_by: "endpoint" rather than the pre-rename word.
 type AmbiguousCategoryError struct {
 	Requested string
 	Matches   []string
@@ -54,19 +65,19 @@ type AmbiguousCategoryError struct {
 
 func (e *AmbiguousCategoryError) Error() string {
 	return fmt.Sprintf(
-		"Category %q is ambiguous; matching configured categories: %s.",
+		"Endpoint %q is ambiguous; matching configured endpoints: %s.",
 		e.Requested,
 		strings.Join(e.Matches, ", "),
 	)
 }
 
-func findCategory(name string) (string, *config.CategoryConfig, error) {
+func findCategory(name string) (string, *config.EndpointConfig, error) {
 	s := config.Get()
-	if cat, ok := s.Categories[name]; ok {
+	if cat, ok := s.Endpoints[name]; ok {
 		return name, cat, nil
 	}
 	matches := make([]string, 0, 1)
-	for cname := range s.Categories {
+	for cname := range s.Endpoints {
 		if strings.EqualFold(cname, name) {
 			matches = append(matches, cname)
 		}
@@ -78,7 +89,7 @@ func findCategory(name string) (string, *config.CategoryConfig, error) {
 	if len(matches) > 1 {
 		return "", nil, &AmbiguousCategoryError{Requested: name, Matches: matches}
 	}
-	return matches[0], s.Categories[matches[0]], nil
+	return matches[0], s.Endpoints[matches[0]], nil
 }
 
 // ResolveTargets maps a requested model to an ordered failover chain.

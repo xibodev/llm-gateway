@@ -127,8 +127,12 @@ func NewServer() http.Handler {
 	mux.HandleFunc("POST /admin/api/providers/{id}/repair", handleRepairProvider)
 	mux.HandleFunc("POST /admin/api/providers/{id}/verify", handleVerifyProvider)
 	mux.HandleFunc("POST /admin/api/providers/{id}/enabled", handleProviderEnabled)
-	mux.HandleFunc("POST /admin/api/categories", handleUpsertCategory)
-	mux.HandleFunc("DELETE /admin/api/categories/{name}", handleDeleteCategory)
+	mux.HandleFunc("POST /admin/api/endpoints", handleUpsertEndpoint)
+	mux.HandleFunc("DELETE /admin/api/endpoints/{name}", handleDeleteEndpoint)
+	// Deprecated: the routing layer is called an endpoint now. Retained so
+	// published clients keep working; remove after one release.
+	mux.HandleFunc("POST /admin/api/categories", handleUpsertEndpoint)
+	mux.HandleFunc("DELETE /admin/api/categories/{name}", handleDeleteEndpoint)
 	mux.HandleFunc("POST /admin/api/keys", handleCreateKey)
 	mux.HandleFunc("POST /admin/api/keys/update", handleUpdateKey)
 	mux.HandleFunc("DELETE /admin/api/keys", handleRevokeKey)

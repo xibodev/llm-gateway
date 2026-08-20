@@ -32,7 +32,7 @@ func TestSSOUserSelfServiceKeyLifecycle(t *testing.T) {
 		s.SSOAutoProvision = true
 		s.APIKey = "admin-secret"
 		s.Providers = map[string]*config.ProviderConfig{}
-		s.Categories = map[string]*config.CategoryConfig{}
+		s.Endpoints = map[string]*config.EndpointConfig{}
 	})
 	principal, _ := iam.EnsurePrincipalBySubject(
 		"human", "authentik:user-self", "self@example.com", "Self User",

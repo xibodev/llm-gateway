@@ -1,5 +1,5 @@
 // Package config is the single source of truth for the gateway's runtime state:
-// providers, categories, minted keys, provider secrets, and scalar settings.
+// providers, endpoints, minted keys, provider secrets, and scalar settings.
 //
 // Mirrors the Python llmgw.config module. Keys never live in the committed
 // config file â€” they live in a 0600 secrets.json / keys.json under the state
@@ -47,16 +47,26 @@ type ProviderConfig struct {
 	ForceApiSupport bool `yaml:"force_api_support,omitempty" json:"force_api_support,omitempty"`
 }
 
-// CategoryMember is one pinned provider/model target in a failover chain.
-type CategoryMember struct {
+// EndpointMember is one pinned provider/model target in a failover chain.
+type EndpointMember struct {
 	Provider string `yaml:"provider" json:"provider"`
 	Model    string `yaml:"model" json:"model"`
 }
 
-// CategoryConfig is an ordered failover chain of pinned real models.
-type CategoryConfig struct {
-	Failover []CategoryMember `yaml:"failover" json:"failover"`
+// EndpointConfig is an ordered failover chain of pinned real models. A client
+// requests the endpoint name (e.g. "smart") and the gateway cascades through
+// this chain until one pinned provider/model succeeds.
+type EndpointConfig struct {
+	Failover []EndpointMember `yaml:"failover" json:"failover"`
 }
+
+// Deprecated: use EndpointConfig. Retained for one release so external
+// callers written against the pre-rename name keep compiling; the
+// client-facing routing target is called an endpoint now, not a category.
+type CategoryConfig = EndpointConfig
+
+// Deprecated: use EndpointMember. See CategoryConfig.
+type CategoryMember = EndpointMember
 
 // ProviderPolicy is the per-provider retry + circuit-breaker policy.
 type ProviderPolicy struct {
@@ -131,10 +141,10 @@ type Settings struct {
 	CredentialEncryptionKey     string `yaml:"-"`
 
 	// core
-	Providers  map[string]*ProviderConfig `yaml:"providers"`
-	Categories map[string]*CategoryConfig `yaml:"categories"`
-	Policies   BackendPolicies            `yaml:"policies"`
-	Savings    SavingsConfig              `yaml:"savings"`
+	Providers map[string]*ProviderConfig `yaml:"providers"`
+	Endpoints map[string]*EndpointConfig `yaml:"endpoints"`
+	Policies  BackendPolicies            `yaml:"policies"`
+	Savings   SavingsConfig              `yaml:"savings"`
 
 	// provider-type defaults
 	OpenAICompatibleBaseURL        string  `yaml:"openai_compatible_base_url"`
@@ -158,8 +168,8 @@ type Settings struct {
 // Defaults returns a Settings with the same defaults as the Python model.
 func Defaults() *Settings {
 	return &Settings{
-		Providers:  map[string]*ProviderConfig{},
-		Categories: map[string]*CategoryConfig{},
+		Providers: map[string]*ProviderConfig{},
+		Endpoints: map[string]*EndpointConfig{},
 		Policies: BackendPolicies{
 			Defaults: ProviderPolicy{
 				RetryMaxAttempts: 2, RetryInitialBackoffSeconds: 0.5, RetryMaxBackoffSeconds: 8.0,
@@ -435,26 +445,38 @@ func applyConfig(s *Settings, payload map[string]any) {
 			s.Providers[pid] = cfg
 		}
 	}
-	if raw, ok := payload["categories"].(map[string]any); ok {
-		s.Categories = map[string]*CategoryConfig{}
-		for name, cc := range raw {
-			cat := &CategoryConfig{}
-			switch v := cc.(type) {
-			case map[string]any:
-				if fo, ok := v["failover"].([]any); ok {
-					cat.Failover = parseMembers(fo)
-				}
-			case []any:
-				cat.Failover = parseMembers(v)
-			}
-			s.Categories[name] = cat
-		}
+	// endpoints: is canonical. categories: is the pre-rename key; it is read
+	// only as a fallback so config files written before the rename keep
+	// loading. When both are present endpoints: wins outright rather than
+	// merging, so a mid-migration operator gets a predictable result instead
+	// of one that depends on map iteration order.
+	if raw, ok := payload["endpoints"].(map[string]any); ok {
+		s.Endpoints = parseEndpoints(raw)
+	} else if raw, ok := payload["categories"].(map[string]any); ok {
+		s.Endpoints = parseEndpoints(raw)
 	}
 	applyScalars(s, payload)
 }
 
-func parseMembers(items []any) []CategoryMember {
-	var out []CategoryMember
+func parseEndpoints(raw map[string]any) map[string]*EndpointConfig {
+	out := map[string]*EndpointConfig{}
+	for name, cc := range raw {
+		ep := &EndpointConfig{}
+		switch v := cc.(type) {
+		case map[string]any:
+			if fo, ok := v["failover"].([]any); ok {
+				ep.Failover = parseMembers(fo)
+			}
+		case []any:
+			ep.Failover = parseMembers(v)
+		}
+		out[name] = ep
+	}
+	return out
+}
+
+func parseMembers(items []any) []EndpointMember {
+	var out []EndpointMember
 	for _, it := range items {
 		m, ok := it.(map[string]any)
 		if !ok {
@@ -463,7 +485,7 @@ func parseMembers(items []any) []CategoryMember {
 		prov, _ := m["provider"].(string)
 		model, _ := m["model"].(string)
 		if prov != "" && model != "" {
-			out = append(out, CategoryMember{Provider: prov, Model: model})
+			out = append(out, EndpointMember{Provider: prov, Model: model})
 		}
 	}
 	return out
@@ -581,19 +603,21 @@ func configPayload(s *Settings) map[string]any {
 		}
 		providers[pid] = entry
 	}
-	categories := map[string]any{}
-	for name, cat := range s.Categories {
+	// Always write the canonical endpoints: key so a save quietly migrates a
+	// config file that was still on the pre-rename categories: key.
+	endpoints := map[string]any{}
+	for name, ep := range s.Endpoints {
 		fo := []any{}
-		for _, m := range cat.Failover {
+		for _, m := range ep.Failover {
 			fo = append(fo, map[string]any{"provider": m.Provider, "model": m.Model})
 		}
-		categories[name] = map[string]any{"failover": fo}
+		endpoints[name] = map[string]any{"failover": fo}
 	}
 	payload := map[string]any{
-		"providers":  providers,
-		"categories": categories,
-		"policies":   s.Policies,
-		"savings":    s.Savings,
+		"providers": providers,
+		"endpoints": endpoints,
+		"policies":  s.Policies,
+		"savings":   s.Savings,
 	}
 	if s.OpenAICodexClientID != "" {
 		payload["openai_codex_client_id"] = s.OpenAICodexClientID
@@ -601,7 +625,7 @@ func configPayload(s *Settings) map[string]any {
 	return payload
 }
 
-// Save persists providers + categories + policies + savings (never keys).
+// Save persists providers + endpoints + policies + savings (never keys).
 func Save() error {
 	mu.RLock()
 	payload := configPayload(current)

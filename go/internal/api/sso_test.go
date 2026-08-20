@@ -34,7 +34,7 @@ func TestAdminRejectsProjectKeyAndAcceptsVerifiedSSO(t *testing.T) {
 		s.SSOAdminGroup = "llmgw-admin"
 		s.SSOAutoProvision = true
 		s.Providers = map[string]*config.ProviderConfig{}
-		s.Categories = map[string]*config.CategoryConfig{}
+		s.Endpoints = map[string]*config.EndpointConfig{}
 	})
 	principal, _ := iam.CreatePrincipal("service", "service:test", "", "Test Service")
 	project, _ := iam.CreateProject("test", "Test")

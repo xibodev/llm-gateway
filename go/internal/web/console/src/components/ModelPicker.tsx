@@ -9,7 +9,7 @@ export type CatalogModel = {
   provider: string;
   label: string;
   capabilities: string[];
-  endpoints: string[];
+  surfaces: string[];
   isCategory: boolean;
 };
 
@@ -33,7 +33,10 @@ export function capabilitiesFor(row: JSONRecord): string[] {
   const declared = Object.entries(asRecord(row.capabilities))
     .filter(([, value]) => value !== false)
     .map(([key]) => key.toLowerCase());
-  const endpoints = asList(row.supported_endpoints).map((value) => String(value).toLowerCase());
+  // supported_surfaces is canonical; supported_endpoints is the pre-rename
+  // key, kept as a fallback so this still works against a server that has
+  // not been updated yet.
+  const surfaces = asList(row.supported_surfaces ?? row.supported_endpoints).map((value) => String(value).toLowerCase());
   const out = new Set<string>();
   for (const name of declared) {
     if (name === "tts" || name === "speech") out.add("tts");
@@ -43,19 +46,19 @@ export function capabilitiesFor(row: JSONRecord): string[] {
     else if (name === "vision" || name === "multimodal") out.add("vision");
     else if (name === "chat" || name === "completion" || name === "tools") out.add("chat");
   }
-  for (const endpoint of endpoints) {
-    if (endpoint.includes("/audio/speech")) out.add("tts");
-    if (endpoint.includes("/audio/transcriptions")) out.add("transcription");
-    if (endpoint.includes("/images/generations")) out.add("image");
-    if (endpoint.includes("/videos/generations")) out.add("video");
-    if (endpoint.includes("/chat/completions") || endpoint.includes("/messages") || endpoint.includes("/responses")) out.add("chat");
+  for (const surface of surfaces) {
+    if (surface.includes("/audio/speech")) out.add("tts");
+    if (surface.includes("/audio/transcriptions")) out.add("transcription");
+    if (surface.includes("/images/generations")) out.add("image");
+    if (surface.includes("/videos/generations")) out.add("video");
+    if (surface.includes("/chat/completions") || surface.includes("/messages") || surface.includes("/responses")) out.add("chat");
   }
   // A row that declares no modality at all is a chat model by convention.
   if (!out.size) out.add("chat");
   // Generation-only rows (speech, transcription, image, video) must not
   // masquerade as chat models.
   if ((out.has("tts") || out.has("transcription") || out.has("image") || out.has("video")) && !declared.includes("chat") &&
-      !endpoints.some((endpoint) => endpoint.includes("/chat/completions") || endpoint.includes("/messages") || endpoint.includes("/responses"))) {
+      !surfaces.some((surface) => surface.includes("/chat/completions") || surface.includes("/messages") || surface.includes("/responses"))) {
     out.delete("chat");
   }
   return [...out];
@@ -70,8 +73,9 @@ export function catalogModels(payload: JSONRecord | null): CatalogModel[] {
       provider: owner || "gateway",
       label: stringValue(row.display_name, id),
       capabilities: capabilitiesFor(row),
-      endpoints: asList(row.supported_endpoints).map(String),
-      isCategory: owner === "category",
+      surfaces: asList(row.supported_surfaces ?? row.supported_endpoints).map(String),
+      // Routing-chain pseudo-model rows report owned_by "endpoint" on the wire.
+      isCategory: owner === "endpoint",
     };
   }).filter((row) => row.id);
 }

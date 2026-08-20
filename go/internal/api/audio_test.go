@@ -8,10 +8,10 @@ import (
 
 func TestResolveAudioTargetSanitizesAmbiguousCategoryErrors(t *testing.T) {
 	t.Setenv("LLMGW_STATE_DIR", t.TempDir())
-	oldProviders, oldCategories := config.Get().Providers, config.Get().Categories
+	oldProviders, oldEndpoints := config.Get().Providers, config.Get().Endpoints
 	t.Cleanup(func() {
 		config.Update(func(s *config.Settings) {
-			s.Providers, s.Categories = oldProviders, oldCategories
+			s.Providers, s.Endpoints = oldProviders, oldEndpoints
 		})
 	})
 	config.Update(func(s *config.Settings) {
@@ -19,12 +19,12 @@ func TestResolveAudioTargetSanitizesAmbiguousCategoryErrors(t *testing.T) {
 			"one": {Type: "echo"},
 			"two": {Type: "echo"},
 		}
-		s.Categories = map[string]*config.CategoryConfig{
+		s.Endpoints = map[string]*config.EndpointConfig{
 			"smart": {
-				Failover: []config.CategoryMember{{Provider: "one", Model: "echo-default"}},
+				Failover: []config.EndpointMember{{Provider: "one", Model: "echo-default"}},
 			},
 			"SMART": {
-				Failover: []config.CategoryMember{{Provider: "two", Model: "echo-default"}},
+				Failover: []config.EndpointMember{{Provider: "two", Model: "echo-default"}},
 			},
 		}
 	})

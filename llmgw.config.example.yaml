@@ -1,4 +1,4 @@
-# llm-gateway config (providers + categories). Point LLMGW_CONFIG at this file.
+# llm-gateway config (providers + endpoints). Point LLMGW_CONFIG at this file.
 #
 # API keys are NOT stored here. Enter them in the /admin panel (saved to
 # ~/.llmgw/secrets.json, perms 0600) or reference an env var with ${ENV:NAME}.
@@ -16,10 +16,14 @@ providers:
   ollama:
     type: ollama                    # uses LLMGW_OLLAMA_BASE_URL (default :11434)
 
-# Categories = named, ordered failover chains of real, pinned models. Request a
-# category name and it cascades on 429/5xx/timeout. You can also address any real
+# Endpoints = named, ordered failover chains of real, pinned models. Request an
+# endpoint name and it cascades on 429/5xx/timeout. You can also address any real
 # model directly as "<provider>/<model>" (e.g. copilot/gpt-4o-mini).
-categories:
+#
+# "endpoints:" is the canonical key. The pre-rename "categories:" key still
+# loads (deprecated, removed in a future release) for config files written
+# before the rename.
+endpoints:
   smart:
     failover:
       - { provider: copilot, model: claude-sonnet-4.5 }               # within-provider ...

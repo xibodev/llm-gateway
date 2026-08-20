@@ -14,14 +14,35 @@ import (
 
 // A persisted, per-provider model catalog. It is the single source of truth for
 // /v1/models, the admin model-card page, and API-adaptation routing decisions
-// (a model's supported_endpoints). Refreshes lazily when missing or stale
+// (a model's supported_surfaces). Refreshes lazily when missing or stale
 // (>1h) — frequent enough to surface newly released provider models without a
 // cron, while avoiding an upstream fetch on every CLI startup — and on an
 // explicit provider Test / Refresh.
 type catalogEntry struct {
-	Models      []ModelInfo `json:"models"`
-	RefreshedAt time.Time   `json:"refreshed_at"`
+	// SchemaVersion records which release's rules produced Models. Entries
+	// stamped with anything else are dropped on load instead of being served
+	// or used as a fallback, because a cached row is only as trustworthy as
+	// the code that wrote it:
+	//
+	//   - v0 (unstamped) rows predate the supported_endpoints ->
+	//     supported_surfaces field rename, so their surface lists unmarshal
+	//     into a nil SupportedSurfaces. Serving them would silently route a
+	//     Responses-only model to /chat/completions and drop it from the
+	//     /v1/models chat listing.
+	//   - v0 Vertex rows may be the deleted hand-curated publisher list,
+	//     six of whose nine ids exist in no region a given instance can call.
+	//     A key-only Vertex instance can never refresh, so without this drop
+	//     it would serve that list forever.
+	//
+	// Bump this whenever a release changes what a persisted row means; the
+	// cost is one forced re-discovery per provider, the alternative is
+	// serving data whose meaning has moved underneath it.
+	SchemaVersion int         `json:"schema_version,omitempty"`
+	Models        []ModelInfo `json:"models"`
+	RefreshedAt   time.Time   `json:"refreshed_at"`
 }
+
+const catalogSchemaVersion = 1
 
 var (
 	catMu         sync.Mutex
@@ -56,6 +77,13 @@ func ProviderConfigurationIssue(providerID string) string {
 		if strings.TrimSpace(cfg.Project) == "" {
 			return "Vertex AI requires a Google Cloud project ID."
 		}
+	case "azure_openai":
+		// Reported here as well as at instantiate so an endpoint that cannot be
+		// normalised is visible on the provider row instead of only failing the
+		// first request made through it.
+		if _, err := azureInferenceBaseURL(cfg.BaseURL); err != nil {
+			return "Azure OpenAI base URL is not a resource endpoint: it must be an http(s) URL with no path, or a path ending in /openai/v1."
+		}
 	case "openai_codex":
 		if strings.TrimSpace(config.Get().OpenAICodexClientID) == "" {
 			return "OpenAI Codex requires an OAuth client ID."
@@ -74,6 +102,15 @@ func loadCatalogLocked() {
 	catGeneration = map[string]uint64{}
 	if b, err := os.ReadFile(catalogPath()); err == nil {
 		_ = json.Unmarshal(b, &catData)
+	}
+	// Drop every entry this build cannot vouch for. The file is not rewritten
+	// here: a read must not have a write side-effect, and the next successful
+	// refresh persists the pruned map anyway. Until then the drop simply
+	// repeats on each process start, which costs one map walk.
+	for key, entry := range catData {
+		if entry.SchemaVersion != catalogSchemaVersion {
+			delete(catData, key)
+		}
 	}
 	catLoaded = true
 }
@@ -97,7 +134,9 @@ func storeEntry(providerID string, models []ModelInfo) {
 	catMu.Lock()
 	defer catMu.Unlock()
 	loadCatalogLocked()
-	catData[providerID] = catalogEntry{Models: models, RefreshedAt: time.Now()}
+	catData[providerID] = catalogEntry{
+		SchemaVersion: catalogSchemaVersion, Models: models, RefreshedAt: time.Now(),
+	}
 	saveCatalogLocked()
 }
 
@@ -120,7 +159,9 @@ func storeEntryIfGeneration(
 	if catGeneration[providerID] != expected {
 		return false
 	}
-	catData[providerID] = catalogEntry{Models: models, RefreshedAt: time.Now()}
+	catData[providerID] = catalogEntry{
+		SchemaVersion: catalogSchemaVersion, Models: models, RefreshedAt: time.Now(),
+	}
 	saveCatalogLocked()
 	return true
 }

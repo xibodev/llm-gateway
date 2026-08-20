@@ -1,4 +1,4 @@
-import { useMemo, useState } from "preact/hooks";
+import { useMemo, useRef, useState } from "preact/hooks";
 import {
   Compass,
   LoaderCircle,
@@ -9,7 +9,7 @@ import {
   Trash2,
   X,
 } from "lucide-preact";
-import { sendJSON, type JSONRecord } from "../../lib/api";
+import { sendForm, sendJSON, type JSONRecord } from "../../lib/api";
 import type { ConsoleMode } from "../../lib/mode";
 import { asList, asRecord, numberValue, stringValue } from "../../lib/records";
 import { ProviderMark } from "../ProviderMark";
@@ -45,6 +45,8 @@ export function ConnectDialog({ entry, onClose, onConfigured, mode = "create", t
   })();
   const [providerID, setProviderID] = useState(mode === "edit" ? stringValue(providerConfig.id) : suggestedID);
   const [apiKey, setAPIKey] = useState("");
+  const [credentialKind, setCredentialKind] = useState("api_key");
+  const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [baseURL, setBaseURL] = useState(stringValue(providerConfig.base_url) || stringValue(entry.default_base_url));
   const [region, setRegion] = useState(stringValue(providerConfig.region) || stringValue(entry.default_region));
   const [project, setProject] = useState(stringValue(providerConfig.project));
@@ -58,41 +60,63 @@ export function ConnectDialog({ entry, onClose, onConfigured, mode = "create", t
   // key, and skipped the guard, so the operator submitted blank and got a 400.
   const apiKeySet = mode === "edit" && boolValue(providerConfig.api_key_set);
   const takesServiceAccount = new Set(asList(entry.auth_methods).map(String)).has(SERVICE_ACCOUNT_KIND);
+  const usingServiceAccount = takesServiceAccount && credentialKind === SERVICE_ACCOUNT_KIND;
   const fields = new Set(asList(entry.onboarding_fields).map(String));
   const label = stringValue(entry.label, "Provider");
   const dialogRef = useDialogFocus(onClose);
+  const credentialFile = useCredentialFileRead((text) => { setAPIKey(text); setError(""); });
 
   const submit = async (event: Event) => {
     event.preventDefault();
     if (!providerID.trim()) { setError("Provider ID is required."); return; }
-    if (requiresKey && !apiKey.trim() && !apiKeySet) { setError("An API key is required for this integration."); return; }
+    if (requiresKey && !apiKey.trim() && !apiKeySet) { setError(usingServiceAccount ? "A service account key is required." : "An API key is required for this integration."); return; }
+    if (usingServiceAccount && apiKey.trim() && !isServiceAccountJSON(apiKey)) { setError("That does not look like a service account key. Choose the whole service account JSON file, including its \"type\": \"service_account\" field."); return; }
     if (fields.has("base_url") && boolValue(entry.requires_base_url) && !baseURL.trim()) { setError("A base URL is required for this integration."); return; }
     if (fields.has("project") && !project.trim()) { setError("A Google Cloud project ID is required."); return; }
     if (fields.has("location") && !location.trim()) { setError("A provider location is required."); return; }
     setBusy(true);
     setError("");
     try {
-      await sendJSON<JSONRecord>("admin", "/providers", "POST", {
-        registry_id: stringValue(entry.id),
-        id: providerID.trim(),
-        api_key: apiKey,
-        base_url: baseURL.trim(),
-        region: region.trim(),
-        project: project.trim(),
-        location: location.trim(),
-      });
+      // Only the service-account case goes multipart, so its file survives the
+      // trip intact; every other provider type keeps the plain JSON submit, so
+      // the wire format for the rest of this dialog is unchanged.
+      if (usingServiceAccount && selectedFile) {
+        const form = new FormData();
+        form.set("registry_id", stringValue(entry.id));
+        form.set("id", providerID.trim());
+        form.set("base_url", baseURL.trim());
+        form.set("region", region.trim());
+        form.set("project", project.trim());
+        form.set("location", location.trim());
+        form.set("api_key", selectedFile);
+        await sendForm<JSONRecord>("admin", "/providers", form);
+      } else {
+        await sendJSON<JSONRecord>("admin", "/providers", "POST", {
+          registry_id: stringValue(entry.id),
+          id: providerID.trim(),
+          api_key: apiKey,
+          base_url: baseURL.trim(),
+          region: region.trim(),
+          project: project.trim(),
+          location: location.trim(),
+        });
+      }
+      credentialFile.invalidate();
       setAPIKey("");
+      setSelectedFile(null);
       await onConfigured();
       onClose();
     } catch (cause) {
+      credentialFile.invalidate();
       setAPIKey("");
+      setSelectedFile(null);
       setError(cause instanceof Error ? cause.message : "Provider setup failed.");
     } finally {
       setBusy(false);
     }
   };
 
-  return <div class="dialog-backdrop" role="presentation"><section ref={dialogRef} class="dialog" role="dialog" aria-modal="true" aria-labelledby="connect-provider-title" tabIndex={-1}><header><div><p class="eyebrow">Guided onboarding</p><h2 id="connect-provider-title">{mode === "edit" ? "Edit" : "Connect"} {label}</h2></div><button class="icon-button" type="button" aria-label="Close dialog" onClick={onClose}><X size={18} /></button></header><form class="form-stack" onSubmit={submit}><p class="muted-copy">Credential input is write-only. The console does not display or retrieve the value after setup.</p><label>Gateway provider ID<input value={providerID} disabled={mode === "edit"} onInput={(event) => setProviderID((event.currentTarget as HTMLInputElement).value)} autoComplete="off" /></label>{requiresKey ? <><label>{takesServiceAccount ? "API key or service account JSON" : "API key"}{apiKeySet ? " (leave blank to keep the current key)" : ""}{takesServiceAccount ? <textarea value={apiKey} rows={6} spellcheck={false} onInput={(event) => setAPIKey((event.currentTarget as HTMLTextAreaElement).value)} autoComplete="off" /> : <input type="password" value={apiKey} onInput={(event) => setAPIKey((event.currentTarget as HTMLInputElement).value)} autoComplete="off" />}</label>{takesServiceAccount ? <p class="form-help">Paste an API key, or the whole service account JSON file. The key type is detected from what you paste.</p> : null}</> : <p class="form-help">This integration does not require an API key. Confirm the local or self-hosted endpoint is reachable before continuing.</p>}{fields.has("base_url") ? <label>Base URL<input value={baseURL} onInput={(event) => setBaseURL((event.currentTarget as HTMLInputElement).value)} autoComplete="url" /></label> : null}{fields.has("region") ? <label>Region<input value={region} onInput={(event) => setRegion((event.currentTarget as HTMLInputElement).value)} autoComplete="off" /></label> : null}{fields.has("project") ? <label>Google Cloud project ID<input value={project} onInput={(event) => setProject((event.currentTarget as HTMLInputElement).value)} autoComplete="off" /></label> : null}{fields.has("location") ? <label>Location<input value={location} onInput={(event) => setLocation((event.currentTarget as HTMLInputElement).value)} placeholder="global" autoComplete="off" /></label> : null}{error ? <p class="form-error" role="alert">{error}</p> : null}<footer><button class="button button--secondary" type="button" onClick={onClose}>Cancel</button><button class="button button--primary" type="submit" disabled={busy}>{busy ? <LoaderCircle class="spin" size={16} /> : <ShieldCheck size={16} />} {mode === "edit" ? "Save configuration" : "Connect provider"}</button></footer></form></section></div>;
+  return <div class="dialog-backdrop" role="presentation"><section ref={dialogRef} class="dialog" role="dialog" aria-modal="true" aria-labelledby="connect-provider-title" tabIndex={-1}><header><div><p class="eyebrow">Guided onboarding</p><h2 id="connect-provider-title">{mode === "edit" ? "Edit" : "Connect"} {label}</h2></div><button class="icon-button" type="button" aria-label="Close dialog" onClick={onClose}><X size={18} /></button></header><form class="form-stack" onSubmit={submit}><p class="muted-copy">Credential input is write-only. The console does not display or retrieve the value after setup.</p><label>Gateway provider ID<input value={providerID} disabled={mode === "edit"} onInput={(event) => setProviderID((event.currentTarget as HTMLInputElement).value)} autoComplete="off" /></label>{requiresKey ? <>{takesServiceAccount ? <label>Credential type<select value={credentialKind} onChange={(event) => { credentialFile.invalidate(); setCredentialKind((event.currentTarget as HTMLSelectElement).value); setAPIKey(""); setSelectedFile(null); setError(""); }}><option value="api_key">API key</option><option value={SERVICE_ACCOUNT_KIND}>Google Cloud service account key</option></select></label> : null}<label>{usingServiceAccount ? "Service account key (JSON file)" : "API key"}{apiKeySet ? " (leave blank to keep the current key)" : ""}{usingServiceAccount ? <input type="file" accept="application/json,.json" onChange={(event) => { const file = (event.currentTarget as HTMLInputElement).files?.[0]; if (!file) { credentialFile.invalidate(); setAPIKey(""); setSelectedFile(null); return; } setSelectedFile(file); credentialFile.read(file); }} /> : <input type="password" value={apiKey} onInput={(event) => setAPIKey((event.currentTarget as HTMLInputElement).value)} autoComplete="off" />}</label>{usingServiceAccount ? <p class="form-help">The key is exchanged for short-lived access tokens. Its project is read from the key itself.</p> : null}</> : <p class="form-help">This integration does not require an API key. Confirm the local or self-hosted endpoint is reachable before continuing.</p>}{fields.has("base_url") ? <label>Base URL<input value={baseURL} onInput={(event) => setBaseURL((event.currentTarget as HTMLInputElement).value)} autoComplete="url" /></label> : null}{fields.has("region") ? <label>Region<input value={region} onInput={(event) => setRegion((event.currentTarget as HTMLInputElement).value)} autoComplete="off" /></label> : null}{fields.has("project") ? <label>Google Cloud project ID<input value={project} onInput={(event) => setProject((event.currentTarget as HTMLInputElement).value)} autoComplete="off" /></label> : null}{fields.has("location") ? <label>Location<input value={location} onInput={(event) => setLocation((event.currentTarget as HTMLInputElement).value)} placeholder="global" autoComplete="off" /></label> : null}{error ? <p class="form-error" role="alert">{error}</p> : null}<footer><button class="button button--secondary" type="button" onClick={onClose}>Cancel</button><button class="button button--primary" type="submit" disabled={busy}>{busy ? <LoaderCircle class="spin" size={16} /> : <ShieldCheck size={16} />} {mode === "edit" ? "Save configuration" : "Connect provider"}</button></footer></form></section></div>;
 }
 
 // SERVICE_ACCOUNT_KIND matches gcpauth.CredentialKind on the server.
@@ -102,6 +126,26 @@ const SERVICE_ACCOUNT_KIND = "gcp_service_account";
 // no credential to type in and a gateway_client tile is not an upstream at all,
 // so neither has a credential-based create path to offer.
 const CREDENTIAL_AUTH_METHODS = new Set(["api_key", "none", SERVICE_ACCOUNT_KIND]);
+
+// useCredentialFileRead reads a chosen credential file and applies the result
+// only while nothing has superseded the read. file.text() resolves
+// asynchronously and is tied to neither the file nor the credential kind that
+// started it: switching back to "API key" clears the field, and the stale
+// completion then refilled it, so submitting stored the service-account
+// document under credential_kind "api_key" — an unusable connection, not a
+// retryable error. A monotonic token, bumped by every file pick, credential-kind
+// change and clear, turns a superseded read into a no-op. Both dialogs use this
+// one guard so they cannot drift apart.
+function useCredentialFileRead(apply: (text: string) => void) {
+  const token = useRef(0);
+  const invalidate = () => { token.current += 1; };
+  const read = (file: File) => {
+    invalidate();
+    const started = token.current;
+    void file.text().then((text) => { if (started === token.current) apply(text); });
+  };
+  return { read, invalidate };
+}
 
 // isServiceAccountJSON catches the common paste mistakes (an OAuth client file,
 // a fragment, a path) in the browser, so the key is never sent to be rejected.
@@ -121,11 +165,13 @@ export function PrivateAPIKeyDialog({ entry, providerID, onClose, onConfigured }
   const [name, setName] = useState("personal");
   const [kind, setKind] = useState(allowsAPIKey ? "api_key" : SERVICE_ACCOUNT_KIND);
   const [secret, setSecret] = useState("");
+  const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
   const usingServiceAccount = kind === SERVICE_ACCOUNT_KIND;
   const label = stringValue(entry.label, providerID);
   const dialogRef = useDialogFocus(onClose);
+  const credentialFile = useCredentialFileRead((text) => { setSecret(text); setError(""); });
   const submit = async (event: Event) => {
     event.preventDefault();
     if (!providerID) { setError("An administrator must configure this provider before you add a private credential."); return; }
@@ -136,18 +182,34 @@ export function PrivateAPIKeyDialog({ entry, providerID, onClose, onConfigured }
     }
     setBusy(true);
     try {
-      await sendJSON<JSONRecord>("portal", "/connections", "POST", {
-        provider_id: providerID, connection_name: name, credential_kind: kind, secret, make_default: true,
-      });
+      // A selected file is sent as a real file part so a multi-line PEM-bearing
+      // document survives the trip intact; pasted text still goes as JSON.
+      if (selectedFile) {
+        const form = new FormData();
+        form.set("provider_id", providerID);
+        form.set("connection_name", name);
+        form.set("credential_kind", kind);
+        form.set("make_default", "true");
+        form.set("secret", selectedFile);
+        await sendForm<JSONRecord>("portal", "/connections", form);
+      } else {
+        await sendJSON<JSONRecord>("portal", "/connections", "POST", {
+          provider_id: providerID, connection_name: name, credential_kind: kind, secret, make_default: true,
+        });
+      }
+      credentialFile.invalidate();
       setSecret("");
+      setSelectedFile(null);
       await onConfigured();
       onClose();
     } catch (cause) {
+      credentialFile.invalidate();
       setSecret("");
+      setSelectedFile(null);
       setError(cause instanceof Error ? cause.message : "Private connection could not be stored.");
     } finally { setBusy(false); }
   };
-  return <div class="dialog-backdrop" role="presentation"><section ref={dialogRef} class="dialog" role="dialog" aria-modal="true" aria-labelledby="private-key-title" tabIndex={-1}><header><div><p class="eyebrow">Private API key</p><h2 id="private-key-title">Connect {label}</h2></div><button class="icon-button" type="button" aria-label="Close dialog" onClick={onClose}><X size={18} /></button></header><form class="form-stack" onSubmit={submit}><p class="muted-copy">This credential is encrypted for the signed-in human. It is write-only and is never returned to browser state.</p><label>Connection name<input value={name} onInput={(event) => setName((event.currentTarget as HTMLInputElement).value)} /></label>{allowsServiceAccount && allowsAPIKey ? <label>Credential type<select value={kind} onChange={(event) => { setKind((event.currentTarget as HTMLSelectElement).value); setSecret(""); setError(""); }}><option value="api_key">API key</option><option value={SERVICE_ACCOUNT_KIND}>Google Cloud service account key</option></select></label> : null}{usingServiceAccount ? <label>Service account key (JSON)<textarea value={secret} rows={8} spellcheck={false} onInput={(event) => setSecret((event.currentTarget as HTMLTextAreaElement).value)} placeholder={'{\n  "type": "service_account",\n  ...\n}'} autoComplete="off" /></label> : <label>API key<input type="password" value={secret} onInput={(event) => setSecret((event.currentTarget as HTMLInputElement).value)} autoComplete="off" /></label>}{usingServiceAccount ? <p class="form-help">The key is exchanged for short-lived access tokens. Its project is read from the key itself.</p> : null}{error ? <p class="form-error" role="alert">{error}</p> : null}<footer><button class="button button--secondary" type="button" onClick={onClose}>Cancel</button><button class="button button--primary" type="submit" disabled={busy}>{busy ? <LoaderCircle class="spin" size={16} /> : <ShieldCheck size={16} />} Save private connection</button></footer></form></section></div>;
+  return <div class="dialog-backdrop" role="presentation"><section ref={dialogRef} class="dialog" role="dialog" aria-modal="true" aria-labelledby="private-key-title" tabIndex={-1}><header><div><p class="eyebrow">Private API key</p><h2 id="private-key-title">Connect {label}</h2></div><button class="icon-button" type="button" aria-label="Close dialog" onClick={onClose}><X size={18} /></button></header><form class="form-stack" onSubmit={submit}><p class="muted-copy">This credential is encrypted for the signed-in human. It is write-only and is never returned to browser state.</p><label>Connection name<input value={name} onInput={(event) => setName((event.currentTarget as HTMLInputElement).value)} /></label>{allowsServiceAccount && allowsAPIKey ? <label>Credential type<select value={kind} onChange={(event) => { credentialFile.invalidate(); setKind((event.currentTarget as HTMLSelectElement).value); setSecret(""); setSelectedFile(null); setError(""); }}><option value="api_key">API key</option><option value={SERVICE_ACCOUNT_KIND}>Google Cloud service account key</option></select></label> : null}{usingServiceAccount ? <label>Service account key (JSON file)<input type="file" accept="application/json,.json" onChange={(event) => { const file = (event.currentTarget as HTMLInputElement).files?.[0]; if (!file) { credentialFile.invalidate(); setSecret(""); setSelectedFile(null); return; } setSelectedFile(file); credentialFile.read(file); }} /></label> : <label>API key<input type="password" value={secret} onInput={(event) => setSecret((event.currentTarget as HTMLInputElement).value)} autoComplete="off" /></label>}{usingServiceAccount ? <p class="form-help">The key is exchanged for short-lived access tokens. Its project is read from the key itself.</p> : null}{error ? <p class="form-error" role="alert">{error}</p> : null}<footer><button class="button button--secondary" type="button" onClick={onClose}>Cancel</button><button class="button button--primary" type="submit" disabled={busy}>{busy ? <LoaderCircle class="spin" size={16} /> : <ShieldCheck size={16} />} Save private connection</button></footer></form></section></div>;
 }
 
 export function ProviderHub({ data, mode, onChanged, onOpenDetail }: { data: JSONRecord; mode: ConsoleMode; onChanged: () => Promise<void>; onOpenDetail: (entryID: string) => void }) {
@@ -303,7 +365,7 @@ export function ProviderHub({ data, mode, onChanged, onOpenDetail }: { data: JSO
           // to replace. Keep it only where it is one instance's own words; the
           // detail rows name the instance each message belongs to.
           const tileConfigurationIssue = instanceCount > 1 ? "" : stringValue(entry.configuration_issue);
-          return <article class="provider-card provider-card--rich provider-card--clickable" key={id} role="link" tabIndex={0} aria-label={`Open ${label} details`} onClick={(event) => openDetail(event, id)} onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); onOpenDetail(id); } }}><header><ProviderMark id={id} label={label} /><div><h2>{label}</h2><p>{stringValue(entry.description, "Gateway integration.")}</p></div><StatusBadge status={status} /></header><dl><div><dt>Catalog</dt><dd>{numberValue(entry.model_count)} model{numberValue(entry.model_count) === 1 ? "" : "s"} · {stringValue(entry.catalog_state, "unknown")}</dd></div><div><dt>Connection</dt><dd>{numberValue(entry.connection_count)} private record{numberValue(entry.connection_count) === 1 ? "" : "s"}</dd></div><div><dt>Instances</dt><dd>{instanceCount} instance{instanceCount === 1 ? "" : "s"}{compositionText ? ` · ${compositionText}` : ""}</dd></div><div><dt>Protocol</dt><dd>{stringValue(entry.protocol, "gateway")}</dd></div><div><dt>Auth</dt><dd>{methods.join(" · ") || "Gateway credential"}</dd></div></dl>{tileConfigurationIssue ? <p class="form-error" role="alert">{tileConfigurationIssue}</p> : null}{isClient ? <div class="provider-client-note"><ShieldCheck size={16} /><span>Client setup only. No provider OAuth action is available.</span></div> : null}<footer>{configured && mode === "admin" ? <div class="provider-actions">{canAddInstance ? <button class="button button--secondary" type="button" title="Configure another instance of this integration" onClick={() => connect(entry, "create")}><Plug size={15} /> Add instance</button> : null}{supportsOAuth ? <button class="button button--primary" type="button" disabled={!ownerID || instanceCount > 1} title={instanceCount > 1 ? "Multiple instances are configured; add an OAuth account from an unambiguous single-instance tile" : undefined} onClick={() => connect(entry)}><Plug size={15} /> Add account</button> : null}{instanceCount > 1 ? <button class="button button--secondary" type="button" title="Grid actions are ambiguous across instances; manage each instance from its own row" onClick={() => onOpenDetail(id)}><Plug size={15} /> Manage {instanceCount} instances</button> : <><button class="button button--secondary" type="button" title="Confirm the endpoint answers the catalog API — does not run a completion" disabled={active("test") || (supportsOAuth && !ownerID)} onClick={() => void runLifecycle(entry, "test")}><Plug size={15} /> Check reachability</button><button class="button button--secondary" type="button" title="Refresh this provider's model catalog" disabled={active("refresh") || (supportsOAuth && !ownerID)} onClick={() => void runLifecycle(entry, "refresh")}><RefreshCw size={15} /> Sync catalog</button><button class="button button--danger" type="button" disabled={active("delete")} title="Remove the configured provider and its system connection" onClick={() => void runLifecycle(entry, "delete")}><Trash2 size={15} /> Remove</button></>}</div> : mode === "portal" && !isClient ? unavailable ? <span class="provider-card__meta">Integration not available</span> : portalRequiresAdminSetup ? <span class="provider-card__meta">Administrator setup required</span> : <button class="button button--primary" type="button" disabled={supportsOAuth && instanceCount > 1} title={supportsOAuth && instanceCount > 1 ? "Multiple instances are configured; add an OAuth account from an unambiguous single-instance tile" : undefined} onClick={() => connect(entry)}><Plug size={16} /> {hasPrivateConnection ? "Add or replace account" : "Connect"}</button> : !configured && !unavailable ? <button class="button button--primary" type="button" onClick={() => connect(entry)}><Plug size={16} /> {isClient ? "View setup" : "Connect"}</button> : <span class="provider-card__meta">{unavailable ? "Integration not available" : "Connection managed privately"}</span>}<span class="technical provider-card__freshness">{stringValue(entry.catalog_refreshed, "Catalog not synced")}</span></footer></article>;
+          return <article class="provider-card provider-card--rich provider-card--clickable" key={id} role="link" tabIndex={0} aria-label={`Open ${label} details`} onClick={(event) => openDetail(event, id)} onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); onOpenDetail(id); } }}><header><ProviderMark id={id} label={label} /><div><h2>{label}</h2><p>{stringValue(entry.description, "Gateway integration.")}</p></div><StatusBadge status={status} /></header><dl><div><dt>Catalog</dt><dd>{stringValue(entry.catalog_state) === "not_discoverable" ? "Catalog not discoverable" : `${numberValue(entry.model_count)} model${numberValue(entry.model_count) === 1 ? "" : "s"} · ${stringValue(entry.catalog_state, "unknown")}`}</dd></div><div><dt>Connection</dt><dd>{numberValue(entry.connection_count)} private record{numberValue(entry.connection_count) === 1 ? "" : "s"}</dd></div><div><dt>Instances</dt><dd>{instanceCount} instance{instanceCount === 1 ? "" : "s"}{compositionText ? ` · ${compositionText}` : ""}</dd></div><div><dt>Protocol</dt><dd>{stringValue(entry.protocol, "gateway")}</dd></div><div><dt>Auth</dt><dd>{methods.join(" · ") || "Gateway credential"}</dd></div></dl>{tileConfigurationIssue ? <p class="form-error" role="alert">{tileConfigurationIssue}</p> : null}{isClient ? <div class="provider-client-note"><ShieldCheck size={16} /><span>Client setup only. No provider OAuth action is available.</span></div> : null}<footer>{configured && mode === "admin" ? <div class="provider-actions">{canAddInstance ? <button class="button button--secondary" type="button" title="Configure another instance of this integration" onClick={() => connect(entry, "create")}><Plug size={15} /> Add instance</button> : null}{supportsOAuth ? <button class="button button--primary" type="button" disabled={!ownerID || instanceCount > 1} title={instanceCount > 1 ? "Multiple instances are configured; add an OAuth account from an unambiguous single-instance tile" : undefined} onClick={() => connect(entry)}><Plug size={15} /> Add account</button> : null}{instanceCount > 1 ? <button class="button button--secondary" type="button" title="Grid actions are ambiguous across instances; manage each instance from its own row" onClick={() => onOpenDetail(id)}><Plug size={15} /> Manage {instanceCount} instances</button> : <><button class="button button--secondary" type="button" title="Confirm the endpoint answers the catalog API — does not run a completion" disabled={active("test") || (supportsOAuth && !ownerID)} onClick={() => void runLifecycle(entry, "test")}><Plug size={15} /> Check reachability</button><button class="button button--secondary" type="button" title="Refresh this provider's model catalog" disabled={active("refresh") || (supportsOAuth && !ownerID)} onClick={() => void runLifecycle(entry, "refresh")}><RefreshCw size={15} /> Sync catalog</button><button class="button button--danger" type="button" disabled={active("delete")} title="Remove the configured provider and its system connection" onClick={() => void runLifecycle(entry, "delete")}><Trash2 size={15} /> Remove</button></>}</div> : mode === "portal" && !isClient ? unavailable ? <span class="provider-card__meta">Integration not available</span> : portalRequiresAdminSetup ? <span class="provider-card__meta">Administrator setup required</span> : <button class="button button--primary" type="button" disabled={supportsOAuth && instanceCount > 1} title={supportsOAuth && instanceCount > 1 ? "Multiple instances are configured; add an OAuth account from an unambiguous single-instance tile" : undefined} onClick={() => connect(entry)}><Plug size={16} /> {hasPrivateConnection ? "Add or replace account" : "Connect"}</button> : !configured && !unavailable ? <button class="button button--primary" type="button" onClick={() => connect(entry)}><Plug size={16} /> {isClient ? "View setup" : "Connect"}</button> : <span class="provider-card__meta">{unavailable ? "Integration not available" : "Connection managed privately"}</span>}<span class="technical provider-card__freshness">{stringValue(entry.catalog_refreshed, "Catalog not synced")}</span></footer></article>;
         })}</div></section>;
       })}
       {connectEntry ? <ConnectDialog entry={connectEntry.entry} mode={connectEntry.mode} takenIDs={allProviderIDs} onClose={() => setConnectEntry(null)} onConfigured={onChanged} /> : null}

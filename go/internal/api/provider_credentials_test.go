@@ -51,7 +51,7 @@ func TestServiceProviderCredentialControlsModelsAndRoutes(t *testing.T) {
 		s.Providers = map[string]*config.ProviderConfig{
 			"copilot": {Type: "github_copilot"},
 		}
-		s.Categories = map[string]*config.CategoryConfig{}
+		s.Endpoints = map[string]*config.EndpointConfig{}
 		s.AnthropicDiscoveryAliases = false
 	})
 	providers.ResetProviders()
@@ -193,7 +193,7 @@ func TestServiceBindingPreservesUnrelatedHumanCatalog(t *testing.T) {
 		s.Providers = map[string]*config.ProviderConfig{
 			"copilot": {Type: "github_copilot"},
 		}
-		s.Categories = map[string]*config.CategoryConfig{}
+		s.Endpoints = map[string]*config.EndpointConfig{}
 		s.AnthropicDiscoveryAliases = false
 	})
 	providers.ResetProviders()

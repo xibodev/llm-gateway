@@ -1,6 +1,7 @@
 package router
 
 import (
+	"strings"
 	"testing"
 
 	"llmgw/internal/config"
@@ -17,9 +18,9 @@ func setupEcho(t *testing.T) {
 			"echo2": {Type: "echo"},
 			"bad":   {Type: "openai_compatible", BaseURL: "http://127.0.0.1:1/v1"},
 		}
-		s.Categories = map[string]*config.CategoryConfig{
-			"smart":    {Failover: []config.CategoryMember{{Provider: "echo", Model: "echo-default"}}},
-			"failover": {Failover: []config.CategoryMember{{Provider: "bad", Model: "x"}, {Provider: "echo", Model: "echo-default"}}},
+		s.Endpoints = map[string]*config.EndpointConfig{
+			"smart":    {Failover: []config.EndpointMember{{Provider: "echo", Model: "echo-default"}}},
+			"failover": {Failover: []config.EndpointMember{{Provider: "bad", Model: "x"}, {Provider: "echo", Model: "echo-default"}}},
 			"empty":    {Failover: nil},
 		}
 	})
@@ -61,8 +62,8 @@ func TestResolveTargets(t *testing.T) {
 func TestResolveCategoryRejectsAmbiguousCaseVariants(t *testing.T) {
 	setupEcho(t)
 	config.Update(func(s *config.Settings) {
-		s.Categories["SMART"] = &config.CategoryConfig{
-			Failover: []config.CategoryMember{{Provider: "echo2", Model: "echo-deep"}},
+		s.Endpoints["SMART"] = &config.EndpointConfig{
+			Failover: []config.EndpointMember{{Provider: "echo2", Model: "echo-deep"}},
 		}
 	})
 
@@ -78,6 +79,27 @@ func TestResolveCategoryRejectsAmbiguousCaseVariants(t *testing.T) {
 		t.Fatal("ambiguous case-insensitive route lookup should fail")
 	} else if _, ok := err.(*AmbiguousCategoryError); !ok {
 		t.Fatalf("want AmbiguousCategoryError, got %T: %v", err, err)
+	}
+}
+
+// The type name is internal; the message is not. Endpoint lookup hands this
+// error to the API layer, so its prose must use the product's current
+// vocabulary — the same word ModelNotFoundError and owned_by: "endpoint" use —
+// rather than the pre-rename "category".
+func TestAmbiguousEndpointErrorSpeaksOfEndpoints(t *testing.T) {
+	message := (&AmbiguousCategoryError{
+		Requested: "SmArT", Matches: []string{"SMART", "smart"},
+	}).Error()
+	if strings.Contains(strings.ToLower(message), "categor") {
+		t.Fatalf("message %q still uses the pre-rename vocabulary", message)
+	}
+	if !strings.Contains(message, "Endpoint") || !strings.Contains(message, "endpoints") {
+		t.Fatalf("message %q does not name the endpoint it is about", message)
+	}
+	for _, match := range []string{"SMART", "smart"} {
+		if !strings.Contains(message, match) {
+			t.Fatalf("message %q omits colliding name %q", message, match)
+		}
 	}
 }
 

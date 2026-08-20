@@ -60,7 +60,7 @@ that need an operator sign-off:
 ### Plan
 1. **Stand up the new gateway** on the chosen box (compose above), reachable on a
    temporary hostname (e.g. `llm-next.example.com`) or the box IP behind Caddy.
-2. **Port the config**: recreate providers/categories, sign Copilot in, mint the
+2. **Port the config**: recreate providers/endpoints, sign Copilot in, mint the
    keys the current consumers use (or import the old ones). Verify with `smoke.sh`
    against the temporary hostname.
 3. **Dual-run**: point one non-critical consumer at the new endpoint; watch

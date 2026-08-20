@@ -1,7 +1,7 @@
 import { Activity, ArrowRight, KeyRound, Plug, Route } from "lucide-preact";
 import type { JSONRecord } from "../lib/api";
 import type { PageID } from "../lib/navigation";
-import { asList, asRecord, numberValue, stringValue } from "../lib/records";
+import { asList, asRecord, endpointsOf, numberValue, stringValue } from "../lib/records";
 import { PageHeading } from "../components/PageState";
 import { GetStartedGuide } from "../components/GetStartedGuide";
 
@@ -24,7 +24,7 @@ function nextStepFor(data: JSONRecord, mode: "admin" | "portal"): NextStep {
   const connections = asList(data.provider_connections);
   const keys = asList(data.keys);
   const projects = asList(data.projects);
-  const routes = Object.keys(asRecord(data.categories));
+  const routes = Object.keys(endpointsOf(data));
 
   if (mode === "portal") {
     if (!projects.length) {
@@ -105,11 +105,11 @@ export function Overview({ data, mode, onNavigate }: { data: JSONRecord; mode: "
   const providers = asList(data.providers);
   const keys = asList(data.keys);
   const connections = asList(data.provider_connections);
-  const categories = asRecord(data.categories);
+  const endpoints = endpointsOf(data);
   const projects = asList(data.projects);
   const isPortal = mode === "portal";
   const totalProviders = isPortal ? connections.length : providers.length;
-  const routes = isPortal ? projects.length : Object.keys(categories).length;
+  const routes = isPortal ? projects.length : Object.keys(endpoints).length;
   const nextStep = nextStepFor(data, mode);
 
   return (

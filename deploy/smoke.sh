@@ -27,9 +27,9 @@ models=$(curl -s "${AUTH[@]}" "${BASE_URL}/v1/models")
 count=$(printf '%s' "$models" | grep -o '"id"' | wc -l | tr -d ' ')
 [[ "${count:-0}" -gt 0 ]] && ok "models catalog (${count} entries)" || bad "models catalog empty/unreachable"
 
-# 3) pick a model to exercise (arg > first category > first provider/model)
+# 3) pick a model to exercise (arg > first endpoint > first provider/model)
 if [[ -z "$MODEL" ]]; then
-  MODEL=$(printf '%s' "$models" | grep -o '"id":"[^"]*","object":"model","owned_by":"category"' | head -1 | sed 's/.*"id":"\([^"]*\)".*/\1/')
+  MODEL=$(printf '%s' "$models" | grep -o '"id":"[^"]*","object":"model","owned_by":"endpoint"' | head -1 | sed 's/.*"id":"\([^"]*\)".*/\1/')
 fi
 if [[ -z "$MODEL" ]]; then
   MODEL=$(printf '%s' "$models" | grep -o '"id":"[^"/]*/[^"]*"' | head -1 | sed 's/"id":"\([^"]*\)"/\1/')

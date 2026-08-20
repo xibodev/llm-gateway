@@ -295,24 +295,6 @@ func TestVertexDetailedCatalogRequiresProject(t *testing.T) {
 	}
 }
 
-func TestVertexCatalogIsCuratedAndDistinctFromAIStudio(t *testing.T) {
-	models := vertexCuratedModels()
-	ids := map[string]bool{}
-	for _, model := range models {
-		ids[model.ID] = true
-	}
-	// The same underlying model carries different ids on each surface; using
-	// AI Studio's id against Vertex 404s.
-	// veo-3.1-lite-generate-001 is the id that actually resolves on Vertex;
-	// veo-3.0-generate-001 (Model Garden's card) 404s on this surface.
-	if !ids["veo-3.1-lite-generate-001"] {
-		t.Fatal("vertex catalogue is missing the Veo id that resolves")
-	}
-	if ids["veo-3.1-fast-generate-preview"] {
-		t.Fatal("vertex catalogue must not carry AI Studio ids")
-	}
-}
-
 // A 200 carrying an empty string is the worst failure mode: the caller sees
 // success and no content. Gemini's thinking models hit this whenever
 // max_tokens is small enough that reasoning consumes the whole budget.

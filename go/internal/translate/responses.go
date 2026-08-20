@@ -786,7 +786,7 @@ func responsesIncompleteMaxTokens(resp map[string]any) bool {
 }
 
 // PreferredEndpoint decides which OpenAI-family endpoint a model should use
-// given its published supported_endpoints. Returns "responses" only when the
+// given its published supported_surfaces. Returns "responses" only when the
 // model advertises /responses but NOT /chat/completions; otherwise "chat"
 // (the safe default, including when the list is empty/unknown).
 func PreferredEndpoint(supportedEndpoints []string) string {

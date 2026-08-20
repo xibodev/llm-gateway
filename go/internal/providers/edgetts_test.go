@@ -169,8 +169,8 @@ func TestEdgeTTSSynthesizeAgainstMockService(t *testing.T) {
 	if len(models) != 1 || models[0].ID != "en-US-TestNeural" {
 		t.Fatalf("voice catalog: %+v", models)
 	}
-	if endpoints := models[0].SupportedEndpoints; len(endpoints) != 1 || endpoints[0] != "/v1/audio/speech" {
-		t.Fatalf("supported endpoints: %+v", endpoints)
+	if surfaces := models[0].SupportedSurfaces; len(surfaces) != 1 || surfaces[0] != "/v1/audio/speech" {
+		t.Fatalf("supported surfaces: %+v", surfaces)
 	}
 }
 

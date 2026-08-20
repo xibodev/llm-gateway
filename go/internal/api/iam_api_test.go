@@ -32,7 +32,7 @@ func TestIAMAdminAndKeyAuthenticationE2E(t *testing.T) {
 		s.AllowUnauthenticatedAPI = false
 		s.Savings.Enabled = false
 		s.Providers = map[string]*config.ProviderConfig{"echo": {Type: "echo"}}
-		s.Categories = map[string]*config.CategoryConfig{}
+		s.Endpoints = map[string]*config.EndpointConfig{}
 	})
 	providers.ResetProviders()
 	t.Cleanup(providers.ResetProviders)
@@ -176,7 +176,7 @@ func TestFailedRequestRecordedInUsageStats(t *testing.T) {
 		s.AllowUnauthenticatedAPI = false
 		s.APIKey = "admin-secret"
 		s.Providers = map[string]*config.ProviderConfig{}
-		s.Categories = map[string]*config.CategoryConfig{}
+		s.Endpoints = map[string]*config.EndpointConfig{}
 		s.Savings.Enabled = false
 	})
 	principal, _ := iam.CreatePrincipal("service", "service:errors", "", "Errors")

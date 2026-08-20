@@ -315,6 +315,31 @@ test("routes render as clickable tiles with a detail page and end-to-end test ru
   assert.match(detail, /Create them on the Access page first/);
 });
 
+test("routes vocabulary matches the API's endpoint terminology and writes to the canonical route", () => {
+  const routes = readFileSync(resolve(root, "src/pages/Routes.tsx"), "utf8");
+  const detail = readFileSync(resolve(root, "src/pages/RouteDetail.tsx"), "utf8");
+  const picker = readFileSync(resolve(root, "src/components/ModelPicker.tsx"), "utf8");
+  assert.match(routes, /Endpoint route/);
+  assert.match(detail, /Endpoint route/);
+  assert.doesNotMatch(routes, /Category route/);
+  assert.doesNotMatch(detail, /Category route/);
+  assert.match(routes, /`\/endpoints\$\{principalQuery\}`/);
+  assert.match(routes, /`\/endpoints\/\$\{encodeURIComponent\(routeName\)\}`/);
+  assert.match(detail, /`\/endpoints\/\$\{encodeURIComponent\(routeName\)\}`/);
+  assert.doesNotMatch(routes, /"admin", `\/categories/);
+  assert.doesNotMatch(detail, /"admin", `\/categories/);
+  // owned_by is "endpoint" on the wire now, not "category" — a stale check here
+  // would silently let routing-chain rows leak back into model pickers.
+  assert.match(routes, /stringValue\(row\.owned_by\) === "endpoint"/);
+  assert.match(picker, /owner === "endpoint"/);
+});
+
+test("setup snippets use the console's own origin, not a hardcoded localhost", () => {
+  const page = readFileSync(resolve(root, "src/pages/ModelsEndpoints.tsx"), "utf8");
+  assert.doesNotMatch(page, /http:\/\/localhost:8787/);
+  assert.match(page, /window\.location\.origin/);
+});
+
 test("settings page has real project policy controls instead of shell copy", () => {
   const settings = readFileSync(resolve(root, "src/pages/Settings.tsx"), "utf8");
   assert.match(settings, /ProjectPolicyEditor/);
@@ -606,4 +631,64 @@ test("one tile per id, and a custom row never dresses a curated tile", () => {
   assert.match(hub, /if \(!boolValue\(status\.custom\)\) return false/);
   assert.match(hub, /const taken = new Set\(registryIDs\)/);
   assert.match(detail, /!\(registryEntry && boolValue\(candidate\.custom\)\)/);
+});
+
+test("console can submit a credential as a multipart upload", () => {
+  const api = readFileSync(resolve(root, "src/lib/api.ts"), "utf8");
+  assert.match(api, /export function sendForm</);
+  assert.match(api, /FormData/);
+});
+
+test("a file-shaped credential is chosen with a file picker, not pasted", () => {
+  const hub = readFileSync(resolve(root, "src/components/providers/ProviderHub.tsx"), "utf8");
+  assert.match(hub, /type="file"/);
+  assert.match(hub, /accept="application\/json,\.json"/);
+});
+
+test("guided onboarding asks which credential type rather than sniffing the paste", () => {
+  const hub = readFileSync(resolve(root, "src/components/providers/ProviderHub.tsx"), "utf8");
+  assert.doesNotMatch(hub, /API key or service account JSON/);
+  assert.match(hub, /Credential type/);
+});
+
+test("an undiscoverable catalog is labelled, not shown as zero models", () => {
+  const detail = readFileSync(resolve(root, "src/pages/ProviderDetail.tsx"), "utf8");
+  const hub = readFileSync(resolve(root, "src/components/providers/ProviderHub.tsx"), "utf8");
+  assert.match(detail + hub, /not discoverable/i);
+});
+
+test("console views read the canonical endpoints key, with the deprecated alias only as a fallback", () => {
+  // The server emits "endpoints" and still mirrors it under the deprecated
+  // "categories" alias this branch documents for removal. Every view that read
+  // the alias directly would have shown zero routes — and Overview the wrong
+  // onboarding step — the release the alias goes.
+  const records = readFileSync(resolve(root, "src/lib/records.ts"), "utf8");
+  assert.match(records, /export function endpointsOf/);
+  assert.match(records, /asRecord\(data\.endpoints\)/);
+  assert.match(records, /asRecord\(data\.categories\)/);
+  for (const file of ["src/pages/Routes.tsx", "src/pages/RouteDetail.tsx", "src/pages/Overview.tsx", "src/components/GetStartedGuide.tsx"]) {
+    const source = readFileSync(resolve(root, file), "utf8");
+    assert.match(source, /endpointsOf\(data\)/, `${file} does not read endpoints canonically`);
+    assert.doesNotMatch(source, /data\.categories/, `${file} still reads the deprecated alias`);
+  }
+  // nextStepFor is a second, earlier reader in Overview; both must migrate.
+  const overview = readFileSync(resolve(root, "src/pages/Overview.tsx"), "utf8");
+  assert.equal(overview.match(/endpointsOf\(data\)/g).length, 2);
+});
+
+test("a superseded credential file read cannot repopulate the field it no longer belongs to", () => {
+  // file.text() is not bound to the file or the credential kind that started
+  // the read. Switching back to "API key" cleared the field and the stale
+  // completion refilled it, so a submit stored the service-account document
+  // under credential_kind "api_key" — a connection that cannot work, not a
+  // retryable error. Both dialogs must use the same guard.
+  const hub = readFileSync(resolve(root, "src/components/providers/ProviderHub.tsx"), "utf8");
+  assert.match(hub, /function useCredentialFileRead/);
+  assert.match(hub, /if \(started === token\.current\) apply\(text\)/);
+  assert.doesNotMatch(hub, /void file\.text\(\)\.then\(\(text\) => \{ set/);
+  // One call site per dialog, each reading through the guard and invalidating
+  // whenever the kind changes, the picker is cleared, or a submit resets state.
+  assert.equal(hub.match(/credentialFile\.read\(file\)/g).length, 2);
+  assert.equal(hub.match(/useCredentialFileRead\(\(text\) =>/g).length, 2);
+  assert.equal(hub.match(/credentialFile\.invalidate\(\)/g).length, 8);
 });

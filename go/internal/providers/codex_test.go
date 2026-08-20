@@ -174,7 +174,7 @@ func TestCodexProviderUsesResponsesRefreshesOnceAndCatalogsWithClientVersion(t *
 		t.Fatalf("refreshed=%+v ok=%v err=%v", refreshed, ok, err)
 	}
 	rows := codex.ListModels()
-	if len(rows) != 1 || rows[0].ID != "gpt-5-codex" || rows[0].Label != "GPT-5 Codex" || len(rows[0].SupportedEndpoints) != 1 {
+	if len(rows) != 1 || rows[0].ID != "gpt-5-codex" || rows[0].Label != "GPT-5 Codex" || len(rows[0].SupportedSurfaces) != 1 {
 		t.Fatalf("Codex models=%+v", rows)
 	}
 }

@@ -26,6 +26,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 
@@ -113,6 +114,18 @@ func googleTimeout(seconds float64) time.Duration {
 
 func (p GoogleAIProvider) IsStub() bool { return false }
 
+// vertexHost applies the one region rule every Vertex endpoint in this file
+// shares: the global endpoint has no region prefix in the host, regional ones
+// do. modelURL, operationURL and vertexPublisherModels each need a host built
+// this way but disagree on API version and path shape, so only the host rule
+// lives here rather than a full URL builder.
+func vertexHost(location string) string {
+	if location != vertexDefaultLocation {
+		return location + "-" + vertexDefaultHost
+	}
+	return vertexDefaultHost
+}
+
 // modelURL builds the fully-qualified endpoint for one model action.
 // Vertex needs a project and encodes the location twice: once in the host for
 // regional endpoints and once in the resource path.
@@ -129,12 +142,7 @@ func (p GoogleAIProvider) modelURL(model, action string) (string, error) {
 	}
 	base := p.baseURL
 	if base == "" {
-		host := vertexDefaultHost
-		// The global endpoint has no region prefix; regional ones do.
-		if p.location != vertexDefaultLocation {
-			host = p.location + "-" + vertexDefaultHost
-		}
-		base = "https://" + host + "/" + vertexDefaultAPI
+		base = "https://" + vertexHost(p.location) + "/" + vertexDefaultAPI
 	}
 	return fmt.Sprintf("%s/projects/%s/locations/%s/publishers/google/models/%s:%s",
 		base, p.project, p.location, model, action), nil
@@ -545,11 +553,7 @@ func (p GoogleAIProvider) operationURL(operation string) (string, error) {
 	}
 	base := p.baseURL
 	if base == "" {
-		host := vertexDefaultHost
-		if p.location != vertexDefaultLocation {
-			host = p.location + "-" + vertexDefaultHost
-		}
-		base = "https://" + host + "/" + vertexDefaultAPI
+		base = "https://" + vertexHost(p.location) + "/" + vertexDefaultAPI
 	}
 	return base + "/" + strings.TrimPrefix(operation, "/"), nil
 }
@@ -614,8 +618,14 @@ func googleVideoResult(decoded map[string]any) (string, []byte, string) {
 
 // ListModels reports the models this surface exposes. AI Studio publishes a
 // machine-readable catalogue with supportedGenerationMethods, which is the
-// honest source for capability. Vertex has no equivalent public listing for
-// publisher models, so its catalogue is the curated set below.
+// honest source for capability. Vertex was long believed to expose no public
+// catalogue for publisher models; that belief was tested against the live API
+// and is wrong. A real discovery route exists — GET
+// v1beta1/publishers/{publisher}/models — but only on v1beta1 (the v1
+// collection path serves a generic HTML 404; only the single-model resource
+// route works on v1) and only with an OAuth principal (an API key gets
+// "API keys are not supported by this API. Expected OAuth2 access token.").
+// See vertexPublisherModels for the measured details.
 func (p GoogleAIProvider) ListModels() []ModelInfo {
 	models, _, _ := p.ListModelsWithError()
 	return models
@@ -624,13 +634,6 @@ func (p GoogleAIProvider) ListModels() []ModelInfo {
 func (p GoogleAIProvider) ListModelsWithError() (
 	[]ModelInfo, *iam.ProviderAccountObservation, error,
 ) {
-	if strings.TrimSpace(p.apiKey) == "" {
-		return nil, nil, catalogError(
-			"catalog_authentication_failed",
-			"Provider API key is required for catalog access.",
-			0,
-		)
-	}
 	if p.surface == SurfaceVertex {
 		if strings.TrimSpace(p.project) == "" {
 			return nil, nil, catalogError(
@@ -639,7 +642,31 @@ func (p GoogleAIProvider) ListModelsWithError() (
 				0,
 			)
 		}
-		return vertexCuratedModels(), nil, nil
+		// Discovery requires an OAuth principal. Google refuses API keys on
+		// ListPublisherModels by design ("API keys are not supported by this
+		// API. Expected OAuth2 access token."), so a key-only instance cannot
+		// have a real catalog and must say so rather than advertise one it did
+		// not measure.
+		if strings.TrimSpace(p.bearerToken) == "" {
+			return nil, nil, catalogError(
+				"catalog_not_discoverable",
+				"Vertex AI model discovery requires a service account credential; "+
+					"the catalog is not discoverable with an API key alone.",
+				0,
+			)
+		}
+		models, err := p.vertexPublisherModels("google")
+		if err != nil {
+			return nil, nil, err
+		}
+		return models, nil, nil
+	}
+	if strings.TrimSpace(p.apiKey) == "" {
+		return nil, nil, catalogError(
+			"catalog_authentication_failed",
+			"Provider API key is required for catalog access.",
+			0,
+		)
 	}
 	decoded, status, err := p.do(http.MethodGet, p.baseURL+"/models?pageSize=1000", nil)
 	if err != nil {
@@ -657,6 +684,12 @@ func (p GoogleAIProvider) ListModelsWithError() (
 		return nil, nil, catalogError(code, detail, status)
 	}
 	return parseAIStudioModels(decoded), nil, nil
+}
+
+// catalog is the terse spelling tests reach for; ListModelsWithError is the
+// exported name the detailedModelLister interface requires elsewhere.
+func (p GoogleAIProvider) catalog() ([]ModelInfo, *iam.ProviderAccountObservation, error) {
+	return p.ListModelsWithError()
 }
 
 func parseAIStudioModels(decoded map[string]any) []ModelInfo {
@@ -680,14 +713,14 @@ func parseAIStudioModels(decoded map[string]any) []ModelInfo {
 				}
 			}
 		}
-		capabilities, endpoints := googleCapabilities(id, methods)
+		capabilities, surfaces := googleCapabilities(id, methods)
 		if len(capabilities) == 0 {
 			continue
 		}
 		label, _ := entry["displayName"].(string)
 		models = append(models, ModelInfo{
 			ID: id, Vendor: "google", Label: label,
-			Capabilities: capabilities, SupportedEndpoints: endpoints,
+			Capabilities: capabilities, SupportedSurfaces: surfaces,
 		})
 	}
 	return models
@@ -698,7 +731,7 @@ func parseAIStudioModels(decoded map[string]any) []ModelInfo {
 // they advertise the same generateContent method as text models.
 func googleCapabilities(id string, methods []string) (map[string]any, []string) {
 	capabilities := map[string]any{}
-	endpoints := []string{}
+	surfaces := []string{}
 	has := func(name string) bool {
 		for _, method := range methods {
 			if method == name {
@@ -711,50 +744,198 @@ func googleCapabilities(id string, methods []string) (map[string]any, []string) 
 	switch {
 	case strings.Contains(lower, "veo") && has("predictLongRunning"):
 		capabilities["video"] = true
-		endpoints = append(endpoints, "/v1/videos/generations")
+		surfaces = append(surfaces, "/v1/videos/generations")
 	case strings.Contains(lower, "image") && has("generateContent"):
 		capabilities["image"] = true
-		endpoints = append(endpoints, "/v1/images/generations")
+		surfaces = append(surfaces, "/v1/images/generations")
 	case has("generateContent"):
 		capabilities["chat"] = true
-		endpoints = append(endpoints, "/v1/chat/completions", "/v1/messages")
+		surfaces = append(surfaces, "/v1/chat/completions", "/v1/messages")
 	case has("embedContent"):
 		capabilities["embedding"] = true
 	}
-	return capabilities, endpoints
+	return capabilities, surfaces
 }
 
-// vertexCuratedModels lists the publisher models verified against the Agent
-// Platform endpoint. Vertex model ids differ from AI Studio's for the same
-// underlying model, and Vertex exposes no public catalogue for publisher
-// models, so this list is explicit rather than discovered.
-func vertexCuratedModels() []ModelInfo {
-	chat := func(id, label string) ModelInfo {
-		return ModelInfo{ID: id, Vendor: "google", Label: label,
-			Capabilities:       map[string]any{"chat": true},
-			SupportedEndpoints: []string{"/v1/chat/completions", "/v1/messages"}}
+// vertexPublisherModels lists a publisher's managed models for this
+// instance's configured location, measured live against the Agent Platform
+// endpoint rather than curated by hand:
+//
+//   - The collection route (this one) exists only on v1beta1. Every v1
+//     variant returns a generic HTML 404 — no handler — while the
+//     single-model *resource* route does work on v1, which is probably where
+//     the old "no public catalogue" belief came from. Inference
+//     (modelURL/p.do) stays on v1, so this provider deliberately speaks two
+//     API versions.
+//   - The project-scoped form (projects/*/locations/*/publishers/*/models)
+//     has no list method — 404. The project comes from the OAuth token, not
+//     the path, so the collection route below carries no project segment.
+//   - The catalogue is region-specific and not nested: across 16 regions
+//     counts ranged 2→128, and "global" carries ids a region like
+//     us-central1 lacks and vice versa. Discovery is therefore always scoped
+//     to p.location, never merged across locations.
+//
+// Callers must hold an OAuth bearer token: Google refuses API keys on this
+// route by design (see ListModelsWithError), so that check happens before
+// this function is ever reached.
+func (p GoogleAIProvider) vertexPublisherModels(publisher string) ([]ModelInfo, error) {
+	// Global-vs-regional host selection matches modelURL via vertexHost;
+	// the version segment differs (v1beta1 here, v1 there), so only the
+	// host rule is shared, not the whole URL builder.
+	base := "https://" + vertexHost(p.location)
+	if p.baseURL != "" {
+		base = vertexDiscoveryBase(p.baseURL)
 	}
-	image := func(id, label string) ModelInfo {
-		return ModelInfo{ID: id, Vendor: "google", Label: label,
-			Capabilities:       map[string]any{"image": true},
-			SupportedEndpoints: []string{"/v1/images/generations"}}
+	models := make([]ModelInfo, 0, 64)
+	pageToken := ""
+	for {
+		// pageSize=1000 is rejected upstream; 200 is the measured working value.
+		query := url.Values{"pageSize": {"200"}}
+		if pageToken != "" {
+			// nextPageToken is opaque and is not URL-safe by contract. Appended
+			// raw it only survives while it happens to contain no reserved
+			// character — a '+' in the token decodes back as a space upstream,
+			// so the second page is requested with a token nobody issued.
+			query.Set("pageToken", pageToken)
+		}
+		endpoint := fmt.Sprintf(
+			"%s/v1beta1/publishers/%s/models?%s", base, publisher, query.Encode(),
+		)
+		decoded, status, err := p.do(http.MethodGet, endpoint, nil)
+		if err != nil {
+			code := "catalog_transport_error"
+			detail := "Provider catalog request could not reach the upstream service."
+			if invocation, ok := err.(*InvocationError); ok && invocation.Status > 0 {
+				code = "catalog_http_error"
+				detail = fmt.Sprintf("Provider catalog returned HTTP %d.", invocation.Status)
+				if invocation.Status == http.StatusUnauthorized ||
+					invocation.Status == http.StatusForbidden {
+					code = "catalog_authentication_failed"
+					detail = "Provider credential was rejected by the catalog API."
+				}
+			}
+			return nil, catalogError(code, detail, status)
+		}
+		models = append(models, vertexManagedModels(decoded)...)
+		nextToken, _ := decoded["nextPageToken"].(string)
+		if nextToken == "" {
+			break
+		}
+		pageToken = nextToken
 	}
-	video := func(id, label string) ModelInfo {
-		return ModelInfo{ID: id, Vendor: "google", Label: label,
-			Capabilities:       map[string]any{"video": true},
-			SupportedEndpoints: []string{"/v1/videos/generations"}}
+	return models, nil
+}
+
+// vertexDiscoveryBase turns a configured inference base_url into the root the
+// discovery route hangs off.
+//
+// modelURL's contract is that a custom Vertex base_url already carries the
+// inference API root (/v1) — its default is built that way — while the
+// collection route this file uses exists only on v1beta1. Appending the
+// discovery version to an unstripped base therefore produced
+// <base>/v1/v1beta1/publishers/... and 404ed discovery on every proxied or
+// custom Vertex instance, while inference on the same configuration kept
+// working. A base that does not end in the inference version is left alone:
+// the caller owns the path shape, and guessing a segment to remove would
+// break a proxy that mounts the API somewhere else.
+func vertexDiscoveryBase(baseURL string) string {
+	base := strings.TrimRight(strings.TrimSpace(baseURL), "/")
+	return strings.TrimSuffix(base, "/"+vertexDefaultAPI)
+}
+
+// vertexManagedModels keeps only the entries an operator can call directly:
+// supportedActions containing openGenerationAiStudio (available in AI
+// Studio-style generation) or requestAccess (gated but directly callable once
+// granted). Everything else is a Model Garden entry whose only actions are
+// deploy / deployGke / multiDeployVertex — self-deploy models that require
+// the operator to stand up their own endpoint first. One measured region
+// carried 11,841 of those against roughly 78 managed models; without this
+// filter a single region's catalog balloons past 14,000 rows.
+func vertexManagedModels(decoded map[string]any) []ModelInfo {
+	raw, _ := decoded["publisherModels"].([]any)
+	models := make([]ModelInfo, 0, len(raw))
+	for _, entry := range raw {
+		fields, ok := entry.(map[string]any)
+		if !ok {
+			continue
+		}
+		name, _ := fields["name"].(string)
+		id := name
+		if idx := strings.LastIndex(name, "/"); idx >= 0 {
+			id = name[idx+1:]
+		}
+		if id == "" {
+			continue
+		}
+		actions, _ := fields["supportedActions"].(map[string]any)
+		_, openGeneration := actions["openGenerationAiStudio"]
+		_, gated := actions["requestAccess"]
+		if !openGeneration && !gated {
+			continue
+		}
+		// The list response carries no display-name field either — only
+		// name/versionId/supportedActions and similar machine fields were
+		// observed — so Label is left unset rather than guessed.
+		capabilities, surfaces := vertexModelCapability(id)
+		// An id the classifier cannot place is omitted, not listed bare.
+		// Leaving it in the catalog does not make it unroutable: the console's
+		// capabilitiesFor reads a row that declares no modality and no surface
+		// as a chat model by convention, and Routes offers every catalog row as
+		// a route member — so an unclassified family was selectable, went to
+		// generateContent, and produced exactly the upstream 404 this
+		// classifier exists to prevent. Omission costs nothing at call time:
+		// `<provider>/<model>` resolves without consulting the catalog
+		// (router.ResolveForPrincipal), so an operator who knows the id can
+		// still address it directly.
+		if len(capabilities) == 0 {
+			continue
+		}
+		models = append(models, ModelInfo{
+			ID: id, Vendor: "google",
+			Capabilities: capabilities, SupportedSurfaces: surfaces,
+		})
 	}
-	return []ModelInfo{
-		chat("gemini-3.5-flash", "Gemini 3.5 Flash"),
-		chat("gemini-3.1-pro", "Gemini 3.1 Pro"),
-		chat("gemini-3.1-flash", "Gemini 3.1 Flash"),
-		image("gemini-3.1-flash-image", "Gemini 3.1 Flash Image"),
-		image("gemini-3-pro-image", "Gemini 3 Pro Image"),
-		image("imagen-4.0-generate-001", "Imagen 4"),
-		video("veo-3.1-lite-generate-001", "Veo 3.1 Lite"),
-		video("veo-3.1-generate-001", "Veo 3.1"),
-		video("veo-3.1-fast-generate-001", "Veo 3.1 Fast"),
+	return models
+}
+
+// vertexModelCapability infers a discovered model's capability from its id.
+// ListPublisherModels carries no supportedGenerationMethods, or any other
+// capability field, the way AI Studio's /models response does, so this
+// substring match is a floor, not a measurement.
+//
+// An earlier version reused googleCapabilities by passing it a fixed
+// []string{"generateContent", "predictLongRunning"} methods list for every
+// entry. That made has("generateContent") and has("predictLongRunning")
+// unconditionally true, so the dispatch collapsed to "veo" -> video,
+// "image" -> image, everything else -> chat — silently mis-tagging embedding
+// models (text-embedding-005, gemini-embedding-001, ...) as chat-callable.
+// Routed to /v1/chat/completions that 404s upstream, since generateContent is
+// not an embedding model's action, and the failure surfaces as an opaque
+// "model not available" rather than the real cause. embedding is checked
+// first because "gemini-embedding-*" ids contain both "gemini" and
+// "embedding".
+//
+// An id that matches nothing known below returns no capability at all, and
+// vertexManagedModels drops that row rather than listing it bare. An earlier
+// version kept it, reasoning that a row with no capability is unroutable — it
+// is not. The console's capabilitiesFor treats a row declaring no modality and
+// no surface as a chat model, so the row was offered as a route member and
+// 404ed on generateContent. "No capability" is not a neutral answer anywhere
+// this catalog is read.
+func vertexModelCapability(id string) (map[string]any, []string) {
+	lower := strings.ToLower(id)
+	switch {
+	case strings.Contains(lower, "embed"):
+		return map[string]any{"embedding": true}, nil
+	case strings.Contains(lower, "veo"):
+		return map[string]any{"video": true}, []string{"/v1/videos/generations"}
+	case strings.Contains(lower, "image"):
+		return map[string]any{"image": true}, []string{"/v1/images/generations"}
+	case strings.Contains(lower, "gemini") || strings.Contains(lower, "bison") ||
+		strings.Contains(lower, "chat") || strings.Contains(lower, "codey"):
+		return map[string]any{"chat": true}, []string{"/v1/chat/completions", "/v1/messages"}
 	}
+	return nil, nil
 }
 
 // AsImageGenerator and AsVideoGenerator unwrap resilience decorators to reach
