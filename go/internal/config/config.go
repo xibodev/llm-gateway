@@ -18,7 +18,7 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-const Version = "0.0.2"
+const Version = "0.1.0"
 
 // ProviderConfig is one connected upstream.
 type ProviderConfig struct {
