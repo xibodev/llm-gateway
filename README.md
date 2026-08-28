@@ -26,8 +26,9 @@ keys are shown once and stored only as hashes. Key and project governance suppor
 expiry, model/provider allowlists, persistent RPM, daily/monthly request, token,
 estimated-cost and model-credit budgets. Opt-in **API adaptation** lets a
 `/chat/completions` request reach a Responses-only model (e.g. `gpt-5.5`). See
-`docs/MULTI_USER.md`, `docs/PROVIDER_PARITY.md`,
-`docs/PROVIDER_PARITY_BACKLOG.md`, `SECURITY.md` and `deploy/`.
+`docs/MULTI_USER.md`, `docs/PROVIDER_PARITY.md`, [`BACKLOG.md`](BACKLOG.md),
+`SECURITY.md` and `deploy/`. `BACKLOG.md` is the single implementation tracker;
+the provider-parity document is a target contract, not a status report.
 
 Provider credentials are resolved explicitly. Humans use their own encrypted
 BYOC credential first. A service can use a gateway-managed encrypted provider
