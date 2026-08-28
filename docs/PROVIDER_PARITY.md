@@ -3,12 +3,14 @@
 
 ## Status
 
-This document defines the approved target contract for the provider-parity
-program on `feat/provider-connections-vnext`. It is not a claim that every
+This document defines the approved target contract for provider, model,
+translation, account, quota, and routing expansion. It is not a claim that every
 surface below is implemented today.
 
-Implementation status, dependencies, acceptance evidence and deferred scope are
-maintained in [`PROVIDER_PARITY_BACKLOG.md`](PROVIDER_PARITY_BACKLOG.md).
+Repository-wide implementation status, dependencies, acceptance evidence, and
+deferred scope are maintained only in [`BACKLOG.md`](../BACKLOG.md). That
+tracker reconciles each current capability against source and tests; this file
+remains the target contract.
 
 The canonical implementation is the Go gateway under `go/`. Existing IAM,
 encrypted provider connections, API-key/project governance, usage, audit and

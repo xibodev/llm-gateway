@@ -43,11 +43,13 @@ owners, members and services are distinct principals.
 ## Containers
 - **Go**: `gcr.io/distroless/static-debian12:nonroot` — a static, stripped
   binary, no shell or package manager, non-root by default.
-- **Python**: slim base, runs as a non-root system user (`llmgw`, uid 10001).
-  For local dev against a bind-mounted host `~/.llmgw` of 0600 files, run the
-  container with `--user 0`.
-- **Dependency CVEs**: clean — `govulncheck ./...` (Go) and `pip-audit` (Python)
-  report no known vulnerabilities.
+- **Console**: Node.js and Vite run only while building the embedded static
+  assets; neither ships in the runtime image. Build dependencies are still part
+  of the release supply chain and must be audited.
+- **Dependency audit probes**: run `cd go && govulncheck ./...` and
+  `cd internal/web/console && npm audit`. A healthy release has no unresolved
+  applicable advisories. Current remediation work is tracked in
+  [`BACKLOG.md`](BACKLOG.md) rather than recorded here as a claim that goes stale.
 
 ## SSRF — intentionally not guarded
 The gateway connects to **operator-configured** provider base URLs, which
