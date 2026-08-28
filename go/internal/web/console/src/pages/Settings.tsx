@@ -28,6 +28,8 @@ const policyFields: { key: string; label: string; help: string }[] = [
   { key: "monthly_total_tokens", label: "Monthly total tokens", help: "All tokens per month" },
   { key: "daily_cost_microusd", label: "Daily cost (µUSD)", help: "Estimated spend per day, micro-USD" },
   { key: "monthly_cost_microusd", label: "Monthly cost (µUSD)", help: "Estimated spend per month, micro-USD" },
+  { key: "daily_credits_milli", label: "Daily model credits (milli-credits)", help: "Model-credit budget per UTC day; 1,000 milli-credits = 1 credit" },
+  { key: "monthly_credits_milli", label: "Monthly model credits (milli-credits)", help: "Model-credit budget per calendar month; 1,000 milli-credits = 1 credit" },
 ];
 
 function ProjectPolicyEditor({ projects, onSaved }: { projects: JSONRecord[]; onSaved: (message: string) => void }) {
