@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/base64"
 	"fmt"
+	"llmgw/internal/diagnostics"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -71,6 +72,27 @@ func TestSanitizeDiagnosticTextLimitSanitizesBeforeTruncating(t *testing.T) {
 	}
 	if !strings.Contains(got, redactedDiagnostic) {
 		t.Fatalf("credential was not sanitized before truncation: %q", got)
+	}
+}
+
+func TestDiagnosticSanitizerWrappersMatchSharedImplementation(t *testing.T) {
+	cases := []string{
+		"ordinary diagnostic",
+		"owner@example.test",
+		"Authorization: Bearer small!bearer/value",
+		`{"api_key":"short-value"}`,
+		"llmgw_" + strings.Repeat("a", 32),
+		strings.Repeat("界", 12),
+	}
+	for _, text := range cases {
+		if got, want := SanitizeDiagnosticText(text), diagnostics.SanitizeText(text); got != want {
+			t.Errorf("text wrapper mismatch for %q: got %q want %q", text, got, want)
+		}
+		for _, limit := range []int{-1, 0, 1, 12, 2048} {
+			if got, want := SanitizeDiagnosticTextLimit(text, limit), diagnostics.SanitizeTextLimit(text, limit); got != want {
+				t.Errorf("limit wrapper mismatch for %q at %d: got %q want %q", text, limit, got, want)
+			}
+		}
 	}
 }
 
