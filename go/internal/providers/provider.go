@@ -184,7 +184,9 @@ type CatalogError struct {
 	Status int
 }
 
-func (e *CatalogError) Error() string { return e.Detail }
+func (e *CatalogError) Error() string {
+	return SanitizeDiagnosticTextLimit(e.Detail, diagnosticErrorLimit)
+}
 
 func catalogError(code, detail string, status int) error {
 	return &CatalogError{Code: code, Detail: detail, Status: status}
@@ -195,7 +197,7 @@ func catalogError(code, detail string, status int) error {
 func CatalogFailure(err error) (code, detail string, status int) {
 	var catalogErr *CatalogError
 	if asError(err, &catalogErr) {
-		return catalogErr.Code, catalogErr.Detail, catalogErr.Status
+		return catalogErr.Code, catalogErr.Error(), catalogErr.Status
 	}
 	if err == nil {
 		return "", "", 0
@@ -243,13 +245,17 @@ type InvocationError struct {
 	Status int
 }
 
-func (e *InvocationError) Error() string { return e.Msg }
+func (e *InvocationError) Error() string {
+	return SanitizeDiagnosticTextLimit(e.Msg, diagnosticErrorLimit)
+}
 
 // ConfigError is a provider configuration problem (surfaced as 500, no failover
 // retry semantics beyond the chain).
 type ConfigError struct{ Msg string }
 
-func (e *ConfigError) Error() string { return e.Msg }
+func (e *ConfigError) Error() string {
+	return SanitizeDiagnosticTextLimit(e.Msg, diagnosticErrorLimit)
+}
 
 func invocation(format string) error { return &InvocationError{Msg: format} }
 

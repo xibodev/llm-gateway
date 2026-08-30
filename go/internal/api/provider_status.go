@@ -619,6 +619,7 @@ func runProviderVerify(providerID, model string, principal *config.Principal) ma
 	initialVerificationObservation := verificationObservation
 	fail := func(detail, failureCode string) map[string]any {
 		latency := time.Since(started).Milliseconds()
+		detail = providers.SanitizeDiagnosticTextLimit(detail, 2048)
 		if strings.TrimSpace(failureCode) == "" {
 			failureCode = "verification_failed"
 		}

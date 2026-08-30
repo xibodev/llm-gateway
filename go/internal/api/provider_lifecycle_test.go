@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync/atomic"
 	"testing"
 
@@ -432,6 +433,144 @@ func TestVerifyProviderFailureIsRecordedAndSurfaced(t *testing.T) {
 		}
 	}
 	t.Fatalf("dead-upstream snapshot not present")
+}
+
+func TestVerifyProviderImmediateFailureDetailsAreSanitized(t *testing.T) {
+	t.Setenv("LLMGW_STATE_DIR", t.TempDir())
+	iam.ResetForTests()
+	router.ResetSavingsState()
+	router.ResetTelemetryState()
+	t.Cleanup(func() {
+		iam.ResetForTests()
+		router.ResetSavingsState()
+		router.ResetTelemetryState()
+	})
+	if _, err := iam.Initialize(); err != nil {
+		t.Fatal(err)
+	}
+
+	secret := "gsk_" + strings.Repeat("x", 24)
+	email := "verification-owner@example.test"
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusTooManyRequests)
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"error": map[string]any{"message": "failed for " + email + " with " + secret},
+		})
+	}))
+	defer upstream.Close()
+
+	config.Update(func(s *config.Settings) {
+		s.APIKey = "admin-secret"
+		s.AllowUnauthenticatedAPI = false
+		s.Providers = map[string]*config.ProviderConfig{
+			"redaction-fixture": {
+				Type: "openai_compatible", BaseURL: upstream.URL, APIKey: "fixture",
+			},
+		}
+		s.Endpoints = map[string]*config.EndpointConfig{}
+		s.Policies.Defaults = config.ProviderPolicy{RetryMaxAttempts: 1}
+		s.Policies.Overrides = map[string]config.ProviderPolicy{}
+	})
+	providers.ResetProviders()
+	t.Cleanup(providers.ResetProviders)
+
+	server := httptest.NewServer(NewServer())
+	defer server.Close()
+	status, result := jsonRequest(
+		t,
+		server.URL+"/admin/api/providers/redaction-fixture/verify?model=fixture-model",
+		http.MethodPost,
+		"admin-secret",
+		map[string]any{},
+	)
+	if status != http.StatusOK || result["success"] != false {
+		t.Fatalf("verification response = %d %+v", status, result)
+	}
+	detail, _ := result["details"].(string)
+	if strings.Contains(detail, secret) || strings.Contains(detail, email) {
+		t.Fatalf("verification detail exposed diagnostics: %q", detail)
+	}
+	if !strings.Contains(detail, "[redacted]") || !strings.Contains(detail, "429") {
+		t.Fatalf("verification detail lost safe context: %q", detail)
+	}
+}
+
+func TestWriteErrorSanitizesDiagnosticMessage(t *testing.T) {
+	secret := "llmgw_" + strings.Repeat("C", 32)
+	for name, testCase := range map[string]struct {
+		status int
+		write  func(http.ResponseWriter)
+	}{
+		"standard error": {
+			status: http.StatusBadGateway,
+			write: func(w http.ResponseWriter) {
+				writeError(w, http.StatusBadGateway, "failed for api-owner@example.test using "+secret)
+			},
+		},
+		"upstream error": {
+			status: http.StatusTooManyRequests,
+			write: func(w http.ResponseWriter) {
+				writeUpstreamError(w, &router.AllTargetsFailed{
+					Msg: "failed for api-owner@example.test using " + secret, Status: http.StatusTooManyRequests,
+				})
+			},
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			recorder := httptest.NewRecorder()
+			testCase.write(recorder)
+			if recorder.Code != testCase.status {
+				t.Fatalf("status = %d, want %d", recorder.Code, testCase.status)
+			}
+			var response map[string]any
+			if err := json.Unmarshal(recorder.Body.Bytes(), &response); err != nil {
+				t.Fatal(err)
+			}
+			envelope, _ := response["error"].(map[string]any)
+			message, _ := envelope["message"].(string)
+			if strings.Contains(message, secret) || strings.Contains(message, "api-owner@example.test") ||
+				!strings.Contains(message, "[redacted]") {
+				t.Fatalf("API error message was not sanitized: %q", message)
+			}
+		})
+	}
+}
+
+func TestWriteUpstreamErrorPreservesDirectInvocationStatus(t *testing.T) {
+	secret := "llmgw_" + strings.Repeat("D", 32)
+	for _, status := range []int{
+		http.StatusForbidden,
+		http.StatusTooManyRequests,
+		http.StatusServiceUnavailable,
+	} {
+		t.Run(http.StatusText(status), func(t *testing.T) {
+			err := &providers.InvocationError{
+				Msg:    "failed for direct-owner@example.test using " + secret,
+				Status: status,
+			}
+			if detail := err.Error(); strings.Contains(detail, secret) ||
+				strings.Contains(detail, "direct-owner@example.test") ||
+				!strings.Contains(detail, "[redacted]") {
+				t.Fatalf("typed provider detail was not sanitized: %q", detail)
+			}
+
+			recorder := httptest.NewRecorder()
+			writeUpstreamError(recorder, err)
+			if recorder.Code != status {
+				t.Fatalf("status = %d, want %d", recorder.Code, status)
+			}
+			var response map[string]any
+			if decodeErr := json.Unmarshal(recorder.Body.Bytes(), &response); decodeErr != nil {
+				t.Fatal(decodeErr)
+			}
+			envelope, _ := response["error"].(map[string]any)
+			message, _ := envelope["message"].(string)
+			if strings.Contains(message, secret) || strings.Contains(message, "direct-owner@example.test") {
+				t.Fatalf("upstream response exposed diagnostic detail: %q", message)
+			}
+		})
+	}
 }
 
 func TestSpeedToRateMapsOpenAISpeeds(t *testing.T) {

@@ -207,7 +207,7 @@ func writeUpstreamError(w http.ResponseWriter, err error) {
 	status := upstreamErrorStatus(err)
 	var atf *router.AllTargetsFailed
 	if errors.As(err, &atf) && status >= 400 {
-		writeError(w, status, atf.Msg)
+		writeError(w, status, atf.Error())
 		return
 	}
 	if providers.IsConfig(err) {
@@ -224,6 +224,9 @@ func upstreamErrorStatus(err error) int {
 	}
 	if providers.IsConfig(err) {
 		return 500
+	}
+	if status := providers.UpstreamStatus(err); status >= 400 {
+		return status
 	}
 	return 502
 }

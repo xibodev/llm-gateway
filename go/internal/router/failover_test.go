@@ -1,6 +1,10 @@
 package router
 
 import (
+	"encoding/json"
+	"errors"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 
@@ -188,6 +192,133 @@ func TestExecuteCompleteFailover(t *testing.T) {
 	}
 	if recent[0]["served"] != "echo/echo-default" {
 		t.Errorf("served wrong in telemetry: %v", recent[0]["served"])
+	}
+}
+
+func TestFailoverErrorsAndTelemetryAreSanitized(t *testing.T) {
+	t.Setenv("LLMGW_STATE_DIR", t.TempDir())
+	secret := "llmgw_" + strings.Repeat("A", 32)
+	email := "routing-owner@example.test"
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusServiceUnavailable)
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"error": map[string]any{"message": "failed for " + email + " using " + secret},
+		})
+	}))
+	defer upstream.Close()
+
+	config.Update(func(s *config.Settings) {
+		s.Savings.Enabled = false
+		s.Providers = map[string]*config.ProviderConfig{
+			"bad":  {Type: "openai_compatible", BaseURL: upstream.URL},
+			"echo": {Type: "echo"},
+		}
+		s.Policies.Defaults = config.ProviderPolicy{RetryMaxAttempts: 1}
+		s.Policies.Overrides = map[string]config.ProviderPolicy{}
+	})
+	providers.ResetProviders()
+	ResetTelemetryState()
+	ResetSavingsState()
+	t.Cleanup(func() {
+		providers.ResetProviders()
+		ResetTelemetryState()
+		ResetSavingsState()
+	})
+
+	messages := []providers.Message{{"role": "user", "content": "hi"}}
+	_, served, err := ExecuteComplete(
+		[]Target{{Provider: "bad", Model: "bad-model"}, {Provider: "echo", Model: "echo-default"}},
+		messages, "fallback", nil, providers.Kwargs{},
+	)
+	if err != nil || served == nil || served.Provider != "echo" {
+		t.Fatalf("fallback result served=%+v err=%v", served, err)
+	}
+
+	_, _, err = ExecuteComplete(
+		[]Target{{Provider: "bad", Model: "bad-model"}},
+		messages, "all-targets", nil, providers.Kwargs{},
+	)
+	var allTargets *AllTargetsFailed
+	if !errors.As(err, &allTargets) {
+		t.Fatalf("all-target failure type = %T, want *AllTargetsFailed", err)
+	}
+	if allTargets.Status != http.StatusServiceUnavailable {
+		t.Fatalf("all-target status = %d", allTargets.Status)
+	}
+	if message := err.Error(); strings.Contains(message, secret) || strings.Contains(message, email) {
+		t.Fatalf("all-target error exposed diagnostics: %q", message)
+	}
+	if message := (&AllTargetsFailed{Msg: "raw " + email + " " + secret}).Error(); strings.Contains(message, secret) || strings.Contains(message, email) {
+		t.Fatalf("direct all-target error exposed diagnostics: %q", message)
+	}
+
+	recordTelemetryEvent("sink-defense", []eventAttempt{{
+		Provider: "raw", Model: "model", Error: "raw " + email + " " + secret,
+	}}, "", "", "", "")
+
+	db, err := telConn()
+	if err != nil {
+		t.Fatal(err)
+	}
+	rows, err := db.Query(`SELECT attempts_json FROM failover_events ORDER BY id`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rawRows := 0
+	for rows.Next() {
+		var raw string
+		if err := rows.Scan(&raw); err != nil {
+			rows.Close()
+			t.Fatal(err)
+		}
+		rawRows++
+		if strings.Contains(raw, secret) || strings.Contains(raw, email) {
+			rows.Close()
+			t.Fatalf("raw telemetry exposed diagnostics: %s", raw)
+		}
+		if !strings.Contains(raw, "[redacted]") {
+			rows.Close()
+			t.Fatalf("raw telemetry has no redaction marker: %s", raw)
+		}
+	}
+	if err := rows.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if rawRows != 3 {
+		t.Fatalf("raw telemetry rows = %d, want fallback, all-target, and sink-defense rows", rawRows)
+	}
+
+	legacy, _ := json.Marshal([]map[string]any{{
+		"provider": "legacy", "model": "model", "ok": false,
+		"error": "legacy " + email + " used " + secret,
+	}})
+	if _, err := db.Exec(
+		`INSERT INTO failover_events (ts, requested, served_provider, served_model, throttled, attempts_json, project, key_name)
+		 VALUES (?, ?, NULL, NULL, 0, ?, NULL, NULL)`,
+		1, "legacy", string(legacy),
+	); err != nil {
+		t.Fatal(err)
+	}
+	recent := RecentTelemetry(1)
+	if len(recent) != 1 {
+		t.Fatalf("recent telemetry rows = %d", len(recent))
+	}
+	attempts := recent[0]["attempts"].([]map[string]any)
+	message, _ := attempts[0]["error"].(string)
+	if strings.Contains(message, secret) || strings.Contains(message, email) || !strings.Contains(message, "[redacted]") {
+		t.Fatalf("historical telemetry was not sanitized on read: %q", message)
+	}
+}
+
+func TestAttemptTruncationSanitizesBeforeLimiting(t *testing.T) {
+	secret := "llmgw_" + strings.Repeat("B", 32)
+	got := truncate(strings.Repeat("safe ", 35) + secret)
+	if len(got) > 200 {
+		t.Fatalf("attempt text length = %d", len(got))
+	}
+	if strings.Contains(got, secret[:24]) || !strings.Contains(got, "[redacted]") {
+		t.Fatalf("attempt text was truncated before sanitization: %q", got)
 	}
 }
 

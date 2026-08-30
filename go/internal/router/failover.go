@@ -48,7 +48,9 @@ type AllTargetsFailed struct {
 	Status int
 }
 
-func (e *AllTargetsFailed) Error() string { return e.Msg }
+func (e *AllTargetsFailed) Error() string {
+	return providers.SanitizeDiagnosticTextLimit(e.Msg, 2048)
+}
 
 // AmbiguousCategoryError reports an invalid configuration containing endpoint
 // names that differ only by case.
@@ -574,8 +576,5 @@ func ExecuteStream(targets []Target, messages []providers.Message, requested str
 }
 
 func truncate(s string) string {
-	if len(s) > 200 {
-		return s[:200]
-	}
-	return s
+	return providers.SanitizeDiagnosticTextLimit(s, 200)
 }
