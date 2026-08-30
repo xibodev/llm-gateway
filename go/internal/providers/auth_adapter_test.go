@@ -2,6 +2,7 @@ package providers
 
 import (
 	"context"
+	"strings"
 	"testing"
 
 	"llmgw/internal/config"
@@ -14,6 +15,23 @@ func (fixtureProviderAuthAdapter) ID() string             { return "fixture_auth
 func (fixtureProviderAuthAdapter) CredentialKind() string { return "fixture_oauth" }
 func (fixtureProviderAuthAdapter) Capabilities() ProviderAuthCapabilities {
 	return ProviderAuthCapabilities{TokenImport: true}
+}
+
+func TestSafeProviderAuthPollSanitizesBeforeRuneLimit(t *testing.T) {
+	secret := "llmgw_" + strings.Repeat("a", 32)
+	result := SafeProviderAuthPoll(ProviderAuthPoll{
+		Status: "denied", Error: secret + " Bearer top-secret user@example.test?token=query-secret " + strings.Repeat("界", 400),
+		AccessToken: "internal-access", RefreshToken: "internal-refresh", IDToken: "internal-id",
+	})
+	if result.Status != "denied" || result.AccessToken != "internal-access" || result.RefreshToken != "internal-refresh" || result.IDToken != "internal-id" {
+		t.Fatalf("safe poll changed semantic or internal token fields: %+v", result)
+	}
+	if strings.Contains(result.Error, secret) || strings.Contains(result.Error, "top-secret") || strings.Contains(result.Error, "user@example.test") || strings.Contains(result.Error, "query-secret") {
+		t.Fatalf("safe poll retained sensitive diagnostics: %q", result.Error)
+	}
+	if len([]rune(result.Error)) > maxProviderAuthDiagnosticChars {
+		t.Fatalf("safe poll error has %d runes", len([]rune(result.Error)))
+	}
 }
 func (fixtureProviderAuthAdapter) Import(
 	context.Context, ProviderAuthImport,

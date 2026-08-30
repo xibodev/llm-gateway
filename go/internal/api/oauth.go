@@ -10,9 +10,24 @@ import (
 	"time"
 
 	"llmgw/internal/config"
+	"llmgw/internal/diagnostics"
 	"llmgw/internal/iam"
 	"llmgw/internal/providers"
 )
+
+const maxOAuthDiagnosticChars = 300
+
+func oauthErrorText(text string) string {
+	return diagnostics.SanitizeTextLimit(text, maxOAuthDiagnosticChars)
+}
+
+func safeOAuthPollResponse(status, detail string) map[string]any {
+	response := map[string]any{"status": status}
+	if detail := oauthErrorText(detail); detail != "" {
+		response["error"] = detail
+	}
+	return response
+}
 
 func oauthAdapterFor(providerRef string) (string, string, providers.ProviderAuthAdapter, error) {
 	reference := strings.ToLower(strings.TrimSpace(providerRef))
@@ -290,11 +305,11 @@ func startOAuthFlow(
 func pollOAuthFlow(principal iam.Principal, providerRef, deviceCode, name, source string) map[string]any {
 	providerID, kind, adapter, err := oauthAdapterFor(providerRef)
 	if err != nil {
-		return map[string]any{"status": "error", "error": err.Error()}
+		return safeOAuthPollResponse("error", err.Error())
 	}
 	deviceCode = strings.TrimSpace(deviceCode)
 	if deviceCode == "" {
-		return map[string]any{"status": "error", "error": "device_code is required"}
+		return safeOAuthPollResponse("error", "device_code is required")
 	}
 	now := time.Now().Unix()
 	key := oauthFlowKey(principal.ID, providerID, deviceCode)
@@ -303,36 +318,29 @@ func pollOAuthFlow(principal iam.Principal, providerRef, deviceCode, name, sourc
 	if tracked && flow.ExpiresAt > 0 && now >= flow.ExpiresAt {
 		delete(oauthFlows.values, key)
 		oauthFlows.Unlock()
-		return map[string]any{"status": "expired", "error": "Device authorization expired. Start again."}
+		return safeOAuthPollResponse("expired", "Device authorization expired. Start again.")
 	}
 	if tracked && flow.NextPollAt > now {
 		oauthFlows.Unlock()
-		return map[string]any{"status": "slow_down", "error": "Wait for the provider polling interval before retrying."}
+		return safeOAuthPollResponse("slow_down", "Wait for the provider polling interval before retrying.")
 	}
 	if !tracked {
 		oauthFlows.Unlock()
-		return map[string]any{
-			"status": "expired", "error": "Device authorization is no longer active. Start again.",
-		}
+		return safeOAuthPollResponse("expired", "Device authorization is no longer active. Start again.")
 	}
 	privateState := flow.PrivateState
 	oauthFlows.Unlock()
 
 	deviceAdapter, ok := adapter.(providers.DeviceProviderAuthAdapter)
 	if !ok {
-		return map[string]any{"status": "error", "error": "Provider does not support device authorization."}
+		return safeOAuthPollResponse("error", "Provider does not support device authorization.")
 	}
-	result := deviceAdapter.PollDevice(context.Background(), deviceCode, privateState)
+	result := providers.SafeProviderAuthPoll(deviceAdapter.PollDevice(context.Background(), deviceCode, privateState))
 	if !applyOAuthPollResult(key, flow, result, time.Now().Unix()) {
-		return map[string]any{
-			"status": "expired", "error": "Device authorization is no longer active. Start again.",
-		}
+		return safeOAuthPollResponse("expired", "Device authorization is no longer active. Start again.")
 	}
 
-	out := map[string]any{"status": result.Status}
-	if result.Error != "" {
-		out["error"] = result.Error
-	}
+	out := safeOAuthPollResponse(result.Status, result.Error)
 	if result.Status != "authorized" {
 		return out
 	}
@@ -342,7 +350,7 @@ func pollOAuthFlow(principal iam.Principal, providerRef, deviceCode, name, sourc
 		IDToken: result.IDToken, TokenType: result.TokenType, ExpiresAt: result.ExpiresAt, AccountID: result.AccountID, AccountLabel: result.AccountLabel, Status: "active",
 	})
 	if err != nil {
-		return map[string]any{"status": "error", "error": "Could not store the private OAuth connection."}
+		return safeOAuthPollResponse("error", "Could not store the private OAuth connection.")
 	}
 	providers.ForgetProviderForPrincipal(providerID, principal.ID)
 	providers.ForgetCatalogForPrincipal(providerID, principal.ID)
@@ -353,14 +361,14 @@ func pollOAuthFlow(principal iam.Principal, providerRef, deviceCode, name, sourc
 func refreshOAuthFlow(principal iam.Principal, providerRef, name string) map[string]any {
 	providerID, _, adapter, err := oauthAdapterFor(providerRef)
 	if err != nil {
-		return map[string]any{"status": "error", "error": err.Error()}
+		return safeOAuthPollResponse("error", err.Error())
 	}
 	if guardedAdapter, ok := adapter.(providers.GuardedRefreshProviderAuthAdapter); ok {
 		envelope, connection, err := guardedAdapter.RefreshConnection(
 			context.Background(), principal.ID, providerID, name,
 		)
 		if err != nil {
-			return map[string]any{"status": "error", "error": "OAuth refresh failed."}
+			return safeOAuthPollResponse("error", "OAuth refresh failed.")
 		}
 		providers.ForgetProviderForPrincipal(providerID, principal.ID)
 		providers.ForgetCatalogForPrincipal(providerID, principal.ID)
@@ -371,18 +379,18 @@ func refreshOAuthFlow(principal iam.Principal, providerRef, name string) map[str
 	}
 	envelope, connection, ok, err := iam.OAuthProviderConnectionSecret(principal.ID, providerID, name)
 	if err != nil {
-		return map[string]any{"status": "error", "error": "Could not load the private OAuth connection."}
+		return safeOAuthPollResponse("error", "Could not load the private OAuth connection.")
 	}
 	if !ok {
-		return map[string]any{"status": "missing", "error": "No active OAuth connection exists."}
+		return safeOAuthPollResponse("missing", "No active OAuth connection exists.")
 	}
 	refreshAdapter, ok := adapter.(providers.RefreshableProviderAuthAdapter)
 	if !ok {
-		return map[string]any{"status": "unsupported", "error": "Provider does not support OAuth refresh."}
+		return safeOAuthPollResponse("unsupported", "Provider does not support OAuth refresh.")
 	}
 	refreshed, err := refreshAdapter.Refresh(context.Background(), envelope)
 	if err != nil {
-		return map[string]any{"status": "error", "error": "OAuth refresh failed."}
+		return safeOAuthPollResponse("error", "OAuth refresh failed.")
 	}
 	if refreshed.AccessToken != "" {
 		refreshToken := refreshed.RefreshToken
@@ -415,7 +423,7 @@ func refreshOAuthFlow(principal iam.Principal, providerRef, name string) map[str
 			RefreshToken: refreshToken, IDToken: idToken, TokenType: tokenType, ExpiresAt: expiresAt,
 			AccountID: accountID, AccountLabel: accountLabel, Status: "active",
 		}); err != nil {
-			return map[string]any{"status": "error", "error": "OAuth refresh could not be stored."}
+			return safeOAuthPollResponse("error", "OAuth refresh could not be stored.")
 		}
 	}
 	providers.ForgetProviderForPrincipal(providerID, principal.ID)
@@ -426,11 +434,11 @@ func refreshOAuthFlow(principal iam.Principal, providerRef, name string) map[str
 func revokeOAuthFlow(principal iam.Principal, providerRef, name string) map[string]any {
 	providerID, _, adapter, err := oauthAdapterFor(providerRef)
 	if err != nil {
-		return map[string]any{"status": "error", "error": err.Error()}
+		return safeOAuthPollResponse("error", err.Error())
 	}
 	envelope, connection, ok, err := iam.OAuthProviderConnectionSecret(principal.ID, providerID, name)
 	if err != nil || !ok {
-		return map[string]any{"status": "missing", "error": "No active OAuth connection exists."}
+		return safeOAuthPollResponse("missing", "No active OAuth connection exists.")
 	}
 	upstream := "revoked"
 	if revokeAdapter, ok := adapter.(providers.RevocableProviderAuthAdapter); ok {
@@ -442,12 +450,10 @@ func revokeOAuthFlow(principal iam.Principal, providerRef, name string) map[stri
 	}
 	revoked, err := iam.RevokeOAuthProviderConnectionIfCurrent(connection, envelope)
 	if err != nil {
-		return map[string]any{"status": "error", "error": "Local OAuth revocation failed."}
+		return safeOAuthPollResponse("error", "Local OAuth revocation failed.")
 	}
 	if !revoked {
-		return map[string]any{
-			"status": "changed", "error": "OAuth connection changed while revocation was in progress.",
-		}
+		return safeOAuthPollResponse("changed", "OAuth connection changed while revocation was in progress.")
 	}
 	providers.ForgetProviderForPrincipal(providerID, principal.ID)
 	providers.ForgetCatalogForPrincipal(providerID, principal.ID)
@@ -498,7 +504,7 @@ func handleUserOAuthStart(w http.ResponseWriter, r *http.Request) {
 		principal, r.PathValue("provider_id"), "", false,
 	)
 	if err != nil {
-		writeError(w, 400, err.Error())
+		writeError(w, 400, oauthErrorText(err.Error()))
 		return
 	}
 	writeJSON(w, http.StatusOK, response)
@@ -535,14 +541,14 @@ func handlePrincipalOAuthStart(w http.ResponseWriter, r *http.Request) {
 	}
 	principal, err := oauthPrincipalByID(r.PathValue("id"))
 	if err != nil {
-		writeError(w, 400, err.Error())
+		writeError(w, 400, oauthErrorText(err.Error()))
 		return
 	}
 	response, err := startOAuthFlow(
 		principal, r.PathValue("provider_id"), oauthStartClientID(r), true,
 	)
 	if err != nil {
-		writeError(w, 400, err.Error())
+		writeError(w, 400, oauthErrorText(err.Error()))
 		return
 	}
 	writeJSON(w, http.StatusOK, response)
@@ -554,7 +560,7 @@ func handlePrincipalOAuthPoll(w http.ResponseWriter, r *http.Request) {
 	}
 	principal, err := oauthPrincipalByID(r.PathValue("id"))
 	if err != nil {
-		writeError(w, 400, err.Error())
+		writeError(w, 400, oauthErrorText(err.Error()))
 		return
 	}
 	deviceCode, name, valid := oauthPollInput(r)
@@ -587,7 +593,7 @@ func handlePrincipalOAuthRefresh(w http.ResponseWriter, r *http.Request) {
 	}
 	principal, err := oauthPrincipalByID(r.PathValue("id"))
 	if err != nil {
-		writeError(w, 400, err.Error())
+		writeError(w, 400, oauthErrorText(err.Error()))
 		return
 	}
 	writeJSON(w, http.StatusOK, refreshOAuthFlow(principal, r.PathValue("provider_id"), r.URL.Query().Get("connection_name")))
@@ -599,7 +605,7 @@ func handlePrincipalOAuthRevoke(w http.ResponseWriter, r *http.Request) {
 	}
 	principal, err := oauthPrincipalByID(r.PathValue("id"))
 	if err != nil {
-		writeError(w, 400, err.Error())
+		writeError(w, 400, oauthErrorText(err.Error()))
 		return
 	}
 	response := revokeOAuthFlow(principal, r.PathValue("provider_id"), r.URL.Query().Get("connection_name"))

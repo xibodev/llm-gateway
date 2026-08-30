@@ -10,8 +10,11 @@ import (
 	"llmgw/internal/codexauth"
 	"llmgw/internal/config"
 	"llmgw/internal/copilotauth"
+	"llmgw/internal/diagnostics"
 	"llmgw/internal/iam"
 )
+
+const maxProviderAuthDiagnosticChars = 300
 
 type ProviderAuthCapabilities struct {
 	DeviceCode      bool `json:"device_code"`
@@ -40,6 +43,13 @@ type ProviderAuthPoll struct {
 	ExpiresAt    int64
 	AccountID    string
 	AccountLabel string
+}
+
+// SafeProviderAuthPoll defends the API boundary from an adapter that returns
+// unsanitized diagnostics while retaining the internal token result.
+func SafeProviderAuthPoll(result ProviderAuthPoll) ProviderAuthPoll {
+	result.Error = diagnostics.SanitizeTextLimit(result.Error, maxProviderAuthDiagnosticChars)
+	return result
 }
 
 type ProviderAuthRefresh struct {
@@ -204,7 +214,9 @@ func (githubCopilotAuthAdapter) PollDevice(
 	_ context.Context, deviceCode, _ string,
 ) ProviderAuthPoll {
 	result := copilotauth.PollDeviceFlowTokenOnce(deviceCode)
-	return ProviderAuthPoll{Status: result.Status, Error: result.Error, AccessToken: result.AccessToken}
+	return SafeProviderAuthPoll(ProviderAuthPoll{
+		Status: result.Status, Error: result.Error, AccessToken: result.AccessToken,
+	})
 }
 func (githubCopilotAuthAdapter) Refresh(
 	_ context.Context, envelope iam.OAuthTokenEnvelope,
@@ -252,7 +264,7 @@ func (adapter openAICodexAuthAdapter) PollDevice(
 		DeviceAuthID: deviceCode, UserCode: state.UserCode, ClientID: adapter.clientID,
 	})
 	if err != nil {
-		return ProviderAuthPoll{Status: status, Error: err.Error()}
+		return SafeProviderAuthPoll(ProviderAuthPoll{Status: status, Error: err.Error()})
 	}
 	return ProviderAuthPoll{
 		Status: status, AccessToken: tokens.AccessToken, RefreshToken: tokens.RefreshToken,
