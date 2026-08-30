@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"strings"
 	"time"
+
+	"llmgw/internal/diagnostics"
 )
 
 type AlertRule struct {
@@ -175,6 +177,7 @@ ORDER BY id LIMIT ?`, time.Now().Unix(), limit)
 			return nil, err
 		}
 		_ = json.Unmarshal([]byte(payload), &event.Payload)
+		event.LastError = sanitizeOutboxError(event.LastError)
 		out = append(out, event)
 	}
 	return out, rows.Err()
@@ -297,6 +300,7 @@ FROM outbox_events WHERE id=?`, id).Scan(
 		&event.ClaimedBy, &event.LeaseUntil,
 	)
 	_ = json.Unmarshal([]byte(payload), &event.Payload)
+	event.LastError = sanitizeOutboxError(event.LastError)
 	return event, err
 }
 
@@ -552,9 +556,9 @@ func projectMetricLimitTx(
 }
 
 func truncateError(message string) string {
-	message = strings.TrimSpace(message)
-	if len(message) > 500 {
-		return message[:500]
-	}
-	return message
+	return sanitizeOutboxError(strings.TrimSpace(message))
+}
+
+func sanitizeOutboxError(message string) string {
+	return diagnostics.SanitizeTextLimit(message, 500)
 }

@@ -3,7 +3,11 @@ package iam
 import (
 	"database/sql"
 	"path/filepath"
+	"strings"
 	"testing"
+	"unicode/utf8"
+
+	"llmgw/internal/diagnostics"
 )
 
 func TestProviderCheckMigrationScopesAndSanitizesLegacyRows(t *testing.T) {
@@ -276,5 +280,79 @@ func TestProviderChecksAreScopedPerPrincipal(t *testing.T) {
 	}
 	if len(all["copilot"]) != 2 {
 		t.Fatalf("admin checks=%+v", all)
+	}
+}
+
+func TestProviderChecksSanitizePersistenceAndHistoricalRows(t *testing.T) {
+	t.Setenv("LLMGW_STATE_DIR", t.TempDir())
+	ResetForTests()
+	t.Cleanup(ResetForTests)
+	if _, err := Initialize(); err != nil {
+		t.Fatal(err)
+	}
+	db, err := DB()
+	if err != nil {
+		t.Fatal(err)
+	}
+	secret := "llmgw_" + strings.Repeat("a", 32)
+	model := "anthropic/model-ThisIdentifierSegmentIsLongEnough"
+	unsafe := "界" + strings.Repeat("x", maxProviderCheckChars-14) + " " + secret + strings.Repeat("界", 20) + " owner@example.test"
+	if err := RecordProviderCheck(ProviderCheck{
+		ProviderID: "fixture", Operation: CheckVerify, ScopeKey: "owner-one",
+		Generation: 0, Success: true, Detail: unsafe, Model: model,
+		LatencyMS: 17, CheckedAt: 123,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	var rawDetail, rawModel string
+	if err := db.QueryRow(`SELECT detail,model FROM provider_checks
+		WHERE provider_id='fixture' AND operation='verify' AND scope_key='owner-one'`).Scan(
+		&rawDetail, &rawModel,
+	); err != nil {
+		t.Fatal(err)
+	}
+	for name, value := range map[string]string{"detail": rawDetail, "model": rawModel} {
+		if strings.Contains(value, "llmgw_") || strings.Contains(value, "owner@example.test") ||
+			utf8.RuneCountInString(value) > maxProviderCheckChars ||
+			!utf8.ValidString(value) {
+			t.Fatalf("unsafe persisted %s: %q", name, value)
+		}
+	}
+	if rawModel != model {
+		t.Fatalf("functional model persisted as %q, want %q", rawModel, model)
+	}
+	if !strings.Contains(rawDetail, diagnostics.Redacted) {
+		t.Fatalf("secret crossing limit was truncated before sanitization: %q", rawDetail)
+	}
+
+	historicalDetail := "api_key=" + secret + " owner@example.test"
+	if _, err := db.Exec(`INSERT INTO provider_checks(
+		provider_id,operation,scope_key,connection_id,credential_revision,generation,
+		success,detail,model,latency_ms,checked_at
+	) VALUES(?,?,?,?,?,?,?,?,?,?,?)`,
+		"fixture", CheckCatalogSync, "owner-two", "", 0, 0, 0,
+		historicalDetail, "Bearer historical-token", 29, 456,
+	); err != nil {
+		t.Fatal(err)
+	}
+	checks, err := LastProviderChecks("owner-two")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(checks["fixture"]) != 1 {
+		t.Fatalf("scoped checks=%+v", checks)
+	}
+	got := checks["fixture"][0]
+	if got.Operation != CheckCatalogSync || got.Success || got.ScopeKey != "owner-two" ||
+		got.Generation != 0 || got.LatencyMS != 29 || got.CheckedAt != 456 {
+		t.Fatalf("check semantics changed: %+v", got)
+	}
+	if strings.Contains(got.Detail, secret) || strings.Contains(got.Detail, "owner@example.test") ||
+		strings.Contains(got.Model, "historical-token") {
+		t.Fatalf("historical check was not sanitized: %+v", got)
+	}
+	ownerOne, err := LastProviderChecks("owner-one")
+	if err != nil || len(ownerOne["fixture"]) != 1 || ownerOne["fixture"][0].Model != model {
+		t.Fatalf("functional model did not survive read: checks=%+v err=%v", ownerOne, err)
 	}
 }

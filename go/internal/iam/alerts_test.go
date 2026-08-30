@@ -1,8 +1,12 @@
 package iam
 
 import (
+	"strings"
 	"testing"
 	"time"
+	"unicode/utf8"
+
+	"llmgw/internal/diagnostics"
 )
 
 func TestQuotaAlertsEnqueueWarningAndExhaustionOnce(t *testing.T) {
@@ -93,5 +97,89 @@ func TestKeyExpiryScheduledAlert(t *testing.T) {
 	if len(events) != 1 || events[0].Kind != "key_expiring" ||
 		events[0].Payload["key_id"] != issued.ID {
 		t.Fatalf("events=%+v", events)
+	}
+}
+
+func TestOutboxErrorsSanitizePersistenceAndHistoricalRows(t *testing.T) {
+	t.Setenv("LLMGW_STATE_DIR", t.TempDir())
+	ResetForTests()
+	t.Cleanup(ResetForTests)
+	if _, err := Initialize(); err != nil {
+		t.Fatal(err)
+	}
+	db, err := DB()
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now().Unix()
+	result, err := db.Exec(`INSERT INTO outbox_events(
+		ts,kind,payload_json,status,attempts,available_at
+	) VALUES(?,?,?,'pending',0,?)`, now, "fixture", `{"key_name":"functional@example.test"}`, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	id, err := result.LastInsertId()
+	if err != nil {
+		t.Fatal(err)
+	}
+	claimed, err := ClaimOutbox("worker-one", 1, time.Minute)
+	if err != nil || len(claimed) != 1 || claimed[0].ID != id {
+		t.Fatalf("claim=%+v err=%v", claimed, err)
+	}
+	secret := "llmgw_" + strings.Repeat("c", 32)
+	message := "界" + strings.Repeat("x", 486) + " " + secret + strings.Repeat("界", 20) + " owner@example.test"
+	retryAt := now + 60
+	if err := MarkOutboxFailed(id, "worker-one", message, retryAt); err != nil {
+		t.Fatal(err)
+	}
+	var rawError, rawPayload, status string
+	var attempts int
+	var availableAt int64
+	var claimedBy *string
+	var leaseUntil *int64
+	if err := db.QueryRow(`SELECT last_error,payload_json,status,attempts,available_at,
+		claimed_by,lease_until FROM outbox_events WHERE id=?`, id).Scan(
+		&rawError, &rawPayload, &status, &attempts, &availableAt, &claimedBy, &leaseUntil,
+	); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(rawError, "llmgw_") || strings.Contains(rawError, "owner@example.test") ||
+		!strings.Contains(rawError, diagnostics.Redacted) ||
+		utf8.RuneCountInString(rawError) > 500 || !utf8.ValidString(rawError) {
+		t.Fatalf("unsafe outbox error persisted: %q", rawError)
+	}
+	if rawPayload != `{"key_name":"functional@example.test"}` {
+		t.Fatalf("functional payload changed: %s", rawPayload)
+	}
+	if status != "failed" || attempts != 1 || availableAt != retryAt ||
+		claimedBy != nil || leaseUntil != nil {
+		t.Fatalf("retry/lease semantics changed: status=%s attempts=%d available=%d claimed=%v lease=%v",
+			status, attempts, availableAt, claimedBy, leaseUntil)
+	}
+
+	historical := "Bearer historical-token historical@example.test"
+	if _, err := db.Exec(`UPDATE outbox_events SET last_error=?,available_at=? WHERE id=?`,
+		historical, now-1, id); err != nil {
+		t.Fatal(err)
+	}
+	pending, err := PendingOutbox(1)
+	if err != nil || len(pending) != 1 {
+		t.Fatalf("pending=%+v err=%v", pending, err)
+	}
+	if strings.Contains(pending[0].LastError, "historical-token") ||
+		strings.Contains(pending[0].LastError, "historical@example.test") ||
+		pending[0].Status != "failed" || pending[0].Attempts != 1 ||
+		pending[0].Payload["key_name"] != "functional@example.test" {
+		t.Fatalf("historical pending event unsafe or changed: %+v", pending[0])
+	}
+	claimed, err = ClaimOutbox("worker-two", 1, time.Minute)
+	if err != nil || len(claimed) != 1 {
+		t.Fatalf("historical claim=%+v err=%v", claimed, err)
+	}
+	if strings.Contains(claimed[0].LastError, "historical-token") ||
+		strings.Contains(claimed[0].LastError, "historical@example.test") ||
+		claimed[0].ClaimedBy != "worker-two" || claimed[0].LeaseUntil <= now ||
+		claimed[0].Attempts != 1 || claimed[0].AvailableAt != now-1 {
+		t.Fatalf("historical claimed event unsafe or changed: %+v", claimed[0])
 	}
 }

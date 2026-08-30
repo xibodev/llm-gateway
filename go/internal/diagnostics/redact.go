@@ -25,31 +25,48 @@ var (
 		`(?i)((?:\bkey\s*=|["']key["']\s*[:=])\s*)` +
 			`(?:"[^"\r\n]*"|'[^'\r\n]*'|\[redacted\]|[^\s,;&}\]\r\n]+)`,
 	)
-	bearerRE       = regexp.MustCompile(`(?i)\bBearer[ \t]+(?:\[redacted\]|[^\s,;&}\]\r\n"']+)`)
-	emailRE        = regexp.MustCompile(`(?i)\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b`)
-	gatewayTokenRE = regexp.MustCompile(`\bllmgw_[A-Za-z0-9_-]{32}([^A-Za-z0-9_-]|$)`)
-	tokenRE        = regexp.MustCompile(`(?i)\b(?:gh[oupsr]_[A-Za-z0-9_]{10,}|github_pat_[A-Za-z0-9_]{10,}|sk-[A-Za-z0-9_-]{10,}|gsk_[A-Za-z0-9_-]{10,})\b`)
-	longValueRE    = regexp.MustCompile(`\b[A-Za-z0-9]{20,}\b`)
-	sensitiveKeyRE = regexp.MustCompile(`(?i)^(?:` + sensitiveKeyPattern + `|key)$`)
+	bearerRE               = regexp.MustCompile(`(?i)\bBearer[ \t]+(?:\[redacted\]|[^\s,;&}\]\r\n"']+)`)
+	emailRE                = regexp.MustCompile(`(?i)\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b`)
+	gatewayTokenRE         = regexp.MustCompile(`\bllmgw_[A-Za-z0-9_-]{32}([^A-Za-z0-9_-]|$)`)
+	tokenRE                = regexp.MustCompile(`(?i)\b(?:gh[oupsr]_[A-Za-z0-9_]{10,}|github_pat_[A-Za-z0-9_]{10,}|sk-[A-Za-z0-9_-]{10,}|gsk_[A-Za-z0-9_-]{10,})\b`)
+	longValueRE            = regexp.MustCompile(`\b[A-Za-z0-9]{20,}\b`)
+	sensitiveKeyRE         = regexp.MustCompile(`(?i)^(?:` + sensitiveKeyPattern + `|key)$`)
+	identifierSemanticRE   = regexp.MustCompile(`(?i)(?:^|_)(?:model|voice|provider|route|endpoint|operation)(?:_|$)`)
+	identifierIDRE         = regexp.MustCompile(`(?i)^(?:ids?|[a-z0-9_-]+[_-]ids?)$`)
+	diagnosticKeySegmentRE = regexp.MustCompile(`(?i)(?:^|_)(?:error|message|detail|reason)(?:_|$)`)
 )
 
 // SanitizeText removes credential-shaped and personally identifying values
 // from text that may be returned to a caller or written to diagnostics.
 // Applying it repeatedly produces the same result.
 func SanitizeText(text string) string {
+	text = SanitizeIdentifier(text)
+	return longValueRE.ReplaceAllString(text, Redacted)
+}
+
+// SanitizeIdentifier removes explicit credential and PII shapes without
+// treating an otherwise ordinary long identifier as an opaque secret.
+func SanitizeIdentifier(text string) string {
 	text = pemBlockRE.ReplaceAllString(text, Redacted)
 	text = sensitiveAssignmentRE.ReplaceAllString(text, `${1}`+Redacted)
 	text = keyAssignmentRE.ReplaceAllString(text, `${1}`+Redacted)
 	text = bearerRE.ReplaceAllString(text, "Bearer "+Redacted)
 	text = emailRE.ReplaceAllString(text, Redacted)
 	text = gatewayTokenRE.ReplaceAllString(text, Redacted+`${1}`)
-	text = tokenRE.ReplaceAllString(text, Redacted)
-	return longValueRE.ReplaceAllString(text, Redacted)
+	return tokenRE.ReplaceAllString(text, Redacted)
 }
 
 // SanitizeTextLimit sanitizes text before limiting it to maxChars.
 func SanitizeTextLimit(text string, maxChars int) string {
-	text = SanitizeText(text)
+	return limitText(SanitizeText(text), maxChars)
+}
+
+// SanitizeIdentifierLimit sanitizes an identifier before limiting it.
+func SanitizeIdentifierLimit(text string, maxChars int) string {
+	return limitText(SanitizeIdentifier(text), maxChars)
+}
+
+func limitText(text string, maxChars int) string {
 	if maxChars <= 0 {
 		return ""
 	}
@@ -64,15 +81,31 @@ func SanitizeTextLimit(text string, maxChars int) string {
 // retained verbatim; only string-keyed maps and slices are traversed.
 func SanitizeValue(value any) any {
 	remaining := maxStructuredElements
-	return sanitizeValue(reflect.ValueOf(value), 0, false, &remaining, make(map[visit]bool))
+	return sanitizeValue(reflect.ValueOf(value), 0, sanitizeDiagnostic, false, &remaining, make(map[visit]bool))
 }
+
+// SanitizeStructuredValue sanitizes a JSON-like value while preserving
+// functional identifier fields. Sensitive keys still redact their complete
+// string subtrees, and all other strings retain full diagnostic sanitation.
+func SanitizeStructuredValue(value any) any {
+	remaining := maxStructuredElements
+	return sanitizeValue(reflect.ValueOf(value), 0, sanitizeDiagnostic, true, &remaining, make(map[visit]bool))
+}
+
+type sanitizeMode uint8
+
+const (
+	sanitizeDiagnostic sanitizeMode = iota
+	sanitizeIdentifier
+	sanitizeRedact
+)
 
 type visit struct {
 	typ reflect.Type
 	ptr uintptr
 }
 
-func sanitizeValue(value reflect.Value, depth int, redactStrings bool, remaining *int, seen map[visit]bool) any {
+func sanitizeValue(value reflect.Value, depth int, mode sanitizeMode, fieldAware bool, remaining *int, seen map[visit]bool) any {
 	if !value.IsValid() {
 		return nil
 	}
@@ -80,13 +113,16 @@ func sanitizeValue(value reflect.Value, depth int, redactStrings bool, remaining
 		if value.IsNil() {
 			return nil
 		}
-		return sanitizeValue(value.Elem(), depth, redactStrings, remaining, seen)
+		return sanitizeValue(value.Elem(), depth, mode, fieldAware, remaining, seen)
 	}
 
 	switch value.Kind() {
 	case reflect.String:
-		if redactStrings {
+		if mode == sanitizeRedact {
 			return Redacted
+		}
+		if mode == sanitizeIdentifier {
+			return SanitizeIdentifier(value.String())
 		}
 		return SanitizeText(value.String())
 	case reflect.Bool:
@@ -110,7 +146,13 @@ func sanitizeValue(value reflect.Value, depth int, redactStrings bool, remaining
 		iterator := value.MapRange()
 		for iterator.Next() {
 			key := iterator.Key().String()
-			result[key] = sanitizeValue(iterator.Value(), depth+1, redactStrings || sensitiveKeyRE.MatchString(key), remaining, seen)
+			childMode := sanitizeDiagnostic
+			if mode == sanitizeRedact || sensitiveKeyRE.MatchString(key) {
+				childMode = sanitizeRedact
+			} else if fieldAware && isIdentifierKey(key) {
+				childMode = sanitizeIdentifier
+			}
+			result[key] = sanitizeValue(iterator.Value(), depth+1, childMode, fieldAware, remaining, seen)
 		}
 		return result
 	case reflect.Slice:
@@ -124,12 +166,17 @@ func sanitizeValue(value reflect.Value, depth int, redactStrings bool, remaining
 		defer unsee(value, seen)
 		result := make([]any, value.Len())
 		for i := range value.Len() {
-			result[i] = sanitizeValue(value.Index(i), depth+1, redactStrings, remaining, seen)
+			result[i] = sanitizeValue(value.Index(i), depth+1, mode, fieldAware, remaining, seen)
 		}
 		return result
 	default:
 		return value.Interface()
 	}
+}
+
+func isIdentifierKey(key string) bool {
+	return identifierIDRE.MatchString(key) ||
+		(identifierSemanticRE.MatchString(key) && !diagnosticKeySegmentRE.MatchString(key))
 }
 
 func isSeen(value reflect.Value, seen map[visit]bool) bool {

@@ -3,6 +3,8 @@ package iam
 import (
 	"encoding/json"
 	"time"
+
+	"llmgw/internal/diagnostics"
 )
 
 type AuditEvent struct {
@@ -28,7 +30,7 @@ func RecordAudit(event AuditEvent) error {
 	if event.Result == "" {
 		event.Result = "success"
 	}
-	raw, _ := json.Marshal(event.Detail)
+	raw, _ := json.Marshal(diagnostics.SanitizeStructuredValue(event.Detail))
 	_, err = db.Exec(`
 INSERT INTO audit_events(
  ts,actor_principal_id,actor_key_id,action,target_type,target_id,result,detail_json
@@ -66,7 +68,7 @@ FROM audit_events ORDER BY id DESC LIMIT ?`, limit)
 		); err != nil {
 			return nil, err
 		}
-		_ = json.Unmarshal([]byte(detail), &event.Detail)
+		event.Detail = sanitizedAuditDetail(detail)
 		out = append(out, event)
 	}
 	return out, rows.Err()
@@ -99,8 +101,20 @@ FROM audit_events WHERE actor_principal_id=? ORDER BY id DESC LIMIT ?`, principa
 		); err != nil {
 			return nil, err
 		}
-		_ = json.Unmarshal([]byte(detail), &event.Detail)
+		event.Detail = sanitizedAuditDetail(detail)
 		out = append(out, event)
 	}
 	return out, rows.Err()
+}
+
+func sanitizedAuditDetail(raw string) map[string]any {
+	detail := map[string]any{}
+	if json.Unmarshal([]byte(raw), &detail) != nil {
+		return map[string]any{}
+	}
+	sanitized, ok := diagnostics.SanitizeStructuredValue(detail).(map[string]any)
+	if !ok || sanitized == nil {
+		return map[string]any{}
+	}
+	return sanitized
 }
