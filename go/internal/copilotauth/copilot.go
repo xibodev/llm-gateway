@@ -21,6 +21,7 @@ import (
 	"time"
 
 	"llmgw/internal/config"
+	"llmgw/internal/diagnostics"
 )
 
 const (
@@ -30,6 +31,7 @@ const (
 	oauthCacheFile         = "github_copilot_oauth.json"
 	sessionCacheFile       = "github_copilot_session.json"
 	refreshBeforeExpirySec = 60
+	maxAuthDiagnosticChars = 512
 
 	TOSWarning = "GitHub Copilot is licensed for code suggestions in editors. Using it as a " +
 		"general gateway provider is a personal-use grey area, not a sanctioned public API — " +
@@ -47,9 +49,16 @@ var (
 )
 
 // AuthError is raised when no usable Copilot OAuth token can be resolved.
-type AuthError struct{ Msg string }
+type AuthError struct {
+	Msg        string
+	StatusCode int
+}
 
 func (e *AuthError) Error() string { return e.Msg }
+
+func newAuthError(status int, message string) *AuthError {
+	return &AuthError{Msg: diagnostics.SanitizeTextLimit(message, maxAuthDiagnosticChars), StatusCode: status}
+}
 
 // Session is a resolved Copilot session token + its chat endpoint.
 type Session struct {
@@ -181,15 +190,15 @@ func exchangeOAuthForSession(oauthToken string) (*Session, error) {
 	req.Header.Set("Authorization", "token "+oauthToken)
 	resp, err := httpClient().Do(req)
 	if err != nil {
-		return nil, &AuthError{Msg: "Copilot session-token transport error: " + err.Error()}
+		return nil, newAuthError(0, "Copilot session-token transport error: "+err.Error())
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode == 401 {
-		return nil, &AuthError{Msg: "Copilot session-token exchange returned 401 — the OAuth token " +
-			"is invalid or lacks Copilot access. Sign in via the /admin panel."}
+		return nil, newAuthError(resp.StatusCode, "Copilot session-token exchange returned 401: the OAuth token "+
+			"is invalid or lacks Copilot access. Sign in via the /admin panel.")
 	}
 	if resp.StatusCode >= 400 {
-		return nil, &AuthError{Msg: fmt.Sprintf("Copilot session-token exchange failed (%d)", resp.StatusCode)}
+		return nil, newAuthError(resp.StatusCode, fmt.Sprintf("Copilot session-token exchange failed (%d)", resp.StatusCode))
 	}
 	var payload map[string]any
 	if json.NewDecoder(resp.Body).Decode(&payload) != nil {
@@ -307,11 +316,11 @@ func StartDeviceFlow() (*DeviceCode, error) {
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	resp, err := httpClient().Do(req)
 	if err != nil {
-		return nil, &AuthError{Msg: "device-code request failed: " + err.Error()}
+		return nil, newAuthError(0, "device-code request failed: "+err.Error())
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode >= 400 {
-		return nil, &AuthError{Msg: fmt.Sprintf("device-code request returned %d", resp.StatusCode)}
+		return nil, newAuthError(resp.StatusCode, fmt.Sprintf("device-code request returned %d", resp.StatusCode))
 	}
 	var payload map[string]any
 	if json.NewDecoder(resp.Body).Decode(&payload) != nil {
@@ -372,7 +381,7 @@ func PollDeviceFlowTokenOnce(deviceCode string) DevicePollResult {
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	resp, err := httpClient().Do(req)
 	if err != nil {
-		return DevicePollResult{Status: "error", Error: "transport error: " + err.Error()}
+		return DevicePollResult{Status: "error", Error: diagnostics.SanitizeTextLimit("transport error: "+err.Error(), maxAuthDiagnosticChars)}
 	}
 	defer resp.Body.Close()
 	var payload map[string]any
@@ -394,7 +403,7 @@ func PollDeviceFlowTokenOnce(deviceCode string) DevicePollResult {
 	if e == "" {
 		e = "unknown error"
 	}
-	return DevicePollResult{Status: "denied", Error: e}
+	return DevicePollResult{Status: "denied", Error: diagnostics.SanitizeTextLimit(e, maxAuthDiagnosticChars)}
 }
 
 // PollDeviceFlowOnce is the legacy single-operator flow. It persists the token
