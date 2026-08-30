@@ -179,14 +179,15 @@ func TestEmbeddingsProxiesToUpstream(t *testing.T) {
 
 	var gotPath string
 	var gotBody map[string]any
+	responseBody := []byte(
+		`{"object":"list","data":[{"object":"embedding","index":0,` +
+			`"embedding":[0.25,0.5]}],"usage":{"prompt_tokens":9,"total_tokens":9}}`)
 	upstream := httptest.NewServer(http.HandlerFunc(
 		func(w http.ResponseWriter, r *http.Request) {
 			gotPath = r.URL.Path
 			_ = json.NewDecoder(r.Body).Decode(&gotBody)
-			w.Header().Set("Content-Type", "application/json")
-			_, _ = w.Write([]byte(
-				`{"object":"list","data":[{"object":"embedding","index":0,` +
-					`"embedding":[0.25,0.5]}],"usage":{"prompt_tokens":9,"total_tokens":9}}`))
+			w.Header().Set("Content-Type", "application/vnd.embedding+json")
+			_, _ = w.Write(responseBody)
 		}))
 	defer upstream.Close()
 
@@ -218,6 +219,12 @@ func TestEmbeddingsProxiesToUpstream(t *testing.T) {
 	if gotBody["model"] != "granite-embedding-107m-multilingual" {
 		t.Fatalf("model not rewritten to the bare upstream id: %v", gotBody["model"])
 	}
+	if !bytes.Equal(rec.Body.Bytes(), responseBody) {
+		t.Fatalf("response bytes changed: got %q want %q", rec.Body.Bytes(), responseBody)
+	}
+	if ct := rec.Header().Get("Content-Type"); ct != "application/vnd.embedding+json" {
+		t.Fatalf("Content-Type=%q", ct)
+	}
 	var out struct {
 		Data []struct {
 			Embedding []float64 `json:"embedding"`
@@ -228,6 +235,121 @@ func TestEmbeddingsProxiesToUpstream(t *testing.T) {
 	}
 	if len(out.Data) != 1 || len(out.Data[0].Embedding) != 2 {
 		t.Fatalf("vector did not survive the proxy: %s", rec.Body.String())
+	}
+	db, err := iam.DB()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var count, inputTokens, status int
+	if err := db.QueryRow(`SELECT COUNT(*), input_tokens, status_code FROM usage_events`).Scan(&count, &inputTokens, &status); err != nil {
+		t.Fatal(err)
+	}
+	if count != 1 || inputTokens != 9 || status != 200 {
+		t.Fatalf("usage=(count=%d input=%d status=%d)", count, inputTokens, status)
+	}
+}
+
+func TestEmbeddingsNon2xxIsBoundedAndSanitized(t *testing.T) {
+	resetState(t)
+	const email = "embedding-owner@example.test"
+	token := "sk-" + strings.Repeat("b", 24)
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "text/plain")
+		w.WriteHeader(http.StatusServiceUnavailable)
+		_, _ = w.Write([]byte(strings.Repeat("safe diagnostic ", proxyErrorBodyLimit/16) + token + " " + email))
+	}))
+	defer upstream.Close()
+	configureProxyProvider(t, upstream.URL)
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest("POST", "/v1/embeddings", strings.NewReader(
+		`{"model":"proxy/embedding-model","input":"hello"}`))
+	NewServer().ServeHTTP(rec, req)
+	assertSafeProxyError(t, rec, http.StatusServiceUnavailable, token, email, token[:16])
+
+	db, err := iam.DB()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var count, status int
+	var errorCode string
+	if err := db.QueryRow(`SELECT COUNT(*), status_code, error_code FROM usage_events`).Scan(&count, &status, &errorCode); err != nil {
+		t.Fatal(err)
+	}
+	if count != 1 || status != http.StatusServiceUnavailable || errorCode != "upstream_http_error" {
+		t.Fatalf("usage=(count=%d status=%d code=%q)", count, status, errorCode)
+	}
+}
+
+func TestEmbeddingsRedirectIsNotFollowed(t *testing.T) {
+	resetState(t)
+	token := "sk-" + strings.Repeat("c", 24)
+	var requests int
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests++
+		if r.URL.Path != "/v1/embeddings" {
+			t.Fatalf("redirect was followed to %q", r.URL.Path)
+		}
+		w.Header().Set("Location", "/should-not-follow")
+		w.WriteHeader(http.StatusTemporaryRedirect)
+		_, _ = w.Write([]byte("redirect " + token))
+	}))
+	defer upstream.Close()
+	configureProxyProvider(t, upstream.URL)
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest("POST", "/v1/embeddings", strings.NewReader(
+		`{"model":"proxy/embedding-model","input":"hello"}`))
+	NewServer().ServeHTTP(rec, req)
+	assertSafeProxyError(t, rec, http.StatusTemporaryRedirect, token)
+	if requests != 1 || rec.Header().Get("Location") != "" {
+		t.Fatalf("requests=%d Location=%q", requests, rec.Header().Get("Location"))
+	}
+
+	db, err := iam.DB()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var count, status int
+	var errorCode string
+	if err := db.QueryRow(`SELECT COUNT(*), status_code, error_code FROM usage_events`).Scan(&count, &status, &errorCode); err != nil {
+		t.Fatal(err)
+	}
+	if count != 1 || status != http.StatusTemporaryRedirect || errorCode != "upstream_http_error" {
+		t.Fatalf("usage=(count=%d status=%d code=%q)", count, status, errorCode)
+	}
+}
+
+func TestEmbeddingsBodyReadFailureRecordsEffectiveFailure(t *testing.T) {
+	resetState(t)
+	configureProxyProvider(t, "http://proxy.test")
+	body := &failingReadCloser{}
+	oldClient := embeddingsClient
+	embeddingsClient = &http.Client{Transport: roundTripFunc(func(*http.Request) (*http.Response, error) {
+		return &http.Response{StatusCode: 200, Header: make(http.Header), Body: body}, nil
+	})}
+	t.Cleanup(func() { embeddingsClient = oldClient })
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest("POST", "/v1/embeddings", strings.NewReader(
+		`{"model":"proxy/embedding-model","input":"hello"}`))
+	NewServer().ServeHTTP(rec, req)
+	assertSafeProxyError(t, rec, http.StatusBadGateway)
+	if !body.closed {
+		t.Fatal("upstream response body was not closed")
+	}
+
+	db, err := iam.DB()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var count, status int
+	var errorCode string
+	if err := db.QueryRow(`SELECT COUNT(*), status_code, error_code FROM usage_events`).Scan(&count, &status, &errorCode); err != nil {
+		t.Fatal(err)
+	}
+	if count != 1 || status != 502 || errorCode != "upstream_body_read" {
+		t.Fatalf("usage=(count=%d status=%d code=%q)", count, status, errorCode)
 	}
 }
 
