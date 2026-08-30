@@ -100,6 +100,23 @@ func TestDiagnosticErrorTextIsSanitizedAndBounded(t *testing.T) {
 	}
 }
 
+func TestHTTPInvocationErrorExtractsSanitizesAndKeepsStatus(t *testing.T) {
+	token := syntheticGatewayToken()
+	err := HTTPInvocationError("embeddings", http.StatusServiceUnavailable, []byte(
+		`{"error":{"message":"token `+token+` belongs to owner@example.test"}}`,
+	))
+	if status := UpstreamStatus(err); status != http.StatusServiceUnavailable {
+		t.Fatalf("status=%d", status)
+	}
+	if strings.Contains(err.Error(), token) || strings.Contains(err.Error(), "owner@example.test") {
+		t.Fatalf("HTTP invocation error exposed diagnostic data: %q", err)
+	}
+	if !strings.Contains(err.Error(), "embeddings: upstream returned 503") ||
+		!strings.Contains(err.Error(), redactedDiagnostic) {
+		t.Fatalf("HTTP invocation error lost safe context: %q", err)
+	}
+}
+
 func TestProviderNon2xxErrorsAreSanitizedAndKeepStatus(t *testing.T) {
 	const status = http.StatusTooManyRequests
 	gatewayToken := syntheticGatewayToken()

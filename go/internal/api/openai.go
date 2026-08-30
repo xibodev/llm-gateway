@@ -225,7 +225,7 @@ func upstreamErrorStatus(err error) int {
 	if providers.IsConfig(err) {
 		return 500
 	}
-	if status := providers.UpstreamStatus(err); status >= 400 {
+	if status := providers.UpstreamStatus(err); status >= 300 && status <= 599 {
 		return status
 	}
 	return 502

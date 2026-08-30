@@ -3,7 +3,6 @@ package api
 import (
 	"bytes"
 	"encoding/json"
-	"io"
 	"net/http"
 	"strings"
 	"time"
@@ -35,7 +34,10 @@ import (
 // provider authorisation, and the durable RPM/day/month/budget consumption) —
 // so an embeddings call is metered and refused exactly like any other.
 
-var embeddingsClient = &http.Client{Timeout: 120 * time.Second}
+var embeddingsClient = &http.Client{
+	Timeout:       120 * time.Second,
+	CheckRedirect: func(_ *http.Request, _ []*http.Request) error { return http.ErrUseLastResponse },
+}
 
 type embeddingsRequest struct {
 	Model          string `json:"model"`
@@ -118,8 +120,7 @@ func handleEmbeddings(w http.ResponseWriter, r *http.Request) {
 		writeError(w, 502, "embeddings upstream error")
 		return
 	}
-	defer resp.Body.Close()
-	body, _ := io.ReadAll(resp.Body)
+	result := readAPIProxyResponse(resp, "embeddings")
 
 	// An embeddings response reports `usage.prompt_tokens` and `usage.total_tokens`
 	// and has NO `completion_tokens`. `usage_events.output_tokens` is NOT NULL
@@ -131,17 +132,16 @@ func handleEmbeddings(w http.ResponseWriter, r *http.Request) {
 		RoutedModel: upstreamModel, Provider: provider,
 		Project: principal.Project, Key: principal.Key,
 		ProjectID: principal.ProjectID, PrincipalID: principal.PrincipalID,
-		KeyID: principal.KeyID, InputTokens: embeddingsPromptTokens(body),
-		StatusCode: resp.StatusCode, LatencyMS: time.Since(started).Milliseconds(),
-		ErrorCode: audioErrorCode(resp.StatusCode), IsStub: isStub(provider),
+		KeyID: principal.KeyID, InputTokens: embeddingsPromptTokens(result.body),
+		StatusCode: result.status, LatencyMS: time.Since(started).Milliseconds(),
+		ErrorCode: result.errorCode, IsStub: isStub(provider),
 		CreditsMilli: embeddingsCreditsMilli,
 	})
-
-	if ct := resp.Header.Get("Content-Type"); ct != "" {
-		w.Header().Set("Content-Type", ct)
+	if result.err != nil {
+		writeUpstreamError(w, result.err)
+		return
 	}
-	w.WriteHeader(resp.StatusCode)
-	_, _ = w.Write(body)
+	writeAPIProxySuccess(w, result.status, result.contentType, result.body)
 }
 
 // inputEmpty rejects the three shapes that mean "nothing to embed" before a

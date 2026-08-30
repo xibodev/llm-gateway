@@ -3,6 +3,7 @@ package providers
 import (
 	"bufio"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"strings"
@@ -102,4 +103,16 @@ func extractError(body []byte) string {
 		return "no body"
 	}
 	return t
+}
+
+// HTTPInvocationError converts a non-success HTTP response into the provider
+// error type used by the gateway while preserving its status for the client.
+func HTTPInvocationError(prefix string, status int, body []byte) error {
+	return invocationStatus(
+		SanitizeDiagnosticTextLimit(
+			fmt.Sprintf("%s: upstream returned %d: %s", prefix, status, extractError(body)),
+			diagnosticErrorLimit,
+		),
+		status,
+	)
 }
