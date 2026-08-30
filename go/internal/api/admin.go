@@ -1074,7 +1074,7 @@ func handleCopilotLoginStart(w http.ResponseWriter, r *http.Request) {
 	}
 	dc, err := copilotauth.StartDeviceFlow()
 	if err != nil {
-		writeJSON(w, 200, map[string]any{"error": truncate200(err.Error())})
+		writeJSON(w, 200, map[string]any{"error": oauthErrorText(err.Error())})
 		return
 	}
 	writeJSON(w, 200, map[string]any{
@@ -1091,7 +1091,10 @@ func handleCopilotLoginPoll(w http.ResponseWriter, r *http.Request) {
 		DeviceCode string `json:"device_code"`
 	}
 	_ = decodeBody(r, &body)
-	writeJSON(w, 200, copilotauth.PollDeviceFlowOnce(body.DeviceCode))
+	result := copilotauth.PollDeviceFlowOnce(body.DeviceCode)
+	status, _ := result["status"].(string)
+	detail, _ := result["error"].(string)
+	writeJSON(w, 200, safeOAuthPollResponse(status, detail))
 }
 
 func handleCopilotLogout(w http.ResponseWriter, r *http.Request) {
@@ -1113,10 +1116,3 @@ func contains(list []string, v string) bool {
 }
 
 func emptyNil(s string) string { return strings.TrimSpace(s) }
-
-func truncate200(s string) string {
-	if len(s) > 300 {
-		return s[:300]
-	}
-	return s
-}

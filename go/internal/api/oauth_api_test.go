@@ -179,6 +179,155 @@ func TestOAuthPollCannotResurrectEvictedFlow(t *testing.T) {
 	}
 }
 
+func TestOAuthProjectionSanitizesBeforeRuneLimitAndPreservesStatuses(t *testing.T) {
+	secret := "llmgw_" + strings.Repeat("a", 32)
+	detail := secret + " Bearer top-secret user@example.test?token=query-secret " + strings.Repeat("界", 400)
+	for _, status := range []string{"pending", "slow_down", "authorized", "expired", "denied", "error"} {
+		response := safeOAuthPollResponse(status, detail)
+		if response["status"] != status {
+			t.Fatalf("status %q projected as %+v", status, response)
+		}
+		projected := response["error"].(string)
+		if strings.Contains(projected, secret) || strings.Contains(projected, "top-secret") || strings.Contains(projected, "user@example.test") || strings.Contains(projected, "query-secret") {
+			t.Fatalf("status %q retained sensitive diagnostics: %q", status, projected)
+		}
+		if len([]rune(projected)) > maxOAuthDiagnosticChars {
+			t.Fatalf("status %q error has %d runes", status, len([]rune(projected)))
+		}
+	}
+}
+
+func TestOAuthHandlersSanitizeMaliciousPollDiagnostics(t *testing.T) {
+	t.Setenv("LLMGW_STATE_DIR", t.TempDir())
+	iam.ResetForTests()
+	t.Cleanup(iam.ResetForTests)
+	secret := "llmgw_" + strings.Repeat("b", 32)
+	mock := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if r.URL.Path == "/device" {
+			_, _ = w.Write([]byte(`{"device_code":"safe-device","user_code":"SAFE-CODE","verification_uri":"https://example.test/verify","interval":1,"expires_in":60}`))
+			return
+		}
+		_, _ = fmt.Fprintf(w, `{"error":%q}`, secret+" Bearer top-secret user@example.test?token=query-secret "+strings.Repeat("界", 400))
+	}))
+	defer mock.Close()
+	oldDevice, oldToken := copilotauth.DeviceCodeURL, copilotauth.AccessTokenURL
+	copilotauth.DeviceCodeURL, copilotauth.AccessTokenURL = mock.URL+"/device", mock.URL+"/token"
+	t.Cleanup(func() { copilotauth.DeviceCodeURL, copilotauth.AccessTokenURL = oldDevice, oldToken })
+
+	oldSettings := *config.Get()
+	t.Cleanup(func() { config.Update(func(settings *config.Settings) { *settings = oldSettings }) })
+	config.Update(func(settings *config.Settings) {
+		settings.APIKey = "admin-secret"
+		settings.SSOEnabled, settings.SSOSharedSecret, settings.SSOAutoProvision = true, "proxy-secret", true
+		settings.Providers = map[string]*config.ProviderConfig{
+			"copilot": {Type: "github_copilot", RegistryID: "github_copilot"},
+		}
+	})
+	if _, err := iam.Initialize(); err != nil {
+		t.Fatal(err)
+	}
+	principal, err := iam.CreatePrincipal("human", "admin-oauth-user", "", "Admin OAuth User")
+	if err != nil {
+		t.Fatal(err)
+	}
+	gateway := httptest.NewServer(NewServer())
+	defer gateway.Close()
+
+	checks := []struct {
+		name, startPath, pollPath, token string
+		user                             bool
+		generic                          bool
+	}{
+		{name: "generic user", startPath: "/user/api/connections/copilot/oauth/start", pollPath: "/user/api/connections/copilot/oauth/poll", user: true, generic: true},
+		{name: "generic admin", startPath: "/admin/api/principals/" + principal.ID + "/connections/copilot/oauth/start", pollPath: "/admin/api/principals/" + principal.ID + "/connections/copilot/oauth/poll", token: "admin-secret", generic: true},
+		{name: "legacy user", startPath: "/user/api/copilot/login/start", pollPath: "/user/api/copilot/login/poll", user: true},
+		{name: "legacy admin", startPath: "/admin/api/copilot/login/start", pollPath: "/admin/api/copilot/login/poll", token: "admin-secret"},
+	}
+	for _, check := range checks {
+		t.Run(check.name, func(t *testing.T) {
+			request := func(path string, body map[string]any) (int, map[string]any) {
+				if check.user {
+					return ssoConnectionRequest(t, gateway.URL, "oauth-user", http.MethodPost, path, body)
+				}
+				return jsonRequest(t, gateway.URL+path, http.MethodPost, check.token, body)
+			}
+			status, started := request(check.startPath, map[string]any{})
+			if status != http.StatusOK || started["device_code"] != "safe-device" || started["user_code"] != "SAFE-CODE" || started["verification_uri"] != "https://example.test/verify" || started["interval"] != float64(1) || started["expires_in"] != float64(60) {
+				t.Fatalf("start status=%d payload=%+v", status, started)
+			}
+			if check.generic {
+				oauthFlows.Lock()
+				for key, flow := range oauthFlows.values {
+					if strings.HasSuffix(key, "|safe-device") {
+						flow.NextPollAt = 0
+						oauthFlows.values[key] = flow
+					}
+				}
+				oauthFlows.Unlock()
+			}
+			status, response := request(check.pollPath, map[string]any{"device_code": "safe-device"})
+			if status != http.StatusOK || response["status"] != "denied" {
+				t.Fatalf("poll status=%d payload=%+v", status, response)
+			}
+			encoded, _ := json.Marshal(response)
+			text := string(encoded)
+			for _, sensitive := range []string{secret, "top-secret", "user@example.test", "query-secret", "access_token", "refresh_token", "id_token"} {
+				if strings.Contains(text, sensitive) {
+					t.Fatalf("response leaked %q: %s", sensitive, text)
+				}
+			}
+			detail, _ := response["error"].(string)
+			if len([]rune(detail)) > maxOAuthDiagnosticChars {
+				t.Fatalf("error has %d runes: %q", len([]rune(detail)), detail)
+			}
+		})
+	}
+}
+
+func TestLegacyAdminCopilotPollPersistsAuthorizedTokenWithoutProjectingIt(t *testing.T) {
+	cacheDir := t.TempDir()
+	mock := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"access_token":"authorized-cache-token"}`))
+	}))
+	defer mock.Close()
+	oldTokenURL := copilotauth.AccessTokenURL
+	copilotauth.AccessTokenURL = mock.URL
+	t.Cleanup(func() { copilotauth.AccessTokenURL = oldTokenURL })
+
+	oldSettings := *config.Get()
+	t.Cleanup(func() { config.Update(func(settings *config.Settings) { *settings = oldSettings }) })
+	config.Update(func(settings *config.Settings) {
+		settings.APIKey = "admin-secret"
+		settings.GithubCopilotCacheDir = cacheDir
+		settings.GithubCopilotOAuthToken = ""
+		settings.GithubCopilotUseGhCLI = false
+	})
+	gateway := httptest.NewServer(NewServer())
+	defer gateway.Close()
+
+	status, response := jsonRequest(
+		t, gateway.URL+"/admin/api/copilot/login/poll", http.MethodPost, "admin-secret",
+		map[string]any{"device_code": "authorized-device"},
+	)
+	if status != http.StatusOK || response["status"] != "authorized" {
+		t.Fatalf("poll status=%d payload=%+v", status, response)
+	}
+	encoded, _ := json.Marshal(response)
+	if strings.Contains(string(encoded), "authorized-cache-token") || response["access_token"] != nil || response["refresh_token"] != nil || response["id_token"] != nil {
+		t.Fatalf("authorized poll projected a token: %s", encoded)
+	}
+	authStatus := copilotauth.AuthStatus()
+	if authStatus["active_source"] != "cache" || authStatus["cache_present"] != true {
+		t.Fatalf("authorized poll did not authenticate from cache: %+v", authStatus)
+	}
+	resolved, err := copilotauth.ResolveOAuthToken()
+	if err != nil || resolved != "authorized-cache-token" {
+		t.Fatalf("persisted token resolution token=%q err=%v", resolved, err)
+	}
+}
+
 func TestOAuthPollRejectsUntrackedDeviceCode(t *testing.T) {
 	oldProviders := config.Get().Providers
 	t.Cleanup(func() {
