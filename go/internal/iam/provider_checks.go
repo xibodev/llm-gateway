@@ -4,6 +4,8 @@ import (
 	"database/sql"
 	"fmt"
 	"time"
+
+	"llmgw/internal/diagnostics"
 )
 
 // ProviderCheck is the last recorded outcome of one lifecycle operation for a
@@ -28,6 +30,8 @@ const (
 	CheckCatalogSync  = "catalog_sync"
 	CheckCacheReset   = "cache_reset"
 	CheckVerify       = "verify"
+
+	maxProviderCheckChars = 500
 )
 
 func validCheckOperation(operation string) bool {
@@ -57,6 +61,8 @@ func RecordProviderCheck(check ProviderCheck) error {
 	if check.CheckedAt == 0 {
 		check.CheckedAt = time.Now().Unix()
 	}
+	check.Detail = diagnostics.SanitizeTextLimit(check.Detail, maxProviderCheckChars)
+	check.Model = diagnostics.SanitizeIdentifierLimit(check.Model, maxProviderCheckChars)
 	success := 0
 	if check.Success {
 		success = 1
@@ -169,6 +175,8 @@ FROM provider_checks`
 			return nil, err
 		}
 		check.Success = success == 1
+		check.Detail = diagnostics.SanitizeTextLimit(check.Detail, maxProviderCheckChars)
+		check.Model = diagnostics.SanitizeIdentifierLimit(check.Model, maxProviderCheckChars)
 		out[check.ProviderID] = append(out[check.ProviderID], check)
 	}
 	return out, rows.Err()

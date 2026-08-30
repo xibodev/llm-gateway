@@ -32,6 +32,87 @@ func TestSanitizeTextLimitSanitizesBeforeRuneLimit(t *testing.T) {
 	}
 }
 
+func TestSanitizeIdentifierPreservesFunctionalValuesAndRedactsExplicitSecrets(t *testing.T) {
+	safe := []string{
+		"en-US-EmmaMultilingualNeural",
+		"anthropic/model-ThisIdentifierSegmentIsLongEnough",
+		"provider-ThisProviderIdentifierSegmentIsVeryLong",
+	}
+	for _, value := range safe {
+		if got := SanitizeIdentifier(value); got != value {
+			t.Errorf("SanitizeIdentifier(%q) = %q", value, got)
+		}
+	}
+	secret := "llmgw_" + strings.Repeat("a", 32)
+	for _, value := range []string{
+		secret,
+		"gsk_abcdefghijklmnop",
+		"ghp_abcdefghijklmnop",
+		"sk-abcdefghijklmnop",
+		"Bearer compact-token",
+		"https://example.test/path?token=query-secret",
+		"owner@example.test",
+	} {
+		if got := SanitizeIdentifier(value); strings.Contains(got, value) || !strings.Contains(got, Redacted) {
+			t.Errorf("explicit secret survived: input=%q got=%q", value, got)
+		}
+	}
+	if got := SanitizeIdentifierLimit(strings.Repeat("界", 30), 20); utf8.RuneCountInString(got) != 20 || !utf8.ValidString(got) {
+		t.Fatalf("identifier limit is not rune-safe: %q", got)
+	}
+}
+
+func TestSanitizeStructuredValueUsesFieldAwareStringPolicy(t *testing.T) {
+	model := "anthropic/model-ThisIdentifierSegmentIsLongEnough"
+	voice := "en-US-EmmaMultilingualNeural"
+	provider := "provider-ThisProviderIdentifierSegmentIsVeryLong"
+	secret := "llmgw_" + strings.Repeat("b", 32)
+	input := map[string]any{
+		"model":        model,
+		"served_model": model,
+		"nested": map[string]any{
+			"voice":         voice,
+			"provider_id":   provider,
+			"model_ids":     []any{model, "owner@example.test"},
+			"route":         []any{model, "gsk_abcdefghijklmnop"},
+			"message":       model,
+			"model_error":   model,
+			"model_message": model,
+			"unknown":       provider,
+		},
+		"endpoint":  secret,
+		"operation": "owner@example.test",
+		"token":     model,
+	}
+	got := SanitizeStructuredValue(input).(map[string]any)
+	nested := got["nested"].(map[string]any)
+	if got["model"] != model || got["served_model"] != model ||
+		nested["voice"] != voice || nested["provider_id"] != provider {
+		t.Fatalf("functional identifiers changed: %#v", got)
+	}
+	route := nested["route"].([]any)
+	modelIDs := nested["model_ids"].([]any)
+	if route[0] != model || route[1] != Redacted || got["endpoint"] != Redacted ||
+		modelIDs[0] != model || modelIDs[1] != Redacted ||
+		got["operation"] != Redacted || got["token"] != Redacted {
+		t.Fatalf("explicit credentials survived functional fields: %#v", got)
+	}
+	if !strings.Contains(nested["message"].(string), Redacted) ||
+		!strings.Contains(nested["model_error"].(string), Redacted) ||
+		!strings.Contains(nested["model_message"].(string), Redacted) ||
+		!strings.Contains(nested["unknown"].(string), Redacted) ||
+		nested["message"] == model || nested["unknown"] == provider {
+		t.Fatalf("free text did not retain full sanitation: %#v", nested)
+	}
+	if input["model"] != model || input["endpoint"] != secret ||
+		input["nested"].(map[string]any)["voice"] != voice {
+		t.Fatalf("input was mutated: %#v", input)
+	}
+	if twice := SanitizeStructuredValue(got); !reflect.DeepEqual(twice, got) {
+		t.Fatalf("field-aware sanitation is not idempotent: once=%#v twice=%#v", got, twice)
+	}
+}
+
 func TestSanitizeValueNestedCopyAndScalars(t *testing.T) {
 	input := map[string]any{
 		"authorization": "short-value",
