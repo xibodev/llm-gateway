@@ -3,9 +3,12 @@ package codexauth
 import (
 	"encoding/base64"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"strings"
 	"testing"
 )
 
@@ -78,6 +81,68 @@ func TestOfficialDeviceFlowUsesJSONPollsPendingAndExchangesPollReturnedPKCE(t *t
 	}
 }
 
+func TestSyntheticDeviceDenialCodeIsSanitizedAndInspectable(t *testing.T) {
+	secret := "llmgw_" + strings.Repeat("c", 32)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusBadRequest)
+		_, _ = fmt.Fprintf(w, `{"error":"Bearer malicious owner@example.test api_key=%s %s"}`, secret, strings.Repeat("x", 700))
+	}))
+	defer server.Close()
+	old := DeviceTokenURL
+	DeviceTokenURL = server.URL
+	t.Cleanup(func() { DeviceTokenURL = old })
+	status, _, err := PollAndExchange(DeviceFlow{DeviceAuthID: "device", UserCode: "code"})
+	authErr := &AuthError{}
+	if status != "denied" || !errors.As(err, &authErr) || authErr.StatusCode != http.StatusBadRequest || len([]rune(authErr.Code)) > maxAuthDiagnosticChars || strings.Contains(err.Error(), secret) || strings.Contains(err.Error(), "malicious") || strings.Contains(err.Error(), "owner@example.test") {
+		t.Fatalf("status=%q error=%v authError=%+v", status, err, authErr)
+	}
+}
+
+func TestSyntheticRefreshDescriptionIsSanitizedAndCodePreserved(t *testing.T) {
+	secret := "llmgw_" + strings.Repeat("d", 32)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusUnauthorized)
+		_, _ = fmt.Fprintf(w, `{"error":"invalid_grant","error_description":"Bearer malicious owner@example.test api_key=%s %s"}`, secret, strings.Repeat("y", 700))
+	}))
+	defer server.Close()
+	old := OAuthTokenURL
+	OAuthTokenURL = server.URL
+	t.Cleanup(func() { OAuthTokenURL = old })
+	_, err := Refresh("synthetic-client", "synthetic-refresh")
+	refreshErr := &RefreshError{}
+	if !errors.As(err, &refreshErr) || refreshErr.StatusCode != http.StatusUnauthorized || refreshErr.Code != "invalid_grant" || len([]rune(refreshErr.Description)) > maxAuthDiagnosticChars || strings.Contains(err.Error(), secret) || strings.Contains(err.Error(), "malicious") || strings.Contains(err.Error(), "owner@example.test") {
+		t.Fatalf("error=%v refreshError=%+v", err, refreshErr)
+	}
+}
+
+func TestTypedErrorFinalMessagesAreSanitizedAndBounded(t *testing.T) {
+	secret := "llmgw_" + strings.Repeat("f", 32)
+	code := strings.Repeat("c", maxAuthDiagnosticChars-len(secret)) + secret
+	description := strings.Repeat("d", maxAuthDiagnosticChars-len("owner@example.test")) + "owner@example.test"
+	for name, err := range map[string]error{
+		"auth":    &AuthError{Operation: "OAuth token", StatusCode: http.StatusBadGateway, Code: code, Description: description},
+		"refresh": &RefreshError{StatusCode: http.StatusUnauthorized, Code: code, Description: description},
+	} {
+		t.Run(name, func(t *testing.T) {
+			message := err.Error()
+			if len([]rune(message)) > maxAuthDiagnosticChars || strings.Contains(message, secret) || strings.Contains(message, "owner@example.test") {
+				t.Fatalf("unsafe or unbounded final error: %q", message)
+			}
+		})
+	}
+}
+
+func TestSyntheticTransportQueryIsSanitized(t *testing.T) {
+	oldURL, oldClient := RevokeURL, HTTPClient
+	RevokeURL = "http://127.0.0.1:1/revoke?access_token=query-secret&owner=owner@example.test"
+	HTTPClient = func() *http.Client { return &http.Client{} }
+	t.Cleanup(func() { RevokeURL, HTTPClient = oldURL, oldClient })
+	err := Revoke("synthetic-client", "synthetic-refresh", "")
+	if err == nil || strings.Contains(err.Error(), "query-secret") || strings.Contains(err.Error(), "owner@example.test") || len([]rune(err.Error())) > maxAuthDiagnosticChars {
+		t.Fatalf("unsafe transport error: %v", err)
+	}
+}
+
 func TestRefreshReturnsTypedInvalidReusedAndExpiredErrors(t *testing.T) {
 	cases := []string{"invalid_grant", "refresh_token_reused", "expired_token"}
 	for _, code := range cases {
@@ -101,8 +166,8 @@ func TestRefreshReturnsTypedInvalidReusedAndExpiredErrors(t *testing.T) {
 			t.Cleanup(func() { OAuthTokenURL = old })
 			_, err := Refresh("fixture-client", "fixture-refresh")
 			refreshError := &RefreshError{}
-			if err == nil || !asRefreshError(err, refreshError) || refreshError.Code != code {
-				t.Fatalf("refresh err=%v code=%q", err, refreshError.Code)
+			if err == nil || !asRefreshError(err, refreshError) || refreshError.StatusCode != http.StatusBadRequest || refreshError.Code != code {
+				t.Fatalf("refresh err=%v status=%d code=%q", err, refreshError.StatusCode, refreshError.Code)
 			}
 		})
 	}
