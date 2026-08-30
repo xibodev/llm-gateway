@@ -35,10 +35,13 @@ owners, members and services are distinct principals.
 - Request logging is opt-in (`LLMGW_LOG_REQUESTS=1`) and records metadata only.
   Model-level telemetry remains in the usage ledger; the request log does not
   buffer request content merely to extract a model name.
-  Full prompt/provider-response capture requires the separate unsafe opt-in
-  `LLMGW_LOG_REQUEST_BODIES=1`; those bodies can contain credentials, PII, or
-  proprietary content. Logs rotate at 100 MiB by default
-  (`LLMGW_LOG_REQUESTS_MAX_BYTES`).
+  Bounded request/provider-response diagnostic snapshots require the separate
+  `LLMGW_LOG_REQUEST_BODIES=1` opt-in. Complete JSON is recursively sanitized,
+  plain text is sanitized, and incomplete or capture-limit content is replaced
+  by a summary rather than retaining a raw prefix. Prompts and responses may
+  still retain PII or proprietary content after credential and PII sanitation,
+  so access to these logs must remain restricted. Logs rotate at 100 MiB by
+  default (`LLMGW_LOG_REQUESTS_MAX_BYTES`).
 
 ## Containers
 - **Go**: `gcr.io/distroless/static-debian12:nonroot` — a static, stripped

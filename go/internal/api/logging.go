@@ -3,6 +3,8 @@ package api
 import (
 	"bytes"
 	"encoding/json"
+	"io"
+	"mime"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -10,15 +12,17 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode/utf8"
 
 	"llmgw/internal/config"
+	"llmgw/internal/diagnostics"
 )
 
 // Opt-in request metadata logging for debugging what routes a coding CLI uses.
 // Enable with LLMGW_LOG_REQUESTS=1; entries are appended to
 // <state_dir>/requests.jsonl. Bodies are excluded by default because prompts
 // and responses can contain credentials, PII, and proprietary content. An
-// operator must separately opt into unsafe body capture with
+// operator must separately opt into sanitized body snapshots with
 // LLMGW_LOG_REQUEST_BODIES=1.
 
 const reqLogBodyCap = 1 << 20                      // 1 MiB
@@ -50,6 +54,7 @@ type capturingWriter struct {
 	body         bytes.Buffer
 	bytesWritten int64
 	wrote        bool
+	incomplete   bool
 	captureBody  bool
 }
 
@@ -59,6 +64,8 @@ type capturingWriter struct {
 type capturingReadCloser struct {
 	body        bytes.Buffer
 	bytesRead   int64
+	contentLen  int64
+	complete    bool
 	captureBody bool
 	rc          interface {
 		Read([]byte) (int, error)
@@ -69,6 +76,11 @@ type capturingReadCloser struct {
 func (c *capturingReadCloser) Read(p []byte) (int, error) {
 	n, err := c.rc.Read(p)
 	c.bytesRead += int64(n)
+	if c.contentLen >= 0 {
+		c.complete = c.contentLen < reqLogBodyCap && c.bytesRead == c.contentLen
+	} else if err == io.EOF {
+		c.complete = c.bytesRead < reqLogBodyCap
+	}
 	if c.captureBody && n > 0 && c.body.Len() < reqLogBodyCap {
 		keep := reqLogBodyCap - c.body.Len()
 		if n < keep {
@@ -82,6 +94,9 @@ func (c *capturingReadCloser) Read(p []byte) (int, error) {
 func (c *capturingReadCloser) Close() error { return c.rc.Close() }
 
 func (c *capturingWriter) WriteHeader(code int) {
+	if c.wrote {
+		return
+	}
 	c.status = code
 	c.wrote = true
 	c.ResponseWriter.WriteHeader(code)
@@ -92,19 +107,29 @@ func (c *capturingWriter) Write(b []byte) (int, error) {
 		c.status = http.StatusOK
 		c.wrote = true
 	}
-	c.bytesWritten += int64(len(b))
-	if c.captureBody && c.body.Len() < reqLogBodyCap {
-		if n := reqLogBodyCap - c.body.Len(); len(b) <= n {
-			c.body.Write(b)
+	n, err := c.ResponseWriter.Write(b)
+	c.bytesWritten += int64(n)
+	if n != len(b) || err != nil {
+		c.incomplete = true
+	}
+	if c.captureBody && n > 0 && c.body.Len() < reqLogBodyCap {
+		remaining := reqLogBodyCap - c.body.Len()
+		if n <= remaining {
+			_, _ = c.body.Write(b[:n])
 		} else {
-			c.body.Write(b[:n])
+			_, _ = c.body.Write(b[:remaining])
 		}
 	}
-	return c.ResponseWriter.Write(b)
+	return n, err
 }
 
 // Flush preserves SSE streaming through the wrapper.
 func (c *capturingWriter) Flush() {
+	if !c.wrote {
+		c.status = http.StatusOK
+		c.wrote = true
+		c.ResponseWriter.WriteHeader(http.StatusOK)
+	}
 	if f, ok := c.ResponseWriter.(http.Flusher); ok {
 		f.Flush()
 	}
@@ -121,7 +146,7 @@ func requestLogMiddleware(next http.Handler) http.Handler {
 		includeBodies := requestBodyLoggingEnabled()
 		var captured *capturingReadCloser
 		if r.Body != nil {
-			captured = &capturingReadCloser{rc: r.Body, captureBody: includeBodies}
+			captured = &capturingReadCloser{rc: r.Body, contentLen: r.ContentLength, captureBody: includeBodies}
 			r.Body = captured
 		}
 		cw := &capturingWriter{
@@ -129,16 +154,18 @@ func requestLogMiddleware(next http.Handler) http.Handler {
 		}
 		next.ServeHTTP(cw, r)
 		var reqBody []byte
+		requestComplete := true
 		if captured != nil {
 			reqBody = captured.body.Bytes()
+			requestComplete = captured.complete
 		}
 		requestBytes := int64(0)
 		if captured != nil {
 			requestBytes = captured.bytesRead
 		}
 		writeRequestLog(
-			r, reqBody, requestBytes, cw.status, cw.body.Bytes(),
-			cw.bytesWritten, time.Since(start), includeBodies,
+			r, reqBody, requestBytes, requestComplete, cw.status, cw.body.Bytes(),
+			cw.bytesWritten, !cw.incomplete, cw.Header().Get("Content-Type"), time.Since(start), includeBodies,
 		)
 	})
 }
@@ -151,32 +178,79 @@ func requestBodyLoggingEnabled() bool {
 	return false
 }
 
-func asJSONOrString(b []byte) any {
-	var m map[string]any
-	if json.Unmarshal(b, &m) == nil {
-		return m
+func diagnosticBodySnapshot(b []byte, byteCount int64, complete bool, contentType string) any {
+	if !complete {
+		return bodySnapshotSummary("incomplete_capture", byteCount)
 	}
-	return string(b)
+	if byteCount >= reqLogBodyCap || len(b) >= reqLogBodyCap {
+		return bodySnapshotSummary("capture_limit_reached", byteCount)
+	}
+
+	mediaType, _, _ := mime.ParseMediaType(contentType)
+	isJSON := mediaType == "application/json" || strings.HasSuffix(mediaType, "+json")
+	trimmed := bytes.TrimSpace(b)
+	isJSON = isJSON || len(trimmed) > 0 && (trimmed[0] == '{' || trimmed[0] == '[')
+	var value any
+	if err := json.Unmarshal(b, &value); err == nil {
+		sanitized := diagnostics.SanitizeStructuredValue(value)
+		encoded, err := json.Marshal(sanitized)
+		if err != nil || len(encoded) > reqLogBodyCap {
+			return bodySnapshotSummary("sanitized_snapshot_too_large", byteCount)
+		}
+		return sanitized
+	} else if isJSON {
+		return bodySnapshotSummary("invalid_json", byteCount)
+	}
+
+	text := diagnostics.SanitizeText(string(b))
+	if len(text) > reqLogBodyCap {
+		text = truncateUTF8(text, reqLogBodyCap)
+	}
+	return text
+}
+
+func bodySnapshotSummary(reason string, byteCount int64) map[string]any {
+	return map[string]any{
+		"snapshot":   "omitted",
+		"reason":     reason,
+		"byte_count": byteCount,
+	}
+}
+
+func truncateUTF8(text string, maxBytes int) string {
+	if len(text) <= maxBytes {
+		return text
+	}
+	for maxBytes > 0 && !utf8.ValidString(text[:maxBytes]) {
+		maxBytes--
+	}
+	return text[:maxBytes]
 }
 
 func writeRequestLog(
 	r *http.Request,
 	reqBody []byte,
 	requestBytes int64,
+	requestComplete bool,
 	status int,
 	respBody []byte,
 	responseBytes int64,
+	responseComplete bool,
+	responseContentType string,
 	dur time.Duration,
 	includeBodies bool,
 ) {
 	model := ""
-	var m map[string]any
+	var requestSnapshot any
 	// Model-level telemetry already lives in the usage ledger. In metadata-only
 	// mode we deliberately avoid buffering/parsing request content just to copy
 	// the model id into this debugging log.
-	if includeBodies && json.Unmarshal(reqBody, &m) == nil {
-		if s, ok := m["model"].(string); ok {
-			model = s
+	if includeBodies {
+		requestSnapshot = diagnosticBodySnapshot(reqBody, requestBytes, requestComplete, r.Header.Get("Content-Type"))
+		if m, ok := requestSnapshot.(map[string]any); ok {
+			if s, ok := m["model"].(string); ok {
+				model = s
+			}
 		}
 	}
 	entry := map[string]any{
@@ -190,8 +264,8 @@ func writeRequestLog(
 	}
 	if includeBodies {
 		entry["model"] = model
-		entry["request"] = asJSONOrString(reqBody)
-		entry["response"] = asJSONOrString(respBody)
+		entry["request"] = requestSnapshot
+		entry["response"] = diagnosticBodySnapshot(respBody, responseBytes, responseComplete, responseContentType)
 	}
 	b, err := json.Marshal(entry)
 	if err != nil {
