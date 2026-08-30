@@ -102,7 +102,10 @@ func (p AnthropicNativeProvider) Complete(model string, messages []Message, kw K
 	defer resp.Body.Close()
 	raw, _ := io.ReadAll(resp.Body)
 	if resp.StatusCode >= 400 {
-		return nil, invocation(fmt.Sprintf("anthropic: upstream returned %d: %s", resp.StatusCode, extractError(raw)))
+		return nil, invocationStatus(
+			fmt.Sprintf("anthropic: upstream returned %d: %s", resp.StatusCode, extractError(raw)),
+			resp.StatusCode,
+		)
 	}
 	var anthropicResp map[string]any
 	if json.Unmarshal(raw, &anthropicResp) != nil {
@@ -122,7 +125,10 @@ func (p AnthropicNativeProvider) Stream(model string, messages []Message, kw Kwa
 	if resp.StatusCode >= 400 {
 		raw, _ := io.ReadAll(resp.Body)
 		resp.Body.Close()
-		return nil, invocation(fmt.Sprintf("anthropic: upstream returned %d: %s", resp.StatusCode, extractError(raw)))
+		return nil, invocationStatus(
+			fmt.Sprintf("anthropic: upstream returned %d: %s", resp.StatusCode, extractError(raw)),
+			resp.StatusCode,
+		)
 	}
 	// Translate Anthropic SSE -> OpenAI chunks eagerly into a buffered iterator.
 	return newAnthropicStreamIter(resp, model), nil

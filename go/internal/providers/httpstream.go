@@ -95,9 +95,6 @@ func extractError(body []byte) string {
 		if s, ok := obj["error"].(string); ok {
 			return s
 		}
-		if len(body) > 512 {
-			return string(body[:512])
-		}
 		return string(body)
 	}
 	t := strings.TrimSpace(string(body))
