@@ -59,11 +59,12 @@ type SpeechSynthesizer interface {
 
 // EdgeTTSProvider synthesizes speech through the Edge read-aloud service.
 type EdgeTTSProvider struct {
-	base     string
-	token    string
-	voice    string
-	insecure bool
-	timeout  time.Duration
+	base          string
+	token         string
+	voice         string
+	insecure      bool
+	timeout       time.Duration
+	dialWebsocket func(string, http.Header) (*websocket.Conn, *http.Response, error)
 }
 
 // NewEdgeTTS builds the provider with baked-in defaults, applying any
@@ -150,11 +151,14 @@ func (p EdgeTTSProvider) ListModels() []ModelInfo {
 		// Learn clock skew from the server date and retry once, mirroring the
 		// websocket dial path.
 		if serverDate, parseErr := time.Parse(time.RFC1123, response.Header.Get("Date")); parseErr == nil {
+			skew := float64(serverDate.UTC().Unix()) - edgeTTSUnixNow()
 			edgeTTSClockSkewMutex.Lock()
-			edgeTTSClockSkewSeconds += float64(serverDate.UTC().Unix()) - edgeTTSUnixNow()
+			edgeTTSClockSkewSeconds += skew
 			edgeTTSClockSkewMutex.Unlock()
 		}
-		response.Body.Close()
+		if response.Body != nil {
+			response.Body.Close()
+		}
 		response, err = fetch()
 		if err != nil {
 			return nil
@@ -294,19 +298,37 @@ func (p EdgeTTSProvider) dial() (*websocket.Conn, error) {
 	header.Set("Pragma", "no-cache")
 	header.Set("Cache-Control", "no-cache")
 
-	connection, response, err := dialer.Dial(p.websocketURL(), header)
+	dialWebsocket := p.dialWebsocket
+	if dialWebsocket == nil {
+		dialWebsocket = dialer.Dial
+	}
+	connection, response, err := dialWebsocket(p.websocketURL(), header)
 	if err != nil && response != nil && response.StatusCode == http.StatusForbidden {
 		// A 403 usually means the request signature drifted from the service
 		// clock. Learn the skew from the server's Date header and retry once.
 		if serverDate, parseErr := time.Parse(time.RFC1123, response.Header.Get("Date")); parseErr == nil {
+			skew := float64(serverDate.UTC().Unix()) - edgeTTSUnixNow()
 			edgeTTSClockSkewMutex.Lock()
-			edgeTTSClockSkewSeconds += float64(serverDate.UTC().Unix()) - edgeTTSUnixNow()
+			edgeTTSClockSkewSeconds += skew
 			edgeTTSClockSkewMutex.Unlock()
 		}
-		connection, _, err = dialer.Dial(p.websocketURL(), header)
+		if response.Body != nil {
+			response.Body.Close()
+		}
+		connection, response, err = dialWebsocket(p.websocketURL(), header)
 	}
 	if err != nil {
-		return nil, &InvocationError{Msg: "edge_tts: websocket connect failed: " + err.Error()}
+		status := 0
+		if response != nil {
+			status = response.StatusCode
+			if response.Body != nil {
+				response.Body.Close()
+			}
+		}
+		if status != 0 {
+			return nil, invocationStatus(fmt.Sprintf("edge_tts: websocket handshake failed (status %d)", status), status)
+		}
+		return nil, invocation("edge_tts: websocket transport failed")
 	}
 	return connection, nil
 }
