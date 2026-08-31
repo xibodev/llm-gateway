@@ -85,8 +85,8 @@ repository (omit any secrets/tokens from the report).
 
 ## Provider expansion policy
 
-The provider-parity contract is documented in `docs/PROVIDER_PARITY.md`.
-Expansion must preserve these security boundaries:
+Provider-platform ideas in `docs/PROVIDER_PARITY.md` are design research, not
+committed scope. Any demand-driven expansion must preserve these boundaries:
 
 - Official API-key, OAuth and local/no-auth integrations are preferred.
 - Official CLI-token imports or subscription OAuth with uncertain proxy terms

@@ -156,8 +156,8 @@ func TestCommonCategoryPresentationMetadata(t *testing.T) {
 
 // setSurfaces is the sole place /v1/models writes the HTTP-surfaces field, so
 // this is what guarantees the wire format actually carries both the canonical
-// supported_surfaces key and the deprecated supported_endpoints key, with
-// identical values, for the one-release migration window.
+// supported_surfaces key and the deprecated supported_endpoints compatibility
+// key, with identical values.
 func TestSetSurfacesEmitsBothKeysWithEqualValues(t *testing.T) {
 	entry := map[string]any{}
 	setSurfaces(entry, []string{"/v1/chat/completions", "/v1/messages"})
