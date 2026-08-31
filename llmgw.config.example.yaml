@@ -41,3 +41,12 @@ policies:
     copilot:
       circuit_failure_threshold: 3
       circuit_cooldown_seconds: 60
+
+# gateway.db is the authoritative usage store. The legacy compatibility savings
+# ledger is off by default because its synchronous usage.db write adds request
+# latency. Existing configurations with enabled: true retain their current
+# db_path, baseline, project/key labels, and savings read APIs.
+savings:
+  enabled: false
+  # db_path: /path/to/usage.db
+  # baseline_model: provider/model
