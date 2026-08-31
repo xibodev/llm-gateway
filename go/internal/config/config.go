@@ -176,7 +176,7 @@ func Defaults() *Settings {
 			},
 			Overrides: map[string]ProviderPolicy{},
 		},
-		Savings:                        SavingsConfig{Enabled: true, PriceCatalog: map[string]map[string]float64{}},
+		Savings:                        SavingsConfig{Enabled: false, PriceCatalog: map[string]map[string]float64{}},
 		OpenAICompatibleBaseURL:        "https://api.openai.com/v1",
 		OpenAICompatibleTimeoutSeconds: 300.0,
 		OllamaBaseURL:                  "http://127.0.0.1:11434",

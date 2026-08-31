@@ -2,10 +2,13 @@ package api
 
 import (
 	"bytes"
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -98,13 +101,13 @@ func setupGatewayLoad(tb testing.TB, unauthenticated, minted bool) loadSetup {
 		tb.Fatal(err)
 	}
 	config.Update(func(s *config.Settings) {
+		*s = *config.Defaults()
 		s.APIKey = "benchmark-admin"
 		s.APIKeys = nil
 		s.AllowUnauthenticatedAPI = unauthenticated
 		s.GatewayPreamble = ""
 		s.Providers = map[string]*config.ProviderConfig{"echo": {Type: "echo"}}
 		s.Endpoints = map[string]*config.EndpointConfig{}
-		s.Savings.Enabled = false
 	})
 	providers.ResetProviders()
 	setup := loadSetup{handler: NewServer(), token: "benchmark-admin"}
@@ -213,4 +216,87 @@ func TestGatewayMintedUsageCountersReconcile(t *testing.T) {
 			}
 		}
 	}
+}
+
+func TestGatewayLegacySavingsLedgerIsOptIn(t *testing.T) {
+	t.Run("default", func(t *testing.T) {
+		setup := setupGatewayLoad(t, false, false)
+		body := []byte(`{"model":"echo/echo-default","messages":[{"role":"user","content":"hello"}]}`)
+		req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", bytes.NewReader(body))
+		req.Header.Set("Authorization", "Bearer "+setup.token)
+		recorder := httptest.NewRecorder()
+		setup.handler.ServeHTTP(recorder, req)
+		if recorder.Code != http.StatusOK {
+			t.Fatalf("status=%d body=%q", recorder.Code, recorder.Body.String())
+		}
+		db, err := iam.DB()
+		if err != nil {
+			t.Fatal(err)
+		}
+		var events int
+		if err := db.QueryRow("SELECT COUNT(*) FROM usage_events").Scan(&events); err != nil || events != 1 {
+			t.Fatalf("gateway usage events=%d err=%v, want 1", events, err)
+		}
+		server := httptest.NewServer(setup.handler)
+		defer server.Close()
+		status, state := jsonRequest(t, server.URL+"/admin/api/state", http.MethodGet, setup.token, nil)
+		if status != http.StatusOK {
+			t.Fatalf("admin state status=%d payload=%v", status, state)
+		}
+		savings, ok := state["savings"].(map[string]any)
+		if !ok || savings["requests"] != float64(0) {
+			t.Fatalf("admin state savings=%v", state["savings"])
+		}
+		status, usage := jsonRequest(t, server.URL+"/admin/api/usage", http.MethodGet, setup.token, nil)
+		if status != http.StatusOK {
+			t.Fatalf("admin usage status=%d payload=%v", status, usage)
+		}
+		totals, totalsOK := usage["totals"].(map[string]any)
+		byProject, projectsOK := usage["by_project"].([]any)
+		recent, recentOK := usage["recent"].([]any)
+		if !totalsOK || totals["requests"] != float64(0) || !projectsOK || len(byProject) != 0 || !recentOK || len(recent) != 0 {
+			t.Fatalf("legacy compatibility usage totals=%v by_project=%v recent=%v", usage["totals"], usage["by_project"], usage["recent"])
+		}
+		if _, err := os.Stat(filepath.Join(config.StateDir(), "usage.db")); !os.IsNotExist(err) {
+			t.Fatalf("default legacy ledger exists: %v", err)
+		}
+	})
+
+	t.Run("explicit enabled", func(t *testing.T) {
+		setup := setupGatewayLoad(t, false, true)
+		legacyPath := filepath.Join(config.StateDir(), "legacy", "custom-usage.db")
+		config.Update(func(s *config.Settings) {
+			s.Savings.Enabled = true
+			s.Savings.DBPath = legacyPath
+			s.Savings.BaselineModel = "baseline/model"
+			s.Savings.PriceCatalog = map[string]map[string]float64{
+				"baseline/model": {"input": 1, "output": 2},
+			}
+		})
+		body := []byte(`{"model":"echo/echo-default","messages":[{"role":"user","content":"hello"}]}`)
+		req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", bytes.NewReader(body))
+		req.Header.Set("Authorization", "Bearer "+setup.token)
+		recorder := httptest.NewRecorder()
+		setup.handler.ServeHTTP(recorder, req)
+		if recorder.Code != http.StatusOK {
+			t.Fatalf("status=%d body=%q", recorder.Code, recorder.Body.String())
+		}
+		db, err := sql.Open("sqlite", legacyPath)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer db.Close()
+		var project, key string
+		var baseline float64
+		if err := db.QueryRow("SELECT project,key_name,baseline_cost_usd FROM usage_ledger").Scan(&project, &key, &baseline); err != nil {
+			t.Fatal(err)
+		}
+		if project != "benchmark" || key != "benchmark" || baseline <= 0 {
+			t.Fatalf("legacy labels/baseline=(%q,%q,%v)", project, key, baseline)
+		}
+		totals, projects, recent := router.Totals(true), router.ByProject(true), router.RecentUsage(1)
+		if totals["requests"] != int64(1) || len(projects) != 1 || len(recent) != 1 {
+			t.Fatalf("legacy savings reads totals=%v projects=%v recent=%v", totals, projects, recent)
+		}
+	})
 }

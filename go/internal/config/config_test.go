@@ -139,6 +139,21 @@ func TestSaveLoadRoundTrip(t *testing.T) {
 	}
 }
 
+func TestSavingsLedgerDefaultsOffAndExplicitConfigIsPreserved(t *testing.T) {
+	if Defaults().Savings.Enabled {
+		t.Fatal("legacy savings ledger should default off")
+	}
+	s := parseSettingsForTest(t, `
+savings:
+  enabled: true
+  db_path: custom/usage.db
+  baseline_model: provider/baseline
+`)
+	if !s.Savings.Enabled || s.Savings.DBPath != "custom/usage.db" || s.Savings.BaselineModel != "provider/baseline" {
+		t.Fatalf("explicit savings config not preserved: %+v", s.Savings)
+	}
+}
+
 func TestSecretsIsolation(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("LLMGW_STATE_DIR", dir)
