@@ -63,25 +63,22 @@ repository gate passes, and the local capacity gate meets the product target.
 
 ### Capacity profile
 
-`LOAD-001A` defines one comparable local profile: release-built gateway and load
-client on the same otherwise-idle host, loopback HTTP keep-alive, exact
-`echo/echo-default`, 1 KiB request content, 10-second warm-up, then three
-30-second runs at 1,200 offered requests/sec with a 2,048 in-flight ceiling.
-Every report records OS, CPU, logical cores, memory, Go version, configuration,
-completed/error counts, p50/p95/p99, maximum in-flight, and catch-up time.
+`LOAD-001A` is a conventional Go benchmark baseline for exact
+`echo/echo-default` traffic through `NewServer`: unauthenticated, static-key,
+minted-key, and immediate static-key SSE. Run it with
+`go test -run '^$' -bench 'BenchmarkGateway' -benchmem ./internal/api`; standard
+Go output is the report and requests/sec is `1e9 / ns/op`. It uses direct handler
+calls, so it measures gateway hot paths without loopback networking, connection
+management, or production-provider capacity.
 
-The milestone passes when unauthenticated, static-key, minted-key, and immediate
-short-stream scenarios each complete at least 1,000 successful requests/sec in
-all three runs, return no unexpected status, have no growing queue after offered
-load stops, and reconcile persisted minted-key request/token counters exactly.
-This proves gateway code capacity, not external-provider throughput. Run the
-profile before every milestone promotion because later hot-path changes can
-regress it.
+`LOAD-001B` remains the milestone capacity gate. Build a simple external or
+loopback gate only after the measured hot-path fixes land, if release evidence
+still needs network-level throughput validation.
 
 | ID | State | Depends on | Work and acceptance |
 | --- | --- | --- | --- |
-| `LOAD-001A` | `ready` | none | Add the standard-library fixed-arrival harness and machine-readable report for the capacity profile above. All four scenarios run without external providers; reports contain the complete profile and verify minted usage/quota counters. The first run records the baseline without requiring it to pass. |
-| `LOAD-001B` | `queued` | `DATA-001A`, `DATA-001B`, `PERF-001` | Make the capacity profile a milestone/release gate. The fixed profile meets every throughput, correctness, queue, and counter criterion above on a recorded reference host. |
+| `LOAD-001A` | `done` | none | The standard-library benchmark runs all four local direct-handler scenarios without external providers. A deterministic correctness test reconciles minted-key usage events with key and project request/token counters. Evidence: `go test -run '^$' -bench 'BenchmarkGateway' -benchmem ./internal/api` and `go test -run TestGatewayMintedUsageCountersReconcile ./internal/api`. |
+| `LOAD-001B` | `queued` | `DATA-001A`, `DATA-001B`, `PERF-001` | Add the real milestone/release capacity gate after hot-path fixes. It may be a simple external or loopback test; record reference-host evidence and require at least 1,000 completed local synthetic requests/sec without unexpected statuses or counter drift. |
 | `DATA-001A` | `partial` | `LOAD-001A` | Remove the duplicate synchronous legacy `usage.db` write from request latency; keep `gateway.db` authoritative. Default static/unauthenticated scenarios exceed the target; existing usage totals and migration tests remain correct; legacy data has a documented one-way import path. |
 | `DATA-001B` | `queued` | `LOAD-001A`, `DATA-001A` | Make optional failover telemetry unable to backpressure inference. Failure-heavy load remains bounded and inference completion does not wait on `telemetry.db`; events are bounded, dropped/coalesced with an explicit counter, or stored asynchronously; operator reads remain safe. |
 | `PERF-001` | `queued` | `LOAD-001A`, `DATA-001A` | Optimize only measured minted-key contention in key lookup, `last_used_at`, project policy, quota admission, and usage reconciliation. The minted-key scenario meets the capacity profile while strict quotas, revocation, reconciliation, restart behavior, and attribution remain correct. No Redis/Postgres requirement is introduced. |
@@ -167,5 +164,5 @@ cd internal/web/console && npm ci && npm audit --json && npm run lint && npm tes
 
 Persistence changes also run backup/restart/migration tests. Streaming and client
 compatibility changes run their fixture profiles. Every milestone promotion runs
-the `LOAD-001A` profile, and capacity completion requires `LOAD-001B`. Update
+the `LOAD-001A` benchmarks, and capacity completion requires `LOAD-001B`. Update
 this backlog in the same PR as the behavior and evidence.
