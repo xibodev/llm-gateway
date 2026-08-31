@@ -33,8 +33,8 @@ type ModelInfo struct {
 	// changed with the field: a pre-rename file therefore unmarshals into a
 	// nil list here. That is handled by catalogEntry.SchemaVersion, which
 	// discards unstamped entries instead of serving surface-less rows — the
-	// persisted format gets a hard cut-over, not the one-release dual-key
-	// window the public /v1/models response gets (see api/models.go).
+	// persisted format gets a hard cut-over, unlike the public /v1/models
+	// compatibility alias (see api/models.go).
 	SupportedSurfaces []string `json:"supported_surfaces,omitempty"`
 }
 

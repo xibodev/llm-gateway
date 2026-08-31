@@ -60,9 +60,8 @@ type EndpointConfig struct {
 	Failover []EndpointMember `yaml:"failover" json:"failover"`
 }
 
-// Deprecated: use EndpointConfig. Retained for one release so external
-// callers written against the pre-rename name keep compiling; the
-// client-facing routing target is called an endpoint now, not a category.
+// Deprecated: use EndpointConfig. Retained until client evidence and a
+// documented release boundary make removal safe.
 type CategoryConfig = EndpointConfig
 
 // Deprecated: use EndpointMember. See CategoryConfig.

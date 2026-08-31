@@ -20,9 +20,8 @@ providers:
 # endpoint name and it cascades on 429/5xx/timeout. You can also address any real
 # model directly as "<provider>/<model>" (e.g. copilot/gpt-4o-mini).
 #
-# "endpoints:" is the canonical key. The pre-rename "categories:" key still
-# loads (deprecated, removed in a future release) for config files written
-# before the rename.
+# "endpoints:" is the canonical key. The pre-rename "categories:" key remains
+# a compatibility alias for older config files; no removal release is scheduled.
 endpoints:
   smart:
     failover:

@@ -301,7 +301,7 @@ func handleState(w http.ResponseWriter, r *http.Request) {
 		"provider_connections":         connections,
 		"memberships":                  memberships,
 		"providers":                    provList,
-		"categories":                   cats, // deprecated, removed in a future release — use "endpoints"
+		"categories":                   cats, // Deprecated compatibility alias; use "endpoints".
 		"endpoints":                    cats,
 		"policies": map[string]any{
 			"defaults":  s.Policies.Defaults,
@@ -597,10 +597,10 @@ func handleProviderModels(w http.ResponseWriter, r *http.Request) {
 }
 
 // catalogRowsWithLegacySurfaces renders catalog rows for the wire while keeping
-// the same one-release dual-key window GET /v1/models honours (see setSurfaces).
+// the compatibility alias GET /v1/models honours (see setSurfaces).
 // Marshalling providers.ModelInfo directly emits only "supported_surfaces",
 // which would silently change this route's shape for anything still reading the
-// pre-rename key while the documented deprecation says both are emitted.
+// pre-rename key while the documented compatibility policy emits both.
 //
 // Rows round-trip through the struct's own JSON tags rather than being rebuilt
 // field by field, so the two shapes cannot drift when ModelInfo gains a field.

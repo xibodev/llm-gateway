@@ -26,9 +26,9 @@ keys are shown once and stored only as hashes. Key and project governance suppor
 expiry, model/provider allowlists, persistent RPM, daily/monthly request, token,
 estimated-cost and model-credit budgets. Opt-in **API adaptation** lets a
 `/chat/completions` request reach a Responses-only model (e.g. `gpt-5.5`). See
-`docs/MULTI_USER.md`, `docs/PROVIDER_PARITY.md`, [`BACKLOG.md`](BACKLOG.md),
-`SECURITY.md` and `deploy/`. `BACKLOG.md` is the single implementation tracker;
-the provider-parity document is a target contract, not a status report.
+`docs/MULTI_USER.md`, [`BACKLOG.md`](BACKLOG.md), `SECURITY.md` and `deploy/`.
+`BACKLOG.md` is the single implementation and product-scope tracker; broader
+provider-platform ideas remain design research in `docs/PROVIDER_PARITY.md`.
 
 Provider credentials are resolved explicitly. Humans use their own encrypted
 BYOC credential first. A service can use a gateway-managed encrypted provider
@@ -69,7 +69,8 @@ authentication methods and planned OAuth integrations without embedding a Node
 runtime or a plugin marketplace.
 
 The `endpoints:` config key is canonical; the pre-rename `categories:` key still
-loads (deprecated, removed in a future release — see [Deprecations](#deprecations)).
+loads as a compatibility alias. Removal is deferred until client evidence shows
+it is safe; see [Deprecations](#deprecations).
 
 Human-owned provider connections are named, encrypted and private to that
 principal. A personal connection overrides the system credential only for that
@@ -144,7 +145,7 @@ The `categories` → `endpoints` rename is in progress. Most old spellings still
 work alongside the new ones — but one could not be kept, because a single field
 cannot carry two values at once.
 
-### Still accepted or still emitted — deprecated, removed in a future release
+### Still accepted or emitted as compatibility aliases
 
 | Deprecated | Replacement |
 |---|---|
@@ -152,6 +153,9 @@ cannot carry two values at once.
 | `POST /admin/api/categories`, `DELETE /admin/api/categories/{name}` | `POST /admin/api/endpoints`, `DELETE /admin/api/endpoints/{name}` |
 | `"categories"` key in the `/admin/api/state` payload | `"endpoints"` key (both are currently emitted, same value) |
 | `supported_endpoints` on a model row (`GET /v1/models`, `GET /admin/api/providers/{id}/catalog`) | `supported_surfaces` (both are currently emitted, same value) |
+
+No removal release is scheduled. The aliases remain until a documented release
+boundary and client evidence show they can be removed without breaking users.
 
 ### Already changed — breaking, no compatibility path
 

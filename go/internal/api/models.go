@@ -250,9 +250,8 @@ func buildModelList(principal *config.Principal) (map[string]any, error) {
 // "supported_surfaces" key and the pre-rename "supported_endpoints" key, with
 // identical values. GET /v1/models is public and client-visible, and a live
 // gateway showed supported_endpoints present on only 488 of 5,229 rows
-// (9.3%) — consumers already tolerate its absence — so the deprecated key is
-// kept for one release to avoid breaking anything still reading it, then
-// should be removed.
+// (9.3%). The deprecated key remains a compatibility alias until client
+// evidence and a documented release boundary make removal safe.
 func setSurfaces(entry map[string]any, surfaces []string) {
 	if len(surfaces) == 0 {
 		return

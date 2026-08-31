@@ -1,7 +1,10 @@
 # Multi-user control plane
 
-The production Go gateway remains one static binary plus one SQLite database.
-It does not require Postgres, Redis, an embedded IdP, SMTP or notification SDKs.
+The production Go gateway remains one static binary with `gateway.db` as its
+authoritative SQLite control-plane store. The current build also writes optional
+local usage/failover sidecars; their removal from request latency is tracked in
+`BACKLOG.md`. The gateway does not require Postgres, Redis, an embedded IdP,
+SMTP or notification SDKs.
 
 ## Identity model
 
@@ -40,10 +43,9 @@ Resolution order is:
 3. the legacy config/secrets-store credential.
 
 The current runtime resolves the deterministic default connection for a
-human/provider pair. The approved provider-parity program extends this storage
-model with fixed and dynamic account selection, account health/cooldowns,
-priority and quota-aware routing. See `docs/PROVIDER_PARITY.md`; the document is
-a target contract, not a claim that account-aware routing is already live.
+human/provider pair. Earlier account-aware routing ideas remain in
+`docs/PROVIDER_PARITY.md` as design research; they are not committed product
+scope.
 
 Config credentials seed a missing system connection only when
 `LLMGW_CREDENTIAL_ENCRYPTION_KEY` is configured. Existing database connections
@@ -106,11 +108,9 @@ reconciled after the response. Token/cost limits can exceed by at most one
 in-flight request; request-count and RPM limits are strict.
 
 These are **downstream gateway quotas** applied to gateway-issued keys and
-projects. They are distinct from **upstream provider quotas** such as Copilot
-premium counters, Codex credit windows or subscription reset periods. Upstream
-quota adapters, account thresholds and quota-sharing pools are defined by
-`docs/PROVIDER_PARITY.md` and must reuse rather than duplicate the existing
-downstream counter engine.
+projects. They are distinct from upstream provider quotas such as subscription
+reset periods. Upstream quota adapters and quota-sharing ideas are deferred
+design research, not current routing behavior.
 
 ## Usage, audit and notifications
 
