@@ -88,7 +88,9 @@ Opt in per provider with `force_api_support: true` or per request with `"force_a
 - **Codex:** provider `base_url=http://127.0.0.1:8787/v1`
 - **Copilot CLI (BYOK):** `COPILOT_PROVIDER_BASE_URL=http://127.0.0.1:8787/v1` + `COPILOT_PROVIDER_API_KEY=<LLMGW_API_KEY>`
 
-Pick a `provider/model` or an endpoint name from `GET /v1/models`.
+Pick a `provider/model` or an endpoint name from `GET /v1/models`. See
+[`docs/CLI_COMPATIBILITY.md`](docs/CLI_COMPATIBILITY.md) for the fixture-backed
+wire profiles and known gaps.
 
 ## Deploy (container)
 ```bash
