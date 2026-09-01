@@ -2,6 +2,8 @@ package api
 
 import (
 	"encoding/json"
+	"errors"
+	"io"
 	"net/http"
 	"strings"
 	"time"
@@ -11,6 +13,8 @@ import (
 	"llmgw/internal/router"
 	"llmgw/internal/translate"
 )
+
+const maxAnthropicTokenCountBodyBytes = 32 << 20 // 32 MiB
 
 type anthropicRequest struct {
 	Model         string         `json:"model"`
@@ -185,24 +189,85 @@ func streamMessagesSSE(w http.ResponseWriter, targets []router.Target, msgs []pr
 }
 
 func handleCountTokens(w http.ResponseWriter, r *http.Request) {
-	if _, ok := authed(w, r); !ok {
+	principal, ok := authed(w, r)
+	if !ok {
 		return
 	}
-	var req anthropicRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+	var raw map[string]any
+	r.Body = http.MaxBytesReader(w, r.Body, maxAnthropicTokenCountBodyBytes)
+	decoder := json.NewDecoder(r.Body)
+	decoder.UseNumber()
+	if err := decoder.Decode(&raw); err != nil {
+		var tooLarge *http.MaxBytesError
+		if errors.As(err, &tooLarge) {
+			writeError(w, http.StatusRequestEntityTooLarge, "request body too large")
+			return
+		}
 		writeError(w, 422, "invalid request body")
 		return
 	}
-	openaiMessages := translate.AnthropicMessagesToOpenAI(req.Messages, req.System)
-	total := 0
-	for _, m := range openaiMessages {
-		if c, ok := m["content"].(string); ok {
-			total += len(c)
+	var trailing json.RawMessage
+	if err := decoder.Decode(&trailing); !errors.Is(err, io.EOF) {
+		var tooLarge *http.MaxBytesError
+		if errors.As(err, &tooLarge) {
+			writeError(w, http.StatusRequestEntityTooLarge, "request body too large")
+			return
+		}
+		writeError(w, 422, "invalid request body")
+		return
+	}
+	model, _ := raw["model"].(string)
+	if strings.TrimSpace(model) == "" {
+		writeError(w, 422, "model is required")
+		return
+	}
+	resolution, err := router.ResolveForPrincipal(model, principal)
+	if err != nil {
+		if _, ok := err.(*router.ModelNotFoundError); ok {
+			writeError(w, 404, err.Error())
+		} else {
+			writeError(w, 500, "Gateway is not configured for the requested model.")
+		}
+		return
+	}
+	targets, status, message := authorizeKeyPolicy(principal, model, resolution.Category, resolution.Targets)
+	if status != 0 {
+		writeError(w, status, message)
+		return
+	}
+	target := targets[0]
+	provider, err := providers.GetProviderForPrincipal(target.Provider, principal)
+	if err != nil {
+		writeUpstreamError(w, err)
+		return
+	}
+	if providers.SupportsAnthropicTokenCount(provider) {
+		count, err := providers.CountAnthropicTokens(provider, target.Model, raw, r.Header.Get("anthropic-version"), r.Header.Values("anthropic-beta"))
+		if err != nil {
+			if errors.Is(err, providers.ErrInvalidAnthropicTokenCount) {
+				writeError(w, http.StatusBadGateway, "Upstream provider returned an invalid token count.")
+				return
+			}
+			writeUpstreamError(w, err)
+			return
+		}
+		writeJSON(w, 200, map[string]any{"input_tokens": count})
+		return
+	}
+	countPayload := map[string]any{}
+	for _, field := range []string{"system", "messages", "tools", "tool_choice", "thinking", "output_config"} {
+		if value, exists := raw[field]; exists {
+			countPayload[field] = value
 		}
 	}
-	tokens := total / 4
+	compact, _ := json.Marshal(countPayload)
+	tokens := len(compact) / 4
+	if len(compact)%4 != 0 {
+		tokens++
+	}
 	if tokens < 1 {
 		tokens = 1
 	}
+	w.Header().Set("X-LLMGW-Token-Count", "estimate")
 	writeJSON(w, 200, map[string]any{"input_tokens": tokens})
 }

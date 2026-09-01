@@ -52,6 +52,23 @@ func modelPolicyAllows(allowed []string, requestedModel, resolvedCategory string
 // the (possibly provider-filtered) targets and an HTTP error (status,msg) when
 // the request is not allowed. status==0 means allowed.
 func enforceKeyPolicy(p *config.Principal, requestedModel, resolvedCategory string, targets []router.Target) ([]router.Target, int, string) {
+	targets, status, message := authorizeKeyPolicy(p, requestedModel, resolvedCategory, targets)
+	if status != 0 || p == nil || p.Token == "" {
+		return targets, status, message
+	}
+	if err := iam.CheckAndConsumeRequest(p, time.Now()); err != nil {
+		var exceeded *iam.QuotaExceeded
+		if errors.As(err, &exceeded) {
+			return nil, 429, exceeded.Error()
+		}
+		return nil, 500, "Quota store unavailable."
+	}
+	return targets, 0, ""
+}
+
+// authorizeKeyPolicy enforces routing and credential policy without consuming
+// inference quotas. Non-inference operations such as token counting use it.
+func authorizeKeyPolicy(p *config.Principal, requestedModel, resolvedCategory string, targets []router.Target) ([]router.Target, int, string) {
 	if p == nil || p.Token == "" {
 		return targets, 0, "" // admin / unauthenticated-local: unrestricted
 	}
@@ -109,12 +126,5 @@ func enforceKeyPolicy(p *config.Principal, requestedModel, resolvedCategory stri
 		return nil, 403, "This principal has no active provider credential for the requested route."
 	}
 	targets = credentialTargets
-	if err := iam.CheckAndConsumeRequest(p, time.Now()); err != nil {
-		var exceeded *iam.QuotaExceeded
-		if errors.As(err, &exceeded) {
-			return nil, 429, exceeded.Error()
-		}
-		return nil, 500, "Quota store unavailable."
-	}
 	return targets, 0, ""
 }
