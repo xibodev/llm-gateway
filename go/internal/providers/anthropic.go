@@ -298,6 +298,7 @@ type anthropicStreamIter struct {
 	resp *http.Response
 	ch   chan string
 	done bool
+	err  error
 }
 
 func newAnthropicStreamIter(resp *http.Response, model string) *anthropicStreamIter {
@@ -305,10 +306,17 @@ func newAnthropicStreamIter(resp *http.Response, model string) *anthropicStreamI
 	go func() {
 		defer close(it.ch)
 		defer resp.Body.Close()
-		reader := newLineReader(resp.Body)
-		translate.AnthropicSSEToOpenAIChunks(reader, model, func(chunk string) {
+		reader := newSSERecordReader(resp.Body)
+		translate.AnthropicSSEToOpenAIChunks(func() (string, bool) {
+			payload, ok := reader.Next()
+			if !ok {
+				return "", false
+			}
+			return "data: " + payload, true
+		}, model, func(chunk string) {
 			it.ch <- chunk
 		})
+		it.err = reader.Err()
 	}()
 	return it
 }
@@ -317,5 +325,5 @@ func (it *anthropicStreamIter) Next() (string, bool) {
 	c, ok := <-it.ch
 	return c, ok
 }
-func (it *anthropicStreamIter) Err() error   { return nil }
+func (it *anthropicStreamIter) Err() error   { return it.err }
 func (it *anthropicStreamIter) Close() error { return nil }

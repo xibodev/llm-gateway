@@ -2,6 +2,8 @@ package providers
 
 import (
 	"encoding/json"
+	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strconv"
@@ -30,6 +32,43 @@ func TestAnthropicNativePayloadPreservesThinkingAndOutputConfig(t *testing.T) {
 	outputConfig, ok := payload["output_config"].(map[string]any)
 	if !ok || outputConfig["effort"] != "xhigh" {
 		t.Fatalf("output_config = %#v, want xhigh map", payload["output_config"])
+	}
+}
+
+func TestAnthropicStreamNormalAndOversizedRecords(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		response string
+		wantText string
+		wantErr  bool
+	}{
+		{name: "normal", response: "event: message_start\ndata: {\"type\":\"message_start\"}\n\n" +
+			"event: content_block_delta\ndata: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"text_delta\",\"text\":\"hello\"}}\n\n", wantText: "hello"},
+		{name: "oversized", response: "data: " + strings.Repeat("x", maxStreamRecordWireSize) + "\n\n", wantErr: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				w.Header().Set("Content-Type", "text/event-stream")
+				_, _ = fmt.Fprint(w, tc.response)
+			}))
+			defer server.Close()
+
+			iter, err := (AnthropicNativeProvider{BaseURL: server.URL, Timeout: 2}).Stream("model", []Message{{"role": "user", "content": "hi"}}, nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var chunks strings.Builder
+			for chunk, ok := iter.Next(); ok; chunk, ok = iter.Next() {
+				chunks.WriteString(chunk)
+			}
+			if tc.wantText != "" && !strings.Contains(chunks.String(), tc.wantText) {
+				t.Fatalf("chunks = %s", chunks.String())
+			}
+			var sizeErr *StreamRecordTooLargeError
+			if errors.As(iter.Err(), &sizeErr) != tc.wantErr {
+				t.Fatalf("error = %#v, want oversized %v", iter.Err(), tc.wantErr)
+			}
+		})
 	}
 }
 
@@ -79,7 +118,10 @@ func TestAnthropicNativeMessagesPreservesOpaquePayloadAndResponse(t *testing.T) 
 	}
 }
 
-type messagesTestProvider struct { calls int; err error }
+type messagesTestProvider struct {
+	calls int
+	err   error
+}
 
 func (p *messagesTestProvider) Complete(string, []Message, Kwargs) (map[string]any, error) {
 	return nil, nil
