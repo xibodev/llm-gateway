@@ -123,29 +123,51 @@ func TestNativeKey(t *testing.T) {
 
 func TestResolveNativeAlias(t *testing.T) {
 	setupEcho(t)
-	// a bare catalog name (no provider prefix, not a category) resolves; with
-	// two echo providers the sorted-order winner is deterministic ("echo").
-	targets, err := ResolveTargets("echo-strong")
-	if err != nil || len(targets) != 1 || targets[0].Provider != "echo" || targets[0].Model != "echo-strong" {
-		t.Fatalf("bare-name resolve wrong: %v %v", targets, err)
+	// Duplicate aliases do not silently select whichever provider sorts first.
+	if _, err := ResolveTargets("echo-strong"); err == nil {
+		t.Fatal("duplicate bare alias should be ambiguous")
+	} else if _, ok := err.(*ModelNotFoundError); !ok {
+		t.Fatalf("want safe ModelNotFoundError, got %T: %v", err, err)
 	}
-	// a "[1m]"-style context-variant tag is stripped before matching
-	targets, err = ResolveTargets("echo-strong[1m]")
-	if err != nil || len(targets) != 1 || targets[0].Model != "echo-strong" {
-		t.Fatalf("tagged-name resolve wrong: %v %v", targets, err)
+	principal := &config.Principal{AllowedProviders: []string{"echo2"}}
+	targets, err := ResolveTargetsForPrincipal("echo-strong[1m]", principal)
+	if err != nil || len(targets) != 1 || targets[0] != (Target{Provider: "echo2", Model: "echo-strong"}) {
+		t.Fatalf("policy-filtered tagged alias resolve wrong: %v %v", targets, err)
 	}
-	// case-insensitive
-	if targets, err := ResolveTargets("ECHO-DEEP"); err != nil || len(targets) != 1 || targets[0].Model != "echo-deep" {
+	if targets, err := ResolveTargetsForPrincipal("ECHO-DEEP", principal); err != nil || len(targets) != 1 || targets[0].Model != "echo-deep" {
 		t.Fatalf("case-insensitive resolve wrong: %v %v", targets, err)
 	}
-	// discovery-alias prefix strip: "claude-<non-claude>" falls back to the real
-	// model after a direct match fails (surfaces non-Claude models in the picker).
-	if targets, err := ResolveTargets("claude-echo-strong"); err != nil || len(targets) != 1 || targets[0].Model != "echo-strong" {
+	config.Update(func(s *config.Settings) { s.AnthropicDiscoveryAllModels = true })
+	if targets, err := ResolveTargetsForPrincipal("claude-echo-strong", principal); err != nil || len(targets) != 1 || targets[0].Model != "echo-strong" {
 		t.Fatalf("prefix-strip resolve wrong: %v %v", targets, err)
+	}
+	// Exact provider/model remains authoritative even when its bare alias is ambiguous.
+	if targets, err := ResolveTargets("echo/echo-strong"); err != nil || targets[0].Provider != "echo" {
+		t.Fatalf("exact provider/model changed: %v %v", targets, err)
 	}
 	// genuinely unknown still 404s
 	if _, err := ResolveTargets("totally-unknown-9"); err == nil {
 		t.Error("unknown should still 404")
+	}
+}
+
+func TestNativeAliasCanonicalCollisionAndEndpointPrecedence(t *testing.T) {
+	setupEcho(t)
+	config.Update(func(s *config.Settings) {
+		s.Providers = map[string]*config.ProviderConfig{
+			"echo": {Type: "echo"}, "other": {Type: "echo"},
+		}
+		s.Endpoints["ECHO-STRONG"] = &config.EndpointConfig{
+			Failover: []config.EndpointMember{{Provider: "other", Model: "echo-deep"}},
+		}
+	})
+	providers.ResetProviders()
+	resolution, err := ResolveForPrincipal("ECHO-STRONG", nil)
+	if err != nil || resolution.Category != "ECHO-STRONG" || resolution.Targets[0].Model != "echo-deep" {
+		t.Fatalf("exact endpoint lost precedence: %+v %v", resolution, err)
+	}
+	if _, err := ResolveTargets("echo.strong"); err == nil {
+		t.Fatal("canonical endpoint collision should not resolve as an alias")
 	}
 }
 

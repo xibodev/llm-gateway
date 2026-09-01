@@ -2,11 +2,13 @@ package api
 
 import (
 	"net/http"
+	"sort"
 	"strings"
 
 	"llmgw/internal/config"
 	"llmgw/internal/iam"
 	"llmgw/internal/providers"
+	"llmgw/internal/router"
 )
 
 func handleModels(w http.ResponseWriter, r *http.Request) {
@@ -108,6 +110,8 @@ func handleAdminModels(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 200, response)
 }
 
+var catalogModelsForPrincipal = providers.CatalogModelsForPrincipal
+
 func buildModelList(principal *config.Principal) (map[string]any, error) {
 	data := []any{}
 	seen := map[string]bool{}
@@ -121,7 +125,14 @@ func buildModelList(principal *config.Principal) (map[string]any, error) {
 		}
 	}
 
+	providerIDs := make([]string, 0, len(s.Providers))
 	for providerID := range s.Providers {
+		providerIDs = append(providerIDs, providerID)
+	}
+	sort.Strings(providerIDs)
+	modelSnapshot := map[string][]providers.ModelInfo{}
+	eligibleProviders := map[string]bool{}
+	for _, providerID := range providerIDs {
 		if !providerAllowed(principal, projectPolicy, providerID) {
 			continue
 		}
@@ -132,7 +143,10 @@ func buildModelList(principal *config.Principal) (map[string]any, error) {
 		if !authorized {
 			continue
 		}
-		for _, row := range providers.CatalogModelsForPrincipal(providerID, principal) {
+		eligibleProviders[providerID] = true
+		rows := append([]providers.ModelInfo(nil), catalogModelsForPrincipal(providerID, principal)...)
+		sort.Slice(rows, func(i, j int) bool { return rows[i].ID < rows[j].ID })
+		for _, row := range rows {
 			if row.ID == "" {
 				continue
 			}
@@ -141,6 +155,7 @@ func buildModelList(principal *config.Principal) (map[string]any, error) {
 			if !modelAllowed(principal, projectPolicy, namespaced, row.ID, aliasID) {
 				continue
 			}
+			modelSnapshot[providerID] = append(modelSnapshot[providerID], row)
 			if seen[namespaced] {
 				continue
 			}
@@ -158,22 +173,31 @@ func buildModelList(principal *config.Principal) (map[string]any, error) {
 		}
 	}
 
-	for name, cat := range s.Endpoints {
+	endpointNames := make([]string, 0, len(s.Endpoints))
+	for name := range s.Endpoints {
+		endpointNames = append(endpointNames, name)
+	}
+	sort.Strings(endpointNames)
+	for _, name := range endpointNames {
+		cat := s.Endpoints[name]
 		if !modelAllowed(principal, projectPolicy, name) {
 			continue
 		}
 		if seen[name] {
-			continue
+			// Endpoint lookup has precedence over provider/model parsing, so its
+			// authoritative row must also win an exact public-ID collision.
+			for i, raw := range data {
+				if raw.(map[string]any)["id"] == name {
+					data = append(data[:i], data[i+1:]...)
+					break
+				}
+			}
 		}
 		seen[name] = true
 		fo := []any{}
 		presentationMembers := []config.EndpointMember{}
 		for _, m := range cat.Failover {
-			authorized, err := providers.ProviderCredentialAuthorized(m.Provider, principal)
-			if err != nil {
-				return nil, err
-			}
-			if authorized && providerAllowed(principal, projectPolicy, m.Provider) &&
+			if eligibleProviders[m.Provider] &&
 				modelAllowed(principal, projectPolicy, name, m.Provider+"/"+m.Model, m.Model) {
 				fo = append(fo, map[string]any{"provider": m.Provider, "model": m.Model})
 				presentationMembers = append(presentationMembers, m)
@@ -190,7 +214,7 @@ func buildModelList(principal *config.Principal) (map[string]any, error) {
 			"id": name, "object": "model", "owned_by": "endpoint", "failover": fo,
 		}
 		if capabilities, surfaces := categoryPresentationMetadata(
-			principal, presentationMembers,
+			modelSnapshot, presentationMembers,
 		); len(capabilities) > 0 {
 			categoryEntry["capabilities"] = capabilities
 			setSurfaces(categoryEntry, surfaces)
@@ -207,18 +231,18 @@ func buildModelList(principal *config.Principal) (map[string]any, error) {
 	// Only chat/coding models are aliased â€” embeddings, audio (TTS/STT), and other
 	// non-chat models are kept out of Claude Code's /model picker.
 	if s.AnthropicDiscoveryAliases {
-		for providerID := range s.Providers {
-			if !providerAllowed(principal, projectPolicy, providerID) {
-				continue
-			}
-			authorized, err := providers.ProviderCredentialAuthorized(providerID, principal)
-			if err != nil {
-				return nil, err
-			}
-			if !authorized {
-				continue
-			}
-			for _, row := range providers.CatalogModelsForPrincipal(providerID, principal) {
+		candidates := router.NativeAliasCandidatesFromSnapshot(
+			modelSnapshot, s.AnthropicDiscoveryAllModels,
+		)
+		reserved := map[string]bool{}
+		for _, name := range endpointNames {
+			reserved[nativeAliasKey(name)] = true
+		}
+		for _, providerID := range providerIDs {
+			reserved[nativeAliasKey(providerID)] = true
+		}
+		for _, providerID := range providerIDs {
+			for _, row := range modelSnapshot[providerID] {
 				if row.ID == "" || !isChatModel(row) {
 					continue
 				}
@@ -227,7 +251,9 @@ func buildModelList(principal *config.Principal) (map[string]any, error) {
 					!modelAllowed(principal, projectPolicy, providerID+"/"+row.ID, row.ID, aliasID) {
 					continue
 				}
-				if seen[aliasID] {
+				candidate, unique, _ := uniqueAliasTarget(candidates[nativeAliasKey(aliasID)])
+				if !unique || candidate.Provider != providerID || candidate.Model != row.ID ||
+					reserved[nativeAliasKey(aliasID)] || seen[aliasID] {
 					continue
 				}
 				seen[aliasID] = true
@@ -242,8 +268,29 @@ func buildModelList(principal *config.Principal) (map[string]any, error) {
 			}
 		}
 	}
+	sort.SliceStable(data, func(i, j int) bool {
+		return data[i].(map[string]any)["id"].(string) < data[j].(map[string]any)["id"].(string)
+	})
 
 	return map[string]any{"object": "list", "data": data}, nil
+}
+
+func nativeAliasKey(id string) string {
+	return strings.ReplaceAll(strings.ToLower(strings.TrimSpace(id)), ".", "-")
+}
+
+func uniqueAliasTarget(candidates []router.Target) (router.Target, bool, bool) {
+	unique := map[router.Target]bool{}
+	for _, candidate := range candidates {
+		unique[candidate] = true
+	}
+	if len(unique) != 1 {
+		return router.Target{}, false, len(unique) > 1
+	}
+	for candidate := range unique {
+		return candidate, true, false
+	}
+	return router.Target{}, false, false
 }
 
 // setSurfaces stores a model row's HTTP surfaces under both the canonical
@@ -362,14 +409,19 @@ func providerInfersAudioCapabilities(
 }
 
 func categoryPresentationMetadata(
-	principal *config.Principal,
+	snapshot map[string][]providers.ModelInfo,
 	members []config.EndpointMember,
 ) (map[string]any, []string) {
 	modalities := make([]map[string]bool, 0, len(members))
 	for _, member := range members {
-		row, found := providers.CatalogLookupForPrincipal(
-			member.Provider, member.Model, principal,
-		)
+		var row providers.ModelInfo
+		found := false
+		for _, candidate := range snapshot[member.Provider] {
+			if candidate.ID == member.Model {
+				row, found = candidate, true
+				break
+			}
+		}
 		if !found {
 			return nil, nil
 		}

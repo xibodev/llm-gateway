@@ -105,7 +105,7 @@ still needs network-level throughput validation.
 
 | ID | State | Depends on | Work and acceptance |
 | --- | --- | --- | --- |
-| `CLAUDE-001` | `partial` | `GOV-001` | Make Claude model discovery deterministic and round-trippable. Sort rows, preserve exact provider/endpoint identity, hide ambiguous aliases, apply policy before advertising, and classify native Anthropic rows correctly. Every displayed picker ID must route to exactly what it names. |
+| `CLAUDE-001` | `done` | `GOV-001` | Claude model discovery is deterministic and round-trippable: sorted exact rows remain authoritative, aliases share policy-aware candidate construction with dispatch and are hidden on canonical ambiguity or namespace collisions, and native Anthropic rows declare Messages support. |
 | `CLAUDE-002` | `partial` | none | Use direct native Anthropic pass-through where possible. For adapted providers, preserve the observed Claude core profile (system/text, tools/results, supported images, stop/usage) and reject unsupported thinking/cache/document fields before dispatch instead of silently losing them. |
 | `CLAUDE-003` | `partial` | `CLAUDE-002` | Add bare `/messages/count_tokens`; define downstream auth-header precedence and supported Anthropic version/beta forwarding; proxy native counting when available and return a documented bounded estimate otherwise. |
 | `OPENAI-CLI-001` | `partial` | none | Extend the pinned handler contracts into installed-client evidence for Codex native `/v1/responses` and Copilot BYOK Chat/Responses, including cancellation. This is downstream client compatibility, separate from subscription-provider OAuth. |
