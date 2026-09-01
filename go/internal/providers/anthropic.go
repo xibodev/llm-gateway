@@ -175,7 +175,10 @@ func (p AnthropicNativeProvider) ListModels() []ModelInfo {
 			continue
 		}
 		label, _ := m["display_name"].(string)
-		out = append(out, ModelInfo{ID: id, Vendor: "anthropic", Label: label})
+		out = append(out, ModelInfo{
+			ID: id, Vendor: "anthropic", Label: label,
+			SupportedSurfaces: []string{"/v1/messages"},
+		})
 	}
 	return out
 }

@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"llmgw/internal/config"
+	"llmgw/internal/iam"
 	"llmgw/internal/providers"
 	"llmgw/internal/translate"
 )
@@ -134,7 +135,9 @@ func ResolveForPrincipal(
 			return Resolution{Targets: []Target{{Provider: head, Model: tail}}}, nil
 		}
 	}
-	if t, ok := resolveNativeAlias(name, principal); ok {
+	if t, ok, err := resolveNativeAlias(name, principal); err != nil {
+		return Resolution{}, err
+	} else if ok {
 		return Resolution{Targets: []Target{t}}, nil
 	}
 	return Resolution{}, &ModelNotFoundError{Requested: name}
@@ -152,60 +155,145 @@ func nativeKey(s string) string {
 // "provider/model" id onto a catalog entry, so coding CLIs can send provider-
 // native names directly. It powers Claude Code's built-in /model picker, whose
 // rows send Anthropic-native names with a context tag (e.g. "claude-opus-4-8[1m]")
-// that would otherwise 404. Providers are scanned in sorted order so the winner
-// is deterministic when the same bare name exists under several providers.
+// that would otherwise 404. Ambiguous canonical names are rejected rather than
+// routed to whichever provider happens to sort first.
 func resolveNativeAlias(
 	requested string, principal *config.Principal,
-) (Target, bool) {
+) (Target, bool, error) {
 	base := requested
 	if i := strings.IndexByte(base, '['); i >= 0 { // drop a "[1m]"-style variant tag
 		base = base[:i]
 	}
 	base = strings.TrimSpace(base)
 	if base == "" {
-		return Target{}, false
+		return Target{}, false, nil
 	}
-	// Direct native-name match first, so a real Claude model (claude-opus-4.8)
-	// resolves to itself before the discovery-prefix fallback can strip it.
-	if t, ok := matchByNativeKey(nativeKey(base), principal); ok {
-		return t, true
-	}
-	// Discovery-alias fallback: Claude Code's model discovery only accepts ids
-	// beginning with "claude"/"anthropic", so a non-Claude model surfaced in the
-	// picker carries that prefix (e.g. "claude-gemini-3.1-pro-preview"). Strip it
-	// and retry so the real model resolves.
-	low := strings.ToLower(base)
-	for _, pfx := range []string{"claude-", "anthropic-"} {
-		if strings.HasPrefix(low, pfx) {
-			if t, ok := matchByNativeKey(nativeKey(base[len(pfx):]), principal); ok {
-				return t, true
-			}
+	key := nativeKey(base)
+	for provider := range config.Get().Providers {
+		if nativeKey(provider) == key {
+			return Target{}, false, nil
 		}
 	}
-	return Target{}, false
+	for endpoint := range config.Get().Endpoints {
+		if nativeKey(endpoint) == key {
+			return Target{}, false, nil
+		}
+	}
+	candidates, err := NativeAliasCandidates(principal)
+	if err != nil {
+		return Target{}, false, err
+	}
+	if t, found, ambiguous := uniqueNativeCandidate(candidates[key]); ambiguous {
+		return Target{}, false, &ModelNotFoundError{Requested: requested}
+	} else if found {
+		return t, true, nil
+	}
+	return Target{}, false, nil
 }
 
-// matchByNativeKey finds a catalog model whose canonical key equals key,
-// scanning providers in sorted order for a deterministic winner.
-func matchByNativeKey(
-	key string, principal *config.Principal,
-) (Target, bool) {
-	if key == "" {
-		return Target{}, false
+// NativeAliasCandidates returns policy- and credential-authorized catalog
+// targets grouped by the canonical key used for bare-name resolution.
+func NativeAliasCandidates(principal *config.Principal) (map[string][]Target, error) {
+	s := config.Get()
+	project := iam.ProjectPolicy{}
+	if principal != nil && principal.ProjectID != "" {
+		var err error
+		project, err = iam.GetProjectPolicy(principal.ProjectID)
+		if err != nil {
+			return nil, err
+		}
 	}
-	pids := make([]string, 0, len(config.Get().Providers))
-	for pid := range config.Get().Providers {
+	pids := make([]string, 0, len(s.Providers))
+	for pid := range s.Providers {
 		pids = append(pids, pid)
 	}
 	sort.Strings(pids)
+	snapshot := map[string][]providers.ModelInfo{}
 	for _, pid := range pids {
-		for _, m := range providers.CatalogModelsForPrincipal(pid, principal) {
-			if nativeKey(m.ID) == key {
-				return Target{Provider: pid, Model: m.ID}, true
+		if !aliasProviderAllowed(principal, project, pid) {
+			continue
+		}
+		authorized, err := providers.ProviderCredentialAuthorized(pid, principal)
+		if err != nil {
+			return nil, err
+		}
+		if !authorized {
+			continue
+		}
+		models := append([]providers.ModelInfo(nil), providers.CatalogModelsForPrincipal(pid, principal)...)
+		sort.Slice(models, func(i, j int) bool { return models[i].ID < models[j].ID })
+		for _, m := range models {
+			aliases := aliasIDs(m.ID, s.AnthropicDiscoveryAllModels)
+			policyCandidates := append([]string{pid + "/" + m.ID, m.ID}, aliases...)
+			if principal != nil && (!aliasModelAllowed(principal.AllowedModels, policyCandidates...) ||
+				!aliasModelAllowed(project.AllowedModels, policyCandidates...)) {
+				continue
+			}
+			snapshot[pid] = append(snapshot[pid], m)
+		}
+	}
+	return NativeAliasCandidatesFromSnapshot(snapshot, s.AnthropicDiscoveryAllModels), nil
+}
+
+// NativeAliasCandidatesFromSnapshot groups an already authorized and
+// policy-filtered catalog snapshot without fetching or mutating its rows.
+func NativeAliasCandidatesFromSnapshot(
+	snapshot map[string][]providers.ModelInfo, allModels bool,
+) map[string][]Target {
+	out := map[string][]Target{}
+	for pid, models := range snapshot {
+		for _, model := range models {
+			for _, alias := range aliasIDs(model.ID, allModels) {
+				key := nativeKey(alias)
+				if key != "" {
+					out[key] = append(out[key], Target{Provider: pid, Model: model.ID})
+				}
 			}
 		}
 	}
-	return Target{}, false
+	return out
+}
+
+func aliasIDs(model string, allModels bool) []string {
+	aliases := []string{model}
+	low := strings.ToLower(model)
+	if allModels && !strings.HasPrefix(low, "claude") && !strings.HasPrefix(low, "anthropic") {
+		aliases = append(aliases, "claude-"+model)
+	}
+	return aliases
+}
+
+func uniqueNativeCandidate(candidates []Target) (Target, bool, bool) {
+	unique := map[Target]bool{}
+	for _, candidate := range candidates {
+		unique[candidate] = true
+	}
+	if len(unique) != 1 {
+		return Target{}, false, len(unique) > 1
+	}
+	for candidate := range unique {
+		return candidate, true, false
+	}
+	return Target{}, false, false
+}
+
+func aliasProviderAllowed(principal *config.Principal, project iam.ProjectPolicy, provider string) bool {
+	return principal == nil ||
+		(aliasModelAllowed(principal.AllowedProviders, provider) && aliasModelAllowed(project.AllowedProviders, provider))
+}
+
+func aliasModelAllowed(allowed []string, candidates ...string) bool {
+	if len(allowed) == 0 {
+		return true
+	}
+	for _, allowedID := range allowed {
+		for _, candidate := range candidates {
+			if allowedID == candidate {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // attempt captures one target's outcome for telemetry.

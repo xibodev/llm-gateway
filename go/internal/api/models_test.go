@@ -3,6 +3,8 @@ package api
 import (
 	"net/http"
 	"net/http/httptest"
+	"reflect"
+	"strings"
 	"testing"
 
 	"llmgw/internal/config"
@@ -33,6 +35,141 @@ func TestIsChatModel(t *testing.T) {
 		}
 	}
 
+}
+
+func TestModelListAliasesAreDeterministicUniqueAndRoundTrip(t *testing.T) {
+	t.Setenv("LLMGW_STATE_DIR", t.TempDir())
+	iam.ResetForTests()
+	t.Cleanup(iam.ResetForTests)
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		models := `{"data":[{"id":"echo-strong"},{"id":"echo-deep"}]}`
+		if r.Header.Get("x-api-key") == "alpha-fixture" {
+			models = `{"data":[{"id":"echo-strong"},{"id":"echo-deep"},{"id":"alpha-only"}]}`
+		}
+		_, _ = w.Write([]byte(models))
+	}))
+	defer upstream.Close()
+	config.Update(func(s *config.Settings) {
+		s.AllowUnauthenticatedAPI = true
+		s.AnthropicDiscoveryAliases = true
+		s.AnthropicDiscoveryAllModels = true
+		s.Providers = map[string]*config.ProviderConfig{
+			"zeta":  {Type: "anthropic", BaseURL: upstream.URL, APIKey: "zeta-fixture"},
+			"alpha": {Type: "anthropic", BaseURL: upstream.URL, APIKey: "alpha-fixture"},
+		}
+		s.Endpoints = map[string]*config.EndpointConfig{
+			"coding":           {Failover: []config.EndpointMember{{Provider: "zeta", Model: "echo-default"}}},
+			"CLAUDE-ECHO-DEEP": {Failover: []config.EndpointMember{{Provider: "zeta", Model: "echo-deep"}}},
+			"alpha/echo-deep":  {Failover: []config.EndpointMember{{Provider: "zeta", Model: "echo-deep"}}},
+		}
+	})
+	providers.ResetProviders()
+	t.Cleanup(providers.ResetProviders)
+	originalCatalog := catalogModelsForPrincipal
+	catalogCalls := map[string]int{}
+	catalogModelsForPrincipal = func(provider string, principal *config.Principal) []providers.ModelInfo {
+		catalogCalls[provider]++
+		return originalCatalog(provider, principal)
+	}
+	t.Cleanup(func() { catalogModelsForPrincipal = originalCatalog })
+
+	first, err := buildModelList(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for provider, calls := range catalogCalls {
+		if calls != 1 {
+			t.Fatalf("catalog calls for %s=%d, want 1 per model-list request", provider, calls)
+		}
+	}
+	second, err := buildModelList(nil)
+	if err != nil || !reflect.DeepEqual(first, second) {
+		t.Fatalf("model list changed between calls: %v", err)
+	}
+	for provider, calls := range catalogCalls {
+		if calls != 2 {
+			t.Fatalf("catalog calls for %s=%d after two requests, want 2", provider, calls)
+		}
+	}
+	rows := first["data"].([]any)
+	last := ""
+	for _, raw := range rows {
+		id := raw.(map[string]any)["id"].(string)
+		if id < last {
+			t.Fatalf("rows not sorted: %q before %q", last, id)
+		}
+		last = id
+		if id == "claude-echo-strong" || id == "claude-echo-deep" {
+			t.Fatalf("ambiguous/colliding alias advertised: %q", id)
+		}
+	}
+	for _, exact := range []string{"alpha/echo-strong", "zeta/echo-strong", "coding", "CLAUDE-ECHO-DEEP"} {
+		found := false
+		for _, raw := range rows {
+			found = found || raw.(map[string]any)["id"] == exact
+		}
+		if !found {
+			t.Fatalf("exact row %q missing: %+v", exact, rows)
+		}
+	}
+	owners := map[string]string{}
+	for _, raw := range rows {
+		row := raw.(map[string]any)
+		owners[row["id"].(string)] = row["owned_by"].(string)
+	}
+	if owners["alpha/echo-deep"] != "endpoint" {
+		t.Fatalf("endpoint did not win exact ID collision: %+v", owners)
+	}
+	catalogModelsForPrincipal = originalCatalog
+	for _, raw := range rows {
+		row := raw.(map[string]any)
+		id, owner := row["id"].(string), row["owned_by"].(string)
+		resolution, err := router.ResolveForPrincipal(id, nil)
+		if err != nil {
+			t.Fatalf("advertised row %q does not resolve: %v", id, err)
+		}
+		switch owner {
+		case "endpoint":
+			failover := row["failover"].([]any)
+			if len(resolution.Targets) != len(failover) || resolution.Category != id {
+				t.Fatalf("endpoint %q resolution=%+v row=%+v", id, resolution, row)
+			}
+			for i, rawTarget := range failover {
+				target := rawTarget.(map[string]any)
+				if resolution.Targets[i] != (router.Target{Provider: target["provider"].(string), Model: target["model"].(string)}) {
+					t.Fatalf("endpoint %q target %d mismatch: %+v vs %+v", id, i, resolution.Targets[i], target)
+				}
+			}
+		case strings.SplitN(id, "/", 2)[0]:
+			parts := strings.SplitN(id, "/", 2)
+			if len(parts) != 2 || len(resolution.Targets) != 1 || resolution.Targets[0] != (router.Target{Provider: parts[0], Model: parts[1]}) {
+				t.Fatalf("exact row %q resolution=%+v", id, resolution)
+			}
+		default:
+			wantModel := strings.TrimPrefix(id, "claude-")
+			if len(resolution.Targets) != 1 || resolution.Targets[0] != (router.Target{Provider: owner, Model: wantModel}) {
+				t.Fatalf("alias row %q owner=%q resolution=%+v", id, owner, resolution)
+			}
+		}
+	}
+
+	principal := &config.Principal{AllowedProviders: []string{"alpha"}}
+	filtered, err := buildModelList(principal)
+	if err != nil {
+		t.Fatal(err)
+	}
+	alias := "claude-echo-strong"
+	found := false
+	for _, raw := range filtered["data"].([]any) {
+		row := raw.(map[string]any)
+		if row["id"] == alias {
+			found = row["owned_by"] == "alpha"
+		}
+	}
+	resolution, err := router.ResolveForPrincipal(alias, principal)
+	if err != nil || !found || resolution.Targets[0] != (router.Target{Provider: "alpha", Model: "echo-strong"}) {
+		t.Fatalf("policy-unique alias found=%v resolution=%+v err=%v", found, resolution, err)
+	}
 }
 
 func TestModelPresentationMetadataInfersLocalAudioCapabilities(t *testing.T) {
