@@ -192,10 +192,15 @@ func (it *ollamaStreamIter) Next() (string, bool) {
 		return "", false
 	}
 	for {
-		line, err := it.reader.ReadString('\n')
-		if strings.TrimSpace(line) != "" {
+		line, err := readBoundedLine(it.reader, maxStreamRecordWireSize, "NDJSON")
+		if _, ok := err.(*StreamRecordTooLargeError); ok {
+			it.done = true
+			it.err = err
+			return "", false
+		}
+		if strings.TrimSpace(string(line)) != "" {
 			var event map[string]any
-			if json.Unmarshal([]byte(strings.TrimSpace(line)), &event) == nil {
+			if json.Unmarshal([]byte(strings.TrimSpace(string(line))), &event) == nil {
 				message, _ := event["message"].(map[string]any)
 				if message == nil {
 					message = map[string]any{}
