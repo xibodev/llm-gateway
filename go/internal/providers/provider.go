@@ -8,6 +8,7 @@
 package providers
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"strings"
@@ -65,12 +66,40 @@ type Provider interface {
 	IsStub() bool
 }
 
+// ContextProvider is the optional non-streaming context-aware provider surface.
+// Provider remains unchanged while implementations migrate incrementally.
+type ContextProvider interface {
+	CompleteContext(context.Context, string, []Message, Kwargs) (map[string]any, error)
+}
+
+func CompleteProviderContext(ctx context.Context, provider Provider, model string, messages []Message, kw Kwargs) (map[string]any, error) {
+	if contextual, ok := provider.(ContextProvider); ok {
+		return contextual.CompleteContext(ctx, model, messages, kw)
+	}
+	return provider.Complete(model, messages, kw)
+}
+
 type detailedCompleter interface {
 	CompleteWithObservation(
 		model string,
 		messages []Message,
 		kw Kwargs,
 	) (map[string]any, *iam.ProviderAccountObservation, error)
+}
+
+type detailedContextCompleter interface {
+	CompleteContextWithObservation(context.Context, string, []Message, Kwargs) (map[string]any, *iam.ProviderAccountObservation, error)
+}
+
+func CompleteProviderContextWithObservation(ctx context.Context, provider Provider, model string, messages []Message, kw Kwargs) (map[string]any, *iam.ProviderAccountObservation, error) {
+	if detailed, ok := provider.(detailedContextCompleter); ok {
+		return detailed.CompleteContextWithObservation(ctx, model, messages, kw)
+	}
+	if contextual, ok := provider.(ContextProvider); ok {
+		response, err := contextual.CompleteContext(ctx, model, messages, kw)
+		return response, nil, err
+	}
+	return CompleteProviderWithObservation(provider, model, messages, kw)
 }
 
 func CompleteProviderWithObservation(
@@ -95,6 +124,10 @@ type ResponsesProvider interface {
 		model string,
 		payload map[string]any,
 	) (StreamIter, *iam.ProviderAccountObservation, error)
+}
+
+type ContextResponsesProvider interface {
+	CompleteResponsesContext(context.Context, string, map[string]any) (map[string]any, *iam.ProviderAccountObservation, error)
 }
 
 // AnthropicMessagesProvider is an optional non-streaming native Messages
@@ -224,6 +257,13 @@ func CompleteResponses(
 		return responses.CompleteResponses(model, payload)
 	}
 	return nil, nil, ErrResponsesUnsupported
+}
+
+func CompleteResponsesContext(ctx context.Context, provider Provider, model string, payload map[string]any) (map[string]any, *iam.ProviderAccountObservation, error) {
+	if responses, ok := provider.(ContextResponsesProvider); ok {
+		return responses.CompleteResponsesContext(ctx, model, payload)
+	}
+	return CompleteResponses(provider, model, payload)
 }
 
 func StreamResponses(

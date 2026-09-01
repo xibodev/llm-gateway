@@ -2,6 +2,7 @@ package providers
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -48,18 +49,28 @@ func buildOpenAIPayload(model string, messages []Message, stream bool, kw Kwargs
 }
 
 func (p OpenAIProvider) Complete(model string, messages []Message, kw Kwargs) (map[string]any, error) {
-	response, _, err := p.CompleteWithObservation(model, messages, kw)
+	return p.CompleteContext(context.Background(), model, messages, kw)
+}
+
+func (p OpenAIProvider) CompleteContext(ctx context.Context, model string, messages []Message, kw Kwargs) (map[string]any, error) {
+	response, _, err := p.CompleteContextWithObservation(ctx, model, messages, kw)
 	return response, err
 }
 
 func (p OpenAIProvider) CompleteWithObservation(
 	model string, messages []Message, kw Kwargs,
 ) (map[string]any, *iam.ProviderAccountObservation, error) {
+	return p.CompleteContextWithObservation(context.Background(), model, messages, kw)
+}
+
+func (p OpenAIProvider) CompleteContextWithObservation(
+	ctx context.Context, model string, messages []Message, kw Kwargs,
+) (map[string]any, *iam.ProviderAccountObservation, error) {
 	kw = withOpenAIOutputLimit(kw)
 	if p.adaptEnabled(kw) {
 		plan := p.planAdapt(model)
 		if plan.endpoint == "responses" {
-			return p.completeViaResponsesWithObservation(model, messages, kw)
+			return p.completeViaResponsesContextWithObservation(ctx, model, messages, kw)
 		}
 		if plan.renameMaxTokens {
 			kw = withRenamedMaxTokens(kw)
@@ -72,7 +83,7 @@ func (p OpenAIProvider) CompleteWithObservation(
 	applyVisionHeader(headers, messages)
 	body, _ := json.Marshal(buildOpenAIPayload(model, messages, false, kw))
 	do := func(b string, h http.Header) (*http.Response, error) {
-		req, _ := http.NewRequest("POST", b+"/chat/completions", bytes.NewReader(body))
+		req, _ := http.NewRequestWithContext(ctx, "POST", b+"/chat/completions", bytes.NewReader(body))
 		req.Header = h
 		return httpClient(p.Timeout).Do(req)
 	}
@@ -83,7 +94,13 @@ func (p OpenAIProvider) CompleteWithObservation(
 	}
 	if resp.StatusCode == 401 && p.auth.CanRefresh() {
 		resp.Body.Close()
+		if ctx.Err() != nil {
+			return nil, observation, invocation("openai: request canceled: " + ctx.Err().Error())
+		}
 		if rerr := p.auth.Refresh(); rerr == nil {
+			if ctx.Err() != nil {
+				return nil, observation, invocation("openai: request canceled: " + ctx.Err().Error())
+			}
 			if base, headers, observation, err = prepareOpenAIAuth(p.auth); err == nil {
 				applyVisionHeader(headers, messages)
 				if resp, err = do(base, headers); err != nil {
@@ -431,8 +448,14 @@ func (p OpenAIProvider) completeViaResponses(model string, messages []Message, k
 func (p OpenAIProvider) completeViaResponsesWithObservation(
 	model string, messages []Message, kw Kwargs,
 ) (map[string]any, *iam.ProviderAccountObservation, error) {
+	return p.completeViaResponsesContextWithObservation(context.Background(), model, messages, kw)
+}
+
+func (p OpenAIProvider) completeViaResponsesContextWithObservation(
+	ctx context.Context, model string, messages []Message, kw Kwargs,
+) (map[string]any, *iam.ProviderAccountObservation, error) {
 	payload := translate.ChatToResponses(model, messages, kw, false)
-	resp, observation, err := p.callResponsesPayload(payload, true)
+	resp, observation, err := p.callResponsesPayloadContext(ctx, payload, true)
 	if err != nil {
 		return nil, observation, err
 	}
@@ -467,6 +490,12 @@ func (p OpenAIProvider) callResponsesWithObservation(
 func (p OpenAIProvider) CompleteResponses(
 	model string, payload map[string]any,
 ) (map[string]any, *iam.ProviderAccountObservation, error) {
+	return p.CompleteResponsesContext(context.Background(), model, payload)
+}
+
+func (p OpenAIProvider) CompleteResponsesContext(
+	ctx context.Context, model string, payload map[string]any,
+) (map[string]any, *iam.ProviderAccountObservation, error) {
 	if !p.supportsNativeResponses(model) {
 		return nil, nil, ErrResponsesUnsupported
 	}
@@ -474,7 +503,7 @@ func (p OpenAIProvider) CompleteResponses(
 	request["model"] = model
 	request["stream"] = false
 	delete(request, "force_api_support")
-	response, observation, err := p.callResponsesPayload(request, false)
+	response, observation, err := p.callResponsesPayloadContext(ctx, request, false)
 	if status := UpstreamStatus(err); status == http.StatusNotFound ||
 		status == http.StatusMethodNotAllowed {
 		return nil, observation, ErrResponsesUnsupported
@@ -539,6 +568,12 @@ func (p OpenAIProvider) callResponsesPayloadWithObservation(
 func (p OpenAIProvider) callResponsesPayload(
 	payload map[string]any, allowUnsupportedParameterRetry bool,
 ) (map[string]any, *iam.ProviderAccountObservation, error) {
+	return p.callResponsesPayloadContext(context.Background(), payload, allowUnsupportedParameterRetry)
+}
+
+func (p OpenAIProvider) callResponsesPayloadContext(
+	ctx context.Context, payload map[string]any, allowUnsupportedParameterRetry bool,
+) (map[string]any, *iam.ProviderAccountObservation, error) {
 	base, headers, observation, err := prepareOpenAIAuth(p.auth)
 	if err != nil {
 		return nil, observation, err
@@ -547,7 +582,7 @@ func (p OpenAIProvider) callResponsesPayload(
 	applyResponsesVisionHeader(headers, payload)
 	post := func(b string, h http.Header) (*http.Response, error) {
 		body, _ := json.Marshal(payload)
-		req, _ := http.NewRequest("POST", b+"/responses", bytes.NewReader(body))
+		req, _ := http.NewRequestWithContext(ctx, "POST", b+"/responses", bytes.NewReader(body))
 		req.Header = h
 		return httpClient(p.Timeout).Do(req)
 	}
@@ -558,7 +593,13 @@ func (p OpenAIProvider) callResponsesPayload(
 	}
 	if resp.StatusCode == 401 && p.auth.CanRefresh() {
 		resp.Body.Close()
+		if ctx.Err() != nil {
+			return nil, observation, invocation("openai: responses request canceled: " + ctx.Err().Error())
+		}
 		if rerr := p.auth.Refresh(); rerr == nil {
+			if ctx.Err() != nil {
+				return nil, observation, invocation("openai: responses request canceled: " + ctx.Err().Error())
+			}
 			if base, headers, observation, err = prepareOpenAIAuth(p.auth); err == nil {
 				headers.Set("Accept", "application/json")
 				applyResponsesVisionHeader(headers, payload)
@@ -572,7 +613,7 @@ func (p OpenAIProvider) callResponsesPayload(
 	resp.Body.Close()
 	if allowUnsupportedParameterRetry &&
 		resp.StatusCode == http.StatusBadRequest &&
-		stripRejectedParams(payload, raw) {
+		stripRejectedParams(payload, raw) && ctx.Err() == nil {
 		if resp2, e := post(base, headers); e == nil {
 			raw, _ = io.ReadAll(resp2.Body)
 			resp2.Body.Close()

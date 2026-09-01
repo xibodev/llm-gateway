@@ -90,7 +90,7 @@ func handleChat(w http.ResponseWriter, r *http.Request) {
 		writeError(w, 422, "invalid request body")
 		return
 	}
-	chatDispatch(w, &req, principal, "openai.chat")
+	chatDispatch(w, r, &req, principal, "openai.chat")
 }
 
 func handleResponses(w http.ResponseWriter, r *http.Request) {
@@ -139,7 +139,7 @@ func responsesToChatRequest(rr *responsesRequest) *chatRequest {
 	}
 }
 
-func chatDispatch(w http.ResponseWriter, req *chatRequest, principal *config.Principal, endpoint string) {
+func chatDispatch(w http.ResponseWriter, r *http.Request, req *chatRequest, principal *config.Principal, endpoint string) {
 	started := time.Now()
 	resolution, err := router.ResolveForPrincipal(req.Model, principal)
 	if err != nil {
@@ -180,7 +180,7 @@ func chatDispatch(w http.ResponseWriter, req *chatRequest, principal *config.Pri
 		return
 	}
 
-	response, served, err := router.ExecuteComplete(targets, msgs, req.Model, principal, kw)
+	response, served, err := router.ExecuteCompleteContext(r.Context(), targets, msgs, req.Model, principal, kw)
 	if err != nil {
 		recordFailureUsage(
 			endpoint, req.Model, principal, upstreamErrorStatus(err), "upstream",

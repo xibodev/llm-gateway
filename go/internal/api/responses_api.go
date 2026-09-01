@@ -43,11 +43,12 @@ func handleResponsesAPI(w http.ResponseWriter, r *http.Request) {
 			)
 		}
 	}
-	responsesDispatch(w, payload, publicPayload, &request, principal)
+	responsesDispatch(w, r, payload, publicPayload, &request, principal)
 }
 
 func responsesDispatch(
 	w http.ResponseWriter,
+	r *http.Request,
 	payload, publicPayload map[string]any,
 	request *responsesRequest,
 	principal *config.Principal,
@@ -112,8 +113,8 @@ func responsesDispatch(
 		)
 		return
 	}
-	response, served, err := router.ExecuteResponses(
-		targets, payload, request.Model, principal,
+	response, served, err := router.ExecuteResponsesContext(
+		r.Context(), targets, payload, request.Model, principal,
 	)
 	if err != nil {
 		recordFailureUsage(
