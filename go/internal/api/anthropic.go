@@ -3,6 +3,7 @@ package api
 import (
 	"encoding/json"
 	"net/http"
+	"strings"
 	"time"
 
 	"llmgw/internal/config"
@@ -72,17 +73,20 @@ func handleMessages(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var req anthropicRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+	var raw map[string]any
+	decoder := json.NewDecoder(r.Body)
+	decoder.UseNumber()
+	if err := decoder.Decode(&raw); err != nil {
 		writeError(w, 422, "invalid request body")
 		return
 	}
-	openaiMessages := translate.AnthropicMessagesToOpenAI(req.Messages, req.System)
-	msgs := make([]providers.Message, 0, len(openaiMessages)+1)
-	if pre := config.Get().GatewayPreamble; pre != "" {
-		msgs = append(msgs, providers.Message{"role": "system", "content": pre})
+	encoded, _ := json.Marshal(raw)
+	if json.Unmarshal(encoded, &req) != nil || req.Model == "" {
+		writeError(w, 422, "model is required")
+		return
 	}
-	for _, m := range openaiMessages {
-		msgs = append(msgs, providers.Message(m))
+	if pre := config.Get().GatewayPreamble; pre != "" {
+		raw["_llmgw_preamble"] = pre
 	}
 
 	resolution, err := router.ResolveForPrincipal(req.Model, principal)
@@ -97,8 +101,6 @@ func handleMessages(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	targets := resolution.Targets
-	kw := anthropicKwargs(&req)
-
 	targets, polStatus, polMsg := enforceKeyPolicy(principal, req.Model, resolution.Category, targets)
 	if polStatus != 0 {
 		recordFailureUsage("anthropic.messages", req.Model, principal, polStatus, "policy", started)
@@ -107,11 +109,21 @@ func handleMessages(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if req.Stream {
-		streamMessagesSSE(w, targets, msgs, req.Model, principal, kw, started)
+		converted, kw, incompatible := translate.AnthropicRequestToOpenAI(raw)
+		if len(incompatible) > 0 {
+			recordFailureUsage("anthropic.messages", req.Model, principal, 400, "compatibility", started)
+			writeError(w, 400, "Streaming cannot preserve Anthropic fields: "+strings.Join(incompatible, ", "))
+			return
+		}
+		msgs := make([]providers.Message, len(converted))
+		for i := range converted {
+			msgs[i] = providers.Message(converted[i])
+		}
+		streamMessagesSSE(w, targets, msgs, req.Model, principal, providers.Kwargs(kw), started)
 		return
 	}
 
-	response, served, err := router.ExecuteComplete(targets, msgs, req.Model, principal, kw)
+	response, served, err := router.ExecuteAnthropicMessages(targets, raw, req.Model, principal)
 	if err != nil {
 		status := upstreamErrorStatus(err)
 		recordFailureUsage("anthropic.messages", req.Model, principal, status, "upstream", started)
@@ -122,7 +134,7 @@ func handleMessages(w http.ResponseWriter, r *http.Request) {
 		"anthropic.messages", req.Model, served, principal, response,
 		time.Since(started).Milliseconds(),
 	)
-	writeJSON(w, 200, translate.OpenAIResponseToAnthropic(response, served.Model))
+	writeJSON(w, 200, response)
 }
 
 func streamMessagesSSE(w http.ResponseWriter, targets []router.Target, msgs []providers.Message, requested string, principal *config.Principal, kw providers.Kwargs, started time.Time) {

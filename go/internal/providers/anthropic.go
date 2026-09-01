@@ -114,6 +114,49 @@ func (p AnthropicNativeProvider) Complete(model string, messages []Message, kw K
 	return translate.AnthropicResponseToOpenAI(anthropicResp, model), nil
 }
 
+func (p AnthropicNativeProvider) CompleteAnthropicMessages(model string, payload map[string]any) (map[string]any, error) {
+	request := make(map[string]any, len(payload))
+	for key, value := range payload {
+		request[key] = value
+	}
+	request["model"] = model
+	request["stream"] = false
+	preamble, _ := request["_llmgw_preamble"].(string)
+	delete(request, "_llmgw_preamble")
+	if preamble != "" {
+		switch system := request["system"].(type) {
+		case string:
+			request["system"] = preamble + "\n\n" + system
+		case []any:
+			request["system"] = append([]any{map[string]any{"type": "text", "text": preamble}}, system...)
+		default:
+			request["system"] = preamble
+		}
+	}
+	body, err := json.Marshal(request)
+	if err != nil {
+		return nil, &ConfigError{Msg: "anthropic: invalid Messages request"}
+	}
+	req, _ := http.NewRequest("POST", p.base()+"/v1/messages", bytes.NewReader(body))
+	req.Header = p.headers()
+	resp, err := httpClient(p.timeout()).Do(req)
+	if err != nil {
+		return nil, invocation("anthropic: upstream transport error: " + err.Error())
+	}
+	defer resp.Body.Close()
+	raw, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode >= 400 {
+		return nil, invocationStatus(fmt.Sprintf("anthropic: upstream returned %d: %s", resp.StatusCode, extractError(raw)), resp.StatusCode)
+	}
+	var result map[string]any
+	decoder := json.NewDecoder(bytes.NewReader(raw))
+	decoder.UseNumber()
+	if decoder.Decode(&result) != nil {
+		return nil, invocation("anthropic: invalid JSON in upstream response")
+	}
+	return result, nil
+}
+
 func (p AnthropicNativeProvider) Stream(model string, messages []Message, kw Kwargs) (StreamIter, error) {
 	body, _ := json.Marshal(p.payload(model, messages, true, kw))
 	req, _ := http.NewRequest("POST", p.base()+"/v1/messages", bytes.NewReader(body))

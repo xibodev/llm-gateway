@@ -425,6 +425,102 @@ func ExecuteResponses(
 	}
 }
 
+// ExecuteAnthropicMessages preserves native Messages payloads and loss-checks
+// the narrower OpenAI Chat adapter used by other configured providers.
+func ExecuteAnthropicMessages(
+	targets []Target,
+	payload map[string]any,
+	requested string,
+	principal *config.Principal,
+) (map[string]any, *Target, error) {
+	messages, kw, incompatible := translate.AnthropicRequestToOpenAI(payload)
+	requiresNative := len(incompatible) > 0
+	if requiresNative {
+		hasNative := false
+		for _, target := range targets {
+			provider, err := providers.GetProviderForPrincipal(target.Provider, principal)
+			if err == nil && providers.SupportsAnthropicMessages(provider) {
+				hasNative = true
+				break
+			}
+		}
+		if !hasNative {
+			return nil, nil, &AllTargetsFailed{Msg: "Anthropic request requires a native Messages target; unsupported fields: " + strings.Join(incompatible, ", "), Status: 400}
+		}
+	}
+	var attempts []attempt
+	var lastErr error
+	lastStatus := 0
+	for _, target := range targets {
+		provider, err := providers.GetProviderForPrincipal(target.Provider, principal)
+		if err != nil {
+			lastErr = err
+			attempts = append(attempts, attempt{Provider: target.Provider, Model: target.Model, Error: truncate(err.Error())})
+			continue
+		}
+		var result map[string]any
+		if providers.SupportsAnthropicMessages(provider) {
+			result, err = providers.CompleteAnthropicMessages(provider, target.Model, payload)
+		} else if requiresNative {
+			continue
+		} else if err = anthropicFallbackCompatibility(target, principal, messages); err == nil {
+			var chat map[string]any
+			chat, err = provider.Complete(target.Model, messages, kw)
+			if err == nil {
+				result = translate.OpenAIResponseToAnthropic(chat, target.Model)
+			}
+		}
+		if err != nil {
+			lastErr = err
+			if providers.IsConfig(err) {
+				lastStatus = 400
+			} else {
+				lastStatus = providers.UpstreamStatus(err)
+			}
+			attempts = append(attempts, attempt{Provider: target.Provider, Model: target.Model, Error: truncate(err.Error()), Throttled: providers.IsThrottle(err)})
+			if providers.IsInvocation(err) && !providers.AnthropicMessagesRetryable(err) {
+				recordChain(requested, attempts, nil, principal)
+				return nil, nil, &AllTargetsFailed{Msg: err.Error(), Status: providers.UpstreamStatus(err)}
+			}
+			continue
+		}
+		attempts = append(attempts, attempt{Provider: target.Provider, Model: target.Model, OK: true})
+		served := target
+		recordChain(requested, attempts, &served, principal)
+		return result, &served, nil
+	}
+	recordChain(requested, attempts, nil, principal)
+	message := "no compatible Anthropic Messages target"
+	if lastErr != nil {
+		message = lastErr.Error()
+	}
+	return nil, nil, &AllTargetsFailed{Msg: message, Status: lastStatus}
+}
+
+func anthropicFallbackCompatibility(target Target, principal *config.Principal, messages []map[string]any) error {
+	hasImages := false
+	for _, message := range messages {
+		parts, _ := message["content"].([]any)
+		for _, raw := range parts {
+			part, _ := raw.(map[string]any)
+			if part["type"] == "image_url" {
+				hasImages = true
+			}
+		}
+	}
+	if !hasImages {
+		return nil
+	}
+	model, ok := providers.CatalogLookupForPrincipal(target.Provider, target.Model, principal)
+	if !ok || model.Capabilities == nil {
+		return &providers.ConfigError{Msg: "Anthropic image adaptation requires verified model vision capability"}
+	}
+	if vision, _ := model.Capabilities["vision"].(bool); !vision {
+		return &providers.ConfigError{Msg: "Anthropic image adaptation target is not vision-capable"}
+	}
+	return nil
+}
+
 type ResponsesExecutionStream struct {
 	Iter   providers.StreamIter
 	Native bool
