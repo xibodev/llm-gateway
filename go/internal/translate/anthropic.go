@@ -12,6 +12,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
+	"sort"
 	"strconv"
 	"strings"
 )
@@ -70,6 +71,204 @@ func jsonString(v any) string {
 }
 
 // ---- Request: Anthropic -> OpenAI --------------------------------------- //
+
+func allowedKeys(incompatible *[]string, path string, object map[string]any, keys ...string) {
+	allowed := map[string]bool{}
+	for _, key := range keys {
+		allowed[key] = true
+	}
+	for key := range object {
+		if !allowed[key] {
+			if path != "" {
+				key = path + "." + key
+			}
+			*incompatible = append(*incompatible, key)
+		}
+	}
+}
+
+// AnthropicRequestToOpenAI strictly converts the Messages core profile. The
+// returned paths name every value that an OpenAI Chat target would lose.
+func AnthropicRequestToOpenAI(payload map[string]any) ([]map[string]any, map[string]any, []string) {
+	var incompatible []string
+	allowedKeys(&incompatible, "", payload, "model", "messages", "max_tokens", "system", "tools", "tool_choice", "stream", "temperature", "top_p", "stop_sequences", "_llmgw_preamble")
+	textBlocks := func(value any, path string) (string, bool) {
+		if text, ok := value.(string); ok {
+			return text, true
+		}
+		blocks, ok := value.([]any)
+		if !ok {
+			incompatible = append(incompatible, path)
+			return "", false
+		}
+		var texts []string
+		for i, raw := range blocks {
+			block, ok := raw.(map[string]any)
+			blockPath := path + "." + strconv.Itoa(i)
+			if !ok || block["type"] != "text" {
+				incompatible = append(incompatible, blockPath)
+				continue
+			}
+			allowedKeys(&incompatible, blockPath, block, "type", "text")
+			text, ok := block["text"].(string)
+			if !ok {
+				incompatible = append(incompatible, blockPath)
+				continue
+			}
+			texts = append(texts, text)
+		}
+		return strings.Join(texts, "\n\n"), true
+	}
+	var messages []map[string]any
+	if preamble, _ := payload["_llmgw_preamble"].(string); preamble != "" {
+		messages = append(messages, map[string]any{"role": "system", "content": preamble})
+	}
+	if system := payload["system"]; system != nil {
+		if text, ok := textBlocks(system, "system"); ok {
+			messages = append(messages, map[string]any{"role": "system", "content": text})
+		}
+	}
+	rawMessages, ok := payload["messages"].([]any)
+	if !ok {
+		incompatible = append(incompatible, "messages")
+	}
+	for i, raw := range rawMessages {
+		path := "messages." + strconv.Itoa(i)
+		message, ok := raw.(map[string]any)
+		if !ok {
+			incompatible = append(incompatible, path)
+			continue
+		}
+		allowedKeys(&incompatible, path, message, "role", "content")
+		role, _ := message["role"].(string)
+		content := message["content"]
+		if text, ok := content.(string); ok && (role == "user" || role == "assistant") {
+			messages = append(messages, map[string]any{"role": role, "content": text})
+			continue
+		}
+		blocks, ok := content.([]any)
+		if !ok || (role != "user" && role != "assistant") {
+			incompatible = append(incompatible, path+".content")
+			continue
+		}
+		var parts []any
+		var assistantText []string
+		var calls []any
+		for j, rawBlock := range blocks {
+			bp := path + ".content." + strconv.Itoa(j)
+			block, ok := rawBlock.(map[string]any)
+			if !ok {
+				incompatible = append(incompatible, bp)
+				continue
+			}
+			switch block["type"] {
+			case "text":
+				allowedKeys(&incompatible, bp, block, "type", "text")
+				text, ok := block["text"].(string)
+				if !ok {
+					incompatible = append(incompatible, bp)
+					continue
+				}
+				if role == "assistant" {
+					assistantText = append(assistantText, text)
+				} else {
+					parts = append(parts, map[string]any{"type": "text", "text": text})
+				}
+			case "image":
+				allowedKeys(&incompatible, bp, block, "type", "source")
+				source, _ := block["source"].(map[string]any)
+				allowedKeys(&incompatible, bp+".source", source, "type", "media_type", "data")
+				mime, _ := source["media_type"].(string)
+				data, dataOK := source["data"].(string)
+				validMime := mime == "image/jpeg" || mime == "image/png" || mime == "image/gif" || mime == "image/webp"
+				if role != "user" || source["type"] != "base64" || !validMime || !dataOK {
+					incompatible = append(incompatible, bp)
+					continue
+				}
+				parts = append(parts, map[string]any{"type": "image_url", "image_url": map[string]any{"url": "data:" + mime + ";base64," + data}})
+			case "tool_use":
+				allowedKeys(&incompatible, bp, block, "type", "id", "name", "input")
+				id, idOK := block["id"].(string)
+				name, nameOK := block["name"].(string)
+				if role != "assistant" || !idOK || !nameOK || block["input"] == nil {
+					incompatible = append(incompatible, bp)
+					continue
+				}
+				calls = append(calls, map[string]any{"id": id, "type": "function", "function": map[string]any{"name": name, "arguments": jsonString(block["input"])}})
+			case "tool_result":
+				allowedKeys(&incompatible, bp, block, "type", "tool_use_id", "content", "is_error")
+				id, idOK := block["tool_use_id"].(string)
+				text, textOK := textBlocks(block["content"], bp+".content")
+				isError, hasIsError := block["is_error"]
+				if role != "user" || !idOK || !textOK || (hasIsError && isError != false) {
+					incompatible = append(incompatible, bp)
+					continue
+				}
+				if len(parts) > 0 {
+					messages = append(messages, map[string]any{"role": "user", "content": parts})
+					parts = nil
+				}
+				messages = append(messages, map[string]any{"role": "tool", "tool_call_id": id, "content": text})
+			default:
+				incompatible = append(incompatible, bp)
+			}
+		}
+		if role == "assistant" {
+			messages = append(messages, map[string]any{"role": role, "content": strings.Join(assistantText, ""), "tool_calls": calls})
+		} else if len(parts) > 0 {
+			messages = append(messages, map[string]any{"role": role, "content": parts})
+		}
+	}
+	kw := map[string]any{}
+	for source, target := range map[string]string{"max_tokens": "max_tokens", "temperature": "temperature", "top_p": "top_p", "stop_sequences": "stop"} {
+		if value := payload[source]; value != nil {
+			kw[target] = value
+		}
+	}
+	if rawTools := payload["tools"]; rawTools != nil {
+		tools, ok := rawTools.([]any)
+		if !ok {
+			incompatible = append(incompatible, "tools")
+		} else {
+			for i, raw := range tools {
+				tool, mapOK := raw.(map[string]any)
+				path := "tools." + strconv.Itoa(i)
+				allowedKeys(&incompatible, path, tool, "name", "description", "input_schema")
+				name, nameOK := tool["name"].(string)
+				_, schemaOK := tool["input_schema"].(map[string]any)
+				_, descriptionOK := tool["description"].(string)
+				if !mapOK || !nameOK || name == "" || !schemaOK || (tool["description"] != nil && !descriptionOK) {
+					incompatible = append(incompatible, path)
+				}
+			}
+			converted := AnthropicToolsToOpenAI(tools)
+			if len(converted) != len(tools) {
+				incompatible = append(incompatible, "tools")
+			} else if converted != nil {
+				kw["tools"] = converted
+			}
+		}
+	}
+	if rawChoice := payload["tool_choice"]; rawChoice != nil {
+		choice, ok := rawChoice.(map[string]any)
+		allowedKeys(&incompatible, "tool_choice", choice, "type", "name")
+		converted := AnthropicToolChoiceToOpenAI(choice)
+		typeName, typeOK := choice["type"].(string)
+		if !ok || !typeOK || converted == nil || (typeName != "tool" && choice["name"] != nil) {
+			incompatible = append(incompatible, "tool_choice")
+		} else {
+			kw["tool_choice"] = converted
+		}
+	}
+	sort.Strings(incompatible)
+	unique := incompatible[:0]
+	for _, path := range incompatible {
+		if len(unique) == 0 || unique[len(unique)-1] != path {
+			unique = append(unique, path)
+		}
+	}
+	return messages, kw, unique
+}
 
 func systemToText(system any) string {
 	switch s := system.(type) {

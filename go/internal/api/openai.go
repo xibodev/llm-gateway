@@ -3,7 +3,9 @@ package api
 import (
 	"encoding/json"
 	"errors"
+	"math"
 	"net/http"
+	"strconv"
 	"time"
 
 	"llmgw/internal/config"
@@ -310,13 +312,38 @@ func accumulateStreamUsage(chunk string, acc map[string]int) {
 }
 
 func firstInt(m map[string]any, keys ...string) int {
+	limit := math.Ldexp(1, strconv.IntSize-1)
+	fromFloat := func(n float64) int {
+		if math.IsNaN(n) || math.IsInf(n, 0) || math.Trunc(n) != n || n < -limit || n >= limit {
+			return 0
+		}
+		return int(n)
+	}
 	for _, k := range keys {
 		if v, ok := m[k]; ok {
 			switch n := v.(type) {
 			case float64:
-				return int(n)
+				return fromFloat(n)
 			case int:
 				return n
+			case int64:
+				if strconv.IntSize == 32 && (n > math.MaxInt32 || n < math.MinInt32) {
+					return 0
+				}
+				return int(n)
+			case json.Number:
+				value, err := n.Int64()
+				if err == nil {
+					if strconv.IntSize == 32 && (value > math.MaxInt32 || value < math.MinInt32) {
+						return 0
+					}
+					return int(value)
+				}
+				valueFloat, err := strconv.ParseFloat(string(n), 64)
+				if err == nil {
+					return fromFloat(valueFloat)
+				}
+				return 0
 			}
 		}
 	}

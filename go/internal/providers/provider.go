@@ -10,11 +10,15 @@ package providers
 import (
 	"errors"
 	"strings"
+	"time"
 
 	"llmgw/internal/iam"
 )
 
-var ErrResponsesUnsupported = errors.New("provider model does not support native Responses API")
+var (
+	ErrResponsesUnsupported         = errors.New("provider model does not support native Responses API")
+	ErrAnthropicMessagesUnsupported = errors.New("provider does not support native Anthropic Messages API")
+)
 
 // Message and Kwargs mirror the dynamic dicts the Python pipeline passes around.
 type Message = map[string]any
@@ -88,6 +92,71 @@ type ResponsesProvider interface {
 		model string,
 		payload map[string]any,
 	) (StreamIter, *iam.ProviderAccountObservation, error)
+}
+
+// AnthropicMessagesProvider is an optional non-streaming native Messages
+// surface. Provider remains OpenAI-shaped for all existing callers.
+type AnthropicMessagesProvider interface {
+	CompleteAnthropicMessages(model string, payload map[string]any) (map[string]any, error)
+}
+
+func CompleteAnthropicMessages(provider Provider, model string, payload map[string]any) (map[string]any, error) {
+	if messages, ok := provider.(AnthropicMessagesProvider); ok {
+		return messages.CompleteAnthropicMessages(model, payload)
+	}
+	return nil, ErrAnthropicMessagesUnsupported
+}
+
+func SupportsAnthropicMessages(provider Provider) bool {
+	for provider != nil {
+		if _, ok := provider.(AnthropicMessagesProvider); ok {
+			if unwrapper, wrapped := provider.(interface{ Unwrap() Provider }); wrapped {
+				provider = unwrapper.Unwrap()
+				continue
+			}
+			return true
+		}
+		return false
+	}
+	return false
+}
+
+// AnthropicMessagesRetryable selects the failures safe to repeat: transport
+// errors (status 0), 408, 429, and transient 500/502/503/504 responses.
+func AnthropicMessagesRetryable(err error) bool {
+	if !IsInvocation(err) {
+		return false
+	}
+	switch UpstreamStatus(err) {
+	case 0, 408, 429, 500, 502, 503, 504:
+		return true
+	default:
+		return false
+	}
+}
+
+func (r *ResilientProvider) CompleteAnthropicMessages(model string, payload map[string]any) (map[string]any, error) {
+	if !SupportsAnthropicMessages(r.inner) {
+		return nil, ErrAnthropicMessagesUnsupported
+	}
+	if err := r.checkCircuit(); err != nil {
+		return nil, err
+	}
+	for attempt, attempts := 1, max1(r.policy.RetryMaxAttempts); ; attempt++ {
+		result, err := CompleteAnthropicMessages(r.inner, model, payload)
+		if err == nil {
+			r.recordSuccess()
+			return result, nil
+		}
+		if errors.Is(err, ErrAnthropicMessagesUnsupported) || !AnthropicMessagesRetryable(err) {
+			return nil, err
+		}
+		if attempt >= attempts {
+			r.recordFailure()
+			return nil, err
+		}
+		time.Sleep(time.Duration(r.nextBackoff(attempt) * float64(time.Second)))
+	}
 }
 
 func CompleteResponses(
