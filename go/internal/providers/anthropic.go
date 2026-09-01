@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strings"
 
 	"llmgw/internal/translate"
 )
@@ -155,6 +156,71 @@ func (p AnthropicNativeProvider) CompleteAnthropicMessages(model string, payload
 		return nil, invocation("anthropic: invalid JSON in upstream response")
 	}
 	return result, nil
+}
+
+func (p AnthropicNativeProvider) CountAnthropicTokens(model string, payload map[string]any, version string, beta []string) (json.Number, error) {
+	request := make(map[string]any, len(payload))
+	for key, value := range payload {
+		request[key] = value
+	}
+	request["model"] = model
+	body, err := json.Marshal(request)
+	if err != nil {
+		return "", &ConfigError{Msg: "anthropic: invalid token-count request"}
+	}
+	req, _ := http.NewRequest("POST", p.base()+"/v1/messages/count_tokens", bytes.NewReader(body))
+	req.Header = p.headers()
+	if validAnthropicHeader(version) {
+		req.Header.Set("anthropic-version", strings.TrimSpace(version))
+	}
+	for _, value := range beta {
+		if validAnthropicHeader(value) {
+			req.Header.Add("anthropic-beta", strings.TrimSpace(value))
+		}
+	}
+	resp, err := httpClient(p.timeout()).Do(req)
+	if err != nil {
+		return "", invocation("anthropic: token-count transport error: " + err.Error())
+	}
+	defer resp.Body.Close()
+	raw, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode >= 400 {
+		return "", invocationStatus(fmt.Sprintf("anthropic: token count returned %d: %s", resp.StatusCode, extractError(raw)), resp.StatusCode)
+	}
+	var result struct {
+		InputTokens json.Number `json:"input_tokens"`
+	}
+	decoder := json.NewDecoder(bytes.NewReader(raw))
+	decoder.UseNumber()
+	if decoder.Decode(&result) != nil || !nonnegativeInteger(result.InputTokens.String()) {
+		return "", ErrInvalidAnthropicTokenCount
+	}
+	return result.InputTokens, nil
+}
+
+func validAnthropicHeader(value string) bool {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return false
+	}
+	for _, r := range value {
+		if r < 0x20 || r == 0x7f {
+			return false
+		}
+	}
+	return true
+}
+
+func nonnegativeInteger(value string) bool {
+	if value == "" {
+		return false
+	}
+	for _, r := range value {
+		if r < '0' || r > '9' {
+			return false
+		}
+	}
+	return true
 }
 
 func (p AnthropicNativeProvider) Stream(model string, messages []Message, kw Kwargs) (StreamIter, error) {

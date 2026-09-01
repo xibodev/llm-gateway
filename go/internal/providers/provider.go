@@ -8,6 +8,7 @@
 package providers
 
 import (
+	"encoding/json"
 	"errors"
 	"strings"
 	"time"
@@ -16,8 +17,10 @@ import (
 )
 
 var (
-	ErrResponsesUnsupported         = errors.New("provider model does not support native Responses API")
-	ErrAnthropicMessagesUnsupported = errors.New("provider does not support native Anthropic Messages API")
+	ErrResponsesUnsupported           = errors.New("provider model does not support native Responses API")
+	ErrAnthropicMessagesUnsupported   = errors.New("provider does not support native Anthropic Messages API")
+	ErrAnthropicTokenCountUnsupported = errors.New("provider does not support native Anthropic token counting")
+	ErrInvalidAnthropicTokenCount     = errors.New("invalid Anthropic token-count response")
 )
 
 // Message and Kwargs mirror the dynamic dicts the Python pipeline passes around.
@@ -132,6 +135,59 @@ func AnthropicMessagesRetryable(err error) bool {
 		return true
 	default:
 		return false
+	}
+}
+
+// AnthropicTokenCounter is an optional native Anthropic count_tokens surface.
+type AnthropicTokenCounter interface {
+	CountAnthropicTokens(model string, payload map[string]any, version string, beta []string) (json.Number, error)
+}
+
+func CountAnthropicTokens(provider Provider, model string, payload map[string]any, version string, beta []string) (json.Number, error) {
+	if counter, ok := provider.(AnthropicTokenCounter); ok {
+		return counter.CountAnthropicTokens(model, payload, version, beta)
+	}
+	return "", ErrAnthropicTokenCountUnsupported
+}
+
+func SupportsAnthropicTokenCount(provider Provider) bool {
+	for provider != nil {
+		if _, ok := provider.(AnthropicTokenCounter); ok {
+			if unwrapper, wrapped := provider.(interface{ Unwrap() Provider }); wrapped {
+				provider = unwrapper.Unwrap()
+				continue
+			}
+			return true
+		}
+		unwrapper, ok := provider.(interface{ Unwrap() Provider })
+		if !ok {
+			return false
+		}
+		provider = unwrapper.Unwrap()
+	}
+	return false
+}
+
+func (r *ResilientProvider) CountAnthropicTokens(model string, payload map[string]any, version string, beta []string) (json.Number, error) {
+	if !SupportsAnthropicTokenCount(r.inner) {
+		return "", ErrAnthropicTokenCountUnsupported
+	}
+	if err := r.checkCircuit(); err != nil {
+		return "", err
+	}
+	for attempt, attempts := 1, max1(r.policy.RetryMaxAttempts); ; attempt++ {
+		result, err := CountAnthropicTokens(r.inner, model, payload, version, beta)
+		if err == nil {
+			r.recordSuccess()
+			return result, nil
+		}
+		if !AnthropicMessagesRetryable(err) || attempt >= attempts {
+			if AnthropicMessagesRetryable(err) {
+				r.recordFailure()
+			}
+			return "", err
+		}
+		time.Sleep(time.Duration(r.nextBackoff(attempt) * float64(time.Second)))
 	}
 }
 

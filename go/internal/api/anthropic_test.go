@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strconv"
@@ -43,6 +44,234 @@ func anthropicFixtureRequest(t *testing.T, body map[string]any) *httptest.Respon
 	recorder := httptest.NewRecorder()
 	NewServer().ServeHTTP(recorder, req)
 	return recorder
+}
+
+func tokenCountFixtureRequest(t *testing.T, path, token string, body map[string]any, headers http.Header) *httptest.ResponseRecorder {
+	t.Helper()
+	raw, _ := json.Marshal(body)
+	req := httptest.NewRequest(http.MethodPost, path, bytes.NewReader(raw))
+	req.Header.Set("Authorization", "Bearer "+token)
+	for name, values := range headers {
+		for _, value := range values {
+			req.Header.Add(name, value)
+		}
+	}
+	recorder := httptest.NewRecorder()
+	NewServer().ServeHTTP(recorder, req)
+	return recorder
+}
+
+func resetAnthropicTestState(t *testing.T) {
+	t.Helper()
+	providers.ResetProviders()
+	providers.ResetCircuit("")
+	t.Cleanup(func() {
+		providers.ResetProviders()
+		providers.ResetCircuit("")
+		iam.ResetForTests()
+		router.ResetTelemetryState()
+		router.ResetSavingsState()
+	})
+}
+
+func TestAnthropicTokenCountNativeEndpointAliasAndProxyBoundary(t *testing.T) {
+	t.Setenv("LLMGW_STATE_DIR", t.TempDir())
+	var calls atomic.Int32
+	var payload map[string]any
+	var gotHeader http.Header
+	native := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if calls.Add(1)%2 == 1 {
+			http.Error(w, "temporary", http.StatusServiceUnavailable)
+			return
+		}
+		gotHeader = r.Header.Clone()
+		if r.URL.Path != "/v1/messages/count_tokens" {
+			t.Fatalf("path=%s", r.URL.Path)
+		}
+		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+			t.Fatal(err)
+		}
+		_, _ = w.Write([]byte(`{"input_tokens":9007199254740993}`))
+	}))
+	defer native.Close()
+	var laterCalls atomic.Int32
+	later := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { laterCalls.Add(1) }))
+	defer later.Close()
+	config.Update(func(s *config.Settings) {
+		s.APIKey = "gateway-token"
+		s.APIKeys = nil
+		s.AllowUnauthenticatedAPI = false
+		s.Providers = map[string]*config.ProviderConfig{
+			"native": {Type: "anthropic", BaseURL: native.URL, APIKey: "provider-secret"},
+			"later":  {Type: "anthropic", BaseURL: later.URL},
+		}
+		s.Endpoints = map[string]*config.EndpointConfig{"counting": {Failover: []config.EndpointMember{{Provider: "native", Model: "resolved"}, {Provider: "later", Model: "other"}}}}
+		s.Policies.Defaults.RetryMaxAttempts = 2
+	})
+	resetAnthropicTestState(t)
+	body := map[string]any{
+		"model": "counting", "messages": []any{map[string]any{"role": "user", "content": "hello"}},
+		"system": []any{map[string]any{"type": "text", "text": "system"}}, "tools": []any{map[string]any{"name": "lookup"}},
+	}
+	headers := http.Header{"Anthropic-Version": {"2024-01-01"}, "Anthropic-Beta": {"tools-1", "tools-2"}, "X-Arbitrary": {"do-not-forward"}}
+	for _, path := range []string{"/v1/messages/count_tokens", "/messages/count_tokens"} {
+		response := tokenCountFixtureRequest(t, path, "gateway-token", body, headers)
+		if response.Code != 200 || response.Body.String() != "{\"input_tokens\":9007199254740993}\n" {
+			t.Fatalf("path=%s status=%d body=%s", path, response.Code, response.Body.String())
+		}
+	}
+	if calls.Load() != 4 || laterCalls.Load() != 0 || payload["model"] != "resolved" || payload["system"] == nil || payload["tools"] == nil {
+		t.Fatalf("calls=%d/%d payload=%#v", calls.Load(), laterCalls.Load(), payload)
+	}
+	if gotHeader.Get("x-api-key") != "provider-secret" || gotHeader.Get("Authorization") != "" || gotHeader.Get("X-Arbitrary") != "" || gotHeader.Get("anthropic-version") != "2024-01-01" || len(gotHeader.Values("anthropic-beta")) != 2 {
+		t.Fatalf("forwarded headers=%#v", gotHeader)
+	}
+}
+
+func TestAnthropicTokenCountAdaptedEstimateDoesNotDispatch(t *testing.T) {
+	t.Setenv("LLMGW_STATE_DIR", t.TempDir())
+	var calls atomic.Int32
+	upstream := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { calls.Add(1) }))
+	defer upstream.Close()
+	config.Update(func(s *config.Settings) {
+		s.APIKey = "gateway-token"
+		s.Providers = map[string]*config.ProviderConfig{
+			"adapted": {Type: "openai_compatible", BaseURL: upstream.URL},
+			"native":  {Type: "anthropic", BaseURL: upstream.URL},
+		}
+		s.Endpoints = map[string]*config.EndpointConfig{"counting": {Failover: []config.EndpointMember{{Provider: "adapted", Model: "first"}, {Provider: "native", Model: "later"}}}}
+	})
+	resetAnthropicTestState(t)
+	count := func(text string) int {
+		response := tokenCountFixtureRequest(t, "/v1/messages/count_tokens", "gateway-token", map[string]any{"model": "counting", "messages": []any{map[string]any{"role": "user", "content": text}}}, nil)
+		if response.Code != 200 || response.Header().Get("X-LLMGW-Token-Count") != "estimate" {
+			t.Fatalf("status=%d header=%q body=%s", response.Code, response.Header().Get("X-LLMGW-Token-Count"), response.Body.String())
+		}
+		var result struct {
+			InputTokens int `json:"input_tokens"`
+		}
+		_ = json.Unmarshal(response.Body.Bytes(), &result)
+		return result.InputTokens
+	}
+	short, repeated, long := count("a"), count("a"), count(strings.Repeat("a", 80))
+	if short < 1 || repeated != short || long <= short || calls.Load() != 0 {
+		t.Fatalf("counts=%d/%d/%d upstream=%d", short, repeated, long, calls.Load())
+	}
+}
+
+func TestAnthropicTokenCountPolicyWithoutInferenceConsumption(t *testing.T) {
+	t.Setenv("LLMGW_STATE_DIR", t.TempDir())
+	config.Update(func(s *config.Settings) {
+		s.APIKey = "admin-secret"
+		s.APIKeys = nil
+		s.AllowUnauthenticatedAPI = false
+		s.Providers = map[string]*config.ProviderConfig{"adapted": {Type: "echo"}}
+		s.Endpoints = map[string]*config.EndpointConfig{}
+	})
+	resetAnthropicTestState(t)
+	if _, err := iam.Initialize(); err != nil {
+		t.Fatal(err)
+	}
+	principal, _ := iam.CreatePrincipal("human", "fixture:counter", "", "Counter")
+	project, _ := iam.CreateProject("counter", "Counter")
+	_ = iam.SetMembership(project.ID, principal.ID, "member")
+	_, _ = iam.SetProjectPolicy(project.ID, iam.KeyPolicy{AllowedModels: []string{"adapted/allowed"}, DailyRequests: 1})
+	issued, err := iam.IssueKey(iam.KeyCreate{ProjectID: project.ID, PrincipalID: principal.ID, Name: "counter", Policy: iam.KeyPolicy{AllowedModels: []string{"adapted/allowed"}, DailyRequests: 1}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for range 2 {
+		response := tokenCountFixtureRequest(t, "/v1/messages/count_tokens", issued.Token, map[string]any{"model": "adapted/allowed", "messages": []any{}}, nil)
+		if response.Code != 200 {
+			t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
+		}
+	}
+	denied := tokenCountFixtureRequest(t, "/v1/messages/count_tokens", issued.Token, map[string]any{"model": "adapted/denied", "messages": []any{}}, nil)
+	if denied.Code != http.StatusForbidden {
+		t.Fatalf("denied status=%d body=%s", denied.Code, denied.Body.String())
+	}
+	db, _ := iam.DB()
+	for _, table := range []string{"usage_events", "quota_counters", "project_quota_counters"} {
+		var rows int
+		if err := db.QueryRow("SELECT COUNT(*) FROM " + table).Scan(&rows); err != nil || rows != 0 {
+			t.Fatalf("%s rows=%d err=%v", table, rows, err)
+		}
+	}
+}
+
+func TestAnthropicTokenCountAuthPrecedenceAndNativeFailures(t *testing.T) {
+	for _, tc := range []struct {
+		name, response string
+		status, want   int
+	}{
+		{"client error", `{"error":{"message":"bad"}}`, 400, 400},
+		{"fractional success", `{"input_tokens":1.5}`, 200, 502},
+		{"negative success", `{"input_tokens":-1}`, 200, 502},
+		{"missing success", `{}`, 200, 502},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Setenv("LLMGW_STATE_DIR", t.TempDir())
+			var calls atomic.Int32
+			upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				calls.Add(1)
+				w.WriteHeader(tc.status)
+				_, _ = w.Write([]byte(tc.response))
+			}))
+			defer upstream.Close()
+			config.Update(func(s *config.Settings) {
+				s.APIKey = "gateway-token"
+				s.Providers = map[string]*config.ProviderConfig{"native": {Type: "anthropic", BaseURL: upstream.URL}}
+				s.Policies.Defaults.RetryMaxAttempts = 3
+			})
+			resetAnthropicTestState(t)
+			body := map[string]any{"model": "native/model", "messages": []any{}}
+			response := tokenCountFixtureRequest(t, "/v1/messages/count_tokens", "gateway-token", body, nil)
+			if response.Code != tc.want {
+				t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
+			}
+			wantCalls := int32(1)
+			if calls.Load() != wantCalls {
+				t.Fatalf("upstream calls=%d want=%d", calls.Load(), wantCalls)
+			}
+			raw, _ := json.Marshal(body)
+			req := httptest.NewRequest(http.MethodPost, "/messages/count_tokens", bytes.NewReader(raw))
+			req.Header.Set("x-api-key", "wrong")
+			req.Header.Set("Authorization", "Bearer gateway-token")
+			auth := httptest.NewRecorder()
+			NewServer().ServeHTTP(auth, req)
+			if auth.Code != http.StatusUnauthorized {
+				t.Fatalf("auth precedence status=%d", auth.Code)
+			}
+		})
+	}
+}
+
+func TestAnthropicTokenCountRequestBodyLimit(t *testing.T) {
+	t.Setenv("LLMGW_STATE_DIR", t.TempDir())
+	config.Update(func(s *config.Settings) {
+		s.APIKey = "gateway-token"
+		s.APIKeys = nil
+		s.AllowUnauthenticatedAPI = false
+	})
+	resetAnthropicTestState(t)
+	prefix := strings.NewReader(`{"model":"unused","messages":[]}`)
+	padding := io.LimitReader(zeroReader{}, maxAnthropicTokenCountBodyBytes+1-int64(prefix.Len()))
+	req := httptest.NewRequest(http.MethodPost, "/v1/messages/count_tokens", io.MultiReader(prefix, padding))
+	req.Header.Set("Authorization", "Bearer gateway-token")
+	recorder := httptest.NewRecorder()
+	NewServer().ServeHTTP(recorder, req)
+	if recorder.Code != http.StatusRequestEntityTooLarge || !strings.Contains(recorder.Body.String(), `"code":"413"`) || !strings.Contains(recorder.Body.String(), "request body too large") {
+		t.Fatalf("status=%d body=%s", recorder.Code, recorder.Body.String())
+	}
+}
+
+type zeroReader struct{}
+
+func (zeroReader) Read(p []byte) (int, error) {
+	for i := range p {
+		p[i] = ' '
+	}
+	return len(p), nil
 }
 
 func TestAnthropicMessagesRejectsLossBeforeDispatch(t *testing.T) {

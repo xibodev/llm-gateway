@@ -12,16 +12,17 @@ import (
 // pathAliases rewrites bare CLI paths onto their /v1 equivalents so tools that
 // append to a base URL without /v1 still hit the right handler.
 var pathAliases = map[string]string{
-	"/chat/completions":     "/v1/chat/completions",
-	"/responses":            "/v1/responses",
-	"/completions":          "/v1/chat/completions",
-	"/models":               "/v1/models",
-	"/messages":             "/v1/messages",
-	"/audio/transcriptions": "/v1/audio/transcriptions",
-	"/audio/speech":         "/v1/audio/speech",
-	"/embeddings":           "/v1/embeddings",
-	"/images/generations":   "/v1/images/generations",
-	"/videos/generations":   "/v1/videos/generations",
+	"/chat/completions":      "/v1/chat/completions",
+	"/responses":             "/v1/responses",
+	"/completions":           "/v1/chat/completions",
+	"/models":                "/v1/models",
+	"/messages":              "/v1/messages",
+	"/messages/count_tokens": "/v1/messages/count_tokens",
+	"/audio/transcriptions":  "/v1/audio/transcriptions",
+	"/audio/speech":          "/v1/audio/speech",
+	"/embeddings":            "/v1/embeddings",
+	"/images/generations":    "/v1/images/generations",
+	"/videos/generations":    "/v1/videos/generations",
 }
 
 // NewServer builds the http.Handler with all routes registered.
