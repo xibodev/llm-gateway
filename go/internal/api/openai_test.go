@@ -2,12 +2,14 @@ package api
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -16,6 +18,100 @@ import (
 	"llmgw/internal/providers"
 	"llmgw/internal/router"
 )
+
+func TestCanceledNonStreamingRequestsCancelUpstreamWithoutRetry(t *testing.T) {
+	tests := []struct {
+		name, path, providerType, registryID, body string
+	}{
+		{"OpenAI Chat", "/v1/chat/completions", "openai_compatible", "", `{"model":"cancel-route","messages":[{"role":"user","content":"hi"}]}`},
+		{"OpenAI Responses", "/v1/responses", "openai_compatible", "openai", `{"model":"cancel-route","input":"hi"}`},
+		{"Google Chat", "/v1/chat/completions", "ai_studio", "", `{"model":"cancel-route","messages":[{"role":"user","content":"hi"}]}`},
+		{"adapted Claude", "/v1/messages", "openai_compatible", "", `{"model":"cancel-route","max_tokens":16,"messages":[{"role":"user","content":"hi"}]}`},
+	}
+	for _, testCase := range tests {
+		t.Run(testCase.name, func(t *testing.T) {
+			var calls atomic.Int32
+			started := make(chan struct{}, 1)
+			canceled := make(chan struct{}, 1)
+			release := make(chan struct{})
+			upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				calls.Add(1)
+				_, _ = io.Copy(io.Discard, r.Body)
+				started <- struct{}{}
+				select {
+				case <-r.Context().Done():
+					canceled <- struct{}{}
+				case <-release:
+				}
+			}))
+			t.Cleanup(func() { close(release) })
+			defer upstream.Close()
+
+			t.Setenv("LLMGW_STATE_DIR", t.TempDir())
+			iam.ResetForTests()
+			router.ResetSavingsState()
+			router.ResetTelemetryState()
+			t.Cleanup(func() {
+				iam.ResetForTests()
+				router.ResetSavingsState()
+				router.ResetTelemetryState()
+			})
+			config.Update(func(settings *config.Settings) {
+				settings.AllowUnauthenticatedAPI = true
+				settings.APIKey = ""
+				settings.Providers = map[string]*config.ProviderConfig{
+					"upstream": {
+						Type: testCase.providerType, RegistryID: testCase.registryID,
+						BaseURL: upstream.URL, APIKey: "fixture",
+					},
+					"second": {
+						Type: testCase.providerType, RegistryID: testCase.registryID,
+						BaseURL: upstream.URL, APIKey: "fixture",
+					},
+				}
+				settings.Endpoints = map[string]*config.EndpointConfig{
+					"cancel-route": {Failover: []config.EndpointMember{
+						{Provider: "upstream", Model: "model"},
+						{Provider: "second", Model: "model"},
+					}},
+				}
+				settings.Policies.Defaults.RetryMaxAttempts = 3
+				settings.Policies.Defaults.RetryInitialBackoffSeconds = 0.01
+			})
+			providers.ResetProviders()
+			t.Cleanup(providers.ResetProviders)
+
+			ctx, cancel := context.WithCancel(context.Background())
+			request := httptest.NewRequest(http.MethodPost, testCase.path, strings.NewReader(testCase.body)).WithContext(ctx)
+			request.Header.Set("Content-Type", "application/json")
+			done := make(chan struct{})
+			go func() {
+				NewServer().ServeHTTP(httptest.NewRecorder(), request)
+				close(done)
+			}()
+			select {
+			case <-started:
+			case <-time.After(time.Second):
+				t.Fatal("upstream request did not start")
+			}
+			cancel()
+			select {
+			case <-canceled:
+			case <-time.After(time.Second):
+				t.Fatal("upstream request context was not canceled")
+			}
+			select {
+			case <-done:
+			case <-time.After(time.Second):
+				t.Fatal("gateway handler did not return promptly")
+			}
+			time.Sleep(25 * time.Millisecond)
+			if got := calls.Load(); got != 1 {
+				t.Fatalf("upstream calls = %d, want 1", got)
+			}
+		})
+	}
+}
 
 type fixtureStreamIter struct {
 	chunks []string

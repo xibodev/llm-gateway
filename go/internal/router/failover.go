@@ -3,6 +3,7 @@
 package router
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"sort"
@@ -331,20 +332,34 @@ type AttemptTrace struct {
 // ExecuteComplete runs the chain for a non-streaming request. Returns the
 // response, the served target, and an error if all targets failed.
 func ExecuteComplete(targets []Target, messages []providers.Message, requested string, principal *config.Principal, kw providers.Kwargs) (map[string]any, *Target, error) {
-	response, served, _, err := executeCompleteWithTrace(targets, messages, requested, principal, kw)
+	return ExecuteCompleteContext(context.Background(), targets, messages, requested, principal, kw)
+}
+
+func ExecuteCompleteContext(ctx context.Context, targets []Target, messages []providers.Message, requested string, principal *config.Principal, kw providers.Kwargs) (map[string]any, *Target, error) {
+	response, served, _, err := executeCompleteWithTrace(ctx, targets, messages, requested, principal, kw)
 	return response, served, err
 }
 
 // ExecuteCompleteWithTrace uses the same route/provider execution path as
 // ExecuteComplete while returning a safe fallback trace for operator tooling.
 func ExecuteCompleteWithTrace(targets []Target, messages []providers.Message, requested string, principal *config.Principal, kw providers.Kwargs) (map[string]any, *Target, []AttemptTrace, error) {
-	return executeCompleteWithTrace(targets, messages, requested, principal, kw)
+	return executeCompleteWithTrace(context.Background(), targets, messages, requested, principal, kw)
 }
 
 // ExecuteResponses preserves the caller's Responses API intent when a target
 // supports it natively, falling back through an explicit loss-checked Chat
 // adapter only for Chat-only providers.
 func ExecuteResponses(
+	targets []Target,
+	payload map[string]any,
+	requested string,
+	principal *config.Principal,
+) (map[string]any, *Target, error) {
+	return ExecuteResponsesContext(context.Background(), targets, payload, requested, principal)
+}
+
+func ExecuteResponsesContext(
+	ctx context.Context,
 	targets []Target,
 	payload map[string]any,
 	requested string,
@@ -358,6 +373,10 @@ func ExecuteResponses(
 	var lastErr error
 	lastStatus := 0
 	for index := range targets {
+		if ctx.Err() != nil {
+			lastErr = ctx.Err()
+			break
+		}
 		target := targets[index]
 		provider, err := providers.GetProviderForPrincipal(target.Provider, principal)
 		if err != nil {
@@ -368,7 +387,7 @@ func ExecuteResponses(
 			lastErr = err
 			continue
 		}
-		result, _, err := providers.CompleteResponses(provider, target.Model, payload)
+		result, _, err := providers.CompleteResponsesContext(ctx, provider, target.Model, payload)
 		if errors.Is(err, providers.ErrResponsesUnsupported) {
 			if conversionErr != nil {
 				lastErr = &providers.ConfigError{Msg: conversionErr.Error()}
@@ -390,7 +409,7 @@ func ExecuteResponses(
 				})
 				continue
 			}
-			chat, chatErr := provider.Complete(target.Model, chatMessages, chatKw)
+			chat, chatErr := providers.CompleteProviderContext(ctx, provider, target.Model, chatMessages, chatKw)
 			if chatErr == nil {
 				result = translate.ChatResponseToResponsesWithRequest(
 					target.Model, chat, payload,
@@ -433,6 +452,16 @@ func ExecuteAnthropicMessages(
 	requested string,
 	principal *config.Principal,
 ) (map[string]any, *Target, error) {
+	return ExecuteAnthropicMessagesContext(context.Background(), targets, payload, requested, principal)
+}
+
+func ExecuteAnthropicMessagesContext(
+	ctx context.Context,
+	targets []Target,
+	payload map[string]any,
+	requested string,
+	principal *config.Principal,
+) (map[string]any, *Target, error) {
 	messages, kw, incompatible := translate.AnthropicRequestToOpenAI(payload)
 	requiresNative := len(incompatible) > 0
 	if requiresNative {
@@ -452,6 +481,10 @@ func ExecuteAnthropicMessages(
 	var lastErr error
 	lastStatus := 0
 	for _, target := range targets {
+		if ctx.Err() != nil {
+			lastErr = ctx.Err()
+			break
+		}
 		provider, err := providers.GetProviderForPrincipal(target.Provider, principal)
 		if err != nil {
 			lastErr = err
@@ -465,7 +498,7 @@ func ExecuteAnthropicMessages(
 			continue
 		} else if err = anthropicFallbackCompatibility(target, principal, messages); err == nil {
 			var chat map[string]any
-			chat, err = provider.Complete(target.Model, messages, kw)
+			chat, err = providers.CompleteProviderContext(ctx, provider, target.Model, messages, kw)
 			if err == nil {
 				result = translate.OpenAIResponseToAnthropic(chat, target.Model)
 			}
@@ -692,11 +725,15 @@ func responsesFallbackCompatibility(
 	return nil
 }
 
-func executeCompleteWithTrace(targets []Target, messages []providers.Message, requested string, principal *config.Principal, kw providers.Kwargs) (map[string]any, *Target, []AttemptTrace, error) {
+func executeCompleteWithTrace(ctx context.Context, targets []Target, messages []providers.Message, requested string, principal *config.Principal, kw providers.Kwargs) (map[string]any, *Target, []AttemptTrace, error) {
 	var attempts []attempt
 	trace := make([]AttemptTrace, 0, len(targets))
 	var lastErr error
 	for i := range targets {
+		if ctx.Err() != nil {
+			lastErr = ctx.Err()
+			break
+		}
 		t := targets[i]
 		prov, err := providers.GetProviderForPrincipal(t.Provider, principal)
 		if err != nil {
@@ -706,7 +743,7 @@ func executeCompleteWithTrace(targets []Target, messages []providers.Message, re
 			lastErr = err
 			continue
 		}
-		result, err := prov.Complete(t.Model, messages, kw)
+		result, err := providers.CompleteProviderContext(ctx, prov, t.Model, messages, kw)
 		if err != nil {
 			throttled := providers.IsThrottle(err)
 			attempts = append(attempts, attempt{Provider: t.Provider, Model: t.Model, OK: false, Error: truncate(err.Error()), Throttled: throttled})

@@ -127,7 +127,7 @@ func handleMessages(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	response, served, err := router.ExecuteAnthropicMessages(targets, raw, req.Model, principal)
+	response, served, err := router.ExecuteAnthropicMessagesContext(r.Context(), targets, raw, req.Model, principal)
 	if err != nil {
 		status := upstreamErrorStatus(err)
 		recordFailureUsage("anthropic.messages", req.Model, principal, status, "upstream", started)
