@@ -105,9 +105,11 @@ func (c *capturingWriter) Write(b []byte) (int, error) {
 
 // Flush preserves SSE streaming through the wrapper.
 func (c *capturingWriter) Flush() {
-	if f, ok := c.ResponseWriter.(http.Flusher); ok {
-		f.Flush()
-	}
+	_ = c.FlushError()
+}
+
+func (c *capturingWriter) FlushError() error {
+	return http.NewResponseController(c.ResponseWriter).Flush()
 }
 
 // requestLogMiddleware logs POST /v1/* traffic when LLMGW_LOG_REQUESTS is set.
