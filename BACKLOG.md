@@ -4,165 +4,135 @@ This is the single active implementation tracker for `llm-gateway`.
 
 ## Product target
 
-Build a single-node, self-hosted gateway that reliably serves Claude Code,
-Codex, and Copilot CLI through Anthropic Messages and OpenAI Chat/Responses.
-It must provide stable model selection, simple ordered failover, secure
-credentials, recoverable state, bounded resource use, and measured capacity of
-at least 1,000 completed local synthetic requests per second on suitable
-single-node infrastructure.
+Ship a reliable single-node, self-hosted gateway for Claude Code, Codex, and
+Copilot CLI, while preserving the same HTTP behavior for browsers, SDKs, backend
+applications, and direct HTTP clients.
 
-The goal is not a hyperscale provider platform. SQLite, one Go process, exact
-`provider/model` routes, and ordered endpoint chains remain the default design.
-New architecture is justified only by a failing compatibility, correctness,
-security, operability, or measured-capacity test.
+The current release needs stable model selection, core Anthropic Messages and
+OpenAI Chat/Responses compatibility, simple ordered failover, safe credentials,
+correct cancellation, and a real-provider smoke test. It does not need
+hyperscale throughput, high availability, dynamic account scheduling, quota
+marketplaces, or a universal translation framework.
 
-[`docs/PROVIDER_PARITY.md`](docs/PROVIDER_PARITY.md) is retained as historical
-design research. It is not a target contract and does not authorize provider
-breadth, dynamic account routing, quota sharing, or a universal translation
-framework.
+## Delivery policy
 
-## Tracking rules
+- One focused acceptance slice per feature branch and PR into `staging`.
+- Run targeted tests while implementing. GitHub CI runs the complete Go and
+  console gates for each PR.
+- The `staging -> main` gate is Docker endpoint integration against a real
+  provider plus simple host-side checks with the installed Claude, Codex, and
+  Copilot CLIs.
+- Do not build a test framework when direct endpoint calls or existing CLIs can
+  establish the behavior.
+- Fix only failures demonstrated by code inspection, focused tests, endpoint
+  integration, or the real-client smoke.
+- Real credentials, provider login, deployment, DNS, and infrastructure changes
+  require explicit operator participation. Never commit credentials or local
+  identity data.
 
-| State | Meaning |
-| --- | --- |
-| `ready` | Committed, scoped, and pullable now. |
-| `partial` | Useful implementation exists; the stated acceptance boundary remains open. |
-| `queued` | Committed work waiting on listed dependencies. |
-| `blocked` | External approval or input prevents otherwise-ready work. |
-| `deferred` | Not committed now; includes a concrete re-entry trigger. |
-| `done` | Acceptance evidence passed and documentation reflects the result. |
+## Completed on staging
 
-- Implement one acceptance slice per feature branch and PR into `staging`.
-- Promote a finite milestone from `staging` to `main`; do not wait for every
-  deferred idea.
-- Keep a slice reviewable. Split it before editing when it spans unrelated
-  subsystems or is likely to exceed roughly 10 production/test paths.
-- A commit, branch, or document is not completion evidence. Record the command
-  or test that establishes the durable behavior.
-- This backlog authorizes local implementation and validation only. Real logins,
-  deployment, DNS, and infrastructure changes require explicit approval.
+- Dependency and project-policy correctness fixes.
+- Provider, OAuth, audit, outbox, and proxy-error diagnostic redaction.
+- Edge TTS handshake status, retry, and cleanup fixes.
+- `gateway.db` remains authoritative; the legacy savings ledger is opt-in.
+- Gateway-side Claude, Codex, and Copilot wire-contract fixtures.
+- Deterministic, policy-aware Claude model discovery and selection.
+- Native non-streaming Anthropic Messages pass-through and strict adapted core
+  compatibility.
+- Native and estimated Claude token counting, including the bare count route.
+- Bounded SSE and NDJSON records.
+- Request cancellation already reaches OpenAI-compatible Chat/Responses,
+  Google Chat, and Claude requests adapted through those paths.
 
-## Completed foundations
+These are implementation and fixture results. They do not claim an installed
+Claude CLI has selected a model successfully against Docker; that remains part
+of the release gate below.
 
-| ID | Result | Evidence |
+## Current release
+
+| ID | State | Work and acceptance |
 | --- | --- | --- |
-| `DEPS-001` | Console build dependencies resolve to patched compatible releases; the embedded bundle remains reproducible. | `npm ci && npm audit --json && npm run lint && npm test && npm run check:dist` |
-| `IAM-002` | Project-policy edits preserve every backend field, including model-credit limits, with a source-contract guard for future fields. | `go test ./internal/api`; console test and dist gate |
-| `ERROR-001A` | Core provider, API, verification, router, and telemetry diagnostics redact credentials before limiting while retaining upstream status. | Provider/router/API tests and `govulncheck ./...` |
-| `ERROR-001B` | Audio and embedding non-2xx proxy responses use safe gateway errors; status and usage remain accurate; successful bytes remain unchanged. | Audio/embedding success, redirect, malformed, oversized, and read-failure tests |
-| `ERROR-001C1` | Authentication and persistence code can reuse one dependency-neutral, bounded diagnostic sanitizer. | Diagnostics and provider tests |
-| `ERROR-001C2` | GCP, Copilot, and Codex error producers emit bounded safe diagnostics while preserving successful auth flows. | Auth-package tests |
-| `ERROR-001C3` | OAuth browser projections sanitize errors and never expose stored tokens; legacy authorized polling still persists its credential. | Provider/API OAuth tests |
-| `ERROR-001C4` | Provider-check, audit, and outbox diagnostics are safe on write and historical read without corrupting model/voice/provider identifiers. | Diagnostics/IAM raw-row and history tests |
-| `ERROR-001C5` | Edge TTS handshake failures retain status without leaking signed URLs and close each failed response exactly once. | Edge TTS retry/status/closure tests |
+| `CANCEL-001` | `partial` | Treat the incoming HTTP request context as the single abort signal for every synchronous public request. Pass it through shared execution and outbound requests. Once canceled, stop translation, retry, failover, and stream processing; close upstream resources; do not emit a success terminal event; record `client_cancelled` rather than success. A downstream write failure triggers the same stop path. Prove this with table-driven endpoint integration tests for Chat, Responses, Messages, and one direct proxy endpoint. Payload translators remain cancellation-agnostic. |
+| `SMOKE-001` | `ready` | Start the disposable Docker UAT gateway with normal internet access, connect a real provider through the console or device flow, sync its catalog, and run direct endpoint checks for models, Messages, token counting, Chat, Responses, and the stream forms used by the clients. Prefer Copilot because its real catalog exercises Claude-family model selection; Azure OpenAI is an optional second provider. Store no credential in the repository or test output. |
+| `CLI-UAT-001` | `blocked` | After `SMOKE-001`, use the installed host CLIs with temporary shell environment/config pointing to the Docker gateway. Claude must display and select the intended model, complete one minimal prompt and one harmless tool-enabled flow, and stop on Ctrl+C. Codex must complete one Responses call; Copilot CLI must complete one BYOK call. Record only client version, selected public model ID, served provider/model, and pass/fail. Blocked only on operator participation and disposable real-provider credentials. |
+| `RELEASE-001` | `queued` | When `CANCEL-001`, `SMOKE-001`, and `CLI-UAT-001` pass and GitHub CI is green, open one reviewed `staging -> main` PR. Do not add unrelated hardening to that promotion. |
 
-## Milestone 1: safety and measured capacity
+## Cancellation contract
 
-This milestone is promoted to `main` when every item below is `done`, the full
-repository gate passes, and the local capacity gate meets the product target.
+Cancellation is an HTTP lifecycle concern, not a provider dialect or CLI
+feature. There is no translated abort payload for ordinary synchronous calls.
 
-### Capacity profile
+```text
+client closes request / resets stream / aborts SDK call
+                         |
+                         v
+                  request.Context done
+                         |
+       +-----------------+-----------------+
+       |                 |                 |
+       v                 v                 v
+ stop retry/failover  stop translation  close upstream body/socket
+                         |
+                         v
+                record client_cancelled
+```
 
-`LOAD-001A` is a conventional Go benchmark baseline for exact
-`echo/echo-default` traffic through `NewServer`: unauthenticated, static-key,
-minted-key, and immediate static-key SSE. Run it with
-`go test -run '^$' -bench 'BenchmarkGateway' -benchmem ./internal/api`; standard
-Go output is the report and requests/sec is `1e9 / ns/op`. It uses direct handler
-calls, so it measures gateway hot paths without loopback networking, connection
-management, or production-provider capacity.
+The contract applies equally to CLIs, browsers using `AbortController`, Go
+clients canceling a context, .NET cancellation tokens, Python task cancellation,
+and reverse-proxy disconnects. A client that merely stops reading while keeping
+the request open has not canceled it.
 
-`LOAD-001B` remains the milestone capacity gate. Build a simple external or
-loopback gate only after the measured hot-path fixes land, if release evidence
-still needs network-level throughput validation.
+Asynchronous operations are different. Once a video/background job has returned
+an operation ID, canceling the initiating HTTP request cannot guarantee provider
+job cancellation. A provider-specific job-cancel API is deferred until demanded.
 
-| ID | State | Depends on | Work and acceptance |
-| --- | --- | --- | --- |
-| `LOAD-001A` | `done` | none | The standard-library benchmark runs all four local direct-handler scenarios without external providers. A deterministic correctness test reconciles minted-key usage events with key and project request/token counters. Evidence: `go test -run '^$' -bench 'BenchmarkGateway' -benchmem ./internal/api` and `go test -run TestGatewayMintedUsageCountersReconcile ./internal/api`. |
-| `LOAD-001B` | `queued` | `DATA-001A`, `DATA-001B`, `PERF-001` | Add the real milestone/release capacity gate after hot-path fixes. It may be a simple external or loopback test; record reference-host evidence and require at least 1,000 completed local synthetic requests/sec without unexpected statuses or counter drift. |
-| `DATA-001A` | `done` | `LOAD-001A` | `gateway.db` remains authoritative and the synchronous legacy compatibility `usage.db` savings ledger is opt-in/off by default. Explicit `savings.enabled: true` users retain custom path, baseline, labels, and read behavior; migration import remains unchanged and idempotent. Default static-key and unauthenticated benchmarks exceed 1,000 requests/sec. |
-| `DATA-001B` | `queued` | `LOAD-001A`, `DATA-001A` | Make optional failover telemetry unable to backpressure inference. Failure-heavy load remains bounded and inference completion does not wait on `telemetry.db`; events are bounded, dropped/coalesced with an explicit counter, or stored asynchronously; operator reads remain safe. |
-| `PERF-001` | `queued` | `LOAD-001A`, `DATA-001A` | Optimize only measured minted-key contention in key lookup, `last_used_at`, project policy, quota admission, and usage reconciliation. The minted-key scenario meets the capacity profile while strict quotas, revocation, reconciliation, restart behavior, and attribution remain correct. No Redis/Postgres requirement is introduced. |
-| `GOV-001` | `ready` | none | Use one fail-closed provider-credential decision for catalog and dispatch. Services require an exact active project/provider binding; human, static-admin, and local behavior remains explicit. Stop presenting the recovery admin key as the routine CLI credential. Unbound, cross-project, disabled, revoked, personal, bound, static-admin, and local cases pass across provider types and model listing. |
-| `CFG-001` | `ready` | none | Replace the live mutable settings pointer with atomic immutable snapshots and make management persistence failure-aware. A failed config save leaves runtime state and provider/catalog caches unchanged; concurrent reads and successful updates pass race-capable tests. |
-| `HTTP-001A` | `ready` | none | Bound buffered inbound JSON request bodies by surface. Stable 413 behavior covers inference and management JSON while documented normal limits remain accepted. |
-| `HTTP-001B` | `ready` | none | Bound multipart request bodies and file handling. Stable 413 behavior covers credentials, transcription, and playground media without unbounded disk spill or whole-file duplication beyond the documented limit. |
-| `HTTP-001C1` | `ready` | none | Bound non-streaming OpenAI-compatible, Azure, and Codex upstream response/error bodies. Oversized responses fail with stable safe 502 behavior while normal configured model responses remain accepted. |
-| `HTTP-001C2` | `ready` | none | Bound non-streaming Anthropic, Ollama, and Google upstream response/error bodies. Oversized responses fail with stable safe 502 behavior while normal text and supported media responses remain accepted. |
-| `HTTP-001D` | `done` | none | SSE events and NDJSON lines have a fixed 4 MiB wire-record limit without limiting total stream duration; complete SSE payloads, safe oversized errors, Ollama/Anthropic streams, and existing CLI fixtures pass focused and full Go gates. Cancellation remains `HTTP-002E`; terminal semantics remain `STREAM-001`. |
-| `HTTP-002A` | `done` | none | Optional context-aware provider/router variants cancel OpenAI-compatible Chat/Responses and Google Chat non-streaming calls when ingress is cancelled; background compatibility wrappers preserve unmigrated providers. Focused cancellation tests cover OpenAI Chat, native Responses, Google Chat, and adapted Claude with no retry or second provider dispatch. Evidence: focused/full Go gates and `govulncheck ./...`. |
-| `HTTP-002B` | `queued` | `HTTP-002A` | Migrate Anthropic, Ollama, Azure, and Edge TTS inference calls to contextual outbound requests. Each implementation has focused cancellation tests. |
-| `HTTP-002C` | `queued` | `HTTP-002A` | Migrate GCP, Copilot, and Codex auth/token calls to contextual outbound requests without changing successful device or refresh behavior. |
-| `HTTP-002D` | `queued` | `HTTP-002A`, `HTTP-002B` | Make retry backoff cancellation-aware. Disconnects stop waits promptly; retry/failover semantics remain covered. |
-| `HTTP-002E` | `queued` | `HTTP-001D`, `HTTP-002A`, `HTTP-002B` | Make active stream reads cancellation-aware, close response bodies promptly, and avoid a global write timeout that breaks valid long streams. |
-| `RETRY-001` | `ready` | none | Align retry and failover with the documented contract. Retry/fail over only transport failures, timeouts, 429, and selected 5xx responses; ordinary 400/401/403/404 are not duplicated; stateful requests remain single-attempt. |
-| `DEPLOY-001` | `ready` | none | Make the supplied production Compose/Caddy path satisfy the documented trust boundary. SSO/encryption settings are passed by secret reference; trusted identity headers are stripped/overwritten; gateway/state remain private and restrictive; incomplete secure mode fails clearly; synthetic deployment tests use no real secret. |
-| `AUTH-001` | `partial` | none | Finish only the existing GitHub Copilot and OpenAI Codex official auth flows. Explicit risk acknowledgement, refresh serialization, revocation, owner isolation, and fixture tests pass. No open-ended auth-adapter expansion. |
-| `PLAY-002` | `ready` | none | Hide portal media controls whose owner routes do not exist. Every control visible in portal mode has a registered policy-enforced route; admin media behavior remains unchanged. |
-| `KEY-001` | `ready` | none | Make the key list accurately summarize all existing restrictions. A key restricted by expiry, allowlists, request, token, cost, or credit policy is never labelled `Unrestricted`; advanced editing remains deferred. |
-| `CLI-001` | `done` | none | Credential-free `NewServer` fixtures pin documented Claude Code, Codex, and Copilot CLI request paths and auth forms; independently verify exact-provider and endpoint routing, translated message/input/tool bodies, served-model identity, representative stream terminals, and safe 404 envelopes. Live clients, login/network behavior, cancellation hardening, and bare Claude token counting remain explicit follow-on work. |
+## Release validation
 
-## Milestone 2: coding-client compatibility
-
-| ID | State | Depends on | Work and acceptance |
-| --- | --- | --- | --- |
-| `CLAUDE-001` | `done` | `GOV-001` | Claude model discovery is deterministic and round-trippable: sorted exact rows remain authoritative, aliases share policy-aware candidate construction with dispatch and are hidden on canonical ambiguity or namespace collisions, and native Anthropic rows declare Messages support. |
-| `CLAUDE-002` | `done` | none | Non-stream native Anthropic Messages requests preserve semantic JSON fields except resolved model, forced non-stream mode, and configured preamble; retry/failover is limited to transport failures, 408/429, and 500/502/503/504. Adapted targets strictly preserve the core system/text, tools/results, verified-vision images, stop, and usage profile; deterministic compatibility errors occur before lossy dispatch. Evidence: targeted provider/router/translate/API tests plus the full repository Go gate and `govulncheck ./...`. |
-| `CLAUDE-003` | `done` | `CLAUDE-002` | Bare and canonical token-count routes preserve existing `x-api-key`-before-bearer authentication, enforce routing and credential policy without consuming inference quotas or usage, proxy the first eligible native Anthropic target with restricted version/beta forwarding and provider-only credentials, and otherwise return a marked deterministic compact-JSON estimate without upstream dispatch. |
-| `OPENAI-CLI-001` | `partial` | none | Extend the pinned handler contracts into installed-client evidence for Codex native `/v1/responses` and Copilot BYOK Chat/Responses, including cancellation. This is downstream client compatibility, separate from subscription-provider OAuth. |
-| `STREAM-001A` | `partial` | `HTTP-001D`, `HTTP-002E` | Correct Chat and Responses stream setup and terminal failure accounting. Resolve before HTTP 200, parse bounded complete records, emit one dialect-correct failure, close/cancel promptly, and never record failed streams as success credits. |
-| `STREAM-001B` | `queued` | `STREAM-001A`, `CLAUDE-002` | Correct Anthropic Messages and native Anthropic stream translation. Preserve supported text/tool/usage events, surface transport/in-band failures without false `message_stop`, and reject unsupported event types explicitly. |
-| `TEST-001` | `partial` | none | Add one credential-free fixture command for the three now-pinned CLI handler contracts and ordered failover. Existing CI remains responsible for build, vet, unit tests, console tests, and dist parity. |
-| `CLI-002` | `blocked` | `CLAUDE-001`, `CLAUDE-002`, `CLAUDE-003`, `OPENAI-CLI-001`, `STREAM-001B`, `TEST-001` | Run the local fixture gate, then one explicitly approved disposable smoke for Claude Code, Codex, and Copilot CLI using normal coding flows and ordered failover. Record tested client versions; store no credential or personal identity. |
-
-## Milestone 3: dependable single-node operation
-
-| ID | State | Depends on | Work and acceptance |
-| --- | --- | --- | --- |
-| `OBS-001` | `partial` | `DATA-001A` | Generate or accept one safe request ID, return it to clients, propagate it upstream where appropriate, and include it in structured logs, usage, and fallback records. No distributed tracing platform or trace console. |
-| `OPS-001A` | `ready` | none | Separate process liveness from local readiness and make graceful drain configurable. Readiness checks parsed configuration and writable state, never external providers; shutdown reports timeout/failure and drains within the configured window. |
-| `OPS-001B` | `queued` | `DATA-001A` | Add one tested online backup/restore command and bounded retention procedure. A disposable state directory restores IAM/config/catalog/session authority and passes readiness; retention cannot delete current quota/audit state accidentally. |
-| `PROVIDER-001` | `partial` | `TEST-001` | Define fixture-backed availability for the existing provider runtimes used by the three coding clients. A provider is labelled available only when its configured auth, discovery, and relevant inference path pass fixtures. Add other providers only through a new demand-specific item. |
-| `RELEASE-001A` | `queued` | `TEST-001` | Inject one version identity from tagged builds into binaries and images. `version`, health output, user-agent metadata, artifact names, and docs derive from the release tag or one source without conflicting constants. |
-| `RELEASE-001B` | `queued` | `OPS-001B`, `RELEASE-001A` | Guard publication and migration compatibility. Release workflows reject tags not reachable from `main`, retain checksums/image gates, and test fresh plus current-state startup before publishing. |
-
-## Deferred ideas
-
-These items are not dependencies of active work.
-
-| Scope | Re-entry trigger |
-| --- | --- |
-| Optional sanitized request/response body snapshots (`ERROR-001C6`) | Operators need body capture after metadata plus request IDs prove insufficient. Raw body logging remains explicitly unsafe and off by default. |
-| Full browser journey suite | Console regressions become a recurring support problem; begin with one setup smoke. |
-| Advanced per-key policy editing | Operators routinely need fields that cannot be managed adequately through current admin surfaces. Accurate display is active under `KEY-001`. |
-| Removing deprecated route/field names | A release boundary and client evidence show compatibility aliases can be removed safely. |
-| Multi-account selection, health, and provider quota adapters | A real deployment needs simultaneous accounts or a stable official quota API. |
-| Formal management OpenAPI contract | Third-party consumers require a versioned management API. |
-| Additional provider onboarding or catalog breadth | A concrete user/provider request exists with official documentation and fixtures. |
-
-## Removed from the product plan
-
-- A universal canonical translation IR and translator marketplace.
-- A 100-provider catalog target.
-- Dynamic weighted, round-robin, power-of-two, least-used, cost-first,
-  reset-aware, headroom, or last-known-good routing.
-- Provider quota pools, borrowing, virtual quota model IDs, and automatic route
-  combos.
-- Model override/alias policy subsystems beyond deterministic client-compatible
-  IDs and existing allowlists.
-- Streaming account/key selection and a trace console in Playground.
-- A marketing-site publication milestone.
-
-Existing shipped code is not removed merely because related expansion is no
-longer planned. Any removal requires a separate compatibility decision.
-
-## Repository gate
+### Automated per PR
 
 ```bash
 cd go && go build ./... && go vet ./... && go test ./... && govulncheck ./...
 cd internal/web/console && npm ci && npm audit --json && npm run lint && npm test && npm run check:dist
 ```
 
-Persistence changes also run backup/restart/migration tests. Streaming and client
-compatibility changes run their fixture profiles. Every milestone promotion runs
-the `LOAD-001A` benchmarks, and capacity completion requires `LOAD-001B`. Update
-this backlog in the same PR as the behavior and evidence.
+Local development may run only focused tests. The complete gate is required once
+in GitHub CI before merge.
+
+### Real-provider staging gate
+
+Use `test/uat/docker-compose.uat.yml` with a fresh disposable state volume and a
+real provider configured interactively or through local environment references.
+Do not add provider secrets to `.env.example`, Compose files, fixtures, reports,
+or chat transcripts.
+
+The operator runs the host CLIs with process-scoped temporary environment or an
+ephemeral config directory. The final gate instructions must include exact setup,
+test, inspection, and cleanup commands; they must not persist or print secrets.
+
+## Deferred efforts
+
+| Effort | Re-entry trigger |
+| --- | --- |
+| Throughput and high availability | A real deployment needs high traffic or multiple gateway nodes. Existing direct-handler benchmarks remain diagnostic only; strict minted-key SQLite throughput is not a release target. |
+| Broad provider-by-provider cancellation cleanup | A synchronous public endpoint fails the central `CANCEL-001` integration test or a real client leaves work running. Do not resume the preserved broad cancellation branch wholesale. |
+| Async video/background job cancellation | A supported provider exposes a stable cancellation API and users need it. |
+| Optional sanitized body logging | Metadata and request IDs prove insufficient for an operational incident. Raw body logging remains off by default. |
+| Full browser journey suite | Console regressions become a recurring support issue. |
+| Advanced key-policy editing | Operators routinely require policy fields not adequately managed today. |
+| Provider breadth, multi-account routing, provider quota, and alternate routing strategies | A concrete user requirement names the provider or routing behavior and a focused fixture can prove it. |
+| Formal management OpenAPI | A third-party management client requires a versioned contract. |
+| Backup, retention, version injection, and broader deployment automation | Schedule as a separate operability/release milestone after this client-compatibility release. |
+
+## Removed from the product plan
+
+- Universal canonical translation IR or translator marketplace.
+- A 100-provider target.
+- Dynamic weighted, round-robin, least-used, cost-first, reset-aware, or
+  headroom routing.
+- Provider quota pools, borrowing, and virtual quota models.
+- A trace console or streaming account/key selection in Playground.
+- Marketing-site publication as an engineering milestone.
+
+Existing shipped behavior is not removed merely because expansion is deferred.
+Any removal requires a separate compatibility decision.
