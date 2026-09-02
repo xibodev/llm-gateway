@@ -46,6 +46,32 @@ Operator participation is required — real keys and a real OAuth device flow.
 9. **Governance** — set a project budget in Settings; verify the audit trail
    recorded every step without secret values.
 
+## Coding-client release gate
+
+For the `staging -> main` compatibility gate, connect a real provider rather
+than WireMock. Prefer a personal Copilot device authorization because its real
+catalog exercises Claude-family model discovery; Azure OpenAI may be added as a
+second exact-provider/failover check.
+
+Run Claude Code, Codex, and Copilot CLI on the host with process-scoped temporary
+environment variables or an ephemeral config directory pointing to
+`http://127.0.0.1:8898`. Do not install the clients in the gateway container and
+do not persist provider or gateway credentials in this repository.
+
+The gate verifies:
+
+1. direct endpoint responses for models, Messages, token counting, Chat, and
+   Responses;
+2. Claude's model picker displays and selects the intended public model ID;
+3. one minimal prompt and one harmless tool-enabled Claude flow succeed;
+4. Ctrl+C stops the request without retry or failover;
+5. one Codex Responses request and one Copilot BYOK request succeed;
+6. gateway usage identifies the expected served provider/model.
+
+Record only client versions, selected public IDs, served provider/model, and
+pass/fail. Keep the disposable stack up for operator inspection, then use the
+teardown command below to remove its state.
+
 ## Tear down
 
 ```bash

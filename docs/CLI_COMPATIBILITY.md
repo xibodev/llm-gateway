@@ -24,8 +24,10 @@ order. Exact `provider/model` and endpoint IDs remain available subject to the
 same credential and policy checks. Responses continue to identify the native
 model actually served, not the alias selected by the client.
 
-Cancellation and live-client login/network behavior remain outside `CLI-001`.
-Those behaviors belong to the follow-on coding-client and stream work tracked in
-[`BACKLOG.md`](../BACKLOG.md).
+Gateway fixture coverage does not prove an installed CLI works against a real
+provider. The `staging -> main` gate in [`BACKLOG.md`](../BACKLOG.md) therefore
+uses the installed host clients against the disposable Docker gateway after a
+real provider is connected. Cancellation uses the same HTTP request lifecycle
+for CLIs, SDKs, browsers, and backend applications.
 
 Adaptation fails closed for `thinking`, `redacted_thinking`, `cache_control`, documents, unsupported image sources/media types, error tool results, and unknown top-level or content fields. Native non-stream responses preserve those semantic JSON fields, including IDs, model, thinking/signatures, cache usage, and stop data. Token-count request bodies are limited to 32 MiB. Token-count forwarding never copies gateway authentication or arbitrary caller headers: it uses only the resolved provider credential, a valid nonempty caller `anthropic-version` (otherwise the provider default), and caller `anthropic-beta` values for native Anthropic targets.
