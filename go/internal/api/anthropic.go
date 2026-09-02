@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"io"
@@ -123,7 +124,7 @@ func handleMessages(w http.ResponseWriter, r *http.Request) {
 		for i := range converted {
 			msgs[i] = providers.Message(converted[i])
 		}
-		streamMessagesSSE(w, targets, msgs, req.Model, principal, providers.Kwargs(kw), started)
+		streamMessagesSSE(w, r.Context(), targets, msgs, req.Model, principal, providers.Kwargs(kw), started)
 		return
 	}
 
@@ -141,31 +142,40 @@ func handleMessages(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 200, response)
 }
 
-func streamMessagesSSE(w http.ResponseWriter, targets []router.Target, msgs []providers.Message, requested string, principal *config.Principal, kw providers.Kwargs, started time.Time) {
-	flusher, _ := w.(http.Flusher)
+func streamMessagesSSE(w http.ResponseWriter, ctx context.Context, targets []router.Target, msgs []providers.Message, requested string, principal *config.Principal, kw providers.Kwargs, started time.Time) {
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("Cache-Control", "no-cache")
 	w.Header().Set("Connection", "keep-alive")
-	w.WriteHeader(200)
 
-	it, served, err := router.ExecuteStream(targets, msgs, requested, principal, kw)
+	it, served, err := router.ExecuteStreamContext(ctx, targets, msgs, requested, principal, kw)
 	if err != nil {
+		if ctx.Err() != nil {
+			recordClientCancelled("anthropic.messages", requested, principal, started)
+			return
+		}
 		recordFailureUsage(
 			"anthropic.messages", requested, principal, upstreamErrorStatus(err),
 			"upstream", started,
 		)
 		payload := map[string]any{"type": "error", "error": map[string]any{"type": "api_error", "message": "Upstream provider request failed."}}
-		_, _ = w.Write([]byte("event: error\ndata: " + jsonStr(payload) + "\n\n"))
-		if flusher != nil {
-			flusher.Flush()
-		}
+		_ = writeAndFlush(w, []byte("event: error\ndata: "+jsonStr(payload)+"\n\n"))
 		return
 	}
+	defer it.Close()
+	w.WriteHeader(http.StatusOK)
 
 	usageAcc := map[string]int{"prompt_tokens": 0, "completion_tokens": 0}
+	var writeErr error
+	terminalWritten := false
 	// pull func peeks usage as it forwards OpenAI chunks into the translator
 	pull := func() (string, bool) {
+		if writeErr != nil || ctx.Err() != nil {
+			return "", false
+		}
 		chunk, more := it.Next()
+		if ctx.Err() != nil {
+			return "", false
+		}
 		if !more {
 			return "", false
 		}
@@ -173,12 +183,23 @@ func streamMessagesSSE(w http.ResponseWriter, targets []router.Target, msgs []pr
 		return chunk, true
 	}
 	translate.OpenAIStreamToAnthropicSSE(pull, served.Model, func(event string) {
-		_, _ = w.Write([]byte(event))
-		if flusher != nil {
-			flusher.Flush()
+		if writeErr != nil {
+			return
+		}
+		terminal := strings.HasPrefix(event, "event: message_stop\n")
+		if err := ctx.Err(); err != nil {
+			writeErr = err
+			return
+		}
+		writeErr = writeAndFlush(w, []byte(event))
+		if writeErr == nil && terminal {
+			terminalWritten = true
 		}
 	})
-	_ = it.Close()
+	if writeErr != nil || !terminalWritten {
+		recordClientCancelled("anthropic.messages", requested, principal, started)
+		return
+	}
 	router.RecordUsage(router.UsageRecord{
 		Endpoint: "anthropic.messages", RequestedModel: requested, RoutedModel: served.Model,
 		Provider: served.Provider, Project: principal.Project, Key: principal.Key,

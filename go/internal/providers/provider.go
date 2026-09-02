@@ -72,11 +72,22 @@ type ContextProvider interface {
 	CompleteContext(context.Context, string, []Message, Kwargs) (map[string]any, error)
 }
 
+type ContextStreamProvider interface {
+	StreamContext(context.Context, string, []Message, Kwargs) (StreamIter, error)
+}
+
 func CompleteProviderContext(ctx context.Context, provider Provider, model string, messages []Message, kw Kwargs) (map[string]any, error) {
 	if contextual, ok := provider.(ContextProvider); ok {
 		return contextual.CompleteContext(ctx, model, messages, kw)
 	}
 	return provider.Complete(model, messages, kw)
+}
+
+func StreamProviderContext(ctx context.Context, provider Provider, model string, messages []Message, kw Kwargs) (StreamIter, error) {
+	if contextual, ok := provider.(ContextStreamProvider); ok {
+		return contextual.StreamContext(ctx, model, messages, kw)
+	}
+	return provider.Stream(model, messages, kw)
 }
 
 type detailedCompleter interface {
@@ -128,6 +139,10 @@ type ResponsesProvider interface {
 
 type ContextResponsesProvider interface {
 	CompleteResponsesContext(context.Context, string, map[string]any) (map[string]any, *iam.ProviderAccountObservation, error)
+}
+
+type ContextResponsesStreamProvider interface {
+	StreamResponsesContext(context.Context, string, map[string]any) (StreamIter, *iam.ProviderAccountObservation, error)
 }
 
 // AnthropicMessagesProvider is an optional non-streaming native Messages
@@ -275,6 +290,18 @@ func StreamResponses(
 		return responses.StreamResponses(model, payload)
 	}
 	return nil, nil, ErrResponsesUnsupported
+}
+
+func StreamResponsesContext(
+	ctx context.Context,
+	provider Provider,
+	model string,
+	payload map[string]any,
+) (StreamIter, *iam.ProviderAccountObservation, error) {
+	if responses, ok := provider.(ContextResponsesStreamProvider); ok {
+		return responses.StreamResponsesContext(ctx, model, payload)
+	}
+	return StreamResponses(provider, model, payload)
 }
 
 func ResponsesPayloadIsStateful(payload map[string]any) bool {

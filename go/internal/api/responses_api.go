@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -109,7 +110,7 @@ func responsesDispatch(
 	}
 	if request.Stream {
 		streamResponsesSSE(
-			w, targets, payload, publicPayload, request.Model, principal, started,
+			w, r.Context(), targets, payload, publicPayload, request.Model, principal, started,
 		)
 		return
 	}
@@ -230,16 +231,21 @@ func responsesPayloadContainsType(value any, types ...string) bool {
 
 func streamResponsesSSE(
 	w http.ResponseWriter,
+	ctx context.Context,
 	targets []router.Target,
 	payload, publicPayload map[string]any,
 	requested string,
 	principal *config.Principal,
 	started time.Time,
 ) {
-	execution, served, err := router.ExecuteResponsesStream(
-		targets, payload, requested, principal,
+	execution, served, err := router.ExecuteResponsesStreamContext(
+		ctx, targets, payload, requested, principal,
 	)
 	if err != nil {
+		if ctx.Err() != nil {
+			recordClientCancelled("openai.responses", requested, principal, started)
+			return
+		}
 		recordFailureUsage(
 			"openai.responses", requested, principal,
 			upstreamErrorStatus(err), "upstream", started,
@@ -251,39 +257,42 @@ func streamResponsesSSE(
 	w.Header().Set("Cache-Control", "no-cache")
 	w.Header().Set("Connection", "keep-alive")
 	w.WriteHeader(http.StatusOK)
-	flusher, _ := w.(http.Flusher)
+	defer execution.Iter.Close()
 	if execution.Native {
-		streamNativeResponseEvents(
-			w, flusher, execution.Iter, publicPayload, requested, served, principal, started,
-		)
+		if err := streamNativeResponseEventsContext(w, ctx, execution.Iter, publicPayload, requested, served, principal, started); err != nil {
+			recordClientCancelled("openai.responses", requested, principal, started)
+		}
 		return
 	}
-	streamChatAsResponseEvents(
-		w, flusher, execution.Iter, publicPayload, requested, served, principal, started,
-	)
+	if err := streamChatAsResponseEventsContext(w, ctx, execution.Iter, publicPayload, requested, served, principal, started); err != nil {
+		recordClientCancelled("openai.responses", requested, principal, started)
+	}
 }
 
 func writeResponseEvent(
-	w http.ResponseWriter, flusher http.Flusher, event string, payload map[string]any,
-) {
-	encoded, _ := json.Marshal(payload)
-	_, _ = w.Write([]byte("event: " + event + "\n"))
-	_, _ = w.Write([]byte("data: " + string(encoded) + "\n\n"))
-	if flusher != nil {
-		flusher.Flush()
+	ctx context.Context, w http.ResponseWriter, event string, payload map[string]any,
+) error {
+	if err := ctx.Err(); err != nil {
+		return err
 	}
+	encoded, _ := json.Marshal(payload)
+	return writeAndFlush(w, []byte("event: "+event+"\ndata: "+string(encoded)+"\n\n"))
 }
 
-func streamNativeResponseEvents(
+func streamNativeResponseEvents(w http.ResponseWriter, _ http.Flusher, iterator providers.StreamIter, request map[string]any, requested string, served *router.Target, principal *config.Principal, started time.Time) {
+	_ = streamNativeResponseEventsContext(w, context.Background(), iterator, request, requested, served, principal, started)
+}
+
+func streamNativeResponseEventsContext(
 	w http.ResponseWriter,
-	flusher http.Flusher,
+	ctx context.Context,
 	iterator providers.StreamIter,
 	request map[string]any,
 	requested string,
 	served *router.Target,
 	principal *config.Principal,
 	started time.Time,
-) {
+) error {
 	var finalResponse map[string]any
 	responseID := ""
 	sequence := 0
@@ -310,59 +319,74 @@ func streamNativeResponseEvents(
 		}
 		if eventType == "response.completed" || eventType == "response.incomplete" {
 			finalResponse, _ = event["response"].(map[string]any)
-			writeResponseEvent(w, flusher, eventType, event)
-			_ = iterator.Close()
+			if err := ctx.Err(); err != nil {
+				return err
+			}
+			if err := writeResponseEvent(ctx, w, eventType, event); err != nil {
+				return err
+			}
 			recordFromResponses(
 				requested, served, principal, finalResponse,
 				time.Since(started).Milliseconds(),
 			)
-			return
+			return nil
 		}
 		if eventType == "response.failed" {
-			writeResponseEvent(w, flusher, eventType, event)
-			_ = iterator.Close()
+			if err := writeResponseEvent(ctx, w, eventType, event); err != nil {
+				return err
+			}
 			recordFailureUsage("openai.responses", requested, principal, 502, "upstream_stream", started)
-			return
+			return nil
 		}
 		if value := firstInt(event, "sequence_number"); value >= sequence {
 			sequence = value + 1
 		}
-		writeResponseEvent(w, flusher, eventType, event)
+		if err := writeResponseEvent(ctx, w, eventType, event); err != nil {
+			return err
+		}
 	}
 	streamErr := iterator.Err()
-	_ = iterator.Close()
 	message := "Upstream provider stream failed."
 	if streamErr == nil {
 		message = "Upstream provider stream ended without a terminal event."
 	}
-	writeResponseEvent(w, flusher, "response.failed", map[string]any{
+	if err := writeResponseEvent(ctx, w, "response.failed", map[string]any{
 		"type": "response.failed", "sequence_number": sequence,
 		"response": translate.FailedResponseEnvelope(
 			served.Model, responseID, "server_error", message, request,
 		),
-	})
+	}); err != nil {
+		return err
+	}
 	recordFailureUsage("openai.responses", requested, principal, 502, "upstream_stream", started)
+	return nil
 }
 
-func streamChatAsResponseEvents(
+func streamChatAsResponseEvents(w http.ResponseWriter, _ http.Flusher, iterator providers.StreamIter, request map[string]any, requested string, served *router.Target, principal *config.Principal, started time.Time) {
+	_ = streamChatAsResponseEventsContext(w, context.Background(), iterator, request, requested, served, principal, started)
+}
+
+func streamChatAsResponseEventsContext(
 	w http.ResponseWriter,
-	flusher http.Flusher,
+	ctx context.Context,
 	iterator providers.StreamIter,
 	request map[string]any,
 	requested string,
 	served *router.Target,
 	principal *config.Principal,
 	started time.Time,
-) {
+) error {
 	responseID := fmt.Sprintf("resp_%d", time.Now().UnixNano())
 	messageID := "msg_" + strings.TrimPrefix(responseID, "resp_")
 	sequence := 0
-	writeResponseEvent(w, flusher, "response.created", map[string]any{
+	if err := writeResponseEvent(ctx, w, "response.created", map[string]any{
 		"type": "response.created", "sequence_number": sequence,
 		"response": translate.NewResponseEnvelope(
 			served.Model, responseID, "in_progress", []any{}, request,
 		),
-	})
+	}); err != nil {
+		return err
+	}
 	sequence++
 	messageItemStarted := false
 	textStarted := false
@@ -374,21 +398,24 @@ func streamChatAsResponseEvents(
 	toolOutputIndexes := map[int]int{}
 	finishReason := ""
 	usage := map[string]any{}
-	ensureMessageItem := func() {
+	ensureMessageItem := func() error {
 		if messageItemStarted {
-			return
+			return nil
 		}
 		messageOutputIndex = len(toolCalls)
-		writeResponseEvent(w, flusher, "response.output_item.added", map[string]any{
+		if err := writeResponseEvent(ctx, w, "response.output_item.added", map[string]any{
 			"type": "response.output_item.added", "sequence_number": sequence,
 			"response_id": responseID, "output_index": messageOutputIndex,
 			"item": map[string]any{
 				"id": messageID, "type": "message",
 				"status": "in_progress", "role": "assistant", "content": []any{},
 			},
-		})
+		}); err != nil {
+			return err
+		}
 		sequence++
 		messageItemStarted = true
+		return nil
 	}
 	for {
 		chunk, more := iterator.Next()
@@ -412,51 +439,63 @@ func streamChatAsResponseEvents(
 		}
 		delta, _ := choice["delta"].(map[string]any)
 		if content, ok := delta["content"].(string); ok && content != "" {
-			ensureMessageItem()
+			if err := ensureMessageItem(); err != nil {
+				return err
+			}
 			if !textStarted {
-				writeResponseEvent(w, flusher, "response.content_part.added", map[string]any{
+				if err := writeResponseEvent(ctx, w, "response.content_part.added", map[string]any{
 					"type": "response.content_part.added", "sequence_number": sequence,
 					"response_id": responseID, "item_id": messageID,
 					"output_index": messageOutputIndex, "content_index": 0,
 					"part": map[string]any{
 						"type": "output_text", "text": "", "annotations": []any{},
 					},
-				})
+				}); err != nil {
+					return err
+				}
 				sequence++
 				textStarted = true
 			}
 			text.WriteString(content)
-			writeResponseEvent(w, flusher, "response.output_text.delta", map[string]any{
+			if err := writeResponseEvent(ctx, w, "response.output_text.delta", map[string]any{
 				"type": "response.output_text.delta", "sequence_number": sequence,
 				"response_id": responseID, "item_id": messageID,
 				"output_index": messageOutputIndex, "content_index": 0,
 				"delta": content, "logprobs": []any{},
-			})
+			}); err != nil {
+				return err
+			}
 			sequence++
 		}
 		if value, ok := delta["refusal"].(string); ok && value != "" {
-			ensureMessageItem()
+			if err := ensureMessageItem(); err != nil {
+				return err
+			}
 			contentIndex := 0
 			if textStarted {
 				contentIndex = 1
 			}
 			if !refusalStarted {
-				writeResponseEvent(w, flusher, "response.content_part.added", map[string]any{
+				if err := writeResponseEvent(ctx, w, "response.content_part.added", map[string]any{
 					"type": "response.content_part.added", "sequence_number": sequence,
 					"response_id": responseID, "item_id": messageID,
 					"output_index": messageOutputIndex, "content_index": contentIndex,
 					"part": map[string]any{"type": "refusal", "refusal": ""},
-				})
+				}); err != nil {
+					return err
+				}
 				sequence++
 				refusalStarted = true
 			}
 			refusal.WriteString(value)
-			writeResponseEvent(w, flusher, "response.refusal.delta", map[string]any{
+			if err := writeResponseEvent(ctx, w, "response.refusal.delta", map[string]any{
 				"type": "response.refusal.delta", "sequence_number": sequence,
 				"response_id": responseID, "item_id": messageID,
 				"output_index": messageOutputIndex, "content_index": contentIndex,
 				"delta": value,
-			})
+			}); err != nil {
+				return err
+			}
 			sequence++
 		}
 		if rawCalls, ok := delta["tool_calls"].([]any); ok {
@@ -483,11 +522,13 @@ func streamChatAsResponseEvents(
 					}
 					toolCalls[index] = current
 					toolOutputIndexes[index] = outputIndex
-					writeResponseEvent(w, flusher, "response.output_item.added", map[string]any{
+					if err := writeResponseEvent(ctx, w, "response.output_item.added", map[string]any{
 						"type": "response.output_item.added", "sequence_number": sequence,
 						"response_id": responseID, "output_index": outputIndex,
 						"item": current,
-					})
+					}); err != nil {
+						return err
+					}
 					sequence++
 				}
 				if name != "" {
@@ -496,50 +537,57 @@ func streamChatAsResponseEvents(
 				if arguments != "" {
 					existing, _ := current["arguments"].(string)
 					current["arguments"] = existing + arguments
-					writeResponseEvent(w, flusher, "response.function_call_arguments.delta", map[string]any{
+					if err := writeResponseEvent(ctx, w, "response.function_call_arguments.delta", map[string]any{
 						"type":            "response.function_call_arguments.delta",
 						"sequence_number": sequence, "response_id": responseID,
 						"output_index": toolOutputIndexes[index],
 						"item_id":      current["id"], "delta": arguments,
-					})
+					}); err != nil {
+						return err
+					}
 					sequence++
 				}
 			}
 		}
 	}
 	streamErr := iterator.Err()
-	_ = iterator.Close()
 	if streamErr != nil || finishReason == "" {
 		message := "Upstream provider stream failed."
 		if streamErr == nil {
 			message = "Upstream provider stream ended without a finish reason."
 		}
-		writeResponseEvent(w, flusher, "response.failed", map[string]any{
+		if err := writeResponseEvent(ctx, w, "response.failed", map[string]any{
 			"type": "response.failed", "sequence_number": sequence,
 			"response": translate.FailedResponseEnvelope(
 				served.Model, responseID, "server_error", message, request,
 			),
-		})
+		}); err != nil {
+			return err
+		}
 		recordFailureUsage("openai.responses", requested, principal, 502, "upstream_stream", started)
-		return
+		return nil
 	}
 	incomplete := finishReason == "length" || finishReason == "content_filter"
 	if textStarted && !incomplete {
-		writeResponseEvent(w, flusher, "response.output_text.done", map[string]any{
+		if err := writeResponseEvent(ctx, w, "response.output_text.done", map[string]any{
 			"type": "response.output_text.done", "sequence_number": sequence,
 			"response_id": responseID, "item_id": messageID,
 			"output_index": messageOutputIndex, "content_index": 0,
 			"text": text.String(), "logprobs": []any{},
-		})
+		}); err != nil {
+			return err
+		}
 		sequence++
-		writeResponseEvent(w, flusher, "response.content_part.done", map[string]any{
+		if err := writeResponseEvent(ctx, w, "response.content_part.done", map[string]any{
 			"type": "response.content_part.done", "sequence_number": sequence,
 			"response_id": responseID, "item_id": messageID,
 			"output_index": messageOutputIndex, "content_index": 0,
 			"part": map[string]any{
 				"type": "output_text", "text": text.String(), "annotations": []any{},
 			},
-		})
+		}); err != nil {
+			return err
+		}
 		sequence++
 	}
 	if refusalStarted && !incomplete {
@@ -547,21 +595,25 @@ func streamChatAsResponseEvents(
 		if textStarted {
 			contentIndex = 1
 		}
-		writeResponseEvent(w, flusher, "response.refusal.done", map[string]any{
+		if err := writeResponseEvent(ctx, w, "response.refusal.done", map[string]any{
 			"type": "response.refusal.done", "sequence_number": sequence,
 			"response_id": responseID, "item_id": messageID,
 			"output_index": messageOutputIndex, "content_index": contentIndex,
 			"refusal": refusal.String(),
-		})
+		}); err != nil {
+			return err
+		}
 		sequence++
-		writeResponseEvent(w, flusher, "response.content_part.done", map[string]any{
+		if err := writeResponseEvent(ctx, w, "response.content_part.done", map[string]any{
 			"type": "response.content_part.done", "sequence_number": sequence,
 			"response_id": responseID, "item_id": messageID,
 			"output_index": messageOutputIndex, "content_index": contentIndex,
 			"part": map[string]any{
 				"type": "refusal", "refusal": refusal.String(),
 			},
-		})
+		}); err != nil {
+			return err
+		}
 		sequence++
 	}
 	chatToolCalls := []any{}
@@ -572,17 +624,21 @@ func streamChatAsResponseEvents(
 		}
 		if !incomplete {
 			call["status"] = "completed"
-			writeResponseEvent(w, flusher, "response.function_call_arguments.done", map[string]any{
+			if err := writeResponseEvent(ctx, w, "response.function_call_arguments.done", map[string]any{
 				"type": "response.function_call_arguments.done", "sequence_number": sequence,
 				"response_id": responseID, "output_index": toolOutputIndexes[index],
 				"item_id": call["id"], "arguments": call["arguments"],
-			})
+			}); err != nil {
+				return err
+			}
 			sequence++
-			writeResponseEvent(w, flusher, "response.output_item.done", map[string]any{
+			if err := writeResponseEvent(ctx, w, "response.output_item.done", map[string]any{
 				"type": "response.output_item.done", "sequence_number": sequence,
 				"response_id": responseID, "output_index": toolOutputIndexes[index],
 				"item": call,
-			})
+			}); err != nil {
+				return err
+			}
 			sequence++
 		}
 		chatToolCalls = append(chatToolCalls, map[string]any{
@@ -615,11 +671,13 @@ func streamChatAsResponseEvents(
 	if messageItemStarted && !incomplete {
 		output, _ := converted["output"].([]any)
 		if len(output) > 0 {
-			writeResponseEvent(w, flusher, "response.output_item.done", map[string]any{
+			if err := writeResponseEvent(ctx, w, "response.output_item.done", map[string]any{
 				"type": "response.output_item.done", "sequence_number": sequence,
 				"response_id": responseID, "output_index": messageOutputIndex,
 				"item": output[0],
-			})
+			}); err != nil {
+				return err
+			}
 			sequence++
 		}
 	}
@@ -627,13 +685,16 @@ func streamChatAsResponseEvents(
 	if converted["status"] == "incomplete" {
 		terminal = "response.incomplete"
 	}
-	writeResponseEvent(w, flusher, terminal, map[string]any{
+	if err := writeResponseEvent(ctx, w, terminal, map[string]any{
 		"type": terminal, "sequence_number": sequence, "response": converted,
-	})
+	}); err != nil {
+		return err
+	}
 	recordFromResponses(
 		requested, served, principal, converted,
 		time.Since(started).Milliseconds(),
 	)
+	return nil
 }
 
 func recordFromResponses(

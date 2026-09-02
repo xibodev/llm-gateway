@@ -122,11 +122,15 @@ func (p OpenAIProvider) CompleteContextWithObservation(
 }
 
 func (p OpenAIProvider) Stream(model string, messages []Message, kw Kwargs) (StreamIter, error) {
+	return p.StreamContext(context.Background(), model, messages, kw)
+}
+
+func (p OpenAIProvider) StreamContext(ctx context.Context, model string, messages []Message, kw Kwargs) (StreamIter, error) {
 	kw = withOpenAIOutputLimit(kw)
 	if p.adaptEnabled(kw) {
 		plan := p.planAdapt(model)
 		if plan.endpoint == "responses" {
-			return p.streamViaResponses(model, messages, kw)
+			return p.streamViaResponsesContext(ctx, model, messages, kw)
 		}
 		if plan.renameMaxTokens {
 			kw = withRenamedMaxTokens(kw)
@@ -139,7 +143,7 @@ func (p OpenAIProvider) Stream(model string, messages []Message, kw Kwargs) (Str
 	applyVisionHeader(headers, messages)
 	body, _ := json.Marshal(buildOpenAIPayload(model, messages, true, kw))
 	do := func(b string, h http.Header) (*http.Response, error) {
-		req, _ := http.NewRequest("POST", b+"/chat/completions", bytes.NewReader(body))
+		req, _ := http.NewRequestWithContext(ctx, "POST", b+"/chat/completions", bytes.NewReader(body))
 		req.Header = h
 		return httpClient(p.Timeout).Do(req)
 	}
@@ -151,6 +155,9 @@ func (p OpenAIProvider) Stream(model string, messages []Message, kw Kwargs) (Str
 	if resp.StatusCode == 401 && p.auth.CanRefresh() {
 		resp.Body.Close()
 		if rerr := p.auth.Refresh(); rerr == nil {
+			if ctx.Err() != nil {
+				return nil, ctx.Err()
+			}
 			if base, headers, err = p.auth.Prepare(); err == nil {
 				applyVisionHeader(headers, messages)
 				if resp, err = do(base, headers); err != nil {
@@ -465,7 +472,12 @@ func (p OpenAIProvider) completeViaResponsesContextWithObservation(
 }
 
 func (p OpenAIProvider) streamViaResponses(model string, messages []Message, kw Kwargs) (StreamIter, error) {
-	resp, err := p.callResponses(model, messages, kw)
+	return p.streamViaResponsesContext(context.Background(), model, messages, kw)
+}
+
+func (p OpenAIProvider) streamViaResponsesContext(ctx context.Context, model string, messages []Message, kw Kwargs) (StreamIter, error) {
+	payload := translate.ChatToResponses(model, messages, kw, false)
+	resp, _, err := p.callResponsesPayloadContext(ctx, payload, true)
 	if err != nil {
 		return nil, err
 	}
@@ -514,6 +526,12 @@ func (p OpenAIProvider) CompleteResponsesContext(
 func (p OpenAIProvider) StreamResponses(
 	model string, payload map[string]any,
 ) (StreamIter, *iam.ProviderAccountObservation, error) {
+	return p.StreamResponsesContext(context.Background(), model, payload)
+}
+
+func (p OpenAIProvider) StreamResponsesContext(
+	ctx context.Context, model string, payload map[string]any,
+) (StreamIter, *iam.ProviderAccountObservation, error) {
 	if !p.supportsNativeResponses(model) {
 		return nil, nil, ErrResponsesUnsupported
 	}
@@ -521,7 +539,7 @@ func (p OpenAIProvider) StreamResponses(
 	request["model"] = model
 	request["stream"] = true
 	delete(request, "force_api_support")
-	stream, observation, err := p.streamResponsesPayload(request)
+	stream, observation, err := p.streamResponsesPayloadContext(ctx, request)
 	if status := UpstreamStatus(err); status == http.StatusNotFound ||
 		status == http.StatusMethodNotAllowed {
 		return nil, observation, ErrResponsesUnsupported
@@ -633,6 +651,12 @@ func (p OpenAIProvider) callResponsesPayloadContext(
 func (p OpenAIProvider) streamResponsesPayload(
 	payload map[string]any,
 ) (StreamIter, *iam.ProviderAccountObservation, error) {
+	return p.streamResponsesPayloadContext(context.Background(), payload)
+}
+
+func (p OpenAIProvider) streamResponsesPayloadContext(
+	ctx context.Context, payload map[string]any,
+) (StreamIter, *iam.ProviderAccountObservation, error) {
 	base, headers, observation, err := prepareOpenAIAuth(p.auth)
 	if err != nil {
 		return nil, observation, err
@@ -641,7 +665,7 @@ func (p OpenAIProvider) streamResponsesPayload(
 	applyResponsesVisionHeader(headers, payload)
 	post := func(b string, h http.Header) (*http.Response, error) {
 		body, _ := json.Marshal(payload)
-		request, _ := http.NewRequest("POST", b+"/responses", bytes.NewReader(body))
+		request, _ := http.NewRequestWithContext(ctx, "POST", b+"/responses", bytes.NewReader(body))
 		request.Header = h
 		return httpClient(p.Timeout).Do(request)
 	}
@@ -654,6 +678,9 @@ func (p OpenAIProvider) streamResponsesPayload(
 	if response.StatusCode == http.StatusUnauthorized && p.auth.CanRefresh() {
 		response.Body.Close()
 		if refreshErr := p.auth.Refresh(); refreshErr == nil {
+			if ctx.Err() != nil {
+				return nil, observation, ctx.Err()
+			}
 			if base, headers, observation, err = prepareOpenAIAuth(p.auth); err == nil {
 				headers.Set("Accept", "text/event-stream")
 				applyResponsesVisionHeader(headers, payload)
@@ -678,6 +705,41 @@ func (p OpenAIProvider) streamResponsesPayload(
 		)
 	}
 	return newHTTPStreamIter(response, "responses"), observation, nil
+}
+
+func (p CodexProvider) CompleteContext(ctx context.Context, model string, messages []Message, kw Kwargs) (map[string]any, error) {
+	response, _, err := p.CompleteContextWithObservation(ctx, model, messages, kw)
+	return response, err
+}
+
+func (p CodexProvider) CompleteContextWithObservation(ctx context.Context, model string, messages []Message, kw Kwargs) (map[string]any, *iam.ProviderAccountObservation, error) {
+	return p.inner.completeViaResponsesContextWithObservation(ctx, model, messages, kw)
+}
+
+func (p CodexProvider) CompleteResponsesContext(ctx context.Context, model string, payload map[string]any) (map[string]any, *iam.ProviderAccountObservation, error) {
+	request := cloneMap(payload)
+	request["model"] = model
+	request["stream"] = false
+	delete(request, "force_api_support")
+	return p.inner.callResponsesPayloadContext(ctx, request, false)
+}
+
+func (p CodexProvider) StreamContext(ctx context.Context, model string, messages []Message, kw Kwargs) (StreamIter, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	return p.inner.streamViaResponsesContext(ctx, model, messages, kw)
+}
+
+func (p CodexProvider) StreamResponsesContext(ctx context.Context, model string, payload map[string]any) (StreamIter, *iam.ProviderAccountObservation, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, nil, err
+	}
+	request := cloneMap(payload)
+	request["model"] = model
+	request["stream"] = true
+	delete(request, "force_api_support")
+	return p.inner.streamResponsesPayloadContext(ctx, request)
 }
 
 func applyResponsesVisionHeader(headers http.Header, payload map[string]any) {

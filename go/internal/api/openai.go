@@ -1,8 +1,10 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
+	"io"
 	"math"
 	"net/http"
 	"strconv"
@@ -176,7 +178,7 @@ func chatDispatch(w http.ResponseWriter, r *http.Request, req *chatRequest, prin
 	}
 
 	if req.Stream {
-		streamChatSSE(w, targets, msgs, req.Model, principal, kw, endpoint, started)
+		streamChatSSE(w, r.Context(), targets, msgs, req.Model, principal, kw, endpoint, started)
 		return
 	}
 
@@ -233,9 +235,13 @@ func upstreamErrorStatus(err error) int {
 	return 502
 }
 
-func streamChatSSE(w http.ResponseWriter, targets []router.Target, msgs []providers.Message, requested string, principal *config.Principal, kw providers.Kwargs, endpoint string, started time.Time) {
-	it, served, err := router.ExecuteStream(targets, msgs, requested, principal, kw)
+func streamChatSSE(w http.ResponseWriter, ctx context.Context, targets []router.Target, msgs []providers.Message, requested string, principal *config.Principal, kw providers.Kwargs, endpoint string, started time.Time) {
+	it, served, err := router.ExecuteStreamContext(ctx, targets, msgs, requested, principal, kw)
 	if err != nil {
+		if ctx.Err() != nil {
+			recordClientCancelled(endpoint, requested, principal, started)
+			return
+		}
 		// Pre-first-byte failure: no SSE headers sent yet, so surface a real
 		// HTTP error (with the upstream status) rather than a 200 error chunk.
 		recordFailureUsage(
@@ -245,8 +251,8 @@ func streamChatSSE(w http.ResponseWriter, targets []router.Target, msgs []provid
 		writeUpstreamError(w, err)
 		return
 	}
+	defer it.Close()
 
-	flusher, _ := w.(http.Flusher)
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("Cache-Control", "no-cache")
 	w.Header().Set("Connection", "keep-alive")
@@ -259,13 +265,33 @@ func streamChatSSE(w http.ResponseWriter, targets []router.Target, msgs []provid
 			break
 		}
 		accumulateStreamUsage(chunk, usageAcc)
-		writeSSE(w, flusher, chunk)
+		if ctx.Err() != nil {
+			recordClientCancelled(endpoint, requested, principal, started)
+			return
+		}
+		if err := writeSSE(w, chunk); err != nil {
+			recordClientCancelled(endpoint, requested, principal, started)
+			return
+		}
 	}
 	if it.Err() != nil {
-		writeSSE(w, flusher, jsonStr(providerErrorPayloadOpenAI()))
+		if ctx.Err() != nil {
+			recordClientCancelled(endpoint, requested, principal, started)
+			return
+		}
+		if err := writeSSE(w, jsonStr(providerErrorPayloadOpenAI())); err != nil {
+			recordClientCancelled(endpoint, requested, principal, started)
+			return
+		}
 	}
-	writeSSE(w, flusher, "[DONE]")
-	_ = it.Close()
+	if ctx.Err() != nil {
+		recordClientCancelled(endpoint, requested, principal, started)
+		return
+	}
+	if err := writeSSE(w, "[DONE]"); err != nil {
+		recordClientCancelled(endpoint, requested, principal, started)
+		return
+	}
 	router.RecordUsage(router.UsageRecord{
 		Endpoint: endpoint, RequestedModel: requested, RoutedModel: served.Model,
 		Provider: served.Provider, Project: principal.Project, Key: principal.Key,
@@ -275,11 +301,32 @@ func streamChatSSE(w http.ResponseWriter, targets []router.Target, msgs []provid
 	})
 }
 
-func writeSSE(w http.ResponseWriter, flusher http.Flusher, data string) {
-	_, _ = w.Write([]byte("data: " + data + "\n\n"))
-	if flusher != nil {
-		flusher.Flush()
+func writeAndFlush(w http.ResponseWriter, payload []byte) error {
+	for len(payload) > 0 {
+		n, err := w.Write(payload)
+		if n > len(payload) {
+			return io.ErrShortWrite
+		}
+		payload = payload[n:]
+		if err != nil {
+			return err
+		}
+		if n == 0 {
+			return io.ErrShortWrite
+		}
 	}
+	if err := http.NewResponseController(w).Flush(); err != nil && !errors.Is(err, http.ErrNotSupported) {
+		return err
+	}
+	return nil
+}
+
+func writeSSE(w http.ResponseWriter, data string) error {
+	return writeAndFlush(w, []byte("data: "+data+"\n\n"))
+}
+
+func recordClientCancelled(endpoint, requested string, principal *config.Principal, started time.Time) {
+	recordFailureUsage(endpoint, requested, principal, 499, "client_cancelled", started)
 }
 
 func providerErrorPayloadOpenAI() map[string]any {

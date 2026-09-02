@@ -565,6 +565,16 @@ func ExecuteResponsesStream(
 	requested string,
 	principal *config.Principal,
 ) (*ResponsesExecutionStream, *Target, error) {
+	return ExecuteResponsesStreamContext(context.Background(), targets, payload, requested, principal)
+}
+
+func ExecuteResponsesStreamContext(
+	ctx context.Context,
+	targets []Target,
+	payload map[string]any,
+	requested string,
+	principal *config.Principal,
+) (*ResponsesExecutionStream, *Target, error) {
 	if providers.ResponsesPayloadIsStateful(payload) && len(targets) > 1 {
 		targets = targets[:1]
 	}
@@ -573,8 +583,14 @@ func ExecuteResponsesStream(
 	var lastErr error
 	lastStatus := 0
 	for index := range targets {
+		if err := ctx.Err(); err != nil {
+			return nil, nil, err
+		}
 		target := targets[index]
 		provider, err := providers.GetProviderForPrincipal(target.Provider, principal)
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			return nil, nil, ctxErr
+		}
 		if err != nil {
 			attempts = append(attempts, attempt{
 				Provider: target.Provider, Model: target.Model,
@@ -583,7 +599,13 @@ func ExecuteResponsesStream(
 			lastErr = err
 			continue
 		}
-		stream, _, err := providers.StreamResponses(provider, target.Model, payload)
+		stream, _, err := providers.StreamResponsesContext(ctx, provider, target.Model, payload)
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			if stream != nil {
+				_ = stream.Close()
+			}
+			return nil, nil, ctxErr
+		}
 		native := true
 		if errors.Is(err, providers.ErrResponsesUnsupported) {
 			native = false
@@ -607,7 +629,16 @@ func ExecuteResponsesStream(
 				})
 				continue
 			}
-			stream, err = provider.Stream(target.Model, chatMessages, chatKw)
+			if ctxErr := ctx.Err(); ctxErr != nil {
+				return nil, nil, ctxErr
+			}
+			stream, err = providers.StreamProviderContext(ctx, provider, target.Model, chatMessages, chatKw)
+			if ctxErr := ctx.Err(); ctxErr != nil {
+				if stream != nil {
+					_ = stream.Close()
+				}
+				return nil, nil, ctxErr
+			}
 		}
 		if err != nil {
 			attempts = append(attempts, attempt{
@@ -767,17 +798,33 @@ func executeCompleteWithTrace(ctx context.Context, targets []Target, messages []
 
 // ExecuteStream runs the chain for a streaming request, failing over pre-first-byte.
 func ExecuteStream(targets []Target, messages []providers.Message, requested string, principal *config.Principal, kw providers.Kwargs) (providers.StreamIter, *Target, error) {
+	return ExecuteStreamContext(context.Background(), targets, messages, requested, principal, kw)
+}
+
+func ExecuteStreamContext(ctx context.Context, targets []Target, messages []providers.Message, requested string, principal *config.Principal, kw providers.Kwargs) (providers.StreamIter, *Target, error) {
 	var attempts []attempt
 	var lastErr error
 	for i := range targets {
+		if err := ctx.Err(); err != nil {
+			return nil, nil, err
+		}
 		t := targets[i]
 		prov, err := providers.GetProviderForPrincipal(t.Provider, principal)
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			return nil, nil, ctxErr
+		}
 		if err != nil {
 			attempts = append(attempts, attempt{Provider: t.Provider, Model: t.Model, OK: false, Error: truncate(err.Error()), Throttled: providers.IsThrottle(err)})
 			lastErr = err
 			continue
 		}
-		it, err := prov.Stream(t.Model, messages, kw)
+		it, err := providers.StreamProviderContext(ctx, prov, t.Model, messages, kw)
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			if it != nil {
+				_ = it.Close()
+			}
+			return nil, nil, ctxErr
+		}
 		if err != nil {
 			attempts = append(attempts, attempt{Provider: t.Provider, Model: t.Model, OK: false, Error: truncate(err.Error()), Throttled: providers.IsThrottle(err)})
 			lastErr = err
