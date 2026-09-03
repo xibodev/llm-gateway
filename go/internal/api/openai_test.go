@@ -156,6 +156,109 @@ func TestResponsesToChatRequestPreservesReasoningControls(t *testing.T) {
 	}
 }
 
+func TestChatResponseEnvelopeNormalization(t *testing.T) {
+	t.Setenv("LLMGW_STATE_DIR", t.TempDir())
+	iam.ResetForTests()
+	router.ResetSavingsState()
+	router.ResetTelemetryState()
+	if _, err := iam.Initialize(); err != nil {
+		t.Fatal(err)
+	}
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/models" {
+			writeJSON(w, http.StatusOK, map[string]any{"data": []any{
+				map[string]any{"id": "missing", "supported_endpoints": []string{"/chat/completions"}},
+				map[string]any{"id": "empty", "supported_endpoints": []string{"/chat/completions"}},
+				map[string]any{"id": "preserved", "supported_endpoints": []string{"/chat/completions"}},
+				map[string]any{"id": "adapted-exact", "supported_endpoints": []string{"/responses"}},
+				map[string]any{"id": "adapted-route-model", "supported_endpoints": []string{"/responses"}},
+			}})
+			return
+		}
+		var request map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+			http.Error(w, "invalid fixture request", http.StatusBadRequest)
+			return
+		}
+		model, _ := request["model"].(string)
+		switch r.URL.Path {
+		case "/chat/completions":
+			switch model {
+			case "missing":
+				writeJSON(w, http.StatusOK, map[string]any{"model": "upstream", "choices": []any{
+					map[string]any{"message": map[string]any{}}, map[string]any{"index": 8}, "provider-entry",
+				}, "copilot_usage": map[string]any{"quota": "preserved"}})
+			case "empty":
+				writeJSON(w, http.StatusOK, map[string]any{"object": "", "choices": []any{map[string]any{}}})
+			case "preserved":
+				writeJSON(w, http.StatusOK, map[string]any{"object": "provider.chat", "choices": []any{map[string]any{"index": 11}}})
+			default:
+				http.Error(w, "adapted model reached chat", http.StatusBadRequest)
+			}
+		case "/responses":
+			writeJSON(w, http.StatusOK, map[string]any{
+				"id": "resp_fixture", "object": "response", "status": "completed", "model": model,
+				"output": []any{map[string]any{"type": "message", "content": []any{map[string]any{"type": "output_text", "text": "ok"}}}},
+			})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer upstream.Close()
+	config.Update(func(s *config.Settings) {
+		s.APIKey = "gateway-token"
+		s.AllowUnauthenticatedAPI = false
+		s.Providers = map[string]*config.ProviderConfig{"fixture": {Type: "openai_compatible", BaseURL: upstream.URL, APIKey: "fixture"}}
+		s.Endpoints = map[string]*config.EndpointConfig{
+			"empty-route":   {Failover: []config.EndpointMember{{Provider: "fixture", Model: "empty"}}},
+			"adapted-route": {Failover: []config.EndpointMember{{Provider: "fixture", Model: "adapted-route-model"}}},
+		}
+	})
+	providers.ResetProviders()
+	if models := providers.RefreshCatalog("fixture"); len(models) != 5 {
+		t.Fatalf("catalog=%+v", models)
+	}
+	server := httptest.NewServer(NewServer())
+	t.Cleanup(func() {
+		server.Close()
+		providers.ResetProviders()
+		iam.ResetForTests()
+		router.ResetSavingsState()
+		router.ResetTelemetryState()
+	})
+	for _, tc := range []struct {
+		name, requested, wantModel, wantObject string
+		force, defect                          bool
+		wantIndex                              float64
+	}{
+		{"exact native defaults", "fixture/missing", "missing", "chat.completion", false, true, 0},
+		{"endpoint native empty object", "empty-route", "empty", "chat.completion", false, false, 0},
+		{"exact native preserves", "fixture/preserved", "preserved", "provider.chat", false, false, 11},
+		{"exact adapted", "fixture/adapted-exact", "adapted-exact", "chat.completion", true, false, 0},
+		{"endpoint adapted", "adapted-route", "adapted-route-model", "chat.completion", true, false, 0},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			payload := map[string]any{"model": tc.requested, "messages": []any{map[string]any{"role": "user", "content": "hi"}}}
+			if tc.force {
+				payload["force_api_support"] = true
+			}
+			status, response := jsonRequest(t, server.URL+"/v1/chat/completions", http.MethodPost, "gateway-token", payload)
+			choices, _ := response["choices"].([]any)
+			if status != http.StatusOK || response["model"] != tc.wantModel || response["object"] != tc.wantObject || len(choices) == 0 || choices[0].(map[string]any)["index"] != tc.wantIndex {
+				t.Fatalf("status=%d response=%+v", status, response)
+			}
+			if tc.defect {
+				if choices[1].(map[string]any)["index"] != float64(8) || choices[2] != "provider-entry" || response["copilot_usage"].(map[string]any)["quota"] != "preserved" {
+					t.Fatalf("provider fields changed: %+v", response)
+				}
+				if _, exists := response["id"]; exists || len(choices[0].(map[string]any)["message"].(map[string]any)) != 0 {
+					t.Fatalf("unrequested fields synthesized: %+v", response)
+				}
+			}
+		})
+	}
+}
+
 func setupResponsesAPITest(t *testing.T) *httptest.Server {
 	t.Helper()
 	t.Setenv("LLMGW_STATE_DIR", t.TempDir())

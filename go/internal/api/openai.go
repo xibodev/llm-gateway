@@ -201,8 +201,25 @@ func chatDispatch(w http.ResponseWriter, r *http.Request, req *chatRequest, prin
 		}
 	}
 	response["model"] = served.Model
+	normalizeChatResponseEnvelope(response)
 	recordFromResponse(endpoint, req.Model, served, principal, response, time.Since(started).Milliseconds())
 	writeJSON(w, 200, response)
+}
+
+func normalizeChatResponseEnvelope(response map[string]any) {
+	if object, ok := response["object"]; !ok || object == nil || object == "" {
+		response["object"] = "chat.completion"
+	}
+	choices, _ := response["choices"].([]any)
+	for index, raw := range choices {
+		choice, ok := raw.(map[string]any)
+		if !ok {
+			continue
+		}
+		if _, exists := choice["index"]; !exists {
+			choice["index"] = index
+		}
+	}
 }
 
 // writeUpstreamError surfaces the real upstream status + (redacted) detail when
