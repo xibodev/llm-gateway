@@ -164,12 +164,21 @@ func TestChatResponseEnvelopeNormalization(t *testing.T) {
 	if _, err := iam.Initialize(); err != nil {
 		t.Fatal(err)
 	}
+	streamChunks := []string{
+		`{"id":"chatcmpl_real","created":1777777777,"model":"provider-model","choices":[{"index":0,"delta":{"role":"assistant"}}]}`,
+		`{"id":"chatcmpl_real","created":1777777777,"model":"provider-model","choices":[{"index":3,"delta":{"content":"hello"}}],"provider_extra":{"trace":"keep"}}`,
+		`{"id":"chatcmpl_real","object":null,"created":1777777777,"model":"provider-model","choices":[{"index":0,"delta":{"content":" null"}}]}`,
+		`{"id":"chatcmpl_real","object":"","created":1777777777,"model":"provider-model","choices":[{"index":0,"delta":{"content":" empty"}}]}`,
+		`{"id":"chatcmpl_real","object":"provider.chunk","created":1777777777,"model":"provider-model","choices":[{"index":4,"delta":{"content":" preserved"},"finish_reason":null}]}`,
+		`{"id":"chatcmpl_real","created":1777777777,"model":"provider-model","choices":[{"index":0,"delta":{},"finish_reason":"stop"}],"usage":{"prompt_tokens":9,"completion_tokens":2,"total_tokens":11},"copilot_usage":{"quota_snapshots":{"chat":7}}}`,
+	}
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/models" {
 			writeJSON(w, http.StatusOK, map[string]any{"data": []any{
 				map[string]any{"id": "missing", "supported_endpoints": []string{"/chat/completions"}},
 				map[string]any{"id": "empty", "supported_endpoints": []string{"/chat/completions"}},
 				map[string]any{"id": "preserved", "supported_endpoints": []string{"/chat/completions"}},
+				map[string]any{"id": "stream", "supported_endpoints": []string{"/chat/completions"}},
 				map[string]any{"id": "adapted-exact", "supported_endpoints": []string{"/responses"}},
 				map[string]any{"id": "adapted-route-model", "supported_endpoints": []string{"/responses"}},
 			}})
@@ -184,6 +193,12 @@ func TestChatResponseEnvelopeNormalization(t *testing.T) {
 		switch r.URL.Path {
 		case "/chat/completions":
 			switch model {
+			case "stream":
+				w.Header().Set("Content-Type", "text/event-stream")
+				for _, chunk := range streamChunks {
+					_, _ = io.WriteString(w, "data: "+chunk+"\n\n")
+				}
+				_, _ = io.WriteString(w, "data: provider-heartbeat\n\ndata: [DONE]\n\n")
 			case "missing":
 				writeJSON(w, http.StatusOK, map[string]any{"model": "upstream", "choices": []any{
 					map[string]any{"message": map[string]any{}}, map[string]any{"index": 8}, "provider-entry",
@@ -215,7 +230,7 @@ func TestChatResponseEnvelopeNormalization(t *testing.T) {
 		}
 	})
 	providers.ResetProviders()
-	if models := providers.RefreshCatalog("fixture"); len(models) != 5 {
+	if models := providers.RefreshCatalog("fixture"); len(models) != 6 {
 		t.Fatalf("catalog=%+v", models)
 	}
 	server := httptest.NewServer(NewServer())
@@ -257,6 +272,32 @@ func TestChatResponseEnvelopeNormalization(t *testing.T) {
 			}
 		})
 	}
+	t.Run("stream chunks", func(t *testing.T) {
+		status, body := cliRequest(t, server.URL+"/v1/chat/completions", map[string]any{
+			"model": "fixture/stream", "stream": true,
+			"messages": []any{map[string]any{"role": "user", "content": "hi"}},
+		})
+		records := strings.Split(strings.TrimSuffix(string(body), "\n\n"), "\n\n")
+		if status != http.StatusOK || len(records) != len(streamChunks)+2 ||
+			records[len(streamChunks)] != "data: provider-heartbeat" ||
+			records[len(records)-1] != "data: [DONE]" || strings.Count(string(body), "data: [DONE]\n\n") != 1 {
+			t.Fatalf("status=%d stream=%q", status, body)
+		}
+		for i, raw := range streamChunks {
+			var got, want map[string]any
+			if !strings.HasPrefix(records[i], "data: ") || json.Unmarshal([]byte(strings.TrimPrefix(records[i], "data: ")), &got) != nil || json.Unmarshal([]byte(raw), &want) != nil {
+				t.Fatalf("chunk %d is not JSON: %q", i, records[i])
+			}
+			if want["object"] == nil || want["object"] == "" {
+				want["object"] = "chat.completion.chunk"
+			}
+			gotJSON, _ := json.Marshal(got)
+			wantJSON, _ := json.Marshal(want)
+			if !bytes.Equal(gotJSON, wantJSON) {
+				t.Fatalf("chunk %d changed: got=%s want=%s", i, gotJSON, wantJSON)
+			}
+		}
+	})
 }
 
 func setupResponsesAPITest(t *testing.T) *httptest.Server {
