@@ -286,7 +286,7 @@ func streamChatSSE(w http.ResponseWriter, ctx context.Context, targets []router.
 			recordClientCancelled(endpoint, requested, principal, started)
 			return
 		}
-		if err := writeSSE(w, chunk); err != nil {
+		if err := writeChatSSE(w, chunk); err != nil {
 			recordClientCancelled(endpoint, requested, principal, started)
 			return
 		}
@@ -340,6 +340,25 @@ func writeAndFlush(w http.ResponseWriter, payload []byte) error {
 
 func writeSSE(w http.ResponseWriter, data string) error {
 	return writeAndFlush(w, []byte("data: "+data+"\n\n"))
+}
+
+func writeChatSSE(w http.ResponseWriter, data string) error {
+	var chunk map[string]json.RawMessage
+	if err := json.Unmarshal([]byte(data), &chunk); err == nil && chunk != nil {
+		rawObject, exists := chunk["object"]
+		normalize := !exists
+		if exists {
+			var object *string
+			normalize = json.Unmarshal(rawObject, &object) == nil && (object == nil || *object == "")
+		}
+		if normalize {
+			chunk["object"] = json.RawMessage(`"chat.completion.chunk"`)
+			if normalized, err := json.Marshal(chunk); err == nil {
+				data = string(normalized)
+			}
+		}
+	}
+	return writeSSE(w, data)
 }
 
 func recordClientCancelled(endpoint, requested string, principal *config.Principal, started time.Time) {
