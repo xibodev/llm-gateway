@@ -58,6 +58,18 @@ environment variables or an ephemeral config directory pointing to
 `http://127.0.0.1:8898`. Do not install the clients in the gateway container and
 do not persist provider or gateway credentials in this repository.
 
+For Claude Code with a stored login or settings-level base URL, force API-key
+mode with `--bare`, put the gateway key in `ANTHROPIC_API_KEY`, and override
+`ANTHROPIC_BASE_URL` through per-invocation `--settings`. A Chat-only Claude
+target also needs thinking and prompt caching disabled for the core-profile
+smoke; the gateway intentionally rejects adaptive thinking, structured output,
+and cache controls rather than silently dropping them.
+
+Codex must use a model whose catalog row advertises `/responses`; a Chat-only
+model cannot preserve its encrypted reasoning state. Copilot CLI should use
+`COPILOT_PROVIDER_WIRE_API=completions` for a Chat-only model. Filter tools at
+the client for no-tool checks; the gateway does not discard native tools.
+
 The gate verifies:
 
 1. direct endpoint responses for models, Messages, token counting, Chat, and

@@ -110,3 +110,26 @@ func TestV043OfficialOpenAIUsesNativeResponsesWithoutCatalogMetadata(t *testing.
 		t.Fatal("official OpenAI should attempt its native Responses endpoint")
 	}
 }
+
+func TestV043ChatPayloadPreservesFallbackControls(t *testing.T) {
+	payload := buildOpenAIPayload("model", []Message{{"role": "user", "content": "hi"}}, true, Kwargs{
+		"metadata":            map[string]any{"client": "fixture"},
+		"parallel_tool_calls": false,
+		"reasoning_effort":    "high",
+		"thinking":            map[string]any{"type": "disabled"},
+	})
+	if value, ok := payload["parallel_tool_calls"].(bool); !ok || value {
+		t.Fatalf("parallel_tool_calls=%#v", payload["parallel_tool_calls"])
+	}
+	if payload["reasoning_effort"] != "high" {
+		t.Fatalf("reasoning_effort=%#v", payload["reasoning_effort"])
+	}
+	thinking, ok := payload["thinking"].(map[string]any)
+	if !ok || thinking["type"] != "disabled" {
+		t.Fatalf("thinking=%#v", payload["thinking"])
+	}
+	metadata, ok := payload["metadata"].(map[string]any)
+	if !ok || metadata["client"] != "fixture" {
+		t.Fatalf("metadata=%#v", payload["metadata"])
+	}
+}

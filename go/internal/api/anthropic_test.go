@@ -16,6 +16,7 @@ import (
 	"llmgw/internal/iam"
 	"llmgw/internal/providers"
 	"llmgw/internal/router"
+	"llmgw/internal/translate"
 )
 
 func TestAnthropicKwargsMapsAdaptiveEffort(t *testing.T) {
@@ -33,6 +34,90 @@ func TestAnthropicKwargsMapsAdaptiveEffort(t *testing.T) {
 	}
 	if got, ok := kw["output_config"].(map[string]any); !ok || got["effort"] != "xhigh" {
 		t.Fatalf("output_config = %#v, want xhigh map", kw["output_config"])
+	}
+}
+
+func TestAnthropicStreamingMapsCodingClientControls(t *testing.T) {
+	_, kw, incompatible := translate.AnthropicRequestToOpenAI(map[string]any{
+		"model": "claude-sonnet-5", "max_tokens": 64, "stream": true,
+		"messages":      []any{map[string]any{"role": "user", "content": "hello"}},
+		"metadata":      map[string]any{"user_id": "fixture"},
+		"thinking":      map[string]any{"type": "disabled"},
+		"output_config": map[string]any{"effort": "xhigh"},
+	})
+	if len(incompatible) != 0 {
+		t.Fatalf("incompatible=%v", incompatible)
+	}
+	if kw["reasoning_effort"] != "xhigh" {
+		t.Fatalf("reasoning_effort=%#v", kw["reasoning_effort"])
+	}
+	metadata, ok := kw["metadata"].(map[string]any)
+	if !ok || metadata["user_id"] != "fixture" {
+		t.Fatalf("metadata=%#v", kw["metadata"])
+	}
+}
+
+func TestAnthropicStreamingRejectsLossyClientControls(t *testing.T) {
+	for name, control := range map[string]map[string]any{
+		"adaptive thinking": {"thinking": map[string]any{"type": "adaptive"}},
+		"structured output": {"output_config": map[string]any{
+			"effort": "high", "format": map[string]any{"type": "json_schema"},
+		}},
+		"unknown effort": {"output_config": map[string]any{"effort": "extreme"}},
+	} {
+		t.Run(name, func(t *testing.T) {
+			payload := map[string]any{
+				"model": "claude-sonnet-5", "max_tokens": 64, "stream": true,
+				"messages": []any{map[string]any{"role": "user", "content": "hello"}},
+			}
+			for key, value := range control {
+				payload[key] = value
+			}
+			if _, _, incompatible := translate.AnthropicRequestToOpenAI(payload); len(incompatible) == 0 {
+				t.Fatal("lossy controls unexpectedly converted")
+			}
+		})
+	}
+}
+
+func TestAnthropicStreamingTargetIncompatibilityReturnsHTTPError(t *testing.T) {
+	t.Setenv("LLMGW_STATE_DIR", t.TempDir())
+	iam.ResetForTests()
+	router.ResetSavingsState()
+	router.ResetTelemetryState()
+	if _, err := iam.Initialize(); err != nil {
+		t.Fatal(err)
+	}
+	config.Update(func(settings *config.Settings) {
+		settings.APIKey = "gateway-token"
+		settings.AllowUnauthenticatedAPI = false
+		settings.Providers = map[string]*config.ProviderConfig{
+			"echo": {Type: "echo"},
+		}
+	})
+	providers.ResetProviders()
+	t.Cleanup(func() {
+		providers.ResetProviders()
+		iam.ResetForTests()
+		router.ResetSavingsState()
+		router.ResetTelemetryState()
+	})
+
+	response := anthropicFixtureRequest(t, map[string]any{
+		"model": "echo/echo-default", "max_tokens": 8, "stream": true,
+		"messages": []any{map[string]any{"role": "user", "content": "hello"}},
+		"metadata": map[string]any{"user_id": "fixture"},
+		"thinking": map[string]any{"type": "disabled"},
+	})
+	if response.Code != http.StatusBadRequest {
+		t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
+	}
+	if contentType := response.Header().Get("Content-Type"); contentType != "application/json" {
+		t.Fatalf("content type=%q", contentType)
+	}
+	if strings.Contains(response.Body.String(), "event: error") ||
+		!strings.Contains(response.Body.String(), "cannot preserve Anthropic thinking") {
+		t.Fatalf("body=%s", response.Body.String())
 	}
 }
 
@@ -296,13 +381,15 @@ func TestAnthropicMessagesRejectsLossBeforeDispatch(t *testing.T) {
 			"messages": []any{map[string]any{"role": "user", "content": []any{
 				map[string]any{"type": "document", "source": map[string]any{"type": "base64"}},
 				map[string]any{"type": "thinking", "thinking": "secret"},
-			}}}, "output_config": map[string]any{"effort": "high"},
+			}}}, "output_config": map[string]any{
+				"effort": "high", "format": map[string]any{"type": "json_schema"},
+			},
 		})
 		if response.Code != http.StatusBadRequest {
 			t.Fatalf("stream=%v status=%d body=%s", stream, response.Code, response.Body.String())
 		}
 		body := response.Body.String()
-		if !strings.Contains(body, "messages.0.content.0, messages.0.content.1, output_config") {
+		if !strings.Contains(body, "messages.0.content.0, messages.0.content.1, output_config.format") {
 			t.Fatalf("non-deterministic paths: %s", body)
 		}
 	}

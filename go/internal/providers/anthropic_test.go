@@ -22,6 +22,7 @@ func TestAnthropicNativePayloadPreservesThinkingAndOutputConfig(t *testing.T) {
 		Kwargs{
 			"thinking":      map[string]any{"type": "adaptive"},
 			"output_config": map[string]any{"effort": "xhigh"},
+			"metadata":      map[string]any{"user_id": "fixture"},
 		},
 	)
 
@@ -32,6 +33,10 @@ func TestAnthropicNativePayloadPreservesThinkingAndOutputConfig(t *testing.T) {
 	outputConfig, ok := payload["output_config"].(map[string]any)
 	if !ok || outputConfig["effort"] != "xhigh" {
 		t.Fatalf("output_config = %#v, want xhigh map", payload["output_config"])
+	}
+	metadata, ok := payload["metadata"].(map[string]any)
+	if !ok || metadata["user_id"] != "fixture" {
+		t.Fatalf("metadata = %#v, want fixture user", payload["metadata"])
 	}
 }
 

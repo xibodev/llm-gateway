@@ -84,7 +84,7 @@ Some OpenAI-family models speak only one API (for example, Copilot GPT-5.x model
 Opt in per provider with `force_api_support: true` or per request with `"force_api_support": true`. The gateway uses the persisted model catalog's `supported_surfaces` (the pre-rename `supported_endpoints` field, deprecated) to decide deterministically, translates Chat Completions to Responses when needed, and marks adapted replies with `X-LLMGW-Adapted` (request-level opt-in also echoes `forced_support` in the body).
 
 ## Wire up a CLI
-- **Claude Code:** `ANTHROPIC_BASE_URL=http://127.0.0.1:8787` + `ANTHROPIC_AUTH_TOKEN=<LLMGW_API_KEY>`
+- **Claude Code:** `ANTHROPIC_BASE_URL=http://127.0.0.1:8787` + `ANTHROPIC_API_KEY=<LLMGW_API_KEY>`; use `--bare` to force API-key mode when a stored OAuth login exists
 - **Codex:** provider `base_url=http://127.0.0.1:8787/v1`
 - **Copilot CLI (BYOK):** `COPILOT_PROVIDER_BASE_URL=http://127.0.0.1:8787/v1` + `COPILOT_PROVIDER_API_KEY=<LLMGW_API_KEY>`
 

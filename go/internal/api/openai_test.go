@@ -384,17 +384,26 @@ func TestResponsesEndpointStreamsResponsesEvents(t *testing.T) {
 
 func TestResponsesFallbackRejectsUnsupportedGuaranteesAndStatefulRoutes(t *testing.T) {
 	server := setupResponsesAPITest(t)
-	status, _ := jsonRequest(
-		t, server.URL+"/v1/responses", http.MethodPost, "test-secret",
-		map[string]any{
-			"model": "echo/echo-default", "input": "hello",
-			"text": map[string]any{
-				"format": map[string]any{"type": "json_schema"},
-			},
-		},
-	)
-	if status != http.StatusBadRequest {
-		t.Fatalf("unsupported fallback field status=%d", status)
+	for name, control := range map[string]map[string]any{
+		"structured output": {"text": map[string]any{
+			"format": map[string]any{"type": "json_schema"},
+		}},
+		"reasoning summary":   {"reasoning": map[string]any{"summary": "auto"}},
+		"encrypted reasoning": {"include": []any{"reasoning.encrypted_content"}},
+		"parallel tools":      {"parallel_tool_calls": false},
+	} {
+		t.Run(name, func(t *testing.T) {
+			payload := map[string]any{"model": "echo/echo-default", "input": "hello"}
+			for key, value := range control {
+				payload[key] = value
+			}
+			status, _ := jsonRequest(
+				t, server.URL+"/v1/responses", http.MethodPost, "test-secret", payload,
+			)
+			if status != http.StatusBadRequest {
+				t.Fatalf("unsupported fallback field status=%d", status)
+			}
+		})
 	}
 	config.Update(func(s *config.Settings) {
 		s.Endpoints["multi"] = &config.EndpointConfig{Failover: []config.EndpointMember{
@@ -405,7 +414,7 @@ func TestResponsesFallbackRejectsUnsupportedGuaranteesAndStatefulRoutes(t *testi
 			{Provider: "echo", Model: "echo-default"},
 		}}
 	})
-	status, _ = jsonRequest(
+	status, _ := jsonRequest(
 		t, server.URL+"/v1/responses", http.MethodPost, "test-secret",
 		map[string]any{
 			"model": "multi", "input": "hello", "previous_response_id": "resp_prior",

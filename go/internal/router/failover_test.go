@@ -401,6 +401,60 @@ func TestResponsesFallbackRejectsUnsupportedToolConstraints(t *testing.T) {
 	}
 }
 
+func TestTargetCompatibilityPreservesClientControls(t *testing.T) {
+	setupEcho(t)
+	config.Update(func(settings *config.Settings) {
+		settings.Providers["chat"] = &config.ProviderConfig{Type: "openai_compatible"}
+		settings.Providers["anthropic"] = &config.ProviderConfig{Type: "anthropic"}
+		settings.Providers["copilot-chat"] = &config.ProviderConfig{Type: "github_copilot"}
+		settings.Providers["copilot-adapt"] = &config.ProviderConfig{Type: "github_copilot", ForceApiSupport: true}
+	})
+	chat := Target{Provider: "chat", Model: "model"}
+	unsupported := Target{Provider: "echo", Model: "echo-default"}
+
+	if err := anthropicControlsCompatibility(chat, nil, providers.Kwargs{
+		"metadata": map[string]any{"user_id": "fixture"}, "reasoning_effort": "high",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := anthropicControlsCompatibility(Target{Provider: "anthropic", Model: "model"}, nil, providers.Kwargs{
+		"thinking": map[string]any{"type": "disabled"},
+	}); err != nil {
+		t.Fatalf("native Anthropic should preserve disabled thinking: %v", err)
+	}
+	if err := anthropicControlsCompatibility(Target{Provider: "copilot-chat", Model: "model"}, nil, providers.Kwargs{
+		"thinking": map[string]any{"type": "disabled"},
+	}); err != nil {
+		t.Fatalf("Copilot Chat should preserve disabled thinking: %v", err)
+	}
+	if err := anthropicControlsCompatibility(Target{Provider: "copilot-adapt", Model: "model"}, nil, providers.Kwargs{
+		"thinking": map[string]any{"type": "disabled"},
+	}); err == nil {
+		t.Fatal("forced Copilot adaptation accepted thinking without a verified Chat surface")
+	}
+	for name, kw := range map[string]providers.Kwargs{
+		"metadata": {"metadata": map[string]any{"user_id": "fixture"}},
+		"effort":   {"reasoning_effort": "high"},
+		"thinking": {"thinking": map[string]any{"type": "disabled"}},
+	} {
+		t.Run(name, func(t *testing.T) {
+			if err := anthropicControlsCompatibility(unsupported, nil, kw); err == nil {
+				t.Fatal("unsupported Anthropic control was accepted")
+			}
+		})
+	}
+	if err := responsesFallbackCompatibility(chat, nil, nil, providers.Kwargs{
+		"parallel_tool_calls": false,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := responsesFallbackCompatibility(Target{Provider: "anthropic", Model: "model"}, nil, nil, providers.Kwargs{
+		"parallel_tool_calls": false,
+	}); err == nil {
+		t.Fatal("Anthropic fallback silently accepted parallel_tool_calls")
+	}
+}
+
 func TestRecordUsageWritesControlPlaneLedger(t *testing.T) {
 	t.Setenv("LLMGW_STATE_DIR", t.TempDir())
 	iam.ResetForTests()

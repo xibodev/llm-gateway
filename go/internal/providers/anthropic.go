@@ -83,6 +83,9 @@ func (p AnthropicNativeProvider) payload(model string, messages []Message, strea
 			payload["tools"] = t
 		}
 	}
+	if metadata, ok := kw["metadata"].(map[string]any); ok {
+		payload["metadata"] = metadata
+	}
 	if thinking, ok := kw["thinking"].(map[string]any); ok && len(thinking) > 0 {
 		payload["thinking"] = thinking
 	}

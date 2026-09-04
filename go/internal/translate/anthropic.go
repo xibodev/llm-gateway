@@ -91,7 +91,7 @@ func allowedKeys(incompatible *[]string, path string, object map[string]any, key
 // returned paths name every value that an OpenAI Chat target would lose.
 func AnthropicRequestToOpenAI(payload map[string]any) ([]map[string]any, map[string]any, []string) {
 	var incompatible []string
-	allowedKeys(&incompatible, "", payload, "model", "messages", "max_tokens", "system", "tools", "tool_choice", "stream", "temperature", "top_p", "stop_sequences", "_llmgw_preamble")
+	allowedKeys(&incompatible, "", payload, "model", "messages", "max_tokens", "system", "tools", "tool_choice", "stream", "temperature", "top_p", "stop_sequences", "metadata", "thinking", "output_config", "_llmgw_preamble")
 	textBlocks := func(value any, path string) (string, bool) {
 		if text, ok := value.(string); ok {
 			return text, true
@@ -223,6 +223,38 @@ func AnthropicRequestToOpenAI(payload map[string]any) ([]map[string]any, map[str
 	for source, target := range map[string]string{"max_tokens": "max_tokens", "temperature": "temperature", "top_p": "top_p", "stop_sequences": "stop"} {
 		if value := payload[source]; value != nil {
 			kw[target] = value
+		}
+	}
+	if metadata := payload["metadata"]; metadata != nil {
+		if value, ok := metadata.(map[string]any); ok {
+			kw["metadata"] = value
+		} else {
+			incompatible = append(incompatible, "metadata")
+		}
+	}
+	if rawThinking := payload["thinking"]; rawThinking != nil {
+		thinking, ok := rawThinking.(map[string]any)
+		allowedKeys(&incompatible, "thinking", thinking, "type")
+		if !ok || thinking["type"] != "disabled" {
+			incompatible = append(incompatible, "thinking")
+		} else {
+			kw["thinking"] = thinking
+		}
+	}
+	if rawOutputConfig := payload["output_config"]; rawOutputConfig != nil {
+		outputConfig, ok := rawOutputConfig.(map[string]any)
+		allowedKeys(&incompatible, "output_config", outputConfig, "effort")
+		effort, effortOK := outputConfig["effort"].(string)
+		switch effort {
+		case "low", "medium", "high", "xhigh", "max":
+		default:
+			effortOK = false
+		}
+		if !ok || !effortOK {
+			incompatible = append(incompatible, "output_config.effort")
+		} else {
+			kw["output_config"] = outputConfig
+			kw["reasoning_effort"] = effort
 		}
 	}
 	if rawTools := payload["tools"]; rawTools != nil {

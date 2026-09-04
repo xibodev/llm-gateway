@@ -496,7 +496,7 @@ func ExecuteAnthropicMessagesContext(
 			result, err = providers.CompleteAnthropicMessages(provider, target.Model, payload)
 		} else if requiresNative {
 			continue
-		} else if err = anthropicFallbackCompatibility(target, principal, messages); err == nil {
+		} else if err = anthropicFallbackCompatibility(target, principal, messages, kw); err == nil {
 			var chat map[string]any
 			chat, err = providers.CompleteProviderContext(ctx, provider, target.Model, messages, kw)
 			if err == nil {
@@ -530,7 +530,10 @@ func ExecuteAnthropicMessagesContext(
 	return nil, nil, &AllTargetsFailed{Msg: message, Status: lastStatus}
 }
 
-func anthropicFallbackCompatibility(target Target, principal *config.Principal, messages []map[string]any) error {
+func anthropicFallbackCompatibility(target Target, principal *config.Principal, messages []map[string]any, kw providers.Kwargs) error {
+	if err := anthropicControlsCompatibility(target, principal, kw); err != nil {
+		return err
+	}
 	hasImages := false
 	for _, message := range messages {
 		parts, _ := message["content"].([]any)
@@ -550,6 +553,39 @@ func anthropicFallbackCompatibility(target Target, principal *config.Principal, 
 	}
 	if vision, _ := model.Capabilities["vision"].(bool); !vision {
 		return &providers.ConfigError{Msg: "Anthropic image adaptation target is not vision-capable"}
+	}
+	return nil
+}
+
+func anthropicControlsCompatibility(target Target, principal *config.Principal, kw providers.Kwargs) error {
+	providerConfig := config.Get().Providers[target.Provider]
+	if providerConfig == nil {
+		return &providers.ConfigError{Msg: "provider is not configured"}
+	}
+	providerType := strings.ToLower(strings.TrimSpace(providerConfig.Type))
+	if providerType == "anthropic" {
+		return nil
+	}
+	if _, present := kw["thinking"]; present {
+		if providerType != "github_copilot" {
+			return &providers.ConfigError{Msg: "selected provider cannot preserve Anthropic thinking"}
+		}
+		if providerConfig.ForceApiSupport {
+			model, ok := providers.CatalogLookupForPrincipal(target.Provider, target.Model, principal)
+			if !ok || translate.PreferredEndpoint(model.SupportedSurfaces) != "chat" {
+				return &providers.ConfigError{Msg: "selected provider cannot preserve Anthropic thinking on a Responses-only model"}
+			}
+		}
+	}
+	switch providerType {
+	case "openai_compatible", "openai", "github_copilot", "bedrock", "litellm", "azure_openai":
+		return nil
+	}
+	if metadata, ok := kw["metadata"].(map[string]any); ok && len(metadata) > 0 {
+		return &providers.ConfigError{Msg: "selected provider cannot preserve Anthropic metadata"}
+	}
+	if kw["reasoning_effort"] != nil {
+		return &providers.ConfigError{Msg: "selected provider cannot preserve Anthropic output_config.effort"}
 	}
 	return nil
 }
@@ -712,7 +748,7 @@ func responsesFallbackCompatibility(
 	if len(tools) > 0 {
 		switch providerType {
 		case "openai_compatible", "openai", "github_copilot", "bedrock", "litellm",
-			"anthropic", "ollama":
+			"azure_openai", "anthropic", "ollama":
 		default:
 			return &providers.ConfigError{
 				Msg: "selected provider cannot preserve Responses tools",
@@ -737,7 +773,7 @@ func responsesFallbackCompatibility(
 	}
 	if kw["reasoning_effort"] != nil {
 		switch providerType {
-		case "openai_compatible", "openai", "github_copilot", "bedrock", "litellm":
+		case "openai_compatible", "openai", "github_copilot", "bedrock", "litellm", "azure_openai":
 		default:
 			return &providers.ConfigError{
 				Msg: "selected provider cannot preserve Responses reasoning controls",
@@ -746,11 +782,18 @@ func responsesFallbackCompatibility(
 	}
 	if metadata, ok := kw["metadata"].(map[string]any); ok && len(metadata) > 0 {
 		switch providerType {
-		case "openai_compatible", "openai", "github_copilot", "bedrock", "litellm":
+		case "openai_compatible", "openai", "github_copilot", "bedrock", "litellm", "azure_openai":
 		default:
 			return &providers.ConfigError{
 				Msg: "selected provider cannot preserve Responses metadata",
 			}
+		}
+	}
+	if _, present := kw["parallel_tool_calls"]; present {
+		switch providerType {
+		case "openai_compatible", "openai", "github_copilot", "bedrock", "litellm", "azure_openai":
+		default:
+			return &providers.ConfigError{Msg: "selected provider cannot preserve Responses parallel_tool_calls"}
 		}
 	}
 	return nil
@@ -802,13 +845,32 @@ func ExecuteStream(targets []Target, messages []providers.Message, requested str
 }
 
 func ExecuteStreamContext(ctx context.Context, targets []Target, messages []providers.Message, requested string, principal *config.Principal, kw providers.Kwargs) (providers.StreamIter, *Target, error) {
+	return executeStreamContext(ctx, targets, messages, requested, principal, kw, nil)
+}
+
+func ExecuteAnthropicStreamContext(ctx context.Context, targets []Target, messages []providers.Message, requested string, principal *config.Principal, kw providers.Kwargs) (providers.StreamIter, *Target, error) {
+	return executeStreamContext(ctx, targets, messages, requested, principal, kw, func(target Target) error {
+		return anthropicControlsCompatibility(target, principal, kw)
+	})
+}
+
+func executeStreamContext(ctx context.Context, targets []Target, messages []providers.Message, requested string, principal *config.Principal, kw providers.Kwargs, validate func(Target) error) (providers.StreamIter, *Target, error) {
 	var attempts []attempt
 	var lastErr error
+	lastStatus := 0
 	for i := range targets {
 		if err := ctx.Err(); err != nil {
 			return nil, nil, err
 		}
 		t := targets[i]
+		if validate != nil {
+			if err := validate(t); err != nil {
+				attempts = append(attempts, attempt{Provider: t.Provider, Model: t.Model, Error: truncate(err.Error())})
+				lastErr = err
+				lastStatus = 400
+				continue
+			}
+		}
 		prov, err := providers.GetProviderForPrincipal(t.Provider, principal)
 		if ctxErr := ctx.Err(); ctxErr != nil {
 			return nil, nil, ctxErr
@@ -816,6 +878,7 @@ func ExecuteStreamContext(ctx context.Context, targets []Target, messages []prov
 		if err != nil {
 			attempts = append(attempts, attempt{Provider: t.Provider, Model: t.Model, OK: false, Error: truncate(err.Error()), Throttled: providers.IsThrottle(err)})
 			lastErr = err
+			lastStatus = providers.UpstreamStatus(err)
 			continue
 		}
 		it, err := providers.StreamProviderContext(ctx, prov, t.Model, messages, kw)
@@ -828,6 +891,7 @@ func ExecuteStreamContext(ctx context.Context, targets []Target, messages []prov
 		if err != nil {
 			attempts = append(attempts, attempt{Provider: t.Provider, Model: t.Model, OK: false, Error: truncate(err.Error()), Throttled: providers.IsThrottle(err)})
 			lastErr = err
+			lastStatus = providers.UpstreamStatus(err)
 			continue
 		}
 		attempts = append(attempts, attempt{Provider: t.Provider, Model: t.Model, OK: true})
@@ -840,7 +904,7 @@ func ExecuteStreamContext(ctx context.Context, targets []Target, messages []prov
 	if lastErr != nil {
 		msg = lastErr.Error()
 	}
-	return nil, nil, &AllTargetsFailed{Msg: msg, Status: providers.UpstreamStatus(lastErr)}
+	return nil, nil, &AllTargetsFailed{Msg: msg, Status: lastStatus}
 }
 
 func truncate(s string) string {

@@ -143,11 +143,7 @@ func handleMessages(w http.ResponseWriter, r *http.Request) {
 }
 
 func streamMessagesSSE(w http.ResponseWriter, ctx context.Context, targets []router.Target, msgs []providers.Message, requested string, principal *config.Principal, kw providers.Kwargs, started time.Time) {
-	w.Header().Set("Content-Type", "text/event-stream")
-	w.Header().Set("Cache-Control", "no-cache")
-	w.Header().Set("Connection", "keep-alive")
-
-	it, served, err := router.ExecuteStreamContext(ctx, targets, msgs, requested, principal, kw)
+	it, served, err := router.ExecuteAnthropicStreamContext(ctx, targets, msgs, requested, principal, kw)
 	if err != nil {
 		if ctx.Err() != nil {
 			recordClientCancelled("anthropic.messages", requested, principal, started)
@@ -157,11 +153,13 @@ func streamMessagesSSE(w http.ResponseWriter, ctx context.Context, targets []rou
 			"anthropic.messages", requested, principal, upstreamErrorStatus(err),
 			"upstream", started,
 		)
-		payload := map[string]any{"type": "error", "error": map[string]any{"type": "api_error", "message": "Upstream provider request failed."}}
-		_ = writeAndFlush(w, []byte("event: error\ndata: "+jsonStr(payload)+"\n\n"))
+		writeUpstreamError(w, err)
 		return
 	}
 	defer it.Close()
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("Connection", "keep-alive")
 	w.WriteHeader(http.StatusOK)
 
 	usageAcc := map[string]int{"prompt_tokens": 0, "completion_tokens": 0}

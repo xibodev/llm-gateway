@@ -39,7 +39,7 @@ func buildOpenAIPayload(model string, messages []Message, stream bool, kw Kwargs
 	for _, key := range []string{
 		"temperature", "top_p", "max_tokens", "max_completion_tokens",
 		"stop", "tools", "tool_choice", "reasoning_effort", "stream_options",
-		"metadata",
+		"metadata", "parallel_tool_calls", "thinking",
 	} {
 		if v, ok := kw[key]; ok && v != nil {
 			payload[key] = v
