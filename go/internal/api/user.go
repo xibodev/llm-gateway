@@ -1,6 +1,7 @@
 package api
 
 import (
+	"errors"
 	"net/http"
 	"sort"
 	"strconv"
@@ -146,6 +147,44 @@ func handleUserCreateKey(w http.ResponseWriter, r *http.Request) {
 		Detail: map[string]any{"project_id": projectID, "source": "self-service"},
 	})
 	writeJSON(w, 200, map[string]any{"token": issued.Token, "key": issued.APIKey})
+}
+
+func handleUserRevealKey(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Cache-Control", "no-store")
+	w.Header().Set("Pragma", "no-cache")
+	principal, ok := requireSSOUser(w, r)
+	if !ok {
+		return
+	}
+	keyID := strings.TrimSpace(r.PathValue("id"))
+	key, found, err := iam.APIKeyByID(keyID)
+	if err != nil {
+		writeError(w, 500, "Identity store unavailable.")
+		return
+	}
+	if !found || key.PrincipalID != principal.ID {
+		writeError(w, 404, "unknown key")
+		return
+	}
+	token, found, err := iam.RevealAPIKey(keyID)
+	if !found {
+		writeError(w, 404, "unknown key")
+		return
+	}
+	if errors.Is(err, iam.ErrAPIKeyNotRevealable) {
+		writeError(w, 409, "This key predates encrypted key recovery and cannot be revealed.")
+		return
+	}
+	if err != nil {
+		writeError(w, 500, "Encrypted key store unavailable.")
+		return
+	}
+	_ = iam.RecordAudit(iam.AuditEvent{
+		ActorPrincipalID: principal.ID, Action: "api_key.reveal",
+		TargetType: "api_key", TargetID: key.ID, Result: "success",
+		Detail: map[string]any{"source": "self-service"},
+	})
+	writeJSON(w, 200, map[string]any{"token": token})
 }
 
 func handleUserRevokeKey(w http.ResponseWriter, r *http.Request) {

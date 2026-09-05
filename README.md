@@ -22,7 +22,8 @@ named, ordered failover chains of pinned real models that cascade on
 - `GET /health`
 
 Multimodal requests (images) route to vision-capable models automatically. API
-keys are shown once and stored only as hashes. Key and project governance supports
+keys use hashes for authentication and encrypted copies may be revealed by their
+owner or an administrator. Key and project governance supports
 expiry, model/provider allowlists, persistent RPM, daily/monthly request, token,
 estimated-cost and model-credit budgets. Opt-in **API adaptation** lets a
 `/chat/completions` request reach a Responses-only model (e.g. `gpt-5.5`). See

@@ -15,8 +15,9 @@ SMTP or notification SDKs.
   only through an explicit project/provider/`service` binding.
 - **Project**: membership and aggregate policy boundary.
 - **Membership roles**: owner, admin, member, viewer.
-- **API key**: belongs to exactly one principal + project; full token shown once,
-  only SHA-256 hash + prefix stored.
+- **API key**: belongs to exactly one principal + project; requests authenticate
+  against its SHA-256 hash, while an encrypted token copy can be revealed only by
+  that principal or an administrator.
 
 ## SSO trust boundary
 

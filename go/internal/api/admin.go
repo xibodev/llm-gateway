@@ -249,6 +249,7 @@ func handleState(w http.ResponseWriter, r *http.Request) {
 			"monthly_cost_microusd": k.Policy.MonthlyCostMicroUSD,
 			"daily_credits_milli":   k.Policy.DailyCreditsMilli,
 			"monthly_credits_milli": k.Policy.MonthlyCreditsMilli,
+			"revealable":            k.Revealable,
 		})
 	}
 	principals, err := iam.ListPrincipals()
@@ -882,6 +883,30 @@ func handleCreateKey(w http.ResponseWriter, r *http.Request) {
 		"ok": true, "project": project.Slug, "name": name,
 		"token": issued.Token, "key": issued.APIKey,
 	})
+}
+
+func handleRevealKey(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Cache-Control", "no-store")
+	w.Header().Set("Pragma", "no-cache")
+	if !adminAuthed(w, r) {
+		return
+	}
+	keyID := strings.TrimSpace(r.PathValue("id"))
+	token, found, err := iam.RevealAPIKey(keyID)
+	if !found {
+		writeError(w, 404, "unknown key")
+		return
+	}
+	if errors.Is(err, iam.ErrAPIKeyNotRevealable) {
+		writeError(w, 409, "This key predates encrypted key recovery and cannot be revealed.")
+		return
+	}
+	if err != nil {
+		writeError(w, 500, "Encrypted key store unavailable.")
+		return
+	}
+	auditAdmin(r, "api_key.reveal", "api_key", keyID, nil)
+	writeJSON(w, 200, map[string]any{"token": token})
 }
 
 type keyUpdateBody struct {

@@ -11,8 +11,9 @@ owners, members and services are distinct principals.
   cannot call admin APIs.
 - **User auth**: Authentik/SSO assertions provision human principals and power
   `/portal`; same-origin checks protect SSO-authenticated mutations.
-- **API auth**: one-time `llmgw_...` keys assigned to exactly one principal and
-  project. Only SHA-256 hashes and display prefixes are stored.
+- **API auth**: `llmgw_...` keys assigned to exactly one principal and
+  project. Requests authenticate against SHA-256 hashes; encrypted token copies
+  support explicit owner/admin reveal when credential encryption is configured.
 - **Governance**: key + aggregate project policies enforce model/provider
   allowlists and persistent minute/day/month request, token, estimated-cost and
   model-credit limits through atomic SQLite counters.

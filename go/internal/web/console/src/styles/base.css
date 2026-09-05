@@ -343,6 +343,8 @@ tbody tr:last-child td { border-bottom: 0; }
 .key-editor footer, .key-secret-dialog footer { display: flex; justify-content: flex-end; gap: 8px; }
 .key-secret-warning { display: flex; gap: 8px; align-items: flex-start; margin: 0; padding: 10px; border: 1px solid #e7d7b8; background: #fffaf1; color: #78602f; font-size: 0.78rem; line-height: 1.42; }
 .key-secret-value { margin: 0; padding: 12px; overflow-x: auto; border: 1px solid #cfd8e5; background: #fafcff; color: #244d83; font-size: 0.77rem; }
+.key-value { display: inline-flex; align-items: center; gap: 6px; min-width: 0; }
+.key-value .technical { display: inline-block; max-width: 28rem; }
 .table-actions { display: flex; align-items: center; gap: 6px; }
 .advanced-settings details { margin-top: 16px; }
 .advanced-settings summary { color: #365f99; font-size: 0.8rem; font-weight: 650; cursor: pointer; }

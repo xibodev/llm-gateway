@@ -1,11 +1,16 @@
 package iam
 
 import (
+	"bytes"
+	"encoding/base64"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 	"time"
+
+	"llmgw/internal/config"
 )
 
 func TestIssueResolveAndDisableHashedKey(t *testing.T) {
@@ -71,6 +76,81 @@ func TestIssueResolveAndDisableHashedKey(t *testing.T) {
 	}
 	if _, ok, err := ResolveAPIKey(issued.Token); err != nil || ok {
 		t.Fatalf("disabled key resolved: ok=%v err=%v", ok, err)
+	}
+}
+
+func TestIssueAndRevealEncryptedAPIKey(t *testing.T) {
+	t.Setenv("LLMGW_STATE_DIR", t.TempDir())
+	ResetForTests()
+	oldKey := config.Get().CredentialEncryptionKey
+	config.Update(func(s *config.Settings) {
+		s.CredentialEncryptionKey = base64.RawURLEncoding.EncodeToString(make([]byte, 32))
+	})
+	t.Cleanup(func() {
+		ResetForTests()
+		config.Update(func(s *config.Settings) { s.CredentialEncryptionKey = oldKey })
+	})
+
+	principal, err := CreatePrincipal("human", "authentik:reveal", "", "Reveal Owner")
+	if err != nil {
+		t.Fatal(err)
+	}
+	project, err := CreateProject("reveal-project", "Reveal Project")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := SetMembership(project.ID, principal.ID, "owner"); err != nil {
+		t.Fatal(err)
+	}
+	issued, err := IssueKey(KeyCreate{ProjectID: project.ID, PrincipalID: principal.ID, Name: "laptop"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !issued.Revealable {
+		t.Fatal("new key is not marked revealable")
+	}
+	revealed, found, err := RevealAPIKey(issued.ID)
+	if err != nil || !found || revealed != issued.Token {
+		t.Fatalf("reveal: found=%v matches=%v err=%v", found, revealed == issued.Token, err)
+	}
+	raw, err := os.ReadFile(filepath.Join(config.StateDir(), "gateway.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(raw), issued.Token) {
+		t.Fatal("raw API token was stored in plaintext")
+	}
+
+	config.Update(func(s *config.Settings) {
+		s.CredentialEncryptionKey = base64.RawURLEncoding.EncodeToString(bytes.Repeat([]byte{1}, 32))
+	})
+	if _, found, err := RevealAPIKey(issued.ID); err == nil || !found {
+		t.Fatalf("wrong encryption key: found=%v err=%v", found, err)
+	}
+}
+
+func TestHashOnlyAPIKeyIsNotRevealable(t *testing.T) {
+	t.Setenv("LLMGW_STATE_DIR", t.TempDir())
+	ResetForTests()
+	oldKey := config.Get().CredentialEncryptionKey
+	config.Update(func(s *config.Settings) { s.CredentialEncryptionKey = "" })
+	t.Cleanup(func() {
+		ResetForTests()
+		config.Update(func(s *config.Settings) { s.CredentialEncryptionKey = oldKey })
+	})
+
+	principal, _ := CreatePrincipal("service", "service:legacy-reveal", "", "Legacy")
+	project, _ := CreateProject("legacy-reveal", "Legacy Reveal")
+	_ = SetMembership(project.ID, principal.ID, "member")
+	issued, err := IssueKey(KeyCreate{ProjectID: project.ID, PrincipalID: principal.ID, Name: "legacy"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if issued.Revealable {
+		t.Fatal("hash-only key is marked revealable")
+	}
+	if _, found, err := RevealAPIKey(issued.ID); !found || !errors.Is(err, ErrAPIKeyNotRevealable) {
+		t.Fatalf("hash-only reveal: found=%v err=%v", found, err)
 	}
 }
 

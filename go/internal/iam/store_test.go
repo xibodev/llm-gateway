@@ -1,6 +1,7 @@
 package iam
 
 import (
+	"bytes"
 	"database/sql"
 	"os"
 	"path/filepath"
@@ -125,6 +126,56 @@ VALUES('prn_existing','service','Existing','active',0,0)`); err != nil {
 SELECT name FROM sqlite_master
 WHERE type='table' AND name='provider_credential_bindings'`).Scan(&table); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestAPIKeyRecoveryMigrationPreservesHashOnlyKeys(t *testing.T) {
+	db, err := sql.Open("sqlite", filepath.Join(t.TempDir(), "gateway.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	if _, err := db.Exec(`CREATE TABLE schema_migrations (
+		version INTEGER PRIMARY KEY, applied_at INTEGER NOT NULL
+	)`); err != nil {
+		t.Fatal(err)
+	}
+	for _, migration := range migrations[:13] {
+		if _, err := db.Exec(migration.sql); err != nil {
+			t.Fatalf("apply migration %d: %v", migration.version, err)
+		}
+		if _, err := db.Exec(
+			"INSERT INTO schema_migrations(version,applied_at) VALUES(?,0)", migration.version,
+		); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := db.Exec(`
+INSERT INTO principals(id,kind,display_name,status,created_at,updated_at)
+VALUES('prn_key','service','Existing key','active',0,0);
+INSERT INTO projects(id,slug,name,status,created_at,updated_at)
+VALUES('prj_key','existing-key','Existing key','active',0,0);
+INSERT INTO project_memberships(project_id,principal_id,role,created_at)
+VALUES('prj_key','prn_key','member',0);
+INSERT INTO api_keys(id,prefix,secret_hash,project_id,principal_id,name,status,created_at)
+VALUES('key_existing','llmgw_existing...',X'0102','prj_key','prn_key','Existing','active',0);`); err != nil {
+		t.Fatal(err)
+	}
+	if err := applyMigrations(db); err != nil {
+		t.Fatal(err)
+	}
+	var prefix string
+	var hash, ciphertext, nonce []byte
+	if err := db.QueryRow(`
+SELECT prefix,secret_hash,secret_ciphertext,secret_nonce
+FROM api_keys WHERE id='key_existing'`).Scan(&prefix, &hash, &ciphertext, &nonce); err != nil {
+		t.Fatal(err)
+	}
+	if prefix != "llmgw_existing..." || !bytes.Equal(hash, []byte{1, 2}) {
+		t.Fatalf("existing key changed: prefix=%q hash=%x", prefix, hash)
+	}
+	if len(ciphertext) != 0 || len(nonce) != 0 {
+		t.Fatal("existing hash-only key unexpectedly gained recovery material")
 	}
 }
 

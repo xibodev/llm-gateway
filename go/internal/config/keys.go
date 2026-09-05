@@ -78,7 +78,7 @@ func writeKeys(data map[string]keyEntry) {
 	_ = os.WriteFile(keysFilePath(), b, 0o600)
 }
 
-// MintKey creates a new project key and returns the token (shown once).
+// MintKey creates a legacy plaintext-file project key and returns the token.
 func MintKey(project, name string) string {
 	project = strings.TrimSpace(project)
 	if project == "" {

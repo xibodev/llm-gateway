@@ -44,6 +44,14 @@ test("revoked keys have no console enable action", () => {
   assert.match(keys, /!revoked \? <button class="button button--secondary"/);
 });
 
+test("recoverable keys have an accessible inline reveal control", () => {
+  const keys = readFileSync(resolve(root, "src/pages/ApiKeys.tsx"), "utf8");
+  assert.match(keys, /key\.revealable === true/);
+  assert.match(keys, /`\/keys\/\$\{encodeURIComponent\(id\)\}\/reveal`/);
+  assert.match(keys, /visible \? "Hide" : "Reveal"/);
+  assert.match(keys, /<EyeOff size=\{15\} \/> : <Eye size=\{15\} \/>/);
+});
+
 
 test("static admin console authentication is session-only and admin-scoped", () => {
   const api = readFileSync(resolve(root, "src/lib/api.ts"), "utf8");

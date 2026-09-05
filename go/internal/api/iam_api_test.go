@@ -2,6 +2,7 @@ package api
 
 import (
 	"bytes"
+	"encoding/base64"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -32,6 +33,7 @@ func TestIAMAdminAndKeyAuthenticationE2E(t *testing.T) {
 		s.APIKeys = nil
 		s.AllowUnauthenticatedAPI = false
 		s.Savings.Enabled = false
+		s.CredentialEncryptionKey = base64.RawURLEncoding.EncodeToString(make([]byte, 32))
 		s.Providers = map[string]*config.ProviderConfig{"echo": {Type: "echo"}}
 		s.Endpoints = map[string]*config.EndpointConfig{}
 	})
@@ -88,6 +90,30 @@ func TestIAMAdminAndKeyAuthenticationE2E(t *testing.T) {
 	if listed["prefix"] == "" || listed["token"] != nil {
 		t.Fatalf("listed key leaks token or lacks prefix: %+v", listed)
 	}
+	if listed["revealable"] != true {
+		t.Fatalf("listed key is not revealable: %+v", listed)
+	}
+	issuedKey := issued["key"].(map[string]any)
+	keyID := issuedKey["id"].(string)
+	revealRequest, _ := http.NewRequest(http.MethodPost, server.URL+"/admin/api/keys/"+keyID+"/reveal", nil)
+	revealRequest.Header.Set("Authorization", "Bearer admin-secret")
+	revealResponse, err := http.DefaultClient.Do(revealRequest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer revealResponse.Body.Close()
+	revealed := map[string]any{}
+	_ = json.NewDecoder(revealResponse.Body).Decode(&revealed)
+	if revealResponse.StatusCode != http.StatusOK || revealed["token"] != token {
+		t.Fatalf("reveal key: %d token_matches=%v", revealResponse.StatusCode, revealed["token"] == token)
+	}
+	if revealResponse.Header.Get("Cache-Control") != "no-store" || revealResponse.Header.Get("Pragma") != "no-cache" {
+		t.Fatalf("reveal cache headers: cache-control=%q pragma=%q", revealResponse.Header.Get("Cache-Control"), revealResponse.Header.Get("Pragma"))
+	}
+	status, _ = jsonRequest(t, server.URL+"/admin/api/keys/"+keyID+"/reveal", http.MethodPost, "", nil)
+	if status != http.StatusUnauthorized {
+		t.Fatalf("unauthenticated reveal status=%d, want 401", status)
+	}
 
 	status, chat := jsonRequest(t, server.URL+"/v1/chat/completions", "POST", token, map[string]any{
 		"model":    "echo/echo-default",
@@ -110,12 +136,11 @@ func TestIAMAdminAndKeyAuthenticationE2E(t *testing.T) {
 	if usageCount != 1 {
 		t.Fatalf("usage_events count=%d, want 1", usageCount)
 	}
-	key := issued["key"].(map[string]any)
-	status, revoked := admin("DELETE", "/admin/api/keys?id="+key["id"].(string), nil)
+	status, revoked := admin("DELETE", "/admin/api/keys?id="+keyID, nil)
 	if status != http.StatusOK || revoked["ok"] != true {
 		t.Fatalf("revoke: %d %+v", status, revoked)
 	}
-	status, rejected := admin("POST", "/admin/api/keys/update", map[string]any{"id": key["id"], "disabled": false})
+	status, rejected := admin("POST", "/admin/api/keys/update", map[string]any{"id": keyID, "disabled": false})
 	if status != http.StatusBadRequest || rejected["error"] == nil {
 		t.Fatalf("revoked admin update: %d %+v", status, rejected)
 	}

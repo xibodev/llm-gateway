@@ -7,6 +7,7 @@ import (
 	"database/sql"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -28,6 +29,8 @@ type KeyUpdate struct {
 	Policy    *KeyPolicy
 }
 
+var ErrAPIKeyNotRevealable = errors.New("API key was issued before encrypted key recovery was enabled")
+
 func HasAPIKeys() (bool, error) {
 	db, err := DB()
 	if err != nil {
@@ -42,10 +45,9 @@ func HasAPIKeys() (bool, error) {
 	return count > 0, nil
 }
 
-// IssueKey creates a high-entropy API key. The raw token is returned once and
-// never stored; SQLite keeps only its display prefix and SHA-256 hash. A direct
-// hash is appropriate because tokens contain 192 random bits and are not
-// password-derived.
+// IssueKey creates a high-entropy API key. Authentication uses its SHA-256 hash;
+// when credential encryption is configured, an encrypted copy supports explicit
+// owner/admin reveal without weakening request authentication.
 func IssueKey(in KeyCreate) (IssuedKey, error) {
 	name := strings.TrimSpace(in.Name)
 	if name == "" {
@@ -85,6 +87,19 @@ WHERE p.id=? AND n.id=?`, in.ProjectID, in.PrincipalID).Scan(
 	if err != nil {
 		return IssuedKey{}, err
 	}
+	var ciphertext, nonce []byte
+	if strings.TrimSpace(config.Get().CredentialEncryptionKey) != "" {
+		key, err := credentialKey()
+		if err != nil {
+			return IssuedKey{}, fmt.Errorf("encrypt API key: %w", err)
+		}
+		ciphertext, nonce, err = encryptCredential(
+			key, []byte(token), apiKeyAdditionalData(id, in.ProjectID, in.PrincipalID),
+		)
+		if err != nil {
+			return IssuedKey{}, fmt.Errorf("encrypt API key: %w", err)
+		}
+	}
 	sum := sha256.Sum256([]byte(token))
 	models, _ := json.Marshal(in.Policy.AllowedModels)
 	providers, _ := json.Marshal(in.Policy.AllowedProviders)
@@ -94,13 +109,15 @@ INSERT INTO api_keys(
     id,prefix,secret_hash,project_id,principal_id,name,status,created_at,expires_at,
     allowed_models_json,allowed_providers_json,rpm,daily_requests,monthly_requests,
     daily_input_tokens,daily_output_tokens,monthly_total_tokens,daily_cost_microusd,
-    monthly_cost_microusd,daily_credits_milli,monthly_credits_milli
-) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+    monthly_cost_microusd,daily_credits_milli,monthly_credits_milli,
+    secret_ciphertext,secret_nonce
+) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
 		id, displayPrefix(token), sum[:], in.ProjectID, in.PrincipalID, name, "active", now,
 		nullInt(in.ExpiresAt), string(models), string(providers), in.Policy.RPM,
 		in.Policy.DailyRequests, in.Policy.MonthlyRequests, in.Policy.DailyInputTokens,
 		in.Policy.DailyOutputTokens, in.Policy.MonthlyTotalTokens, in.Policy.DailyCostMicroUSD,
 		in.Policy.MonthlyCostMicroUSD, in.Policy.DailyCreditsMilli, in.Policy.MonthlyCreditsMilli,
+		ciphertext, nonce,
 	)
 	if err != nil {
 		return IssuedKey{}, fmt.Errorf("issue API key: %w", err)
@@ -110,6 +127,7 @@ INSERT INTO api_keys(
 		Project: projectSlug, PrincipalID: in.PrincipalID, Principal: principalName,
 		Kind: principalKind, Name: name, Status: "active",
 		CreatedAt: now, ExpiresAt: in.ExpiresAt, Policy: in.Policy,
+		Revealable: len(ciphertext) > 0,
 	}
 	return IssuedKey{APIKey: key, Token: token}, nil
 }
@@ -196,7 +214,8 @@ SELECT k.id,k.prefix,k.project_id,p.slug,k.principal_id,n.display_name,n.kind,
        k.name,k.status,k.created_at,k.expires_at,k.last_used_at,
        k.allowed_models_json,k.allowed_providers_json,k.rpm,k.daily_requests,k.monthly_requests,
        daily_input_tokens,daily_output_tokens,monthly_total_tokens,daily_cost_microusd,
-       monthly_cost_microusd,daily_credits_milli,monthly_credits_milli
+       monthly_cost_microusd,daily_credits_milli,monthly_credits_milli,
+       CASE WHEN k.secret_ciphertext IS NOT NULL AND k.secret_nonce IS NOT NULL THEN 1 ELSE 0 END
 FROM api_keys k
 JOIN projects p ON p.id=k.project_id
 JOIN principals n ON n.id=k.principal_id`
@@ -233,7 +252,8 @@ SELECT k.id,k.prefix,k.project_id,p.slug,k.principal_id,n.display_name,n.kind,
        k.allowed_models_json,k.allowed_providers_json,k.rpm,k.daily_requests,
        k.monthly_requests,k.daily_input_tokens,k.daily_output_tokens,
        k.monthly_total_tokens,k.daily_cost_microusd,k.monthly_cost_microusd,
-       k.daily_credits_milli,k.monthly_credits_milli
+       k.daily_credits_milli,k.monthly_credits_milli,
+       CASE WHEN k.secret_ciphertext IS NOT NULL AND k.secret_nonce IS NOT NULL THEN 1 ELSE 0 END
 FROM api_keys k
 JOIN projects p ON p.id=k.project_id
 JOIN principals n ON n.id=k.principal_id
@@ -263,7 +283,8 @@ SELECT k.id,k.prefix,k.project_id,p.slug,k.principal_id,n.display_name,n.kind,
        k.name,k.status,k.created_at,k.expires_at,k.last_used_at,
        k.allowed_models_json,k.allowed_providers_json,k.rpm,k.daily_requests,k.monthly_requests,
        daily_input_tokens,daily_output_tokens,monthly_total_tokens,daily_cost_microusd,
-       monthly_cost_microusd,daily_credits_milli,monthly_credits_milli
+       monthly_cost_microusd,daily_credits_milli,monthly_credits_milli,
+       CASE WHEN k.secret_ciphertext IS NOT NULL AND k.secret_nonce IS NOT NULL THEN 1 ELSE 0 END
 FROM api_keys k
 JOIN projects p ON p.id=k.project_id
 JOIN principals n ON n.id=k.principal_id
@@ -344,11 +365,56 @@ func RevokeAPIKey(id string) error {
 	return UpdateAPIKey(id, KeyUpdate{Status: &status})
 }
 
+// RevealAPIKey decrypts a stored token. The boolean reports whether the key ID
+// exists; older hash-only keys return ErrAPIKeyNotRevealable.
+func RevealAPIKey(id string) (string, bool, error) {
+	db, err := DB()
+	if err != nil {
+		return "", false, err
+	}
+	var projectID, principalID string
+	var storedHash, ciphertext, nonce []byte
+	err = db.QueryRow(`
+SELECT project_id,principal_id,secret_hash,secret_ciphertext,secret_nonce
+FROM api_keys WHERE id=?`, strings.TrimSpace(id)).Scan(
+		&projectID, &principalID, &storedHash, &ciphertext, &nonce,
+	)
+	if err == sql.ErrNoRows {
+		return "", false, nil
+	}
+	if err != nil {
+		return "", false, err
+	}
+	if len(ciphertext) == 0 || len(nonce) == 0 {
+		return "", true, ErrAPIKeyNotRevealable
+	}
+	key, err := credentialKey()
+	if err != nil {
+		return "", true, err
+	}
+	plaintext, err := decryptCredential(
+		key, ciphertext, nonce, apiKeyAdditionalData(id, projectID, principalID),
+	)
+	if err != nil {
+		return "", true, fmt.Errorf("decrypt API key: %w", err)
+	}
+	sum := sha256.Sum256(plaintext)
+	if subtle.ConstantTimeCompare(storedHash, sum[:]) != 1 {
+		return "", true, fmt.Errorf("decrypted API key does not match its authentication hash")
+	}
+	return string(plaintext), true, nil
+}
+
+func apiKeyAdditionalData(id, projectID, principalID string) []byte {
+	return []byte("api-key|" + id + "|" + projectID + "|" + principalID)
+}
+
 func scanAPIKey(row rowScanner) (APIKey, error) {
 	var (
 		k                         APIKey
 		expiresAt, lastUsedAt     sql.NullInt64
 		modelsJSON, providersJSON string
+		revealable                int
 	)
 	err := row.Scan(
 		&k.ID, &k.Prefix, &k.ProjectID, &k.Project, &k.PrincipalID, &k.Principal,
@@ -358,7 +424,7 @@ func scanAPIKey(row rowScanner) (APIKey, error) {
 		&k.Policy.DailyInputTokens, &k.Policy.DailyOutputTokens,
 		&k.Policy.MonthlyTotalTokens, &k.Policy.DailyCostMicroUSD,
 		&k.Policy.MonthlyCostMicroUSD, &k.Policy.DailyCreditsMilli,
-		&k.Policy.MonthlyCreditsMilli,
+		&k.Policy.MonthlyCreditsMilli, &revealable,
 	)
 	if err != nil {
 		return APIKey{}, err
@@ -368,6 +434,7 @@ func scanAPIKey(row rowScanner) (APIKey, error) {
 	_ = json.Unmarshal([]byte(modelsJSON), &k.Policy.AllowedModels)
 	_ = json.Unmarshal([]byte(providersJSON), &k.Policy.AllowedProviders)
 	k.Expired = k.IsExpired()
+	k.Revealable = revealable != 0
 	return k, nil
 }
 
