@@ -13,6 +13,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -133,7 +134,67 @@ func CreateBackup(path string) (BackupInspection, error) {
 		return BackupInspection{}, fmt.Errorf("verify created backup: %w", err)
 	}
 	inspection.Path = path
+	if filepath.Clean(filepath.Dir(path)) == filepath.Clean(defaultBackupDir()) {
+		_, _ = PruneDefaultBackups()
+	}
 	return inspection, nil
+}
+
+func defaultBackupDir() string { return filepath.Join(config.StateDir(), "backups") }
+
+func defaultBackupKeep() int {
+	value, err := strconv.Atoi(strings.TrimSpace(os.Getenv("LLMGW_BACKUP_KEEP")))
+	if err != nil || value < 1 {
+		return 7
+	}
+	return value
+}
+
+func PruneBackups(keep int) (int, error) {
+	if keep < 1 {
+		return 0, fmt.Errorf("at least one verified backup must be retained")
+	}
+	dir := defaultBackupDir()
+	entries, err := os.ReadDir(dir)
+	if os.IsNotExist(err) {
+		return 0, nil
+	}
+	if err != nil {
+		return 0, err
+	}
+	type candidate struct {
+		path    string
+		created time.Time
+	}
+	valid := []candidate{}
+	for _, entry := range entries {
+		if entry.Type()&os.ModeSymlink != 0 || !entry.Type().IsRegular() || !strings.HasPrefix(entry.Name(), "llmgw-") || !strings.HasSuffix(entry.Name(), ".tar.gz") {
+			continue
+		}
+		path := filepath.Join(dir, entry.Name())
+		inspection, err := InspectBackup(path)
+		if err != nil {
+			continue
+		}
+		created, err := time.Parse(time.RFC3339, inspection.CreatedAt)
+		if err != nil {
+			continue
+		}
+		valid = append(valid, candidate{path: path, created: created})
+	}
+	sort.Slice(valid, func(i, j int) bool { return valid[i].created.After(valid[j].created) })
+	removed := 0
+	for _, candidate := range valid[keep:] {
+		if err := os.Remove(candidate.path); err != nil {
+			return removed, err
+		}
+		removed++
+	}
+	return removed, nil
+}
+
+func PruneDefaultBackups() (int, error) {
+	return PruneBackups(defaultBackupKeep())
 }
 
 func InspectBackup(path string) (BackupInspection, error) {

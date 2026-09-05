@@ -6,11 +6,13 @@ import (
 	"compress/gzip"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"llmgw/internal/iam"
 )
@@ -173,5 +175,55 @@ func TestInspectDoesNotPrintStoredValues(t *testing.T) {
 	}
 	if strings.Contains(output.String(), secret) {
 		t.Fatal("inspection exposed stored secret")
+	}
+}
+
+func TestPruneBackupsKeepsNewestVerifiedArchives(t *testing.T) {
+	state := t.TempDir()
+	t.Setenv("LLMGW_STATE_DIR", state)
+	iam.ResetForTests()
+	t.Cleanup(iam.ResetForTests)
+	if _, err := iam.Initialize(); err != nil {
+		t.Fatal(err)
+	}
+	stage := t.TempDir()
+	if err := snapshotSQLite(filepath.Join(state, "gateway.db"), filepath.Join(stage, "gateway.db")); err != nil {
+		t.Fatal(err)
+	}
+	entry, err := describeFile("gateway.db", filepath.Join(stage, "gateway.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	backupDir := filepath.Join(state, "backups")
+	if err := os.MkdirAll(backupDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	paths := make([]string, 0, 3)
+	for day := 1; day <= 3; day++ {
+		path := filepath.Join(backupDir, fmt.Sprintf("llmgw-%d.tar.gz", day))
+		manifest := BackupManifest{
+			Format:    backupFormatVersion,
+			CreatedAt: time.Date(2026, 1, day, 0, 0, 0, 0, time.UTC).Format(time.RFC3339),
+			Files:     []BackupEntry{entry},
+		}
+		if err := writeArchive(path, stage, manifest); err != nil {
+			t.Fatal(err)
+		}
+		paths = append(paths, path)
+	}
+	foreign := filepath.Join(backupDir, "notes.txt")
+	if err := os.WriteFile(foreign, []byte("keep"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if removed, err := PruneBackups(2); err != nil || removed != 1 {
+		t.Fatalf("removed=%d err=%v", removed, err)
+	}
+	if _, err := os.Stat(paths[0]); !os.IsNotExist(err) {
+		t.Fatalf("oldest backup still exists: %v", err)
+	}
+	for _, path := range append(paths[1:], foreign) {
+		if _, err := os.Stat(path); err != nil {
+			t.Fatalf("retained file %s: %v", path, err)
+		}
 	}
 }

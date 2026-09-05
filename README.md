@@ -114,6 +114,12 @@ llmgw backup restore /secure/path/llmgw-state.tar.gz --force
 The archive contains configuration and checkpointed SQLite state, may contain
 credentials, and is written with owner-only permissions. Keep the deployment's
 `LLMGW_CREDENTIAL_ENCRYPTION_KEY` separately; it is never copied into a backup.
+The gateway also bounds operational history by default: 90 days of usage and
+failover telemetry, 365 days of audit events, 400 days of delivered notification
+tombstones, completed quota periods, two request-log generations, and seven
+verified built-in backups. `LLMGW_RETENTION_*` and `LLMGW_BACKUP_KEEP` override
+those limits; active control-plane state and retryable notifications are never
+pruned.
 
 ## Local console
 

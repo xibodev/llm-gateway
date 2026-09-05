@@ -261,6 +261,27 @@ func nullOrString(ns sql.NullString) any {
 	return ns.String
 }
 
+func PruneSavingsBefore(cutoff int64) (int64, error) {
+	if !config.Get().Savings.Enabled {
+		return 0, nil
+	}
+	path := savingsDBPath()
+	if _, err := os.Stat(path); os.IsNotExist(err) {
+		return 0, nil
+	} else if err != nil {
+		return 0, err
+	}
+	db, err := savingsConn()
+	if err != nil {
+		return 0, err
+	}
+	result, err := db.Exec("DELETE FROM usage_ledger WHERE ts < ?", cutoff)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}
+
 // ResetSavingsState drops cached DB handles (test helper).
 func ResetSavingsState() {
 	savingsMu.Lock()

@@ -9,6 +9,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -24,6 +25,7 @@ import (
 	"llmgw/internal/config"
 	"llmgw/internal/iam"
 	"llmgw/internal/operations"
+	"llmgw/internal/router"
 )
 
 const usage = `Usage: llmgw [serve|health|version|backup]
@@ -103,6 +105,8 @@ func serve() {
 			migrated.Keys, migrated.Projects, migrated.Principals,
 		)
 	}
+	retentionStop := startRetention()
+	defer retentionStop()
 
 	// Local providers are surfaced via the /admin "Detect local" button, not
 	// hardwired. Opt in to silent auto-add on startup with LLMGW_AUTODISCOVER_LOCAL=1.
@@ -140,6 +144,46 @@ func serve() {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	_ = srv.Shutdown(ctx)
+}
+
+func startRetention() func() {
+	stop := make(chan struct{})
+	run := func() {
+		now := time.Now()
+		policy := iam.DefaultRetentionPolicy()
+		result, err := iam.PruneOperationalHistory(now, policy)
+		if err != nil {
+			log.Printf("retention: %v", err)
+			return
+		}
+		cutoff := now.AddDate(0, 0, -policy.UsageDays).Unix()
+		telemetry, telemetryErr := router.PruneTelemetryBefore(cutoff)
+		savings, savingsErr := router.PruneSavingsBefore(cutoff)
+		backups, backupErr := operations.PruneDefaultBackups()
+		if err := errors.Join(telemetryErr, savingsErr, backupErr); err != nil {
+			log.Printf("retention: %v", err)
+		}
+		if result != (iam.RetentionResult{}) || telemetry > 0 || savings > 0 || backups > 0 {
+			log.Printf("retention pruned usage=%d audit=%d key_quotas=%d project_quotas=%d outbox=%d telemetry=%d savings=%d backups=%d",
+				result.UsageEvents, result.AuditEvents, result.KeyQuotaCounters,
+				result.ProjectQuotaCounters, result.DeliveredOutbox,
+				telemetry, savings, backups)
+		}
+	}
+	run()
+	go func() {
+		ticker := time.NewTicker(24 * time.Hour)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ticker.C:
+				run()
+			case <-stop:
+				return
+			}
+		}
+	}()
+	return func() { close(stop) }
 }
 
 func backupCommand(args []string, output io.Writer) error {

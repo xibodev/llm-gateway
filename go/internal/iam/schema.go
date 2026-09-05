@@ -469,6 +469,13 @@ ALTER TABLE api_keys ADD COLUMN secret_ciphertext BLOB;
 ALTER TABLE api_keys ADD COLUMN secret_nonce BLOB;
 `,
 	},
+	{
+		version: 15,
+		sql: `
+CREATE INDEX idx_outbox_delivered_retention
+ON outbox_events(delivered_at) WHERE status='delivered';
+`,
+	},
 }
 
 func SchemaVersion() int { return len(migrations) }
