@@ -471,6 +471,8 @@ ALTER TABLE api_keys ADD COLUMN secret_nonce BLOB;
 	},
 }
 
+func SchemaVersion() int { return len(migrations) }
+
 func migrationApplied(db *sql.DB, version int) (bool, error) {
 	var count int
 	if err := db.QueryRow(

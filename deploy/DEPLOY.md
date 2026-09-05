@@ -43,6 +43,20 @@ forward the `X-Authentik-*` identity headers. See `docs/MULTI_USER.md`.
 BASE_URL=https://<domain> KEY=llmgw_... ./deploy/smoke.sh
 ```
 
+## Back up and restore
+
+Stop the gateway container before using the binary's maintenance commands. The
+archive is sensitive and must be stored outside the public repository:
+
+```bash
+llmgw backup create /secure/path/llmgw-state.tar.gz
+llmgw backup inspect /secure/path/llmgw-state.tar.gz
+llmgw backup restore /secure/path/llmgw-state.tar.gz --force
+```
+
+Restore also requires the original `LLMGW_CREDENTIAL_ENCRYPTION_KEY` from the
+secret store; the archive deliberately does not contain it.
+
 ## Alternative: systemd (no Docker)
 `go build -o llmgw ./cmd/llmgw`, ship the binary, and run it under systemd behind
 Caddy/nginx — see `go/README.md` for the unit. Disable proxy buffering so SSE

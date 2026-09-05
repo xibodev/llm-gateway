@@ -101,6 +101,20 @@ Builds `go/Dockerfile` (distroless, nonroot), mounts your config read-only and
 persists gateway state in a named volume at `/state`. For a real box with TLS,
 use `deploy/docker-compose.prod.yml` + `Caddyfile` — see `deploy/DEPLOY.md`.
 
+## Back up and restore
+
+Stop the gateway before maintenance, then use the built-in verified archive:
+
+```bash
+llmgw backup create /secure/path/llmgw-state.tar.gz
+llmgw backup inspect /secure/path/llmgw-state.tar.gz
+llmgw backup restore /secure/path/llmgw-state.tar.gz --force
+```
+
+The archive contains configuration and checkpointed SQLite state, may contain
+credentials, and is written with owner-only permissions. Keep the deployment's
+`LLMGW_CREDENTIAL_ENCRYPTION_KEY` separately; it is never copied into a backup.
+
 ## Local console
 
 Open `http://127.0.0.1:8787/console` for the locally embedded operational console. The playground follows the selected model's capability: chat models get a conversation thread, speech models a text-to-audio surface with playback, and transcription models an audio upload. `/admin` redirects there; `/admin-legacy` and `/portal-legacy` remain available while teams transition. `/portal` serves the same bundle in owner mode and calls only `/user/api/*`; console administration calls only `/admin/api/*`. The bundle has no CDN, external font, or runtime Node dependency.

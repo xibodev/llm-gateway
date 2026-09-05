@@ -139,10 +139,13 @@ On first Go startup:
 6. `provider_credential_bindings` is added without changing existing
    principals, projects, keys or human provider credentials.
 
-Back up the entire state directory (including `gateway.db`, `-wal`, `-shm`,
-config, encrypted credentials and Copilot session cache) with the container
-stopped or via SQLite's online backup mechanism. Keep the encryption key in the
-secret manager; database backups are unusable for BYOC recovery without it.
+Stop the gateway and run `llmgw backup create <archive>`. The command checkpoints
+SQLite state into a standalone database, copies configuration and supported
+legacy state, writes checksums, and verifies the completed archive. Use
+`llmgw backup inspect <archive>` before `llmgw backup restore <archive> --force`.
+The process lock prevents maintenance from racing `serve`. Keep the encryption
+key in the secret manager; it is not archived and encrypted credentials are
+unusable without it.
 
 ## Console and official OAuth
 
@@ -152,7 +155,6 @@ OAuth connections use encrypted provider-connection envelopes with safe expiry/a
 
 Owner/admin playground requests require an explicit project and record the selected human/project attribution. They consume project request counters without creating a browser API key. Provider subscription quota values remain `unknown` unless an adapter supplies verified data; unknown is never rendered as a numeric remaining percentage.
 
-Before any rollout, back up `gateway.db` together with its WAL/SHM files and the
-full state directory. Rollback restores that backup and the prior immutable
-image; a binary older than a schema change should not be paired with state that
-has already migrated past it.
+Before any rollout, create and inspect a built-in backup. Rollback restores that
+archive and the prior immutable image; a binary older than a schema change
+should not be paired with state that has already migrated past it.

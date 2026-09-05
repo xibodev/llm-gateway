@@ -85,6 +85,18 @@ docker build -t llm-gateway-go .   # ~2 MB distroless/static image
 docker run -p 8787:8787 -v llmgw:/state llm-gateway-go
 ```
 
+Offline state maintenance is built into the same binary:
+
+```bash
+llmgw backup create /secure/path/llmgw-state.tar.gz
+llmgw backup inspect /secure/path/llmgw-state.tar.gz
+llmgw backup restore /secure/path/llmgw-state.tar.gz --force
+```
+
+Stop `serve` first. The process lock prevents backup or restore from racing a
+running gateway. Archives are checksum-verified and should be protected as
+secrets; the credential-encryption key remains external.
+
 ## Deploy to Ubuntu (systemd)
 
 ```bash
