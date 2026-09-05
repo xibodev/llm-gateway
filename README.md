@@ -142,6 +142,11 @@ version, source commit, and RFC3339 build time. Development builds use explicit
 `0.0.0-dev` and `unknown` values; release binaries and images inject immutable
 provenance during their build.
 
+Version tags publish five platform archives, SPDX SBOMs, verified checksums,
+provenance attestations, and a two-architecture GHCR image through one release
+workflow. A manual workflow dispatch performs the same binary and image build as
+a dry run but has no registry login or release-publishing step.
+
 ## Google providers
 
 Google is reachable through two surfaces that share a request grammar and little

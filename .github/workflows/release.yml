@@ -1,30 +1,57 @@
-# Publish standalone binaries on a version tag.
-#
-#   git tag v0.0.1 && git push origin v0.0.1
-#     -> llmgw_v0.0.1_windows_amd64.zip, ..._linux_amd64.tar.gz, ...
-#
-# The gateway is pure Go (modernc.org/sqlite, no cgo), so every target
-# cross-compiles from one runner and needs no C toolchain.
-#
-# Gated on ci.yml: a tag cannot publish binaries unless the suite passes.
+# Build and publish immutable binaries and a multi-architecture image.
+# Tag pushes publish. Manual dispatch is always a read-only dry run.
 name: release
 
 on:
   push:
     tags: ["v*"]
-  workflow_dispatch: {}
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Version to build in vMAJOR.MINOR.PATCH form; never publishes
+        required: true
+        type: string
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
+  validate:
+    name: validate release identity
+    runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.identity.outputs.tag }}
+      version: ${{ steps.identity.outputs.version }}
+      commit: ${{ steps.identity.outputs.commit }}
+      build_time: ${{ steps.identity.outputs.build_time }}
+    steps:
+      - name: Validate semantic version
+        id: identity
+        env:
+          REQUESTED_TAG: ${{ github.event_name == 'push' && github.ref_name || inputs.version }}
+        run: |
+          set -euo pipefail
+          if ! printf '%s' "$REQUESTED_TAG" | grep -Eq '^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$'; then
+            echo "version must match vMAJOR.MINOR.PATCH" >&2
+            exit 1
+          fi
+          {
+            echo "tag=$REQUESTED_TAG"
+            echo "version=${REQUESTED_TAG#v}"
+            echo "commit=$GITHUB_SHA"
+            echo "build_time=$(date -u +'%Y-%m-%dT%H:%M:%SZ')"
+          } >> "$GITHUB_OUTPUT"
+
   ci:
+    needs: validate
     uses: ./.github/workflows/ci.yml
 
   binaries:
-    needs: ci
+    name: binaries / SBOM / checksums
+    needs: [validate, ci]
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    permissions:
+      contents: read
     steps:
       - uses: actions/checkout@v4
 
@@ -33,35 +60,36 @@ jobs:
           go-version: 1.26.6
           cache-dependency-path: go/go.sum
 
-      - uses: actions/setup-node@v4
-        with:
-          node-version: "22"
-          cache: npm
-          cache-dependency-path: go/internal/web/console/package-lock.json
+      - name: Install Syft
+        uses: anchore/sbom-action/download-syft@v0
 
-      # dist/ is committed, but rebuild it so a release can never ship a stale
-      # console that no commit accounts for.
-      - name: Build console
-        working-directory: go/internal/web/console
-        run: npm ci && npm run build
-
-      - name: Cross-compile
+      - name: Build release artifacts
         working-directory: go
         env:
+          VERSION: ${{ needs.validate.outputs.version }}
+          COMMIT: ${{ needs.validate.outputs.commit }}
+          BUILD_TIME: ${{ needs.validate.outputs.build_time }}
+          TAG: ${{ needs.validate.outputs.tag }}
           CGO_ENABLED: "0"
         run: |
-          set -eu
-          version="${GITHUB_REF_NAME#v}"
+          set -euo pipefail
           mkdir -p ../dist
+          ldflags="-s -w -X=llmgw/internal/buildinfo.Version=$VERSION -X=llmgw/internal/buildinfo.Commit=$COMMIT -X=llmgw/internal/buildinfo.BuildTime=$BUILD_TIME"
           for target in windows/amd64 linux/amd64 linux/arm64 darwin/amd64 darwin/arm64; do
             os="${target%/*}"
             arch="${target#*/}"
             ext=""
             [ "$os" = "windows" ] && ext=".exe"
-            echo "building $os/$arch"
-            GOOS="$os" GOARCH="$arch" go build \
-              -trimpath -ldflags="-s -w" -o "llmgw${ext}" ./cmd/llmgw
-            name="llmgw_${GITHUB_REF_NAME}_${os}_${arch}"
+            name="llmgw_${TAG}_${os}_${arch}"
+            GOOS="$os" GOARCH="$arch" go build -trimpath -ldflags="$ldflags" -o "llmgw${ext}" ./cmd/llmgw
+            syft "file:llmgw${ext}" -o "spdx-json=../dist/${name}.spdx.json"
+            if [ "$os/$arch" = "linux/amd64" ]; then
+              output=$(./llmgw version)
+              printf '%s\n' "$output"
+              printf '%s\n' "$output" | grep -Fx "llm-gateway $VERSION"
+              printf '%s\n' "$output" | grep -Fx "commit $COMMIT"
+              printf '%s\n' "$output" | grep -Fx "build_time $BUILD_TIME"
+            fi
             if [ "$os" = "windows" ]; then
               zip -q "../dist/${name}.zip" "llmgw${ext}"
             else
@@ -69,11 +97,136 @@ jobs:
             fi
             rm -f "llmgw${ext}"
           done
-          echo "built version ${version}"
+          cd ../dist
+          find . -maxdepth 1 -type f ! -name SHA256SUMS -printf '%f\n' | sort | xargs sha256sum > SHA256SUMS
+          sha256sum -c SHA256SUMS
+          test "$(find . -maxdepth 1 -type f \( -name '*.zip' -o -name '*.tar.gz' \) | wc -l)" -eq 5
+          test "$(find . -maxdepth 1 -type f -name '*.spdx.json' | wc -l)" -eq 5
 
-      - name: Checksums
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-assets-${{ needs.validate.outputs.tag }}
+          path: dist/*
+          if-no-files-found: error
+          retention-days: 7
+
+  image-dry-run:
+    name: image dry run
+    if: github.event_name == 'workflow_dispatch'
+    needs: [validate, ci, binaries]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Build OCI image without publishing
+        uses: docker/build-push-action@v6
+        with:
+          context: go
+          file: go/Dockerfile
+          platforms: linux/amd64,linux/arm64
+          push: false
+          outputs: type=oci,dest=/tmp/llmgw-image.tar
+          sbom: true
+          provenance: mode=max
+          build-args: |
+            VERSION=${{ needs.validate.outputs.version }}
+            COMMIT=${{ needs.validate.outputs.commit }}
+            BUILD_TIME=${{ needs.validate.outputs.build_time }}
+
+      - name: Verify OCI archive
+        run: |
+          set -euo pipefail
+          tar -tf /tmp/llmgw-image.tar | grep -Fx index.json
+          test -s /tmp/llmgw-image.tar
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: image-dry-run-${{ needs.validate.outputs.tag }}
+          path: /tmp/llmgw-image.tar
+          if-no-files-found: error
+          retention-days: 2
+
+  image-publish:
+    name: publish image
+    if: github.event_name == 'push' && github.ref_type == 'tag'
+    needs: [validate, ci, binaries]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+      attestations: write
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-buildx-action@v3
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Derive image metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/${{ github.repository }}
+          tags: |
+            type=raw,value=${{ needs.validate.outputs.version }}
+            type=raw,value=latest
+
+      - name: Build and publish image
+        id: image
+        uses: docker/build-push-action@v6
+        with:
+          context: go
+          file: go/Dockerfile
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          sbom: true
+          provenance: mode=max
+          build-args: |
+            VERSION=${{ needs.validate.outputs.version }}
+            COMMIT=${{ needs.validate.outputs.commit }}
+            BUILD_TIME=${{ needs.validate.outputs.build_time }}
+
+      - name: Attest image provenance
+        uses: actions/attest-build-provenance@v3
+        with:
+          subject-name: ghcr.io/${{ github.repository }}
+          subject-digest: ${{ steps.image.outputs.digest }}
+          push-to-registry: true
+
+  release-publish:
+    name: publish GitHub release
+    if: github.event_name == 'push' && github.ref_type == 'tag'
+    needs: [validate, ci, binaries, image-publish]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      attestations: write
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: release-assets-${{ needs.validate.outputs.tag }}
+          path: dist
+
+      - name: Verify downloaded checksums
         working-directory: dist
-        run: sha256sum * > SHA256SUMS
+        run: sha256sum -c SHA256SUMS
+
+      - name: Attest release assets
+        uses: actions/attest-build-provenance@v3
+        with:
+          subject-path: dist/*
 
       - name: Publish release
         uses: softprops/action-gh-release@v2

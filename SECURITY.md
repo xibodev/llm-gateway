@@ -51,6 +51,9 @@ owners, members and services are distinct principals.
   `cd internal/web/console && npm audit`. A healthy release has no unresolved
   applicable advisories. Current remediation work is tracked in
   [`BACKLOG.md`](BACKLOG.md) rather than recorded here as a claim that goes stale.
+- **Release provenance**: tag releases produce per-binary SPDX SBOMs, verified
+  SHA-256 checksums, build-provenance attestations, and a multi-architecture
+  image with BuildKit SBOM/provenance. Manual dispatch is a non-publishing dry run.
 
 ## SSRF — intentionally not guarded
 The gateway connects to **operator-configured** provider base URLs, which
