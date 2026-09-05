@@ -111,9 +111,12 @@ llmgw backup inspect /secure/path/llmgw-state.tar.gz
 llmgw backup restore /secure/path/llmgw-state.tar.gz --force
 ```
 
-The archive contains configuration and checkpointed SQLite state, may contain
+The archive contains configuration, catalog and OAuth caches, configured
+checkpointed SQLite state, and legacy secret files. It may contain
 credentials, and is written with owner-only permissions. Keep the deployment's
 `LLMGW_CREDENTIAL_ENCRYPTION_KEY` separately; it is never copied into a backup.
+Archive checksums detect corruption but do not authenticate the archive; protect
+it from replacement as well as disclosure.
 The gateway also bounds operational history by default: 90 days of usage and
 failover telemetry, 365 days of audit events, 400 days of delivered notification
 tombstones, completed quota periods, two request-log generations, and seven
@@ -142,10 +145,11 @@ version, source commit, and RFC3339 build time. Development builds use explicit
 `0.0.0-dev` and `unknown` values; release binaries and images inject immutable
 provenance during their build.
 
-Version tags publish five platform archives, SPDX SBOMs, verified checksums,
-provenance attestations, and a two-architecture GHCR image through one release
-workflow. A manual workflow dispatch performs the same binary and image build as
-a dry run but has no registry login or release-publishing step.
+Version tags on the current `main` head publish five platform archives, SPDX
+SBOMs, verified checksums, provenance attestations, and a versioned
+two-architecture GHCR image through one release workflow. Actions and base images
+are pinned. A manual dispatch performs the same builds only on ephemeral runners;
+it has no artifact upload, registry login, or release-publishing step.
 
 ## Google providers
 

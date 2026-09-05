@@ -34,7 +34,7 @@ services:
       LLMGW_RETENTION_DELIVERED_OUTBOX_DAYS: ${LLMGW_RETENTION_DELIVERED_OUTBOX_DAYS:-400}
       LLMGW_BACKUP_KEEP: ${LLMGW_BACKUP_KEEP:-7}
     volumes:
-      - ./config.local.yaml:/config/llmgw.config.yaml:ro
+      - ./config.local.yaml:/config/llmgw.config.yaml:rw
       - llmgw-state:/state
     ports:
       - "${LLMGW_HOST_PORT:-8787}:8787"

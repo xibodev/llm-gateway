@@ -140,8 +140,9 @@ On first Go startup:
    principals, projects, keys or human provider credentials.
 
 Stop the gateway and run `llmgw backup create <archive>`. The command checkpoints
-SQLite state into a standalone database, copies configuration and supported
-legacy state, writes checksums, and verifies the completed archive. Use
+configured SQLite state into standalone databases, copies configuration,
+catalog, OAuth cache and supported legacy state, writes checksums, and verifies
+the completed archive. Use
 `llmgw backup inspect <archive>` before `llmgw backup restore <archive> --force`.
 The process lock prevents maintenance from racing `serve`. Keep the encryption
 key in the secret manager; it is not archived and encrypted credentials are

@@ -385,6 +385,12 @@ test("settings editor covers every writable project policy field", () => {
   assert.doesNotMatch(settings, /grouped here rather than mixed into provider and routing workflows/);
 });
 
+test("audit history copy reflects bounded retention", () => {
+  const settings = readFileSync(resolve(root, "src/pages/Settings.tsx"), "utf8");
+  assert.match(settings, /retained audit history/);
+  assert.doesNotMatch(settings, /immutable audit history/);
+});
+
 test("overview shows an evidence-driven first-run guide for admins", () => {
   const guide = readFileSync(resolve(root, "src/components/GetStartedGuide.tsx"), "utf8");
   const overview = readFileSync(resolve(root, "src/pages/Overview.tsx"), "utf8");

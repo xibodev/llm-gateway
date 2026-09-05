@@ -99,7 +99,8 @@ llmgw backup restore /secure/path/llmgw-state.tar.gz --force
 
 Stop `serve` first. The process lock prevents backup or restore from racing a
 running gateway. Archives are checksum-verified and should be protected as
-secrets; the credential-encryption key remains external.
+secrets; checksums detect corruption rather than authenticate an archive, and
+the credential-encryption key remains external.
 
 ## Deploy to Ubuntu (systemd)
 

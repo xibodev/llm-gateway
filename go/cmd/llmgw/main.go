@@ -63,6 +63,7 @@ func main() {
 	case "version", "--version":
 		printVersion(os.Stdout)
 	case "backup":
+		config.Load()
 		if err := backupCommand(os.Args[2:], os.Stdout); err != nil {
 			fmt.Fprintln(os.Stderr, "backup:", err)
 			os.Exit(1)
@@ -97,6 +98,9 @@ func serve() {
 		log.Fatal(err)
 	}
 	defer lock.Release()
+	if err := operations.RecoverInterruptedRestore(); err != nil {
+		log.Fatal(err)
+	}
 	config.Load()
 	if migrated, err := iam.Initialize(); err != nil {
 		log.Fatalf("initialize IAM control plane: %v", err)
@@ -176,8 +180,8 @@ func startRetention() func() {
 				telemetry, savings, backups)
 		}
 	}
-	run()
 	go func() {
+		run()
 		ticker := time.NewTicker(24 * time.Hour)
 		defer ticker.Stop()
 		for {

@@ -20,9 +20,16 @@ func AcquireStateLock() (*StateLock, error) {
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return nil, fmt.Errorf("create state directory: %w", err)
 	}
+	if err := restrictPath(dir, true); err != nil {
+		return nil, fmt.Errorf("protect state directory: %w", err)
+	}
 	file, err := os.OpenFile(filepath.Join(dir, ".state.lock"), os.O_CREATE|os.O_RDWR, 0o600)
 	if err != nil {
 		return nil, fmt.Errorf("open state lock: %w", err)
+	}
+	if err := restrictPath(file.Name(), false); err != nil {
+		_ = file.Close()
+		return nil, fmt.Errorf("protect state lock: %w", err)
 	}
 	if err := lockFile(file); err != nil {
 		_ = file.Close()

@@ -332,6 +332,15 @@ func Load() *Settings {
 	return s
 }
 
+// ReadFile parses one configuration file without changing the process-wide
+// settings or applying environment overrides. Maintenance uses it to derive
+// destinations from the configuration stored inside a backup archive.
+func ReadFile(path string) *Settings {
+	s := Defaults()
+	applyConfig(s, readYAML(path))
+	return s
+}
+
 func envBool(key string, dst *bool) {
 	if v, ok := os.LookupEnv(key); ok {
 		switch strings.ToLower(strings.TrimSpace(v)) {

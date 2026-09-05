@@ -14,7 +14,9 @@ import (
 	"testing"
 	"time"
 
+	"llmgw/internal/config"
 	"llmgw/internal/iam"
+	"llmgw/internal/router"
 )
 
 func TestBackupInspectRestoreRoundTrip(t *testing.T) {
@@ -88,6 +90,11 @@ func TestBackupInspectRestoreRoundTrip(t *testing.T) {
 	resolved, found, err := iam.ResolveAPIKey(issued.Token)
 	if err != nil || !found || resolved.ProjectID != project.ID {
 		t.Fatalf("restored key: found=%v principal=%+v err=%v", found, resolved, err)
+	}
+	config.Load()
+	targets, err := router.ResolveTargets("safe")
+	if err != nil || len(targets) != 1 || targets[0].Provider != "echo" || targets[0].Model != "echo-default" {
+		t.Fatalf("restored route: targets=%+v err=%v", targets, err)
 	}
 }
 

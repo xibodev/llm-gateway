@@ -27,17 +27,18 @@ const (
 	backupFormatVersion = 1
 	maxManifestBytes    = 1 << 20
 	maxBackupFileBytes  = int64(16 << 30)
+	maxBackupTotalBytes = int64(16 << 30)
 )
 
-var backupFiles = map[string]func() string{
+var coreBackupFiles = map[string]func() string{
 	"config.yaml": func() string { return config.ConfigFilePath() },
 	"gateway.db":  func() string { return filepath.Join(config.StateDir(), "gateway.db") },
 	"keys.json":   func() string { return filepath.Join(config.StateDir(), "keys.json") },
 	"secrets.json": func() string {
 		return filepath.Join(config.StateDir(), "secrets.json")
 	},
+	"catalog.json": func() string { return filepath.Join(config.StateDir(), "catalog.json") },
 	"telemetry.db": func() string { return filepath.Join(config.StateDir(), "telemetry.db") },
-	"usage.db":     func() string { return filepath.Join(config.StateDir(), "usage.db") },
 }
 
 var sqliteBackupFiles = map[string]bool{
@@ -89,15 +90,18 @@ func CreateBackup(path string) (BackupInspection, error) {
 		return BackupInspection{}, fmt.Errorf("create backup directory: %w", err)
 	}
 
-	stage, err := os.MkdirTemp("", "llmgw-backup-*")
+	stage, err := secureTempDir("llmgw-backup-*")
 	if err != nil {
 		return BackupInspection{}, err
 	}
 	defer os.RemoveAll(stage)
 
-	entries := make([]BackupEntry, 0, len(backupFiles))
-	for name, sourceFn := range backupFiles {
-		source := sourceFn()
+	sources, err := backupSourceFiles()
+	if err != nil {
+		return BackupInspection{}, err
+	}
+	entries := make([]BackupEntry, 0, len(sources))
+	for name, source := range sources {
 		if _, err := os.Stat(source); os.IsNotExist(err) {
 			if name == "gateway.db" {
 				return BackupInspection{}, fmt.Errorf("gateway state database does not exist")
@@ -106,11 +110,14 @@ func CreateBackup(path string) (BackupInspection, error) {
 		} else if err != nil {
 			return BackupInspection{}, fmt.Errorf("inspect %s: %w", name, err)
 		}
-		target := filepath.Join(stage, name)
+		target := filepath.Join(stage, filepath.FromSlash(name))
+		if err := os.MkdirAll(filepath.Dir(target), 0o700); err != nil {
+			return BackupInspection{}, err
+		}
 		if sqliteBackupFiles[name] {
 			err = snapshotSQLite(source, target)
 		} else {
-			err = copyFile(source, target, 0o600)
+			err = copyFile(source, target)
 		}
 		if err != nil {
 			return BackupInspection{}, fmt.Errorf("stage %s: %w", name, err)
@@ -135,9 +142,130 @@ func CreateBackup(path string) (BackupInspection, error) {
 	}
 	inspection.Path = path
 	if filepath.Clean(filepath.Dir(path)) == filepath.Clean(defaultBackupDir()) {
-		_, _ = PruneDefaultBackups()
+		if _, err := PruneDefaultBackups(); err != nil {
+			return inspection, fmt.Errorf("backup created but retention failed: %w", err)
+		}
 	}
 	return inspection, nil
+}
+
+func backupSourceFiles() (map[string]string, error) {
+	files := map[string]string{}
+	for name, sourceFn := range coreBackupFiles {
+		files[name] = sourceFn()
+	}
+	savingsPath := filepath.Join(config.StateDir(), "usage.db")
+	if configured := strings.TrimSpace(config.Get().Savings.DBPath); configured != "" {
+		savingsPath = configured
+	}
+	files["usage.db"] = savingsPath
+	cacheDir := copilotCacheDir(config.Get())
+	cacheEntries, err := os.ReadDir(cacheDir)
+	if err != nil && !os.IsNotExist(err) {
+		return nil, fmt.Errorf("read Copilot cache: %w", err)
+	}
+	for _, entry := range cacheEntries {
+		if entry.Type().IsRegular() && validCopilotCacheName(entry.Name()) {
+			files["cache/"+entry.Name()] = filepath.Join(cacheDir, entry.Name())
+		}
+	}
+	if err := uniqueFilePaths(files); err != nil {
+		return nil, err
+	}
+	return files, nil
+}
+
+func backupDestinationFiles(extracted string, manifest BackupManifest) (map[string]string, error) {
+	current := config.Get()
+	settings := current
+	if _, err := os.Stat(filepath.Join(extracted, "config.yaml")); err == nil {
+		settings = config.ReadFile(filepath.Join(extracted, "config.yaml"))
+	}
+	destinations := map[string]string{}
+	for name, destinationFn := range coreBackupFiles {
+		destinations[name] = destinationFn()
+	}
+	savingsPath := filepath.Join(config.StateDir(), "usage.db")
+	if configured := strings.TrimSpace(settings.Savings.DBPath); configured != "" {
+		currentPath := strings.TrimSpace(current.Savings.DBPath)
+		if currentPath == "" || filepath.Clean(currentPath) != filepath.Clean(configured) {
+			return nil, fmt.Errorf("configure the archived savings database path before restore")
+		}
+		savingsPath = configured
+	}
+	destinations["usage.db"] = savingsPath
+	archivedCache := strings.TrimSpace(settings.GithubCopilotCacheDir)
+	currentCache := strings.TrimSpace(current.GithubCopilotCacheDir)
+	cacheDir := copilotCacheDir(current)
+	if archivedCache != "" {
+		if currentCache == "" || filepath.Clean(currentCache) != filepath.Clean(archivedCache) {
+			return nil, fmt.Errorf("configure the archived Copilot cache path before restore")
+		}
+		cacheDir = currentCache
+	}
+	for _, entry := range manifest.Files {
+		if strings.HasPrefix(entry.Name, "cache/") {
+			base := strings.TrimPrefix(entry.Name, "cache/")
+			if !validCopilotCacheName(base) {
+				return nil, fmt.Errorf("invalid Copilot cache entry")
+			}
+			destinations[entry.Name] = filepath.Join(cacheDir, base)
+		}
+	}
+	if existing, err := os.ReadDir(cacheDir); err == nil {
+		for _, entry := range existing {
+			if entry.Type().IsRegular() && validCopilotCacheName(entry.Name()) {
+				destinations["cache/"+entry.Name()] = filepath.Join(cacheDir, entry.Name())
+			}
+		}
+	} else if !os.IsNotExist(err) {
+		return nil, err
+	}
+	if err := uniqueFilePaths(destinations); err != nil {
+		return nil, err
+	}
+	return destinations, nil
+}
+
+func uniqueFilePaths(files map[string]string) error {
+	seen := map[string]string{}
+	for name, path := range files {
+		absolute, err := filepath.Abs(path)
+		if err != nil {
+			return err
+		}
+		key := strings.ToLower(filepath.Clean(absolute))
+		if previous, duplicate := seen[key]; duplicate {
+			return fmt.Errorf("state paths for %s and %s overlap", previous, name)
+		}
+		seen[key] = name
+	}
+	return nil
+}
+
+func copilotCacheDir(settings *config.Settings) string {
+	if configured := strings.TrimSpace(settings.GithubCopilotCacheDir); configured != "" {
+		return configured
+	}
+	home, _ := os.UserHomeDir()
+	return filepath.Join(home, ".llmgw", "cache")
+}
+
+func validCopilotCacheName(name string) bool {
+	return strings.HasPrefix(name, "github_copilot_") && strings.HasSuffix(name, ".json") && filepath.Base(name) == name
+}
+
+func allowedBackupName(name string) bool {
+	if _, ok := coreBackupFiles[name]; ok {
+		return true
+	}
+	if name == "usage.db" {
+		return true
+	}
+	if strings.HasPrefix(name, "cache/") {
+		return validCopilotCacheName(strings.TrimPrefix(name, "cache/"))
+	}
+	return false
 }
 
 func defaultBackupDir() string { return filepath.Join(config.StateDir(), "backups") }
@@ -228,87 +356,83 @@ func RestoreBackup(path string) (BackupInspection, error) {
 		return BackupInspection{}, err
 	}
 	defer lock.Release()
+	if err := RecoverInterruptedRestore(); err != nil {
+		return BackupInspection{}, err
+	}
 
+	destinations, err := backupDestinationFiles(extracted, manifest)
+	if err != nil {
+		return BackupInspection{}, err
+	}
 	available := map[string]bool{}
 	for _, entry := range manifest.Files {
 		available[entry.Name] = true
 	}
-	type replacement struct {
-		destination string
-		staged      string
-		rollback    string
-		installed   bool
-	}
-	replacements := make([]replacement, 0, len(backupFiles)+6)
-	names := make([]string, 0, len(backupFiles))
-	for name := range backupFiles {
+	replacements := make([]restoreEntry, 0, len(destinations)+9)
+	names := make([]string, 0, len(destinations))
+	for name := range destinations {
 		names = append(names, name)
 	}
 	sort.Strings(names)
 	for _, name := range names {
-		destination := backupFiles[name]()
+		destination := destinations[name]
 		var staged string
 		if available[name] {
 			if err := os.MkdirAll(filepath.Dir(destination), 0o700); err != nil {
 				return BackupInspection{}, err
 			}
-			file, err := os.CreateTemp(filepath.Dir(destination), ".llmgw-restore-*")
+			file, err := createSecureTempFile(filepath.Dir(destination), ".llmgw-restore-*.tmp")
 			if err != nil {
 				return BackupInspection{}, err
 			}
 			staged = file.Name()
-			_ = file.Close()
-			_ = os.Remove(staged)
-			if err := copyFile(filepath.Join(extracted, name), staged, 0o600); err != nil {
+			if err := copyToOpenFile(filepath.Join(extracted, filepath.FromSlash(name)), file); err != nil {
+				_ = os.Remove(staged)
 				return BackupInspection{}, err
 			}
 		}
-		replacements = append(replacements, replacement{destination: destination, staged: staged})
+		replacements = append(replacements, restoreEntry{Destination: destination, Staged: staged})
 		if sqliteBackupFiles[name] {
 			for _, suffix := range []string{"-wal", "-shm", "-journal"} {
-				replacements = append(replacements, replacement{destination: destination + suffix})
-			}
-		}
-	}
-
-	rollback := func(last int) {
-		for i := last; i >= 0; i-- {
-			r := &replacements[i]
-			if r.installed {
-				_ = os.Remove(r.destination)
-			}
-			if r.rollback != "" {
-				_ = os.Rename(r.rollback, r.destination)
-			}
-			if r.staged != "" {
-				_ = os.Remove(r.staged)
+				replacements = append(replacements, restoreEntry{Destination: destination + suffix})
 			}
 		}
 	}
 	for i := range replacements {
 		r := &replacements[i]
-		if _, err := os.Stat(r.destination); err == nil {
-			r.rollback = r.destination + fmt.Sprintf(".restore-old-%d", time.Now().UnixNano())
-			if err := os.Rename(r.destination, r.rollback); err != nil {
-				rollback(i - 1)
-				return BackupInspection{}, fmt.Errorf("stage current state: %w", err)
-			}
+		if _, err := os.Stat(r.Destination); err == nil {
+			r.HadOriginal = true
+			r.Rollback = uniqueRollbackPath(r.Destination)
 		} else if !os.IsNotExist(err) {
-			rollback(i - 1)
 			return BackupInspection{}, err
 		}
-		if r.staged != "" {
-			if err := os.Rename(r.staged, r.destination); err != nil {
-				rollback(i)
-				return BackupInspection{}, fmt.Errorf("install restored state: %w", err)
+	}
+	journal := restoreJournal{Phase: "prepared", Entries: replacements}
+	if err := writeRestoreJournal(journal); err != nil {
+		return BackupInspection{}, err
+	}
+	journalPath := restoreJournalPath()
+	for _, entry := range replacements {
+		if entry.HadOriginal {
+			if err := durableRename(entry.Destination, entry.Rollback); err != nil {
+				rollbackErr := rollbackRestore(journalPath, replacements)
+				return BackupInspection{}, errors.Join(fmt.Errorf("stage current state: %w", err), rollbackErr)
 			}
-			r.installed = true
+		}
+		if entry.Staged != "" {
+			if err := durableRename(entry.Staged, entry.Destination); err != nil {
+				rollbackErr := rollbackRestore(journalPath, replacements)
+				return BackupInspection{}, errors.Join(fmt.Errorf("install restored state: %w", err), rollbackErr)
+			}
 		}
 	}
-	for i := range replacements {
-		if replacements[i].rollback != "" {
-			_ = os.Remove(replacements[i].rollback)
-		}
+	journal.Phase = "committed"
+	if err := writeRestoreJournal(journal); err != nil {
+		rollbackErr := rollbackRestore(journalPath, replacements)
+		return BackupInspection{}, errors.Join(fmt.Errorf("record committed restore: %w", err), rollbackErr)
+	}
+	if err := finalizeRestore(journalPath, replacements); err != nil {
+		return BackupInspection{}, err
 	}
 	return inspection, nil
 }
@@ -368,7 +492,7 @@ func describeFile(name, path string) (BackupEntry, error) {
 }
 
 func writeArchive(path, stage string, manifest BackupManifest) (err error) {
-	temp, err := os.CreateTemp(filepath.Dir(path), ".llmgw-backup-*.tmp")
+	temp, err := createSecureTempFile(filepath.Dir(path), ".llmgw-backup-*.tmp")
 	if err != nil {
 		return err
 	}
@@ -379,9 +503,6 @@ func writeArchive(path, stage string, manifest BackupManifest) (err error) {
 			_ = os.Remove(tempPath)
 		}
 	}()
-	if err = temp.Chmod(0o600); err != nil {
-		return err
-	}
 	gzipWriter := gzip.NewWriter(temp)
 	tarWriter := tar.NewWriter(gzipWriter)
 	manifestBytes, err := json.Marshal(manifest)
@@ -398,7 +519,7 @@ func writeArchive(path, stage string, manifest BackupManifest) (err error) {
 		if err = tarWriter.WriteHeader(&tar.Header{Name: entry.Name, Mode: 0o600, Size: entry.Size}); err != nil {
 			return err
 		}
-		file, openErr := os.Open(filepath.Join(stage, entry.Name))
+		file, openErr := os.Open(filepath.Join(stage, filepath.FromSlash(entry.Name)))
 		if openErr != nil {
 			return openErr
 		}
@@ -420,10 +541,10 @@ func writeArchive(path, stage string, manifest BackupManifest) (err error) {
 	if err = temp.Close(); err != nil {
 		return err
 	}
-	if err = os.Rename(tempPath, path); err != nil {
+	if err = durableRename(tempPath, path); err != nil {
 		return err
 	}
-	return os.Chmod(path, 0o600)
+	return restrictPath(path, false)
 }
 
 func extractArchive(path string) (string, BackupManifest, error) {
@@ -453,10 +574,12 @@ func extractArchive(path string) (string, BackupManifest, error) {
 		return "", BackupManifest{}, fmt.Errorf("unsupported or invalid backup manifest")
 	}
 	expected := map[string]BackupEntry{}
+	var totalSize int64
 	for _, entry := range manifest.Files {
-		if _, allowed := backupFiles[entry.Name]; !allowed || entry.Size < 0 || entry.Size > maxBackupFileBytes || len(entry.SHA256) != 64 {
+		if !allowedBackupName(entry.Name) || entry.Size < 0 || entry.Size > maxBackupFileBytes || entry.Size > maxBackupTotalBytes-totalSize || len(entry.SHA256) != 64 {
 			return "", BackupManifest{}, fmt.Errorf("invalid backup entry metadata")
 		}
+		totalSize += entry.Size
 		if _, duplicate := expected[entry.Name]; duplicate {
 			return "", BackupManifest{}, fmt.Errorf("duplicate backup entry metadata")
 		}
@@ -465,7 +588,7 @@ func extractArchive(path string) (string, BackupManifest, error) {
 	if _, ok := expected["gateway.db"]; !ok {
 		return "", BackupManifest{}, fmt.Errorf("backup has no gateway database")
 	}
-	tempDir, err := os.MkdirTemp("", "llmgw-inspect-*")
+	tempDir, err := secureTempDir("llmgw-inspect-*")
 	if err != nil {
 		return "", BackupManifest{}, err
 	}
@@ -487,8 +610,11 @@ func extractArchive(path string) (string, BackupManifest, error) {
 			return fail(fmt.Errorf("unexpected or invalid backup entry"))
 		}
 		seen[header.Name] = true
-		target := filepath.Join(tempDir, header.Name)
-		out, err := os.OpenFile(target, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
+		target := filepath.Join(tempDir, filepath.FromSlash(header.Name))
+		if err := os.MkdirAll(filepath.Dir(target), 0o700); err != nil {
+			return fail(err)
+		}
+		out, err := createSecureFile(target)
 		if err != nil {
 			return fail(err)
 		}
@@ -507,14 +633,23 @@ func extractArchive(path string) (string, BackupManifest, error) {
 
 func inspectExtracted(dir string, manifest BackupManifest) (BackupInspection, error) {
 	files := make([]string, 0, len(manifest.Files))
+	cachePresent := false
 	for _, entry := range manifest.Files {
-		files = append(files, entry.Name)
+		if strings.HasPrefix(entry.Name, "cache/") {
+			cachePresent = true
+		} else {
+			files = append(files, entry.Name)
+		}
 		if sqliteBackupFiles[entry.Name] {
-			if err := validateSQLite(filepath.Join(dir, entry.Name)); err != nil {
+			if err := validateSQLite(filepath.Join(dir, filepath.FromSlash(entry.Name))); err != nil {
 				return BackupInspection{}, fmt.Errorf("validate %s: %w", entry.Name, err)
 			}
 		}
 	}
+	if cachePresent {
+		files = append(files, "copilot-cache")
+	}
+	sort.Strings(files)
 	db, err := sql.Open("sqlite", filepath.Join(dir, "gateway.db"))
 	if err != nil {
 		return BackupInspection{}, err
@@ -540,18 +675,32 @@ func inspectExtracted(dir string, manifest BackupManifest) (BackupInspection, er
 	return inspection, nil
 }
 
-func copyFile(source, target string, mode os.FileMode) error {
+func copyFile(source, target string) error {
 	in, err := os.Open(source)
 	if err != nil {
 		return err
 	}
 	defer in.Close()
-	out, err := os.OpenFile(target, os.O_CREATE|os.O_EXCL|os.O_WRONLY, mode)
+	out, err := createSecureFile(target)
 	if err != nil {
 		return err
 	}
-	_, copyErr := io.Copy(out, in)
-	syncErr := out.Sync()
-	closeErr := out.Close()
+	return copyAndClose(in, out)
+}
+
+func copyToOpenFile(source string, output *os.File) error {
+	input, err := os.Open(source)
+	if err != nil {
+		_ = output.Close()
+		return err
+	}
+	defer input.Close()
+	return copyAndClose(input, output)
+}
+
+func copyAndClose(input io.Reader, output *os.File) error {
+	_, copyErr := io.Copy(output, input)
+	syncErr := output.Sync()
+	closeErr := output.Close()
 	return errors.Join(copyErr, syncErr, closeErr)
 }
