@@ -60,6 +60,10 @@ go build -o llmgw ./cmd/llmgw
 LLMGW_ALLOW_UNAUTHENTICATED_API=1 ./llmgw serve   # http://127.0.0.1:8787/admin
 ```
 
+`llmgw version` prints semantic version, source commit, and RFC3339 build time.
+Local builds honestly report development/unknown defaults unless those fields
+are injected with Go linker `-X` flags; release automation injects all three.
+
 State lives under `~/.llmgw` (override with `LLMGW_STATE_DIR`):
 `gateway.db` (IAM, hashed keys, encrypted provider connections, usage, quotas,
 audit, alerts), `config.yaml`, the legacy/config-seed `secrets.json`, and provider

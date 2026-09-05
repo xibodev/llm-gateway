@@ -15,6 +15,9 @@ WORKDIR /src
 # Set by buildx for each requested platform.
 ARG TARGETOS
 ARG TARGETARCH
+ARG VERSION=0.0.0-dev
+ARG COMMIT=unknown
+ARG BUILD_TIME=unknown
 
 # Cache modules first.
 COPY go.mod go.sum ./
@@ -24,11 +27,22 @@ COPY . .
 COPY --from=console-builder /console/dist ./internal/web/console/dist
 # Static, stripped binary. The generated console is embedded at compile time.
 RUN CGO_ENABLED=0 GOOS=${TARGETOS:-linux} GOARCH=${TARGETARCH:-amd64} \
-    go build -trimpath -ldflags="-s -w" -o /out/llmgw ./cmd/llmgw \
+    go build -trimpath -ldflags="-s -w \
+      -X=llmgw/internal/buildinfo.Version=${VERSION} \
+      -X=llmgw/internal/buildinfo.Commit=${COMMIT} \
+      -X=llmgw/internal/buildinfo.BuildTime=${BUILD_TIME}" \
+      -o /out/llmgw ./cmd/llmgw \
     && mkdir -p /out/state
 
 # ---- runtime -------------------------------------------------------------- #
 FROM gcr.io/distroless/static-debian12:nonroot
+
+ARG VERSION=0.0.0-dev
+ARG COMMIT=unknown
+ARG BUILD_TIME=unknown
+LABEL org.opencontainers.image.version=$VERSION \
+      org.opencontainers.image.revision=$COMMIT \
+      org.opencontainers.image.created=$BUILD_TIME
 
 ENV LLMGW_HOST=0.0.0.0 \
     LLMGW_PORT=8787 \

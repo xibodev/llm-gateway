@@ -22,6 +22,7 @@ import (
 	"time"
 
 	"llmgw/internal/api"
+	"llmgw/internal/buildinfo"
 	"llmgw/internal/config"
 	"llmgw/internal/iam"
 	"llmgw/internal/operations"
@@ -60,7 +61,7 @@ func main() {
 	case "-h", "--help", "help":
 		fmt.Print(usage)
 	case "version", "--version":
-		fmt.Println("llm-gateway " + config.Version)
+		printVersion(os.Stdout)
 	case "backup":
 		if err := backupCommand(os.Args[2:], os.Stdout); err != nil {
 			fmt.Fprintln(os.Stderr, "backup:", err)
@@ -131,7 +132,7 @@ func serve() {
 	}
 
 	go func() {
-		log.Printf("llm-gateway %s listening on http://%s (admin at /admin)", config.Version, addr)
+		log.Printf("llm-gateway %s (%s) listening on http://%s (admin at /admin)", buildinfo.Version, buildinfo.Commit, addr)
 		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			log.Fatalf("server error: %v", err)
 		}
@@ -144,6 +145,11 @@ func serve() {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	_ = srv.Shutdown(ctx)
+}
+
+func printVersion(output io.Writer) {
+	info := buildinfo.Current()
+	fmt.Fprintf(output, "llm-gateway %s\ncommit %s\nbuild_time %s\n", info.Version, info.Commit, info.BuildTime)
 }
 
 func startRetention() func() {

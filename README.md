@@ -137,6 +137,11 @@ npm run check:dist
 
 The generated `dist/` assets are committed because Go embeds them. The Go runtime does not need Node.js.
 
+`llmgw version`, `/health`, and `/admin/api/state` report the same semantic
+version, source commit, and RFC3339 build time. Development builds use explicit
+`0.0.0-dev` and `unknown` values; release binaries and images inject immutable
+provenance during their build.
+
 ## Google providers
 
 Google is reachable through two surfaces that share a request grammar and little
