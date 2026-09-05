@@ -323,6 +323,7 @@ func readYAML(path string) map[string]any {
 // it as the singleton.
 func Load() *Settings {
 	s := Defaults()
+	seedConfigIfMissing()
 	payload := readYAML(ConfigFilePath())
 	applyConfig(s, payload)
 	applyEnv(s)
@@ -330,6 +331,42 @@ func Load() *Settings {
 	current = s
 	mu.Unlock()
 	return s
+}
+
+func seedConfigIfMissing() {
+	seed := strings.TrimSpace(os.Getenv("LLMGW_CONFIG_SEED"))
+	target := ConfigFilePath()
+	if seed == "" || filepath.Clean(expandUser(seed)) == filepath.Clean(target) {
+		return
+	}
+	if _, err := os.Stat(target); err == nil || !os.IsNotExist(err) {
+		return
+	}
+	raw, err := os.ReadFile(expandUser(seed))
+	if err != nil {
+		return
+	}
+	if err := os.MkdirAll(filepath.Dir(target), 0o700); err != nil {
+		return
+	}
+	temp, err := os.CreateTemp(filepath.Dir(target), ".config-seed-*.tmp")
+	if err != nil {
+		return
+	}
+	tempPath := temp.Name()
+	defer os.Remove(tempPath)
+	if _, err := temp.Write(raw); err != nil {
+		_ = temp.Close()
+		return
+	}
+	if err := temp.Sync(); err != nil {
+		_ = temp.Close()
+		return
+	}
+	if err := temp.Close(); err != nil {
+		return
+	}
+	_ = os.Rename(tempPath, target)
 }
 
 // ReadFile parses one configuration file without changing the process-wide

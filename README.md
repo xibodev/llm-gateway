@@ -98,7 +98,9 @@ wire profiles and known gaps.
 LLMGW_API_KEY=... docker compose up -d --build
 ```
 Builds `go/Dockerfile` (distroless, nonroot), mounts your config read-only and
-persists gateway state in a named volume at `/state`. For a real box with TLS,
+seeds a writable volume copy on first start, then persists gateway state in the
+named volume at `/state`. Later console edits and backup restores update that
+volume copy without modifying `config.local.yaml`. For a real box with TLS,
 use `deploy/docker-compose.prod.yml` + `Caddyfile` — see `deploy/DEPLOY.md`.
 
 ## Back up and restore

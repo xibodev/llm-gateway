@@ -205,8 +205,10 @@ jobs:
           set -euo pipefail
           mkdir /tmp/llmgw-oci
           tar -xf /tmp/llmgw-image.tar -C /tmp/llmgw-oci
-          jq -e '[.manifests[] | select(.platform.os == "linux") | .platform.architecture] | sort == ["amd64", "arm64"]' /tmp/llmgw-oci/index.json >/dev/null
-          jq -e '[.manifests[] | select(.annotations["vnd.docker.reference.type"] == "attestation-manifest")] | length >= 2' /tmp/llmgw-oci/index.json >/dev/null
+          digest=$(jq -r '.manifests[0].digest' /tmp/llmgw-oci/index.json)
+          nested="/tmp/llmgw-oci/blobs/${digest/:/\/}"
+          jq -e '[.manifests[] | select(.platform.os == "linux") | .platform.architecture] | sort == ["amd64", "arm64"]' "$nested" >/dev/null
+          jq -e '[.manifests[] | select(.annotations["vnd.docker.reference.type"] == "attestation-manifest")] | length >= 2' "$nested" >/dev/null
 
   release-stage:
     name: stage draft release

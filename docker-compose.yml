@@ -23,7 +23,8 @@ services:
       LLMGW_HOST: 0.0.0.0
       LLMGW_PORT: "8787"
       LLMGW_STATE_DIR: /state
-      LLMGW_CONFIG: /config/llmgw.config.yaml
+      LLMGW_CONFIG: /state/config.yaml
+      LLMGW_CONFIG_SEED: /config/llmgw.config.yaml
       LLMGW_API_KEY: ${LLMGW_API_KEY:-}
       LLMGW_ALLOW_UNAUTHENTICATED_API: ${LLMGW_ALLOW_UNAUTHENTICATED_API:-0}
       LLMGW_EXPERIMENTAL_COPILOT_PROVIDER: ${LLMGW_EXPERIMENTAL_COPILOT_PROVIDER:-0}
@@ -34,7 +35,7 @@ services:
       LLMGW_RETENTION_DELIVERED_OUTBOX_DAYS: ${LLMGW_RETENTION_DELIVERED_OUTBOX_DAYS:-400}
       LLMGW_BACKUP_KEEP: ${LLMGW_BACKUP_KEEP:-7}
     volumes:
-      - ./config.local.yaml:/config/llmgw.config.yaml:rw
+      - ./config.local.yaml:/config/llmgw.config.yaml:ro
       - llmgw-state:/state
     ports:
       - "${LLMGW_HOST_PORT:-8787}:8787"

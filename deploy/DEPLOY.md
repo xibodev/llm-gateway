@@ -56,8 +56,9 @@ llmgw backup restore /secure/path/llmgw-state.tar.gz --force
 
 Restore also requires the original `LLMGW_CREDENTIAL_ENCRYPTION_KEY` from the
 secret store; the archive deliberately does not contain it. The local Compose
-config mount is writable so the offline restore command can replace it; keep the
-container stopped for the entire maintenance operation.
+stack seeds its read-only config mount into writable state on first start, so the
+offline restore command can replace the state copy; keep the container stopped
+for the entire maintenance operation.
 
 ## Alternative: systemd (no Docker)
 `go build -o llmgw ./cmd/llmgw`, ship the binary, and run it under systemd behind
