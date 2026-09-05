@@ -2,7 +2,7 @@
 ARG SOURCE_DATE_EPOCH=0
 #
 # Build the console before compiling Go so the final binary embeds only local assets.
-FROM --platform=$BUILDPLATFORM node:22-alpine@sha256:c610fcdfb1d5b4740dd70c284ed3cb16bb857e0f7166196e36a5501df7a3aa32 AS console-builder
+FROM --platform=$BUILDPLATFORM node:22.23.2-alpine@sha256:c610fcdfb1d5b4740dd70c284ed3cb16bb857e0f7166196e36a5501df7a3aa32 AS console-builder
 ARG SOURCE_DATE_EPOCH
 WORKDIR /console
 COPY internal/web/console/package.json internal/web/console/package-lock.json ./

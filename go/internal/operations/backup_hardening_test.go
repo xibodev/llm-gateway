@@ -135,6 +135,22 @@ func TestRecoverCommittedRestoreFinishesCleanup(t *testing.T) {
 	assertAbsent(t, rollback, restoreJournalPath())
 }
 
+func TestRecoverPreparedRestoreRemovesNewDestination(t *testing.T) {
+	state := t.TempDir()
+	t.Setenv("LLMGW_STATE_DIR", state)
+	destination := filepath.Join(state, "new-state.json")
+	staged := destination + ".restore-new"
+	mustWrite(t, destination, "installed")
+	entries := []restoreEntry{{Destination: destination, Staged: staged}}
+	if err := writeRestoreJournal(restoreJournal{Phase: "prepared", Entries: entries}); err != nil {
+		t.Fatal(err)
+	}
+	if err := RecoverInterruptedRestore(); err != nil {
+		t.Fatal(err)
+	}
+	assertAbsent(t, destination, staged, restoreJournalPath())
+}
+
 func mustWrite(t *testing.T, path, value string) {
 	t.Helper()
 	if err := os.WriteFile(path, []byte(value), 0o600); err != nil {

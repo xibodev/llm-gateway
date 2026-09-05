@@ -55,6 +55,13 @@ func replaceFile(source, destination string) error {
 	return durableRename(source, destination)
 }
 
+func durableRemove(path string) error {
+	if err := os.Remove(path); err != nil {
+		return err
+	}
+	return syncDirectory(filepath.Dir(path))
+}
+
 func syncDirectory(path string) error {
 	directory, err := os.Open(path)
 	if err != nil {

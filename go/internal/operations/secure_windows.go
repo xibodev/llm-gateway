@@ -147,3 +147,15 @@ func replaceFile(source, destination string) error {
 	}
 	return windows.MoveFileEx(from, to, windows.MOVEFILE_REPLACE_EXISTING|windows.MOVEFILE_WRITE_THROUGH)
 }
+
+func durableRemove(path string) error {
+	tombstone := path + ".deleted-" + fmt.Sprint(os.Getpid())
+	if err := durableRename(path, tombstone); err != nil {
+		return err
+	}
+	pathPointer, err := windows.UTF16PtrFromString(tombstone)
+	if err != nil {
+		return err
+	}
+	return windows.DeleteFile(pathPointer)
+}

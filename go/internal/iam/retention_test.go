@@ -117,6 +117,34 @@ func TestRetentionPolicyUsesSafeDefaults(t *testing.T) {
 	}
 }
 
+func TestRetentionDeletesAcrossBatches(t *testing.T) {
+	t.Setenv("LLMGW_STATE_DIR", t.TempDir())
+	ResetForTests()
+	t.Cleanup(ResetForTests)
+	db, err := DB()
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Date(2026, 9, 5, 0, 0, 0, 0, time.UTC)
+	old := now.AddDate(-2, 0, 0).Unix()
+	tx, err := db.Begin()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for index := 0; index < retentionBatchSize+37; index++ {
+		if _, err := tx.Exec(`INSERT INTO usage_events(request_id,ts,endpoint,status_code) VALUES(?,?,?,200)`, newIDForTest(t), old, "batch"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		t.Fatal(err)
+	}
+	result, err := PruneOperationalHistory(now, RetentionPolicy{UsageDays: 90, AuditDays: 365, DeliveredOutboxDays: 400})
+	if err != nil || result.UsageEvents != retentionBatchSize+37 {
+		t.Fatalf("batch prune=%+v err=%v", result, err)
+	}
+}
+
 func newIDForTest(t *testing.T) string {
 	t.Helper()
 	id, err := newID("ret")

@@ -119,6 +119,9 @@ credentials, and is written with owner-only permissions. Keep the deployment's
 `LLMGW_CREDENTIAL_ENCRYPTION_KEY` separately; it is never copied into a backup.
 Archive checksums detect corruption but do not authenticate the archive; protect
 it from replacement as well as disclosure.
+Request logs are intentionally excluded because optional body logging may contain
+large prompts and responses; retain those separately when incident policy needs
+them.
 The gateway also bounds operational history by default: 90 days of usage and
 failover telemetry, 365 days of audit events, 400 days of delivered notification
 tombstones, completed quota periods, two request-log generations, and seven

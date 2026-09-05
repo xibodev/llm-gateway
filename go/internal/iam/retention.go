@@ -22,6 +22,8 @@ type RetentionResult struct {
 	DeliveredOutbox      int64
 }
 
+const retentionBatchSize = 500
+
 func DefaultRetentionPolicy() RetentionPolicy {
 	return RetentionPolicy{
 		UsageDays:           envIntAtLeast("LLMGW_RETENTION_USAGE_DAYS", 90, 1),
@@ -48,12 +50,6 @@ func PruneOperationalHistory(now time.Time, policy RetentionPolicy) (RetentionRe
 	if err != nil {
 		return RetentionResult{}, err
 	}
-	tx, err := db.Begin()
-	if err != nil {
-		return RetentionResult{}, err
-	}
-	defer func() { _ = tx.Rollback() }()
-
 	result := RetentionResult{}
 	usageCutoff := now.AddDate(0, 0, -policy.UsageDays).Unix()
 	auditCutoff := now.AddDate(0, 0, -policy.AuditDays).Unix()
@@ -65,31 +61,35 @@ func PruneOperationalHistory(now time.Time, policy RetentionPolicy) (RetentionRe
 		args  []any
 		count *int64
 	}{
-		{"DELETE FROM usage_events WHERE ts < ?", []any{usageCutoff}, &result.UsageEvents},
-		{"DELETE FROM audit_events WHERE ts < ?", []any{auditCutoff}, &result.AuditEvents},
-		{`DELETE FROM quota_counters WHERE
+		{"DELETE FROM usage_events WHERE id IN (SELECT id FROM usage_events WHERE ts < ? ORDER BY id LIMIT ?)", []any{usageCutoff, retentionBatchSize}, &result.UsageEvents},
+		{"DELETE FROM audit_events WHERE id IN (SELECT id FROM audit_events WHERE ts < ? ORDER BY id LIMIT ?)", []any{auditCutoff, retentionBatchSize}, &result.AuditEvents},
+		{`DELETE FROM quota_counters WHERE rowid IN (SELECT rowid FROM quota_counters WHERE
             (period='minute' AND period_start < ?) OR
             (period='day' AND period_start < ?) OR
-            (period='month' AND period_start < ?)`, []any{minute, day, month}, &result.KeyQuotaCounters},
-		{`DELETE FROM project_quota_counters WHERE
+            (period='month' AND period_start < ?) LIMIT ?)`, []any{minute, day, month, retentionBatchSize}, &result.KeyQuotaCounters},
+		{`DELETE FROM project_quota_counters WHERE rowid IN (SELECT rowid FROM project_quota_counters WHERE
             (period='minute' AND period_start < ?) OR
             (period='day' AND period_start < ?) OR
-            (period='month' AND period_start < ?)`, []any{minute, day, month}, &result.ProjectQuotaCounters},
-		{`DELETE FROM outbox_events
-          WHERE status='delivered' AND delivered_at IS NOT NULL AND delivered_at < ?`, []any{outboxCutoff}, &result.DeliveredOutbox},
+            (period='month' AND period_start < ?) LIMIT ?)`, []any{minute, day, month, retentionBatchSize}, &result.ProjectQuotaCounters},
+		{`DELETE FROM outbox_events WHERE id IN (SELECT id FROM outbox_events
+          WHERE status='delivered' AND delivered_at IS NOT NULL AND delivered_at < ? ORDER BY id LIMIT ?)`, []any{outboxCutoff, retentionBatchSize}, &result.DeliveredOutbox},
 	}
 	for _, deletion := range deletions {
-		res, err := tx.Exec(deletion.query, deletion.args...)
-		if err != nil {
-			return RetentionResult{}, err
+		for {
+			res, err := db.Exec(deletion.query, deletion.args...)
+			if err != nil {
+				return RetentionResult{}, err
+			}
+			removed, err := res.RowsAffected()
+			if err != nil {
+				return RetentionResult{}, err
+			}
+			*deletion.count += removed
+			if removed < retentionBatchSize {
+				break
+			}
+			time.Sleep(time.Millisecond)
 		}
-		*deletion.count, err = res.RowsAffected()
-		if err != nil {
-			return RetentionResult{}, err
-		}
-	}
-	if err := tx.Commit(); err != nil {
-		return RetentionResult{}, err
 	}
 	return result, nil
 }

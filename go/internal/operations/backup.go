@@ -290,6 +290,15 @@ func PruneBackups(keep int) (int, error) {
 	if err != nil {
 		return 0, err
 	}
+	regularCandidates := 0
+	for _, entry := range entries {
+		if entry.Type()&os.ModeSymlink == 0 && entry.Type().IsRegular() && strings.HasPrefix(entry.Name(), "llmgw-") && strings.HasSuffix(entry.Name(), ".tar.gz") {
+			regularCandidates++
+		}
+	}
+	if regularCandidates <= keep {
+		return 0, nil
+	}
 	type candidate struct {
 		path    string
 		created time.Time

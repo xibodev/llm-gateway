@@ -15,6 +15,9 @@ on:
 permissions:
   contents: read
 
+env:
+  DOCKER_BUILD_RECORD_UPLOAD: "false"
+
 concurrency:
   group: release-pipeline
   cancel-in-progress: false
@@ -183,6 +186,9 @@ jobs:
           persist-credentials: false
 
       - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
+        with:
+          version: v0.36.1
+          driver-opts: image=moby/buildkit:v0.32.2@sha256:28a898719c18a33f4e8000685287fa36fd0dd9560c6440227d3a732d79bb41d8
 
       - name: Build OCI image without publishing
         uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
@@ -192,7 +198,7 @@ jobs:
           platforms: linux/amd64,linux/arm64
           push: false
           outputs: type=oci,dest=/tmp/llmgw-image.tar
-          sbom: true
+          sbom: generator=docker.io/docker/buildkit-syft-scanner@sha256:ae4f3b554449e7e25548e7d8ccc029d17357348e30c6e3df01b92bc93654d6a9
           provenance: mode=max
           build-args: |
             VERSION=${{ needs.validate.outputs.version }}
@@ -208,7 +214,16 @@ jobs:
           digest=$(jq -r '.manifests[0].digest' /tmp/llmgw-oci/index.json)
           nested="/tmp/llmgw-oci/blobs/${digest/:/\/}"
           jq -e '[.manifests[] | select(.platform.os == "linux") | .platform.architecture] | sort == ["amd64", "arm64"]' "$nested" >/dev/null
-          jq -e '[.manifests[] | select(.annotations["vnd.docker.reference.type"] == "attestation-manifest")] | length >= 2' "$nested" >/dev/null
+          mapfile -t attestations < <(jq -r '.manifests[] | select(.annotations["vnd.docker.reference.type"] == "attestation-manifest") | .digest' "$nested")
+          test "${#attestations[@]}" -eq 2
+          for attestation in "${attestations[@]}"; do
+            manifest="/tmp/llmgw-oci/blobs/${attestation/:/\/}"
+            jq -e '
+              [.layers[].annotations["in-toto.io/predicate-type"]] as $types |
+              ($types | index("https://spdx.dev/Document")) != null and
+              any($types[]; startswith("https://slsa.dev/provenance/"))
+            ' "$manifest" >/dev/null
+          done
 
   release-stage:
     name: stage draft release
@@ -254,6 +269,9 @@ jobs:
           persist-credentials: false
 
       - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
+        with:
+          version: v0.36.1
+          driver-opts: image=moby/buildkit:v0.32.2@sha256:28a898719c18a33f4e8000685287fa36fd0dd9560c6440227d3a732d79bb41d8
 
       - uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
         with:
@@ -270,7 +288,8 @@ jobs:
         run: |
           set -euo pipefail
           image="ghcr.io/${GITHUB_REPOSITORY}:$VERSION"
-          if manifest=$(docker buildx imagetools inspect "$image" --format '{{json .Manifest}}' 2>/dev/null); then
+          inspect_error=$(mktemp)
+          if manifest=$(docker buildx imagetools inspect "$image" --format '{{json .Manifest}}' 2>"$inspect_error"); then
             test "$DRAFT_EXISTS" = "true" || {
               echo "version image exists without a resumable draft release" >&2
               exit 1
@@ -294,8 +313,12 @@ jobs:
             }
             echo "exists=true" >> "$GITHUB_OUTPUT"
             echo "digest=$(printf '%s' "$manifest" | jq -r .digest)" >> "$GITHUB_OUTPUT"
-          else
+          elif grep -Eqi 'not found|manifest unknown|name unknown' "$inspect_error"; then
             echo "exists=false" >> "$GITHUB_OUTPUT"
+          else
+            cat "$inspect_error" >&2
+            echo "registry inspection failed; refusing to overwrite a version tag" >&2
+            exit 1
           fi
 
       - name: Build and publish image
@@ -313,7 +336,7 @@ jobs:
             org.opencontainers.image.revision=${{ needs.validate.outputs.commit }}
             org.opencontainers.image.created=${{ needs.validate.outputs.build_time }}
             org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
-          sbom: true
+          sbom: generator=docker.io/docker/buildkit-syft-scanner@sha256:ae4f3b554449e7e25548e7d8ccc029d17357348e30c6e3df01b92bc93654d6a9
           provenance: mode=max
           build-args: |
             VERSION=${{ needs.validate.outputs.version }}
@@ -336,6 +359,35 @@ jobs:
           digest="${BUILT_DIGEST:-$EXISTING_DIGEST}"
           test -n "$digest"
           echo "immutable version image: $digest"
+
+      - name: Validate published image manifests
+        env:
+          VERSION: ${{ needs.validate.outputs.version }}
+          COMMIT: ${{ needs.validate.outputs.commit }}
+        run: |
+          set -euo pipefail
+          image="ghcr.io/${GITHUB_REPOSITORY}:$VERSION"
+          manifest=$(docker buildx imagetools inspect "$image" --format '{{json .Manifest}}')
+          printf '%s' "$manifest" | jq -e '
+            ([.manifests[] | select(.platform.os == "linux") | .platform.architecture] | sort) == ["amd64", "arm64"]
+          ' >/dev/null
+          images=$(docker buildx imagetools inspect "$image" --format '{{json .Image}}')
+          printf '%s' "$images" | jq -e --arg version "$VERSION" --arg commit "$COMMIT" '
+            [. | to_entries[] | select(.key == "linux/amd64" or .key == "linux/arm64")] as $images |
+            ($images | length) == 2 and
+            all($images[]; .value.config.Labels["org.opencontainers.image.version"] == $version and
+                           .value.config.Labels["org.opencontainers.image.revision"] == $commit)
+          ' >/dev/null
+          mapfile -t attestations < <(printf '%s' "$manifest" | jq -r '.manifests[] | select(.annotations["vnd.docker.reference.type"] == "attestation-manifest") | .digest')
+          test "${#attestations[@]}" -eq 2
+          for attestation in "${attestations[@]}"; do
+            raw=$(docker buildx imagetools inspect "ghcr.io/${GITHUB_REPOSITORY}@${attestation}" --raw)
+            printf '%s' "$raw" | jq -e '
+              [.layers[].annotations["in-toto.io/predicate-type"]] as $types |
+              ($types | index("https://spdx.dev/Document")) != null and
+              any($types[]; startswith("https://slsa.dev/provenance/"))
+            ' >/dev/null
+          done
 
   release-publish:
     name: publish GitHub release

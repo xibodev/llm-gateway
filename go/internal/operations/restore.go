@@ -90,7 +90,7 @@ func rollbackRestore(journalPath string, entries []restoreEntry) error {
 		entry := entries[index]
 		if entry.HadOriginal {
 			if _, err := os.Stat(entry.Rollback); err == nil {
-				if removeErr := os.Remove(entry.Destination); removeErr != nil && !os.IsNotExist(removeErr) {
+				if removeErr := durableRemove(entry.Destination); removeErr != nil && !os.IsNotExist(removeErr) {
 					result = errors.Join(result, removeErr)
 					continue
 				}
@@ -102,7 +102,7 @@ func rollbackRestore(journalPath string, entries []restoreEntry) error {
 			}
 		} else if entry.Staged != "" {
 			if _, err := os.Stat(entry.Staged); os.IsNotExist(err) {
-				if removeErr := os.Remove(entry.Destination); removeErr != nil && !os.IsNotExist(removeErr) {
+				if removeErr := durableRemove(entry.Destination); removeErr != nil && !os.IsNotExist(removeErr) {
 					result = errors.Join(result, removeErr)
 				}
 			} else if err != nil {
@@ -110,7 +110,7 @@ func rollbackRestore(journalPath string, entries []restoreEntry) error {
 			}
 		}
 		if entry.Staged != "" {
-			if err := os.Remove(entry.Staged); err != nil && !os.IsNotExist(err) {
+			if err := durableRemove(entry.Staged); err != nil && !os.IsNotExist(err) {
 				result = errors.Join(result, err)
 			}
 		}
@@ -118,7 +118,7 @@ func rollbackRestore(journalPath string, entries []restoreEntry) error {
 	if result != nil {
 		return fmt.Errorf("roll back interrupted restore: %w", result)
 	}
-	if err := os.Remove(journalPath); err != nil && !os.IsNotExist(err) {
+	if err := durableRemove(journalPath); err != nil && !os.IsNotExist(err) {
 		return err
 	}
 	return nil
@@ -131,7 +131,7 @@ func finalizeRestore(journalPath string, entries []restoreEntry) error {
 			if path == "" {
 				continue
 			}
-			if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
+			if err := durableRemove(path); err != nil && !os.IsNotExist(err) {
 				result = errors.Join(result, err)
 			}
 		}
@@ -139,7 +139,7 @@ func finalizeRestore(journalPath string, entries []restoreEntry) error {
 	if result != nil {
 		return fmt.Errorf("finish committed restore: %w", result)
 	}
-	if err := os.Remove(journalPath); err != nil && !os.IsNotExist(err) {
+	if err := durableRemove(journalPath); err != nil && !os.IsNotExist(err) {
 		return err
 	}
 	return nil
