@@ -25,12 +25,15 @@ func TestPruneAuxiliaryHistory(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, ts := range []int64{10, 20} {
-		if _, err := telemetry.Exec(`INSERT INTO failover_events(ts,throttled) VALUES(?,0)`, ts); err != nil {
+	for index := 0; index < 537; index++ {
+		if _, err := telemetry.Exec(`INSERT INTO failover_events(ts,throttled) VALUES(10,0)`); err != nil {
 			t.Fatal(err)
 		}
 	}
-	if deleted, err := PruneTelemetryBefore(20); err != nil || deleted != 1 {
+	if _, err := telemetry.Exec(`INSERT INTO failover_events(ts,throttled) VALUES(20,0)`); err != nil {
+		t.Fatal(err)
+	}
+	if deleted, err := PruneTelemetryBefore(20); err != nil || deleted != 537 {
 		t.Fatalf("telemetry deleted=%d err=%v", deleted, err)
 	}
 
@@ -38,12 +41,15 @@ func TestPruneAuxiliaryHistory(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, ts := range []int64{10, 20} {
-		if _, err := savings.Exec(`INSERT INTO usage_ledger(ts) VALUES(?)`, ts); err != nil {
+	for index := 0; index < 537; index++ {
+		if _, err := savings.Exec(`INSERT INTO usage_ledger(ts) VALUES(10)`); err != nil {
 			t.Fatal(err)
 		}
 	}
-	if deleted, err := PruneSavingsBefore(20); err != nil || deleted != 1 {
+	if _, err := savings.Exec(`INSERT INTO usage_ledger(ts) VALUES(20)`); err != nil {
+		t.Fatal(err)
+	}
+	if deleted, err := PruneSavingsBefore(20); err != nil || deleted != 537 {
 		t.Fatalf("savings deleted=%d err=%v", deleted, err)
 	}
 }

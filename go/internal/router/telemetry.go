@@ -177,11 +177,24 @@ func PruneTelemetryBefore(cutoff int64) (int64, error) {
 	if err != nil {
 		return 0, err
 	}
-	result, err := db.Exec("DELETE FROM failover_events WHERE ts < ?", cutoff)
-	if err != nil {
-		return 0, err
+	var total int64
+	for {
+		result, err := db.Exec(`DELETE FROM failover_events WHERE id IN (
+            SELECT id FROM failover_events WHERE ts < ? ORDER BY id LIMIT 500
+        )`, cutoff)
+		if err != nil {
+			return total, err
+		}
+		removed, err := result.RowsAffected()
+		if err != nil {
+			return total, err
+		}
+		total += removed
+		if removed < 500 {
+			return total, nil
+		}
+		time.Sleep(time.Millisecond)
 	}
-	return result.RowsAffected()
 }
 
 // ResetTelemetryState drops the cached DB handle (test helper).
