@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"llmgw/internal/config"
+	"llmgw/internal/providers"
 
 	_ "modernc.org/sqlite"
 )
@@ -82,10 +83,10 @@ func toEventAttempts(attempts []attempt) []eventAttempt {
 
 func recordTelemetryEvent(requested string, attempts []eventAttempt, servedProvider, servedModel, project, key string) {
 	throttled := 0
-	for _, a := range attempts {
-		if a.Throttled {
+	for i := range attempts {
+		attempts[i].Error = providers.SanitizeDiagnosticTextLimit(attempts[i].Error, 200)
+		if attempts[i].Throttled {
 			throttled = 1
-			break
 		}
 	}
 	db, err := telConn()
@@ -123,6 +124,11 @@ func RecentTelemetry(limit int) []map[string]any {
 		var attempts []map[string]any
 		if aj.Valid {
 			_ = json.Unmarshal([]byte(aj.String), &attempts)
+		}
+		for _, attempt := range attempts {
+			if message, ok := attempt["error"].(string); ok {
+				attempt["error"] = providers.SanitizeDiagnosticTextLimit(message, 200)
+			}
 		}
 		var served any
 		if sp.Valid && sm.Valid {

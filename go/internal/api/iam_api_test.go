@@ -2,9 +2,11 @@ package api
 
 import (
 	"bytes"
+	"encoding/base64"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"testing"
 
 	"llmgw/internal/config"
@@ -31,6 +33,7 @@ func TestIAMAdminAndKeyAuthenticationE2E(t *testing.T) {
 		s.APIKeys = nil
 		s.AllowUnauthenticatedAPI = false
 		s.Savings.Enabled = false
+		s.CredentialEncryptionKey = base64.RawURLEncoding.EncodeToString(make([]byte, 32))
 		s.Providers = map[string]*config.ProviderConfig{"echo": {Type: "echo"}}
 		s.Endpoints = map[string]*config.EndpointConfig{}
 	})
@@ -87,6 +90,30 @@ func TestIAMAdminAndKeyAuthenticationE2E(t *testing.T) {
 	if listed["prefix"] == "" || listed["token"] != nil {
 		t.Fatalf("listed key leaks token or lacks prefix: %+v", listed)
 	}
+	if listed["revealable"] != true {
+		t.Fatalf("listed key is not revealable: %+v", listed)
+	}
+	issuedKey := issued["key"].(map[string]any)
+	keyID := issuedKey["id"].(string)
+	revealRequest, _ := http.NewRequest(http.MethodPost, server.URL+"/admin/api/keys/"+keyID+"/reveal", nil)
+	revealRequest.Header.Set("Authorization", "Bearer admin-secret")
+	revealResponse, err := http.DefaultClient.Do(revealRequest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer revealResponse.Body.Close()
+	revealed := map[string]any{}
+	_ = json.NewDecoder(revealResponse.Body).Decode(&revealed)
+	if revealResponse.StatusCode != http.StatusOK || revealed["token"] != token {
+		t.Fatalf("reveal key: %d token_matches=%v", revealResponse.StatusCode, revealed["token"] == token)
+	}
+	if revealResponse.Header.Get("Cache-Control") != "no-store" || revealResponse.Header.Get("Pragma") != "no-cache" {
+		t.Fatalf("reveal cache headers: cache-control=%q pragma=%q", revealResponse.Header.Get("Cache-Control"), revealResponse.Header.Get("Pragma"))
+	}
+	status, _ = jsonRequest(t, server.URL+"/admin/api/keys/"+keyID+"/reveal", http.MethodPost, "", nil)
+	if status != http.StatusUnauthorized {
+		t.Fatalf("unauthenticated reveal status=%d, want 401", status)
+	}
 
 	status, chat := jsonRequest(t, server.URL+"/v1/chat/completions", "POST", token, map[string]any{
 		"model":    "echo/echo-default",
@@ -109,12 +136,11 @@ func TestIAMAdminAndKeyAuthenticationE2E(t *testing.T) {
 	if usageCount != 1 {
 		t.Fatalf("usage_events count=%d, want 1", usageCount)
 	}
-	key := issued["key"].(map[string]any)
-	status, revoked := admin("DELETE", "/admin/api/keys?id="+key["id"].(string), nil)
+	status, revoked := admin("DELETE", "/admin/api/keys?id="+keyID, nil)
 	if status != http.StatusOK || revoked["ok"] != true {
 		t.Fatalf("revoke: %d %+v", status, revoked)
 	}
-	status, rejected := admin("POST", "/admin/api/keys/update", map[string]any{"id": key["id"], "disabled": false})
+	status, rejected := admin("POST", "/admin/api/keys/update", map[string]any{"id": keyID, "disabled": false})
 	if status != http.StatusBadRequest || rejected["error"] == nil {
 		t.Fatalf("revoked admin update: %d %+v", status, rejected)
 	}
@@ -132,6 +158,91 @@ func TestIAMAdminAndKeyAuthenticationE2E(t *testing.T) {
 	if status != http.StatusUnauthorized {
 		t.Fatalf("revoked key status=%d, want 401", status)
 	}
+}
+
+func TestProjectPolicyAdminAPIRoundTripReplacement(t *testing.T) {
+	t.Setenv("LLMGW_STATE_DIR", t.TempDir())
+	iam.ResetForTests()
+	t.Cleanup(iam.ResetForTests)
+	if _, err := iam.Initialize(); err != nil {
+		t.Fatal(err)
+	}
+	config.Update(func(s *config.Settings) {
+		s.APIKey = "admin-secret"
+		s.AllowUnauthenticatedAPI = false
+	})
+	project, err := iam.CreateProject("policy-roundtrip", "Policy Round Trip")
+	if err != nil {
+		t.Fatal(err)
+	}
+	server := httptest.NewServer(NewServer())
+	defer server.Close()
+	path := server.URL + "/admin/api/projects/" + project.ID + "/policy"
+
+	policy := iam.KeyPolicy{
+		AllowedModels:       []string{"alpha/model-one", "beta/model-two"},
+		AllowedProviders:    []string{"alpha", "beta"},
+		RPM:                 101,
+		DailyRequests:       202,
+		MonthlyRequests:     303,
+		DailyInputTokens:    404,
+		DailyOutputTokens:   505,
+		MonthlyTotalTokens:  606,
+		DailyCostMicroUSD:   707,
+		MonthlyCostMicroUSD: 808,
+		DailyCreditsMilli:   909,
+		MonthlyCreditsMilli: 1010,
+	}
+	assertPolicy := func(label string, got map[string]any, want iam.KeyPolicy) {
+		t.Helper()
+		payload, err := json.Marshal(got)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var response iam.ProjectPolicy
+		if err := json.Unmarshal(payload, &response); err != nil {
+			t.Fatal(err)
+		}
+		if !reflect.DeepEqual(response.KeyPolicy, want) {
+			t.Errorf("%s policy = %#v, want %#v", label, response.KeyPolicy, want)
+		}
+	}
+
+	status, posted := jsonRequest(t, path, http.MethodPost, "admin-secret", policy)
+	if status != http.StatusOK {
+		t.Fatalf("set project policy: %d %+v", status, posted)
+	}
+	assertPolicy("POST", posted, policy)
+	status, fetched := jsonRequest(t, path, http.MethodGet, "admin-secret", nil)
+	if status != http.StatusOK {
+		t.Fatalf("get project policy: %d %+v", status, fetched)
+	}
+	assertPolicy("GET", fetched, policy)
+
+	clear := map[string]any{
+		"allowed_models":        []string{},
+		"allowed_providers":     []string{},
+		"rpm":                   0,
+		"daily_requests":        0,
+		"monthly_requests":      0,
+		"daily_input_tokens":    0,
+		"daily_output_tokens":   0,
+		"monthly_total_tokens":  0,
+		"daily_cost_microusd":   0,
+		"monthly_cost_microusd": 0,
+		"daily_credits_milli":   0,
+		"monthly_credits_milli": 0,
+	}
+	status, replaced := jsonRequest(t, path, http.MethodPost, "admin-secret", clear)
+	if status != http.StatusOK {
+		t.Fatalf("clear project policy: %d %+v", status, replaced)
+	}
+	assertPolicy("replacement POST", replaced, iam.KeyPolicy{})
+	status, cleared := jsonRequest(t, path, http.MethodGet, "admin-secret", nil)
+	if status != http.StatusOK {
+		t.Fatalf("get cleared project policy: %d %+v", status, cleared)
+	}
+	assertPolicy("GET after replacement", cleared, iam.KeyPolicy{})
 }
 
 func jsonRequest(

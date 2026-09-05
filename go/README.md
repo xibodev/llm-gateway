@@ -65,7 +65,7 @@ State lives under `~/.llmgw` (override with `LLMGW_STATE_DIR`):
 audit, alerts), `config.yaml`, the legacy/config-seed `secrets.json`, and provider
 session caches.
 
-Version 0.3.4 adds explicit project/provider/service-principal bindings for encrypted
+Explicit project/provider/service-principal bindings protect encrypted
 gateway-managed provider credentials. Services receive no provider credential
 unless that exact active binding exists. Human BYOC remains first in resolution,
 and its provider/catalog cache remains principal-scoped across unrelated service
@@ -104,7 +104,8 @@ The Python implementation remains a transport/API compatibility reference. The
 Go build is canonical for IAM, SSO, BYOC, persistent quotas, audit, alerts and
 management UI. System provider secrets can be seeded from `secrets.json` into
 encrypted DB connections; human provider connections are always encrypted and
-owner-scoped. Gateway API-key secrets are shown once and only hashes are stored.
+owner-scoped. Gateway API keys authenticate by hash; when credential encryption is
+configured, their owner or an administrator can reveal the encrypted token.
 
 ## vNext console and OAuth
 

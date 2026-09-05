@@ -20,9 +20,8 @@ providers:
 # endpoint name and it cascades on 429/5xx/timeout. You can also address any real
 # model directly as "<provider>/<model>" (e.g. copilot/gpt-4o-mini).
 #
-# "endpoints:" is the canonical key. The pre-rename "categories:" key still
-# loads (deprecated, removed in a future release) for config files written
-# before the rename.
+# "endpoints:" is the canonical key. The pre-rename "categories:" key remains
+# a compatibility alias for older config files; no removal release is scheduled.
 endpoints:
   smart:
     failover:
@@ -42,3 +41,12 @@ policies:
     copilot:
       circuit_failure_threshold: 3
       circuit_cooldown_seconds: 60
+
+# gateway.db is the authoritative usage store. The legacy compatibility savings
+# ledger is off by default because its synchronous usage.db write adds request
+# latency. Existing configurations with enabled: true retain their current
+# db_path, baseline, project/key labels, and savings read APIs.
+savings:
+  enabled: false
+  # db_path: /path/to/usage.db
+  # baseline_model: provider/model

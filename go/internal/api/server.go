@@ -12,16 +12,17 @@ import (
 // pathAliases rewrites bare CLI paths onto their /v1 equivalents so tools that
 // append to a base URL without /v1 still hit the right handler.
 var pathAliases = map[string]string{
-	"/chat/completions":     "/v1/chat/completions",
-	"/responses":            "/v1/responses",
-	"/completions":          "/v1/chat/completions",
-	"/models":               "/v1/models",
-	"/messages":             "/v1/messages",
-	"/audio/transcriptions": "/v1/audio/transcriptions",
-	"/audio/speech":         "/v1/audio/speech",
-	"/embeddings":           "/v1/embeddings",
-	"/images/generations":   "/v1/images/generations",
-	"/videos/generations":   "/v1/videos/generations",
+	"/chat/completions":      "/v1/chat/completions",
+	"/responses":             "/v1/responses",
+	"/completions":           "/v1/chat/completions",
+	"/models":                "/v1/models",
+	"/messages":              "/v1/messages",
+	"/messages/count_tokens": "/v1/messages/count_tokens",
+	"/audio/transcriptions":  "/v1/audio/transcriptions",
+	"/audio/speech":          "/v1/audio/speech",
+	"/embeddings":            "/v1/embeddings",
+	"/images/generations":    "/v1/images/generations",
+	"/videos/generations":    "/v1/videos/generations",
 }
 
 // NewServer builds the http.Handler with all routes registered.
@@ -97,6 +98,7 @@ func NewServer() http.Handler {
 	mux.HandleFunc("GET /user/api/models", handleUserModels)
 	mux.HandleFunc("POST /user/api/providers/{id}/test", handleUserTestProvider)
 	mux.HandleFunc("POST /user/api/keys", handleUserCreateKey)
+	mux.HandleFunc("POST /user/api/keys/{id}/reveal", handleUserRevealKey)
 	mux.HandleFunc("DELETE /user/api/keys/{id}", handleUserRevokeKey)
 	mux.HandleFunc("POST /user/api/keys/{id}/update", handleUserUpdateKey)
 	mux.HandleFunc("GET /user/api/audit", handleUserAudit)
@@ -129,11 +131,12 @@ func NewServer() http.Handler {
 	mux.HandleFunc("POST /admin/api/providers/{id}/enabled", handleProviderEnabled)
 	mux.HandleFunc("POST /admin/api/endpoints", handleUpsertEndpoint)
 	mux.HandleFunc("DELETE /admin/api/endpoints/{name}", handleDeleteEndpoint)
-	// Deprecated: the routing layer is called an endpoint now. Retained so
-	// published clients keep working; remove after one release.
+	// Deprecated: the routing layer is called an endpoint now. Retained until
+	// client evidence and a documented release boundary make removal safe.
 	mux.HandleFunc("POST /admin/api/categories", handleUpsertEndpoint)
 	mux.HandleFunc("DELETE /admin/api/categories/{name}", handleDeleteEndpoint)
 	mux.HandleFunc("POST /admin/api/keys", handleCreateKey)
+	mux.HandleFunc("POST /admin/api/keys/{id}/reveal", handleRevealKey)
 	mux.HandleFunc("POST /admin/api/keys/update", handleUpdateKey)
 	mux.HandleFunc("DELETE /admin/api/keys", handleRevokeKey)
 	mux.HandleFunc("GET /admin/api/principals", handleListPrincipals)

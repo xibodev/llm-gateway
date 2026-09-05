@@ -59,6 +59,7 @@ type APIKey struct {
 	LastUsedAt  int64     `json:"last_used_at,omitempty"`
 	Policy      KeyPolicy `json:"policy"`
 	Expired     bool      `json:"expired"`
+	Revealable  bool      `json:"revealable"`
 }
 
 type IssuedKey struct {

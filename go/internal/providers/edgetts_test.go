@@ -3,8 +3,11 @@ package providers
 import (
 	"encoding/binary"
 	"encoding/json"
+	"errors"
+	"io"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"regexp"
 	"strings"
 	"testing"
@@ -12,6 +15,16 @@ import (
 
 	"github.com/gorilla/websocket"
 )
+
+type trackingReadCloser struct {
+	closeCount int
+}
+
+func (*trackingReadCloser) Read([]byte) (int, error) { return 0, io.EOF }
+func (body *trackingReadCloser) Close() error {
+	body.closeCount++
+	return nil
+}
 
 func TestNewEdgeTTSDefaultsAndOverrides(t *testing.T) {
 	defaults := NewEdgeTTS("", "", "", 0)
@@ -171,6 +184,155 @@ func TestEdgeTTSSynthesizeAgainstMockService(t *testing.T) {
 	}
 	if surfaces := models[0].SupportedSurfaces; len(surfaces) != 1 || surfaces[0] != "/v1/audio/speech" {
 		t.Fatalf("supported surfaces: %+v", surfaces)
+	}
+}
+
+func TestEdgeTTSDialHTTPFailuresAreClosedAndSafe(t *testing.T) {
+	const (
+		subscriptionKey = "llmgw_edge_subscription_secret_123456"
+		gecSignature    = "ABCDEF0123456789ABCDEF0123456789ABCDEF0123456789ABCDEF0123456789"
+		connectionID    = "0123456789abcdef0123456789abcdef"
+	)
+	for _, status := range []int{http.StatusUnauthorized, http.StatusTooManyRequests} {
+		t.Run(http.StatusText(status), func(t *testing.T) {
+			body := &trackingReadCloser{}
+			provider := NewEdgeTTS("https://speech.example.invalid/tts", subscriptionKey, "", 1)
+			provider.dialWebsocket = func(rawURL string, _ http.Header) (*websocket.Conn, *http.Response, error) {
+				if !strings.Contains(rawURL, "Ocp-Apim-Subscription-Key="+subscriptionKey) ||
+					!strings.Contains(rawURL, "Sec-MS-GEC=") || !strings.Contains(rawURL, "ConnectionId=") {
+					t.Fatalf("dial URL did not carry required protocol parameters")
+				}
+				return nil, &http.Response{StatusCode: status, Body: body}, errors.New(
+					"websocket: bad handshake: " + rawURL + "&Sec-MS-GEC=" + gecSignature + "&ConnectionId=" + connectionID,
+				)
+			}
+
+			_, err := provider.dial()
+			if err == nil || !IsInvocation(err) || UpstreamStatus(err) != status {
+				t.Fatalf("dial error = %v, invocation=%v status=%d", err, IsInvocation(err), UpstreamStatus(err))
+			}
+			if body.closeCount != 1 {
+				t.Fatalf("HTTP %d response body close count = %d, want 1", status, body.closeCount)
+			}
+			message := err.Error()
+			for _, secret := range []string{subscriptionKey, gecSignature, connectionID, "speech.example.invalid", "Ocp-Apim-Subscription-Key", "Sec-MS-GEC", "ConnectionId"} {
+				if strings.Contains(message, secret) {
+					t.Fatalf("error leaked %q: %q", secret, message)
+				}
+			}
+		})
+	}
+}
+
+func TestEdgeTTSDialRetriesForbiddenOnceAndClosesResponses(t *testing.T) {
+	t.Run("success", func(t *testing.T) {
+		firstBody := &trackingReadCloser{}
+		edgeTTSClockSkewMutex.Lock()
+		originalSkew := edgeTTSClockSkewSeconds
+		edgeTTSClockSkewSeconds = 0
+		edgeTTSClockSkewMutex.Unlock()
+		t.Cleanup(func() {
+			edgeTTSClockSkewMutex.Lock()
+			edgeTTSClockSkewSeconds = originalSkew
+			edgeTTSClockSkewMutex.Unlock()
+		})
+		upgrader := websocket.Upgrader{
+			Subprotocols: []string{"synthesize"},
+			CheckOrigin:  func(*http.Request) bool { return true },
+		}
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			connection, err := upgrader.Upgrade(w, r, nil)
+			if err != nil {
+				t.Errorf("upgrade: %v", err)
+				return
+			}
+			defer connection.Close()
+			_, _, _ = connection.ReadMessage()
+		}))
+		t.Cleanup(server.Close)
+		provider := NewEdgeTTS(server.URL+"/tts", "test-token", "", 10)
+		realDialer := websocket.Dialer{Subprotocols: []string{"synthesize"}}
+		var dialURLs []string
+		provider.dialWebsocket = func(rawURL string, header http.Header) (*websocket.Conn, *http.Response, error) {
+			dialURLs = append(dialURLs, rawURL)
+			if len(dialURLs) == 1 {
+				return nil, &http.Response{
+					StatusCode: http.StatusForbidden,
+					Header:     http.Header{"Date": []string{time.Now().UTC().Add(time.Hour).Format(time.RFC1123)}},
+					Body:       firstBody,
+				}, errors.New("websocket: bad handshake")
+			}
+			return realDialer.Dial(rawURL, header)
+		}
+
+		connection, err := provider.dial()
+		if err != nil {
+			t.Fatalf("dial after skew retry: %v", err)
+		}
+		connection.Close()
+		if len(dialURLs) != 2 {
+			t.Fatalf("dial attempts = %d, want 2", len(dialURLs))
+		}
+		if firstBody.closeCount != 1 {
+			t.Fatalf("first response body close count = %d, want 1", firstBody.closeCount)
+		}
+		queries := make([]url.Values, len(dialURLs))
+		for index, rawURL := range dialURLs {
+			parsed, parseErr := url.Parse(rawURL)
+			if parseErr != nil {
+				t.Fatalf("parse dial URL %d: %v", index+1, parseErr)
+			}
+			queries[index] = parsed.Query()
+			for _, key := range []string{"Ocp-Apim-Subscription-Key", "Sec-MS-GEC", "Sec-MS-GEC-Version", "ConnectionId"} {
+				if queries[index].Get(key) == "" {
+					t.Fatalf("dial URL %d missing %s", index+1, key)
+				}
+			}
+		}
+		if queries[0].Encode() == queries[1].Encode() {
+			t.Fatalf("retry query was not rebuilt: %q", queries[0].Encode())
+		}
+		if queries[0].Get("Sec-MS-GEC") == queries[1].Get("Sec-MS-GEC") {
+			t.Fatalf("retry Sec-MS-GEC did not reflect induced clock skew: %q", queries[0].Get("Sec-MS-GEC"))
+		}
+		if queries[0].Get("Ocp-Apim-Subscription-Key") != queries[1].Get("Ocp-Apim-Subscription-Key") ||
+			queries[0].Get("Sec-MS-GEC-Version") != queries[1].Get("Sec-MS-GEC-Version") {
+			t.Fatalf("stable signing inputs changed across retry")
+		}
+	})
+
+	t.Run("final forbidden", func(t *testing.T) {
+		bodies := []*trackingReadCloser{{}, {}}
+		provider := NewEdgeTTS("https://speech.example.invalid/tts", "secret-token", "", 1)
+		attempts := 0
+		provider.dialWebsocket = func(string, http.Header) (*websocket.Conn, *http.Response, error) {
+			body := bodies[attempts]
+			attempts++
+			return nil, &http.Response{StatusCode: http.StatusForbidden, Body: body}, errors.New("unsafe URL")
+		}
+
+		_, err := provider.dial()
+		if err == nil || UpstreamStatus(err) != http.StatusForbidden {
+			t.Fatalf("dial error = %v, status=%d", err, UpstreamStatus(err))
+		}
+		if attempts != 2 || bodies[0].closeCount != 1 || bodies[1].closeCount != 1 {
+			t.Fatalf("attempts=%d body close counts=%d,%d; want 2 and 1,1", attempts, bodies[0].closeCount, bodies[1].closeCount)
+		}
+	})
+}
+
+func TestEdgeTTSDialTransportFailureIsGeneric(t *testing.T) {
+	provider := NewEdgeTTS("https://speech.example.invalid/tts", "secret-token", "", 1)
+	provider.dialWebsocket = func(rawURL string, _ http.Header) (*websocket.Conn, *http.Response, error) {
+		return nil, nil, errors.New("transport failed for " + rawURL)
+	}
+
+	_, err := provider.dial()
+	if err == nil || !IsInvocation(err) || UpstreamStatus(err) != 0 {
+		t.Fatalf("dial error = %v, invocation=%v status=%d", err, IsInvocation(err), UpstreamStatus(err))
+	}
+	if got, want := err.Error(), "edge_tts: websocket transport failed"; got != want {
+		t.Fatalf("error = %q, want %q", got, want)
 	}
 }
 

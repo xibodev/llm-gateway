@@ -44,6 +44,14 @@ test("revoked keys have no console enable action", () => {
   assert.match(keys, /!revoked \? <button class="button button--secondary"/);
 });
 
+test("recoverable keys have an accessible inline reveal control", () => {
+  const keys = readFileSync(resolve(root, "src/pages/ApiKeys.tsx"), "utf8");
+  assert.match(keys, /key\.revealable === true/);
+  assert.match(keys, /`\/keys\/\$\{encodeURIComponent\(id\)\}\/reveal`/);
+  assert.match(keys, /visible \? "Hide" : "Reveal"/);
+  assert.match(keys, /<EyeOff size=\{15\} \/> : <Eye size=\{15\} \/>/);
+});
+
 
 test("static admin console authentication is session-only and admin-scoped", () => {
   const api = readFileSync(resolve(root, "src/lib/api.ts"), "utf8");
@@ -340,11 +348,37 @@ test("setup snippets use the console's own origin, not a hardcoded localhost", (
   assert.match(page, /window\.location\.origin/);
 });
 
-test("settings page has real project policy controls instead of shell copy", () => {
+test("settings editor covers every writable project policy field", () => {
   const settings = readFileSync(resolve(root, "src/pages/Settings.tsx"), "utf8");
+  const models = readFileSync(resolve(root, "../../iam/models.go"), "utf8");
+  const keyPolicy = models.match(/type KeyPolicy struct \{([\s\S]*?)\n\}/);
+  assert.ok(keyPolicy, "iam.KeyPolicy struct not found");
+  const writable = [...keyPolicy[1].matchAll(/^\s*\w+\s+(\S+)\s+`json:"([^",]+)(?:,[^"]*)?"`/gm)]
+    .filter(([, , field]) => field !== "-")
+    .map(([, type, field]) => ({ type, field }));
+  const allowlists = writable.filter(({ type }) => type === "[]string").map(({ field }) => field);
+  const numeric = writable.filter(({ type }) => /^(?:u?int(?:8|16|32|64)?|float(?:32|64))$/.test(type)).map(({ field }) => field);
+  const sorted = (values) => [...values].sort();
+  assert.deepEqual(sorted([...allowlists, ...numeric]), sorted(writable.map(({ field }) => field)), "KeyPolicy has an unsupported writable field type");
+
+  const definitions = settings.match(/const policyFields[^=]*=\s*\[([\s\S]*?)\n\];/);
+  assert.ok(definitions, "policyFields definition not found");
+  const numericBindings = [...definitions[1].matchAll(/\bkey:\s*"([^"]+)"/g)].map((match) => match[1]);
+  assert.deepEqual(sorted(numericBindings), sorted(numeric), "policyFields must cover every numeric KeyPolicy field");
+  assert.match(settings, /numberValue\(payload\[field\.key\]\)/);
+  assert.match(settings, /policyFields\.map\(\(field\) => <label/);
+  assert.match(settings, /body\[field\.key\] = value/);
+
+  const loadBindings = Object.fromEntries([...settings.matchAll(/set([A-Z]\w*)\(asList\(payload\.([a-z0-9_]+)\)/g)]
+    .map(([, state, field]) => [field, state[0].toLowerCase() + state.slice(1)]));
+  const saveBindings = Object.fromEntries([...settings.matchAll(/^\s*([a-z0-9_]+):\s*([a-z]\w*)\.split\(","\)/gm)]
+    .map(([, field, state]) => [field, state]));
+  assert.deepEqual(sorted(Object.keys(loadBindings)), sorted(allowlists), "every KeyPolicy allowlist needs an explicit load binding");
+  assert.deepEqual(sorted(Object.keys(saveBindings)), sorted(allowlists), "every KeyPolicy allowlist needs an explicit save binding");
+  for (const field of allowlists) assert.equal(loadBindings[field], saveBindings[field], `${field} must load and save through the same editor state`);
+
   assert.match(settings, /ProjectPolicyEditor/);
   assert.match(settings, /\/policy`/);
-  assert.match(settings, /allowed_models/);
   assert.match(settings, /Save project policy/);
   assert.match(settings, /managed on the Access page/);
   assert.match(settings, /onNavigate\("access"\)/);

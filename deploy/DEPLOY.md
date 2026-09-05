@@ -28,8 +28,8 @@ providers, audit and alerts. Human users use `/portal` for their own keys, usage
 and Copilot BYOC.
 
 The control plane persists to `deploy/state/gateway.db` (SQLite WAL). API keys
-are shown once and stored only as hashes. Provider connections and BYOC
-credentials are AES-GCM encrypted and require
+authenticate by SHA-256 hash; encrypted copies let their owner or an administrator
+reveal them. API-key recovery, provider connections, and BYOC credentials require
 `LLMGW_CREDENTIAL_ENCRYPTION_KEY`. `deploy/state/secrets.json` remains a
 compatibility/config seed; an existing encrypted system connection is not
 overwritten on restart.

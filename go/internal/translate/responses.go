@@ -86,6 +86,9 @@ func ChatToResponses(model string, messages []map[string]any, kw map[string]any,
 	if tc := kw["tool_choice"]; tc != nil {
 		payload["tool_choice"] = responsesToolChoice(tc)
 	}
+	if metadata := kw["metadata"]; metadata != nil {
+		payload["metadata"] = metadata
+	}
 	if stream {
 		payload["stream"] = true
 	}
@@ -104,6 +107,8 @@ func ResponsesRequestToChat(
 		"top_p": true, "tools": true, "tool_choice": true,
 		"metadata": true, "store": true, "background": true,
 		"force_api_support": true, "previous_response_id": true, "conversation": true,
+		"client_metadata": true, "include": true, "parallel_tool_calls": true,
+		"prompt_cache_key": true,
 	}
 	for key, value := range payload {
 		if !allowed[key] && value != nil {
@@ -132,6 +137,30 @@ func ResponsesRequestToChat(
 		enabled, ok := value.(bool)
 		if !ok || enabled {
 			return nil, nil, fmt.Errorf("background requires a native Responses model unless false")
+		}
+	}
+	if value := payload["client_metadata"]; value != nil {
+		if _, ok := value.(map[string]any); !ok {
+			return nil, nil, fmt.Errorf("client_metadata must be an object")
+		}
+	}
+	if value := payload["prompt_cache_key"]; value != nil {
+		if _, ok := value.(string); !ok {
+			return nil, nil, fmt.Errorf("prompt_cache_key must be a string")
+		}
+	}
+	if value := payload["metadata"]; value != nil {
+		if _, ok := value.(map[string]any); !ok {
+			return nil, nil, fmt.Errorf("metadata must be an object")
+		}
+	}
+	if value := payload["include"]; value != nil {
+		items, ok := value.([]any)
+		if !ok {
+			return nil, nil, fmt.Errorf("include must be an array")
+		}
+		if len(items) > 0 {
+			return nil, nil, fmt.Errorf("Responses include values require a native Responses model")
 		}
 	}
 	if instructions := payload["instructions"]; instructions != nil {
@@ -234,9 +263,9 @@ func ResponsesRequestToChat(
 		if value := payload[key]; value != nil {
 			kw[key] = value
 		}
-		if metadata, ok := asMap(payload["metadata"]); ok && len(metadata) > 0 {
-			kw["metadata"] = metadata
-		}
+	}
+	if metadata, ok := payload["metadata"].(map[string]any); ok && len(metadata) > 0 {
+		kw["metadata"] = metadata
 	}
 	if tools, ok := asList(payload["tools"]); ok {
 		converted := make([]any, 0, len(tools))
@@ -271,6 +300,12 @@ func ResponsesRequestToChat(
 			})
 		}
 		kw["tools"] = converted
+	}
+	if value := payload["parallel_tool_calls"]; value != nil {
+		if _, ok := value.(bool); !ok {
+			return nil, nil, fmt.Errorf("parallel_tool_calls must be a boolean")
+		}
+		kw["parallel_tool_calls"] = value
 	}
 	if choice := payload["tool_choice"]; choice != nil {
 		if choiceMap, ok := asMap(choice); ok {

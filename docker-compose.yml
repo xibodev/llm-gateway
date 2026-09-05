@@ -5,7 +5,7 @@
 # The gateway handles bearer auth itself (LLMGW_API_KEY). Put a real config at
 # ./config.local.yaml (see llmgw.config.example.yaml) — it is mounted read-only.
 # The named volume persists gateway state (IAM db, encrypted connections,
-# hashed keys, usage, catalog, Copilot OAuth token cache).
+# hashed and encrypted keys, usage, catalog, Copilot OAuth token cache).
 #
 # The image is distroless/nonroot (uid 65532); state lives at /state rather
 # than a home directory so the container can own it.
@@ -27,6 +27,7 @@ services:
       LLMGW_API_KEY: ${LLMGW_API_KEY:-}
       LLMGW_ALLOW_UNAUTHENTICATED_API: ${LLMGW_ALLOW_UNAUTHENTICATED_API:-0}
       LLMGW_EXPERIMENTAL_COPILOT_PROVIDER: ${LLMGW_EXPERIMENTAL_COPILOT_PROVIDER:-0}
+      LLMGW_CREDENTIAL_ENCRYPTION_KEY: ${LLMGW_CREDENTIAL_ENCRYPTION_KEY:-}
       LLMGW_GITHUB_COPILOT_CACHE_DIR: /state/cache
     volumes:
       - ./config.local.yaml:/config/llmgw.config.yaml:ro

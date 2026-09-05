@@ -462,6 +462,13 @@ CREATE TABLE provider_check_generations (
 );
 `,
 	},
+	{
+		version: 14,
+		sql: `
+ALTER TABLE api_keys ADD COLUMN secret_ciphertext BLOB;
+ALTER TABLE api_keys ADD COLUMN secret_nonce BLOB;
+`,
+	},
 }
 
 func migrationApplied(db *sql.DB, version int) (bool, error) {

@@ -1,6 +1,7 @@
 package providers
 
 import (
+	"context"
 	"errors"
 	"math"
 	"sync"
@@ -106,13 +107,37 @@ func (r *ResilientProvider) nextBackoff(attempt int) float64 {
 	return math.Min(raw, r.policy.RetryMaxBackoffSeconds)
 }
 
+func waitForRetry(ctx context.Context, delay time.Duration) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	timer := time.NewTimer(delay)
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-timer.C:
+		return nil
+	}
+}
+
 func (r *ResilientProvider) Complete(model string, messages []Message, kw Kwargs) (map[string]any, error) {
-	response, _, err := r.CompleteWithObservation(model, messages, kw)
+	return r.CompleteContext(context.Background(), model, messages, kw)
+}
+
+func (r *ResilientProvider) CompleteContext(ctx context.Context, model string, messages []Message, kw Kwargs) (map[string]any, error) {
+	response, _, err := r.CompleteContextWithObservation(ctx, model, messages, kw)
 	return response, err
 }
 
 func (r *ResilientProvider) CompleteWithObservation(
 	model string, messages []Message, kw Kwargs,
+) (map[string]any, *iam.ProviderAccountObservation, error) {
+	return r.CompleteContextWithObservation(context.Background(), model, messages, kw)
+}
+
+func (r *ResilientProvider) CompleteContextWithObservation(
+	ctx context.Context, model string, messages []Message, kw Kwargs,
 ) (map[string]any, *iam.ProviderAccountObservation, error) {
 	if err := r.checkCircuit(); err != nil {
 		return nil, nil, err
@@ -121,10 +146,13 @@ func (r *ResilientProvider) CompleteWithObservation(
 	var lastErr error
 	var lastObservation *iam.ProviderAccountObservation
 	for attempt := 1; attempt <= attempts; attempt++ {
-		result, observation, err := CompleteProviderWithObservation(
-			r.inner, model, messages, kw,
+		result, observation, err := CompleteProviderContextWithObservation(
+			ctx, r.inner, model, messages, kw,
 		)
 		lastObservation = observation
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			return nil, observation, ctxErr
+		}
 		if err == nil {
 			r.recordSuccess()
 			return result, observation, nil
@@ -134,7 +162,9 @@ func (r *ResilientProvider) CompleteWithObservation(
 		}
 		lastErr = err
 		if attempt < attempts {
-			time.Sleep(time.Duration(r.nextBackoff(attempt) * float64(time.Second)))
+			if waitErr := waitForRetry(ctx, time.Duration(r.nextBackoff(attempt)*float64(time.Second))); waitErr != nil {
+				return nil, observation, waitErr
+			}
 			continue
 		}
 		r.recordFailure()
@@ -146,6 +176,12 @@ func (r *ResilientProvider) CompleteWithObservation(
 func (r *ResilientProvider) CompleteResponses(
 	model string, payload map[string]any,
 ) (map[string]any, *iam.ProviderAccountObservation, error) {
+	return r.CompleteResponsesContext(context.Background(), model, payload)
+}
+
+func (r *ResilientProvider) CompleteResponsesContext(
+	ctx context.Context, model string, payload map[string]any,
+) (map[string]any, *iam.ProviderAccountObservation, error) {
 	if err := r.checkCircuit(); err != nil {
 		return nil, nil, err
 	}
@@ -156,8 +192,11 @@ func (r *ResilientProvider) CompleteResponses(
 	var lastErr error
 	var lastObservation *iam.ProviderAccountObservation
 	for attempt := 1; attempt <= attempts; attempt++ {
-		result, observation, err := CompleteResponses(r.inner, model, payload)
+		result, observation, err := CompleteResponsesContext(ctx, r.inner, model, payload)
 		lastObservation = observation
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			return nil, observation, ctxErr
+		}
 		if err == nil {
 			r.recordSuccess()
 			return result, observation, nil
@@ -167,7 +206,9 @@ func (r *ResilientProvider) CompleteResponses(
 		}
 		lastErr = err
 		if attempt < attempts {
-			time.Sleep(time.Duration(r.nextBackoff(attempt) * float64(time.Second)))
+			if waitErr := waitForRetry(ctx, time.Duration(r.nextBackoff(attempt)*float64(time.Second))); waitErr != nil {
+				return nil, observation, waitErr
+			}
 			continue
 		}
 		r.recordFailure()
@@ -179,6 +220,15 @@ func (r *ResilientProvider) CompleteResponses(
 func (r *ResilientProvider) StreamResponses(
 	model string, payload map[string]any,
 ) (StreamIter, *iam.ProviderAccountObservation, error) {
+	return r.StreamResponsesContext(context.Background(), model, payload)
+}
+
+func (r *ResilientProvider) StreamResponsesContext(
+	ctx context.Context, model string, payload map[string]any,
+) (StreamIter, *iam.ProviderAccountObservation, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, nil, err
+	}
 	if err := r.checkCircuit(); err != nil {
 		return nil, nil, err
 	}
@@ -189,8 +239,14 @@ func (r *ResilientProvider) StreamResponses(
 	var lastErr error
 	var lastObservation *iam.ProviderAccountObservation
 	for attempt := 1; attempt <= attempts; attempt++ {
-		stream, observation, err := StreamResponses(r.inner, model, payload)
+		stream, observation, err := StreamResponsesContext(ctx, r.inner, model, payload)
 		lastObservation = observation
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			if stream != nil {
+				_ = stream.Close()
+			}
+			return nil, observation, ctxErr
+		}
 		if err == nil {
 			r.recordSuccess()
 			return stream, observation, nil
@@ -200,7 +256,9 @@ func (r *ResilientProvider) StreamResponses(
 		}
 		lastErr = err
 		if attempt < attempts {
-			time.Sleep(time.Duration(r.nextBackoff(attempt) * float64(time.Second)))
+			if waitErr := waitForRetry(ctx, time.Duration(r.nextBackoff(attempt)*float64(time.Second))); waitErr != nil {
+				return nil, observation, waitErr
+			}
 			continue
 		}
 		r.recordFailure()
@@ -210,13 +268,26 @@ func (r *ResilientProvider) StreamResponses(
 }
 
 func (r *ResilientProvider) Stream(model string, messages []Message, kw Kwargs) (StreamIter, error) {
+	return r.StreamContext(context.Background(), model, messages, kw)
+}
+
+func (r *ResilientProvider) StreamContext(ctx context.Context, model string, messages []Message, kw Kwargs) (StreamIter, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	if err := r.checkCircuit(); err != nil {
 		return nil, err
 	}
 	attempts := max1(r.policy.RetryMaxAttempts)
 	var lastErr error
 	for attempt := 1; attempt <= attempts; attempt++ {
-		it, err := r.inner.Stream(model, messages, kw)
+		it, err := StreamProviderContext(ctx, r.inner, model, messages, kw)
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			if it != nil {
+				_ = it.Close()
+			}
+			return nil, ctxErr
+		}
 		if err == nil {
 			r.recordSuccess()
 			return it, nil
@@ -226,7 +297,9 @@ func (r *ResilientProvider) Stream(model string, messages []Message, kw Kwargs) 
 		}
 		lastErr = err
 		if attempt < attempts {
-			time.Sleep(time.Duration(r.nextBackoff(attempt) * float64(time.Second)))
+			if waitErr := waitForRetry(ctx, time.Duration(r.nextBackoff(attempt)*float64(time.Second))); waitErr != nil {
+				return nil, waitErr
+			}
 			continue
 		}
 		r.recordFailure()

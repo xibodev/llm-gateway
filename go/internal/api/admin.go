@@ -249,6 +249,7 @@ func handleState(w http.ResponseWriter, r *http.Request) {
 			"monthly_cost_microusd": k.Policy.MonthlyCostMicroUSD,
 			"daily_credits_milli":   k.Policy.DailyCreditsMilli,
 			"monthly_credits_milli": k.Policy.MonthlyCreditsMilli,
+			"revealable":            k.Revealable,
 		})
 	}
 	principals, err := iam.ListPrincipals()
@@ -301,7 +302,7 @@ func handleState(w http.ResponseWriter, r *http.Request) {
 		"provider_connections":         connections,
 		"memberships":                  memberships,
 		"providers":                    provList,
-		"categories":                   cats, // deprecated, removed in a future release — use "endpoints"
+		"categories":                   cats, // Deprecated compatibility alias; use "endpoints".
 		"endpoints":                    cats,
 		"policies": map[string]any{
 			"defaults":  s.Policies.Defaults,
@@ -597,10 +598,10 @@ func handleProviderModels(w http.ResponseWriter, r *http.Request) {
 }
 
 // catalogRowsWithLegacySurfaces renders catalog rows for the wire while keeping
-// the same one-release dual-key window GET /v1/models honours (see setSurfaces).
+// the compatibility alias GET /v1/models honours (see setSurfaces).
 // Marshalling providers.ModelInfo directly emits only "supported_surfaces",
 // which would silently change this route's shape for anything still reading the
-// pre-rename key while the documented deprecation says both are emitted.
+// pre-rename key while the documented compatibility policy emits both.
 //
 // Rows round-trip through the struct's own JSON tags rather than being rebuilt
 // field by field, so the two shapes cannot drift when ModelInfo gains a field.
@@ -884,6 +885,30 @@ func handleCreateKey(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+func handleRevealKey(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Cache-Control", "no-store")
+	w.Header().Set("Pragma", "no-cache")
+	if !adminAuthed(w, r) {
+		return
+	}
+	keyID := strings.TrimSpace(r.PathValue("id"))
+	token, found, err := iam.RevealAPIKey(keyID)
+	if !found {
+		writeError(w, 404, "unknown key")
+		return
+	}
+	if errors.Is(err, iam.ErrAPIKeyNotRevealable) {
+		writeError(w, 409, "This key predates encrypted key recovery and cannot be revealed.")
+		return
+	}
+	if err != nil {
+		writeError(w, 500, "Encrypted key store unavailable.")
+		return
+	}
+	auditAdmin(r, "api_key.reveal", "api_key", keyID, nil)
+	writeJSON(w, 200, map[string]any{"token": token})
+}
+
 type keyUpdateBody struct {
 	ID                  string    `json:"id"`
 	Token               string    `json:"token"` // legacy compatibility
@@ -1074,7 +1099,7 @@ func handleCopilotLoginStart(w http.ResponseWriter, r *http.Request) {
 	}
 	dc, err := copilotauth.StartDeviceFlow()
 	if err != nil {
-		writeJSON(w, 200, map[string]any{"error": truncate200(err.Error())})
+		writeJSON(w, 200, map[string]any{"error": oauthErrorText(err.Error())})
 		return
 	}
 	writeJSON(w, 200, map[string]any{
@@ -1091,7 +1116,10 @@ func handleCopilotLoginPoll(w http.ResponseWriter, r *http.Request) {
 		DeviceCode string `json:"device_code"`
 	}
 	_ = decodeBody(r, &body)
-	writeJSON(w, 200, copilotauth.PollDeviceFlowOnce(body.DeviceCode))
+	result := copilotauth.PollDeviceFlowOnce(body.DeviceCode)
+	status, _ := result["status"].(string)
+	detail, _ := result["error"].(string)
+	writeJSON(w, 200, safeOAuthPollResponse(status, detail))
 }
 
 func handleCopilotLogout(w http.ResponseWriter, r *http.Request) {
@@ -1113,10 +1141,3 @@ func contains(list []string, v string) bool {
 }
 
 func emptyNil(s string) string { return strings.TrimSpace(s) }
-
-func truncate200(s string) string {
-	if len(s) > 300 {
-		return s[:300]
-	}
-	return s
-}

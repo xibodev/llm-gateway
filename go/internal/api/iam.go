@@ -406,7 +406,7 @@ func handlePrincipalCopilotLoginStart(w http.ResponseWriter, r *http.Request) {
 	}
 	dc, err := copilotauth.StartDeviceFlow()
 	if err != nil {
-		writeError(w, 502, truncate200(err.Error()))
+		writeError(w, 502, oauthErrorText(err.Error()))
 		return
 	}
 	writeJSON(w, 200, map[string]any{
@@ -447,17 +447,14 @@ func handlePrincipalCopilotLoginPoll(w http.ResponseWriter, r *http.Request) {
 			PrincipalID: principalID, ProviderID: "copilot", Kind: "github_oauth",
 			Source: iam.ConnectionSourceAdmin, MakeDefault: true, AccessToken: result.AccessToken,
 		}); err != nil {
-			writeError(w, 500, err.Error())
+			writeError(w, 500, oauthErrorText(err.Error()))
 			return
 		}
 		providers.ForgetProviderForPrincipal("copilot", principalID)
 		providers.ForgetCatalogForPrincipal("copilot", principalID)
 		auditAdmin(r, "oauth_connection.connect", "principal", principalID, map[string]any{"provider": "copilot"})
 	}
-	response := map[string]any{"status": result.Status}
-	if result.Error != "" {
-		response["error"] = result.Error
-	}
+	response := safeOAuthPollResponse(result.Status, result.Error)
 	writeJSON(w, 200, response)
 }
 
@@ -467,7 +464,7 @@ func handlePrincipalCopilotRevoke(w http.ResponseWriter, r *http.Request) {
 	}
 	principalID := strings.TrimSpace(r.PathValue("id"))
 	if err := iam.RevokeProviderCredential(principalID, "copilot"); err != nil {
-		writeError(w, 404, err.Error())
+		writeError(w, 404, oauthErrorText(err.Error()))
 		return
 	}
 	providers.ForgetProviderForPrincipal("copilot", principalID)

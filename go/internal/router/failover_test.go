@@ -1,6 +1,10 @@
 package router
 
 import (
+	"encoding/json"
+	"errors"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 
@@ -119,29 +123,51 @@ func TestNativeKey(t *testing.T) {
 
 func TestResolveNativeAlias(t *testing.T) {
 	setupEcho(t)
-	// a bare catalog name (no provider prefix, not a category) resolves; with
-	// two echo providers the sorted-order winner is deterministic ("echo").
-	targets, err := ResolveTargets("echo-strong")
-	if err != nil || len(targets) != 1 || targets[0].Provider != "echo" || targets[0].Model != "echo-strong" {
-		t.Fatalf("bare-name resolve wrong: %v %v", targets, err)
+	// Duplicate aliases do not silently select whichever provider sorts first.
+	if _, err := ResolveTargets("echo-strong"); err == nil {
+		t.Fatal("duplicate bare alias should be ambiguous")
+	} else if _, ok := err.(*ModelNotFoundError); !ok {
+		t.Fatalf("want safe ModelNotFoundError, got %T: %v", err, err)
 	}
-	// a "[1m]"-style context-variant tag is stripped before matching
-	targets, err = ResolveTargets("echo-strong[1m]")
-	if err != nil || len(targets) != 1 || targets[0].Model != "echo-strong" {
-		t.Fatalf("tagged-name resolve wrong: %v %v", targets, err)
+	principal := &config.Principal{AllowedProviders: []string{"echo2"}}
+	targets, err := ResolveTargetsForPrincipal("echo-strong[1m]", principal)
+	if err != nil || len(targets) != 1 || targets[0] != (Target{Provider: "echo2", Model: "echo-strong"}) {
+		t.Fatalf("policy-filtered tagged alias resolve wrong: %v %v", targets, err)
 	}
-	// case-insensitive
-	if targets, err := ResolveTargets("ECHO-DEEP"); err != nil || len(targets) != 1 || targets[0].Model != "echo-deep" {
+	if targets, err := ResolveTargetsForPrincipal("ECHO-DEEP", principal); err != nil || len(targets) != 1 || targets[0].Model != "echo-deep" {
 		t.Fatalf("case-insensitive resolve wrong: %v %v", targets, err)
 	}
-	// discovery-alias prefix strip: "claude-<non-claude>" falls back to the real
-	// model after a direct match fails (surfaces non-Claude models in the picker).
-	if targets, err := ResolveTargets("claude-echo-strong"); err != nil || len(targets) != 1 || targets[0].Model != "echo-strong" {
+	config.Update(func(s *config.Settings) { s.AnthropicDiscoveryAllModels = true })
+	if targets, err := ResolveTargetsForPrincipal("claude-echo-strong", principal); err != nil || len(targets) != 1 || targets[0].Model != "echo-strong" {
 		t.Fatalf("prefix-strip resolve wrong: %v %v", targets, err)
+	}
+	// Exact provider/model remains authoritative even when its bare alias is ambiguous.
+	if targets, err := ResolveTargets("echo/echo-strong"); err != nil || targets[0].Provider != "echo" {
+		t.Fatalf("exact provider/model changed: %v %v", targets, err)
 	}
 	// genuinely unknown still 404s
 	if _, err := ResolveTargets("totally-unknown-9"); err == nil {
 		t.Error("unknown should still 404")
+	}
+}
+
+func TestNativeAliasCanonicalCollisionAndEndpointPrecedence(t *testing.T) {
+	setupEcho(t)
+	config.Update(func(s *config.Settings) {
+		s.Providers = map[string]*config.ProviderConfig{
+			"echo": {Type: "echo"}, "other": {Type: "echo"},
+		}
+		s.Endpoints["ECHO-STRONG"] = &config.EndpointConfig{
+			Failover: []config.EndpointMember{{Provider: "other", Model: "echo-deep"}},
+		}
+	})
+	providers.ResetProviders()
+	resolution, err := ResolveForPrincipal("ECHO-STRONG", nil)
+	if err != nil || resolution.Category != "ECHO-STRONG" || resolution.Targets[0].Model != "echo-deep" {
+		t.Fatalf("exact endpoint lost precedence: %+v %v", resolution, err)
+	}
+	if _, err := ResolveTargets("echo.strong"); err == nil {
+		t.Fatal("canonical endpoint collision should not resolve as an alias")
 	}
 }
 
@@ -188,6 +214,133 @@ func TestExecuteCompleteFailover(t *testing.T) {
 	}
 	if recent[0]["served"] != "echo/echo-default" {
 		t.Errorf("served wrong in telemetry: %v", recent[0]["served"])
+	}
+}
+
+func TestFailoverErrorsAndTelemetryAreSanitized(t *testing.T) {
+	t.Setenv("LLMGW_STATE_DIR", t.TempDir())
+	secret := "llmgw_" + strings.Repeat("A", 32)
+	email := "routing-owner@example.test"
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusServiceUnavailable)
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"error": map[string]any{"message": "failed for " + email + " using " + secret},
+		})
+	}))
+	defer upstream.Close()
+
+	config.Update(func(s *config.Settings) {
+		s.Savings.Enabled = false
+		s.Providers = map[string]*config.ProviderConfig{
+			"bad":  {Type: "openai_compatible", BaseURL: upstream.URL},
+			"echo": {Type: "echo"},
+		}
+		s.Policies.Defaults = config.ProviderPolicy{RetryMaxAttempts: 1}
+		s.Policies.Overrides = map[string]config.ProviderPolicy{}
+	})
+	providers.ResetProviders()
+	ResetTelemetryState()
+	ResetSavingsState()
+	t.Cleanup(func() {
+		providers.ResetProviders()
+		ResetTelemetryState()
+		ResetSavingsState()
+	})
+
+	messages := []providers.Message{{"role": "user", "content": "hi"}}
+	_, served, err := ExecuteComplete(
+		[]Target{{Provider: "bad", Model: "bad-model"}, {Provider: "echo", Model: "echo-default"}},
+		messages, "fallback", nil, providers.Kwargs{},
+	)
+	if err != nil || served == nil || served.Provider != "echo" {
+		t.Fatalf("fallback result served=%+v err=%v", served, err)
+	}
+
+	_, _, err = ExecuteComplete(
+		[]Target{{Provider: "bad", Model: "bad-model"}},
+		messages, "all-targets", nil, providers.Kwargs{},
+	)
+	var allTargets *AllTargetsFailed
+	if !errors.As(err, &allTargets) {
+		t.Fatalf("all-target failure type = %T, want *AllTargetsFailed", err)
+	}
+	if allTargets.Status != http.StatusServiceUnavailable {
+		t.Fatalf("all-target status = %d", allTargets.Status)
+	}
+	if message := err.Error(); strings.Contains(message, secret) || strings.Contains(message, email) {
+		t.Fatalf("all-target error exposed diagnostics: %q", message)
+	}
+	if message := (&AllTargetsFailed{Msg: "raw " + email + " " + secret}).Error(); strings.Contains(message, secret) || strings.Contains(message, email) {
+		t.Fatalf("direct all-target error exposed diagnostics: %q", message)
+	}
+
+	recordTelemetryEvent("sink-defense", []eventAttempt{{
+		Provider: "raw", Model: "model", Error: "raw " + email + " " + secret,
+	}}, "", "", "", "")
+
+	db, err := telConn()
+	if err != nil {
+		t.Fatal(err)
+	}
+	rows, err := db.Query(`SELECT attempts_json FROM failover_events ORDER BY id`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rawRows := 0
+	for rows.Next() {
+		var raw string
+		if err := rows.Scan(&raw); err != nil {
+			rows.Close()
+			t.Fatal(err)
+		}
+		rawRows++
+		if strings.Contains(raw, secret) || strings.Contains(raw, email) {
+			rows.Close()
+			t.Fatalf("raw telemetry exposed diagnostics: %s", raw)
+		}
+		if !strings.Contains(raw, "[redacted]") {
+			rows.Close()
+			t.Fatalf("raw telemetry has no redaction marker: %s", raw)
+		}
+	}
+	if err := rows.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if rawRows != 3 {
+		t.Fatalf("raw telemetry rows = %d, want fallback, all-target, and sink-defense rows", rawRows)
+	}
+
+	legacy, _ := json.Marshal([]map[string]any{{
+		"provider": "legacy", "model": "model", "ok": false,
+		"error": "legacy " + email + " used " + secret,
+	}})
+	if _, err := db.Exec(
+		`INSERT INTO failover_events (ts, requested, served_provider, served_model, throttled, attempts_json, project, key_name)
+		 VALUES (?, ?, NULL, NULL, 0, ?, NULL, NULL)`,
+		1, "legacy", string(legacy),
+	); err != nil {
+		t.Fatal(err)
+	}
+	recent := RecentTelemetry(1)
+	if len(recent) != 1 {
+		t.Fatalf("recent telemetry rows = %d", len(recent))
+	}
+	attempts := recent[0]["attempts"].([]map[string]any)
+	message, _ := attempts[0]["error"].(string)
+	if strings.Contains(message, secret) || strings.Contains(message, email) || !strings.Contains(message, "[redacted]") {
+		t.Fatalf("historical telemetry was not sanitized on read: %q", message)
+	}
+}
+
+func TestAttemptTruncationSanitizesBeforeLimiting(t *testing.T) {
+	secret := "llmgw_" + strings.Repeat("B", 32)
+	got := truncate(strings.Repeat("safe ", 35) + secret)
+	if len(got) > 200 {
+		t.Fatalf("attempt text length = %d", len(got))
+	}
+	if strings.Contains(got, secret[:24]) || !strings.Contains(got, "[redacted]") {
+		t.Fatalf("attempt text was truncated before sanitization: %q", got)
 	}
 }
 
@@ -245,6 +398,60 @@ func TestResponsesFallbackRejectsUnsupportedToolConstraints(t *testing.T) {
 				t.Fatal("unsupported tool constraint was accepted")
 			}
 		})
+	}
+}
+
+func TestTargetCompatibilityPreservesClientControls(t *testing.T) {
+	setupEcho(t)
+	config.Update(func(settings *config.Settings) {
+		settings.Providers["chat"] = &config.ProviderConfig{Type: "openai_compatible"}
+		settings.Providers["anthropic"] = &config.ProviderConfig{Type: "anthropic"}
+		settings.Providers["copilot-chat"] = &config.ProviderConfig{Type: "github_copilot"}
+		settings.Providers["copilot-adapt"] = &config.ProviderConfig{Type: "github_copilot", ForceApiSupport: true}
+	})
+	chat := Target{Provider: "chat", Model: "model"}
+	unsupported := Target{Provider: "echo", Model: "echo-default"}
+
+	if err := anthropicControlsCompatibility(chat, nil, providers.Kwargs{
+		"metadata": map[string]any{"user_id": "fixture"}, "reasoning_effort": "high",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := anthropicControlsCompatibility(Target{Provider: "anthropic", Model: "model"}, nil, providers.Kwargs{
+		"thinking": map[string]any{"type": "disabled"},
+	}); err != nil {
+		t.Fatalf("native Anthropic should preserve disabled thinking: %v", err)
+	}
+	if err := anthropicControlsCompatibility(Target{Provider: "copilot-chat", Model: "model"}, nil, providers.Kwargs{
+		"thinking": map[string]any{"type": "disabled"},
+	}); err != nil {
+		t.Fatalf("Copilot Chat should preserve disabled thinking: %v", err)
+	}
+	if err := anthropicControlsCompatibility(Target{Provider: "copilot-adapt", Model: "model"}, nil, providers.Kwargs{
+		"thinking": map[string]any{"type": "disabled"},
+	}); err == nil {
+		t.Fatal("forced Copilot adaptation accepted thinking without a verified Chat surface")
+	}
+	for name, kw := range map[string]providers.Kwargs{
+		"metadata": {"metadata": map[string]any{"user_id": "fixture"}},
+		"effort":   {"reasoning_effort": "high"},
+		"thinking": {"thinking": map[string]any{"type": "disabled"}},
+	} {
+		t.Run(name, func(t *testing.T) {
+			if err := anthropicControlsCompatibility(unsupported, nil, kw); err == nil {
+				t.Fatal("unsupported Anthropic control was accepted")
+			}
+		})
+	}
+	if err := responsesFallbackCompatibility(chat, nil, nil, providers.Kwargs{
+		"parallel_tool_calls": false,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := responsesFallbackCompatibility(Target{Provider: "anthropic", Model: "model"}, nil, nil, providers.Kwargs{
+		"parallel_tool_calls": false,
+	}); err == nil {
+		t.Fatal("Anthropic fallback silently accepted parallel_tool_calls")
 	}
 }
 

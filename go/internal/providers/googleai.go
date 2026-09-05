@@ -21,6 +21,7 @@ package providers
 
 import (
 	"bytes"
+	"context"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
@@ -149,6 +150,10 @@ func (p GoogleAIProvider) modelURL(model, action string) (string, error) {
 }
 
 func (p GoogleAIProvider) do(method, url string, body any) (map[string]any, int, error) {
+	return p.doContext(context.Background(), method, url, body)
+}
+
+func (p GoogleAIProvider) doContext(ctx context.Context, method, url string, body any) (map[string]any, int, error) {
 	var reader io.Reader
 	if body != nil {
 		payload, err := json.Marshal(body)
@@ -157,7 +162,7 @@ func (p GoogleAIProvider) do(method, url string, body any) (map[string]any, int,
 		}
 		reader = bytes.NewReader(payload)
 	}
-	request, err := http.NewRequest(method, url, reader)
+	request, err := http.NewRequestWithContext(ctx, method, url, reader)
 	if err != nil {
 		return nil, 0, err
 	}
@@ -219,11 +224,15 @@ func (p GoogleAIProvider) label() string {
 // Complete translates OpenAI-shaped messages into Gemini contents and maps the
 // reply back, so the gateway's routing and translation layers are unchanged.
 func (p GoogleAIProvider) Complete(model string, messages []Message, kw Kwargs) (map[string]any, error) {
+	return p.CompleteContext(context.Background(), model, messages, kw)
+}
+
+func (p GoogleAIProvider) CompleteContext(ctx context.Context, model string, messages []Message, kw Kwargs) (map[string]any, error) {
 	url, err := p.modelURL(model, "generateContent")
 	if err != nil {
 		return nil, err
 	}
-	decoded, _, err := p.do(http.MethodPost, url, googleContentRequest(messages, kw, nil))
+	decoded, _, err := p.doContext(ctx, http.MethodPost, url, googleContentRequest(messages, kw, nil))
 	if err != nil {
 		return nil, err
 	}

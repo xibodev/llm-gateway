@@ -16,7 +16,12 @@ import (
 	"llmgw/internal/router"
 )
 
-var audioClient = &http.Client{Timeout: 300 * time.Second}
+var audioClient = &http.Client{
+	Timeout:       300 * time.Second,
+	CheckRedirect: func(_ *http.Request, _ []*http.Request) error { return http.ErrUseLastResponse },
+}
+
+const proxyErrorBodyLimit = 64 << 10
 
 // resolveAudioTarget maps a request model (provider/model or category) to a
 // single upstream (provider, model), applying key-policy allowlists.
@@ -53,13 +58,48 @@ func copyAuthHeaders(dst *http.Request, headers http.Header, skipContentType boo
 	}
 }
 
-func proxyAudioResponse(w http.ResponseWriter, resp *http.Response) {
+type apiProxyResponse struct {
+	body        []byte
+	contentType string
+	status      int
+	errorCode   string
+	err         error
+}
+
+func readAPIProxyResponse(resp *http.Response, prefix string) apiProxyResponse {
 	defer resp.Body.Close()
-	body, _ := io.ReadAll(resp.Body)
-	if ct := resp.Header.Get("Content-Type"); ct != "" {
-		w.Header().Set("Content-Type", ct)
+	if resp.StatusCode >= 200 && resp.StatusCode < 300 {
+		body, err := io.ReadAll(resp.Body)
+		if err != nil {
+			return apiProxyResponse{
+				status:    http.StatusBadGateway,
+				errorCode: "upstream_body_read",
+				err:       providers.HTTPInvocationError(prefix, http.StatusBadGateway, []byte("response body could not be read")),
+			}
+		}
+		return apiProxyResponse{body: body, contentType: resp.Header.Get("Content-Type"), status: resp.StatusCode}
 	}
-	w.WriteHeader(resp.StatusCode)
+
+	body, readErr := io.ReadAll(io.LimitReader(resp.Body, proxyErrorBodyLimit+1))
+	if readErr != nil {
+		body = []byte("response body could not be read")
+	} else if len(body) > proxyErrorBodyLimit {
+		// Never sanitize a prefix cut at an arbitrary byte: it could contain only
+		// part of a credential and evade a whole-token redaction rule.
+		body = []byte("response body exceeded diagnostic limit")
+	}
+	return apiProxyResponse{
+		status:    resp.StatusCode,
+		errorCode: "upstream_http_error",
+		err:       providers.HTTPInvocationError(prefix, resp.StatusCode, body),
+	}
+}
+
+func writeAPIProxySuccess(w http.ResponseWriter, status int, contentType string, body []byte) {
+	if contentType != "" {
+		w.Header().Set("Content-Type", contentType)
+	}
+	w.WriteHeader(status)
 	_, _ = w.Write(body)
 }
 
@@ -117,14 +157,19 @@ func handleTranscriptions(w http.ResponseWriter, r *http.Request) {
 		writeError(w, 502, "audio transcription upstream error")
 		return
 	}
+	result := readAPIProxyResponse(resp, "audio transcription")
 	router.RecordUsage(router.UsageRecord{
 		Endpoint: "openai.transcriptions", RequestedModel: provider + "/" + upstreamModel, RoutedModel: upstreamModel,
 		Provider: provider, Project: principal.Project, Key: principal.Key,
 		ProjectID: principal.ProjectID, PrincipalID: principal.PrincipalID, KeyID: principal.KeyID,
-		StatusCode: resp.StatusCode, LatencyMS: time.Since(started).Milliseconds(),
-		ErrorCode: audioErrorCode(resp.StatusCode), IsStub: isStub(provider),
+		StatusCode: result.status, LatencyMS: time.Since(started).Milliseconds(),
+		ErrorCode: result.errorCode, IsStub: isStub(provider),
 	})
-	proxyAudioResponse(w, resp)
+	if result.err != nil {
+		writeUpstreamError(w, result.err)
+		return
+	}
+	writeAPIProxySuccess(w, result.status, result.contentType, result.body)
 }
 
 // POST /v1/audio/speech — text -> audio (TTS). Reverse-proxied to the resolved
@@ -169,18 +214,23 @@ func handleSpeech(w http.ResponseWriter, r *http.Request) {
 		writeError(w, 502, "audio speech upstream error")
 		return
 	}
+	result := readAPIProxyResponse(resp, "audio speech")
 	router.RecordUsage(router.UsageRecord{
 		Endpoint: "openai.speech", RequestedModel: provider + "/" + upstreamModel, RoutedModel: upstreamModel,
 		Provider: provider, Project: principal.Project, Key: principal.Key,
 		ProjectID: principal.ProjectID, PrincipalID: principal.PrincipalID, KeyID: principal.KeyID,
-		StatusCode: resp.StatusCode, LatencyMS: time.Since(started).Milliseconds(),
-		ErrorCode: audioErrorCode(resp.StatusCode), IsStub: isStub(provider),
+		StatusCode: result.status, LatencyMS: time.Since(started).Milliseconds(),
+		ErrorCode: result.errorCode, IsStub: isStub(provider),
 	})
-	proxyAudioResponse(w, resp)
+	if result.err != nil {
+		writeUpstreamError(w, result.err)
+		return
+	}
+	writeAPIProxySuccess(w, result.status, result.contentType, result.body)
 }
 
 func audioErrorCode(status int) string {
-	if status >= 400 {
+	if status >= 300 {
 		return "upstream_http_error"
 	}
 	return ""

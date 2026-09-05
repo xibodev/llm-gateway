@@ -20,6 +20,7 @@ services:
       LLMGW_API_KEY: ${LLMGW_API_KEY:-}
       LLMGW_ALLOW_UNAUTHENTICATED_API: ${LLMGW_ALLOW_UNAUTHENTICATED_API:-0}
       LLMGW_EXPERIMENTAL_COPILOT_PROVIDER: ${LLMGW_EXPERIMENTAL_COPILOT_PROVIDER:-0}
+      LLMGW_CREDENTIAL_ENCRYPTION_KEY: ${LLMGW_CREDENTIAL_ENCRYPTION_KEY:-}
       LLMGW_GITHUB_COPILOT_CACHE_DIR: /state/cache
     # State (config.yaml, keys.json 0600, secrets.json 0600, catalog.json, *.db).
     # Bind mount so the nonroot container (uid 65532) can own + write it.

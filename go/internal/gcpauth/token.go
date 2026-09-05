@@ -15,7 +15,40 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"llmgw/internal/diagnostics"
 )
+
+const maxAuthDiagnosticChars = 512
+
+// TokenError retains safe machine-inspectable token endpoint facts.
+type TokenError struct {
+	StatusCode  int
+	Code        string
+	Description string
+}
+
+func (e *TokenError) Error() string {
+	message := "service account token exchange failed"
+	if e.StatusCode != 0 {
+		message += fmt.Sprintf(" (HTTP %d)", e.StatusCode)
+	}
+	if e.Code != "" {
+		message += ": " + e.Code
+	}
+	if e.Description != "" && e.Description != e.Code {
+		message += ": " + e.Description
+	}
+	return diagnostics.SanitizeTextLimit(message, maxAuthDiagnosticChars)
+}
+
+func tokenError(status int, code, description string) *TokenError {
+	return &TokenError{
+		StatusCode:  status,
+		Code:        diagnostics.SanitizeTextLimit(strings.TrimSpace(code), maxAuthDiagnosticChars),
+		Description: diagnostics.SanitizeTextLimit(strings.TrimSpace(description), maxAuthDiagnosticChars),
+	}
+}
 
 // tokenCache holds minted access tokens keyed by credential fingerprint. Tokens
 // are short lived and re-mintable, so this is memory only: a restart costs one
@@ -130,15 +163,13 @@ func exchange(c *Credential, scope string) (string, time.Time, error) {
 		http.MethodPost, c.tokenURI, strings.NewReader(form.Encode()),
 	)
 	if err != nil {
-		return "", time.Time{}, err
+		return "", time.Time{}, tokenError(0, "request", err.Error())
 	}
 	request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 
 	response, err := httpClient.Do(request)
 	if err != nil {
-		return "", time.Time{}, fmt.Errorf(
-			"service account token exchange for %s failed: %v", c.clientEmail, err,
-		)
+		return "", time.Time{}, tokenError(0, "transport", err.Error())
 	}
 	defer response.Body.Close()
 	raw, _ := io.ReadAll(io.LimitReader(response.Body, 1<<20))
@@ -146,24 +177,14 @@ func exchange(c *Credential, scope string) (string, time.Time, error) {
 	var parsed tokenResponse
 	_ = json.Unmarshal(raw, &parsed)
 	if response.StatusCode != http.StatusOK {
-		// Google reports a bad key as invalid_grant. Surface its reason, which
-		// describes the failure and never echoes the assertion or the key.
-		detail := strings.TrimSpace(parsed.ErrorDesc)
-		if detail == "" {
-			detail = strings.TrimSpace(parsed.Error)
-		}
-		if detail == "" {
+		detail := parsed.ErrorDesc
+		if strings.TrimSpace(detail) == "" {
 			detail = "no error detail returned"
 		}
-		return "", time.Time{}, fmt.Errorf(
-			"service account token exchange for %s failed (HTTP %d): %s",
-			c.clientEmail, response.StatusCode, detail,
-		)
+		return "", time.Time{}, tokenError(response.StatusCode, parsed.Error, detail)
 	}
 	if strings.TrimSpace(parsed.AccessToken) == "" {
-		return "", time.Time{}, fmt.Errorf(
-			"service account token exchange for %s returned no access_token", c.clientEmail,
-		)
+		return "", time.Time{}, tokenError(response.StatusCode, "invalid_response", "response returned no access_token")
 	}
 	lifetime := parsed.ExpiresIn
 	if lifetime <= 0 {

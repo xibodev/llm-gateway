@@ -3,12 +3,14 @@
 package router
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"sort"
 	"strings"
 
 	"llmgw/internal/config"
+	"llmgw/internal/iam"
 	"llmgw/internal/providers"
 	"llmgw/internal/translate"
 )
@@ -48,7 +50,9 @@ type AllTargetsFailed struct {
 	Status int
 }
 
-func (e *AllTargetsFailed) Error() string { return e.Msg }
+func (e *AllTargetsFailed) Error() string {
+	return providers.SanitizeDiagnosticTextLimit(e.Msg, 2048)
+}
 
 // AmbiguousCategoryError reports an invalid configuration containing endpoint
 // names that differ only by case.
@@ -132,7 +136,9 @@ func ResolveForPrincipal(
 			return Resolution{Targets: []Target{{Provider: head, Model: tail}}}, nil
 		}
 	}
-	if t, ok := resolveNativeAlias(name, principal); ok {
+	if t, ok, err := resolveNativeAlias(name, principal); err != nil {
+		return Resolution{}, err
+	} else if ok {
 		return Resolution{Targets: []Target{t}}, nil
 	}
 	return Resolution{}, &ModelNotFoundError{Requested: name}
@@ -150,60 +156,145 @@ func nativeKey(s string) string {
 // "provider/model" id onto a catalog entry, so coding CLIs can send provider-
 // native names directly. It powers Claude Code's built-in /model picker, whose
 // rows send Anthropic-native names with a context tag (e.g. "claude-opus-4-8[1m]")
-// that would otherwise 404. Providers are scanned in sorted order so the winner
-// is deterministic when the same bare name exists under several providers.
+// that would otherwise 404. Ambiguous canonical names are rejected rather than
+// routed to whichever provider happens to sort first.
 func resolveNativeAlias(
 	requested string, principal *config.Principal,
-) (Target, bool) {
+) (Target, bool, error) {
 	base := requested
 	if i := strings.IndexByte(base, '['); i >= 0 { // drop a "[1m]"-style variant tag
 		base = base[:i]
 	}
 	base = strings.TrimSpace(base)
 	if base == "" {
-		return Target{}, false
+		return Target{}, false, nil
 	}
-	// Direct native-name match first, so a real Claude model (claude-opus-4.8)
-	// resolves to itself before the discovery-prefix fallback can strip it.
-	if t, ok := matchByNativeKey(nativeKey(base), principal); ok {
-		return t, true
-	}
-	// Discovery-alias fallback: Claude Code's model discovery only accepts ids
-	// beginning with "claude"/"anthropic", so a non-Claude model surfaced in the
-	// picker carries that prefix (e.g. "claude-gemini-3.1-pro-preview"). Strip it
-	// and retry so the real model resolves.
-	low := strings.ToLower(base)
-	for _, pfx := range []string{"claude-", "anthropic-"} {
-		if strings.HasPrefix(low, pfx) {
-			if t, ok := matchByNativeKey(nativeKey(base[len(pfx):]), principal); ok {
-				return t, true
-			}
+	key := nativeKey(base)
+	for provider := range config.Get().Providers {
+		if nativeKey(provider) == key {
+			return Target{}, false, nil
 		}
 	}
-	return Target{}, false
+	for endpoint := range config.Get().Endpoints {
+		if nativeKey(endpoint) == key {
+			return Target{}, false, nil
+		}
+	}
+	candidates, err := NativeAliasCandidates(principal)
+	if err != nil {
+		return Target{}, false, err
+	}
+	if t, found, ambiguous := uniqueNativeCandidate(candidates[key]); ambiguous {
+		return Target{}, false, &ModelNotFoundError{Requested: requested}
+	} else if found {
+		return t, true, nil
+	}
+	return Target{}, false, nil
 }
 
-// matchByNativeKey finds a catalog model whose canonical key equals key,
-// scanning providers in sorted order for a deterministic winner.
-func matchByNativeKey(
-	key string, principal *config.Principal,
-) (Target, bool) {
-	if key == "" {
-		return Target{}, false
+// NativeAliasCandidates returns policy- and credential-authorized catalog
+// targets grouped by the canonical key used for bare-name resolution.
+func NativeAliasCandidates(principal *config.Principal) (map[string][]Target, error) {
+	s := config.Get()
+	project := iam.ProjectPolicy{}
+	if principal != nil && principal.ProjectID != "" {
+		var err error
+		project, err = iam.GetProjectPolicy(principal.ProjectID)
+		if err != nil {
+			return nil, err
+		}
 	}
-	pids := make([]string, 0, len(config.Get().Providers))
-	for pid := range config.Get().Providers {
+	pids := make([]string, 0, len(s.Providers))
+	for pid := range s.Providers {
 		pids = append(pids, pid)
 	}
 	sort.Strings(pids)
+	snapshot := map[string][]providers.ModelInfo{}
 	for _, pid := range pids {
-		for _, m := range providers.CatalogModelsForPrincipal(pid, principal) {
-			if nativeKey(m.ID) == key {
-				return Target{Provider: pid, Model: m.ID}, true
+		if !aliasProviderAllowed(principal, project, pid) {
+			continue
+		}
+		authorized, err := providers.ProviderCredentialAuthorized(pid, principal)
+		if err != nil {
+			return nil, err
+		}
+		if !authorized {
+			continue
+		}
+		models := append([]providers.ModelInfo(nil), providers.CatalogModelsForPrincipal(pid, principal)...)
+		sort.Slice(models, func(i, j int) bool { return models[i].ID < models[j].ID })
+		for _, m := range models {
+			aliases := aliasIDs(m.ID, s.AnthropicDiscoveryAllModels)
+			policyCandidates := append([]string{pid + "/" + m.ID, m.ID}, aliases...)
+			if principal != nil && (!aliasModelAllowed(principal.AllowedModels, policyCandidates...) ||
+				!aliasModelAllowed(project.AllowedModels, policyCandidates...)) {
+				continue
+			}
+			snapshot[pid] = append(snapshot[pid], m)
+		}
+	}
+	return NativeAliasCandidatesFromSnapshot(snapshot, s.AnthropicDiscoveryAllModels), nil
+}
+
+// NativeAliasCandidatesFromSnapshot groups an already authorized and
+// policy-filtered catalog snapshot without fetching or mutating its rows.
+func NativeAliasCandidatesFromSnapshot(
+	snapshot map[string][]providers.ModelInfo, allModels bool,
+) map[string][]Target {
+	out := map[string][]Target{}
+	for pid, models := range snapshot {
+		for _, model := range models {
+			for _, alias := range aliasIDs(model.ID, allModels) {
+				key := nativeKey(alias)
+				if key != "" {
+					out[key] = append(out[key], Target{Provider: pid, Model: model.ID})
+				}
 			}
 		}
 	}
-	return Target{}, false
+	return out
+}
+
+func aliasIDs(model string, allModels bool) []string {
+	aliases := []string{model}
+	low := strings.ToLower(model)
+	if allModels && !strings.HasPrefix(low, "claude") && !strings.HasPrefix(low, "anthropic") {
+		aliases = append(aliases, "claude-"+model)
+	}
+	return aliases
+}
+
+func uniqueNativeCandidate(candidates []Target) (Target, bool, bool) {
+	unique := map[Target]bool{}
+	for _, candidate := range candidates {
+		unique[candidate] = true
+	}
+	if len(unique) != 1 {
+		return Target{}, false, len(unique) > 1
+	}
+	for candidate := range unique {
+		return candidate, true, false
+	}
+	return Target{}, false, false
+}
+
+func aliasProviderAllowed(principal *config.Principal, project iam.ProjectPolicy, provider string) bool {
+	return principal == nil ||
+		(aliasModelAllowed(principal.AllowedProviders, provider) && aliasModelAllowed(project.AllowedProviders, provider))
+}
+
+func aliasModelAllowed(allowed []string, candidates ...string) bool {
+	if len(allowed) == 0 {
+		return true
+	}
+	for _, allowedID := range allowed {
+		for _, candidate := range candidates {
+			if allowedID == candidate {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // attempt captures one target's outcome for telemetry.
@@ -241,20 +332,34 @@ type AttemptTrace struct {
 // ExecuteComplete runs the chain for a non-streaming request. Returns the
 // response, the served target, and an error if all targets failed.
 func ExecuteComplete(targets []Target, messages []providers.Message, requested string, principal *config.Principal, kw providers.Kwargs) (map[string]any, *Target, error) {
-	response, served, _, err := executeCompleteWithTrace(targets, messages, requested, principal, kw)
+	return ExecuteCompleteContext(context.Background(), targets, messages, requested, principal, kw)
+}
+
+func ExecuteCompleteContext(ctx context.Context, targets []Target, messages []providers.Message, requested string, principal *config.Principal, kw providers.Kwargs) (map[string]any, *Target, error) {
+	response, served, _, err := executeCompleteWithTrace(ctx, targets, messages, requested, principal, kw)
 	return response, served, err
 }
 
 // ExecuteCompleteWithTrace uses the same route/provider execution path as
 // ExecuteComplete while returning a safe fallback trace for operator tooling.
 func ExecuteCompleteWithTrace(targets []Target, messages []providers.Message, requested string, principal *config.Principal, kw providers.Kwargs) (map[string]any, *Target, []AttemptTrace, error) {
-	return executeCompleteWithTrace(targets, messages, requested, principal, kw)
+	return executeCompleteWithTrace(context.Background(), targets, messages, requested, principal, kw)
 }
 
 // ExecuteResponses preserves the caller's Responses API intent when a target
 // supports it natively, falling back through an explicit loss-checked Chat
 // adapter only for Chat-only providers.
 func ExecuteResponses(
+	targets []Target,
+	payload map[string]any,
+	requested string,
+	principal *config.Principal,
+) (map[string]any, *Target, error) {
+	return ExecuteResponsesContext(context.Background(), targets, payload, requested, principal)
+}
+
+func ExecuteResponsesContext(
+	ctx context.Context,
 	targets []Target,
 	payload map[string]any,
 	requested string,
@@ -268,6 +373,10 @@ func ExecuteResponses(
 	var lastErr error
 	lastStatus := 0
 	for index := range targets {
+		if ctx.Err() != nil {
+			lastErr = ctx.Err()
+			break
+		}
 		target := targets[index]
 		provider, err := providers.GetProviderForPrincipal(target.Provider, principal)
 		if err != nil {
@@ -278,7 +387,7 @@ func ExecuteResponses(
 			lastErr = err
 			continue
 		}
-		result, _, err := providers.CompleteResponses(provider, target.Model, payload)
+		result, _, err := providers.CompleteResponsesContext(ctx, provider, target.Model, payload)
 		if errors.Is(err, providers.ErrResponsesUnsupported) {
 			if conversionErr != nil {
 				lastErr = &providers.ConfigError{Msg: conversionErr.Error()}
@@ -300,7 +409,7 @@ func ExecuteResponses(
 				})
 				continue
 			}
-			chat, chatErr := provider.Complete(target.Model, chatMessages, chatKw)
+			chat, chatErr := providers.CompleteProviderContext(ctx, provider, target.Model, chatMessages, chatKw)
 			if chatErr == nil {
 				result = translate.ChatResponseToResponsesWithRequest(
 					target.Model, chat, payload,
@@ -335,12 +444,168 @@ func ExecuteResponses(
 	}
 }
 
+// ExecuteAnthropicMessages preserves native Messages payloads and loss-checks
+// the narrower OpenAI Chat adapter used by other configured providers.
+func ExecuteAnthropicMessages(
+	targets []Target,
+	payload map[string]any,
+	requested string,
+	principal *config.Principal,
+) (map[string]any, *Target, error) {
+	return ExecuteAnthropicMessagesContext(context.Background(), targets, payload, requested, principal)
+}
+
+func ExecuteAnthropicMessagesContext(
+	ctx context.Context,
+	targets []Target,
+	payload map[string]any,
+	requested string,
+	principal *config.Principal,
+) (map[string]any, *Target, error) {
+	messages, kw, incompatible := translate.AnthropicRequestToOpenAI(payload)
+	requiresNative := len(incompatible) > 0
+	if requiresNative {
+		hasNative := false
+		for _, target := range targets {
+			provider, err := providers.GetProviderForPrincipal(target.Provider, principal)
+			if err == nil && providers.SupportsAnthropicMessages(provider) {
+				hasNative = true
+				break
+			}
+		}
+		if !hasNative {
+			return nil, nil, &AllTargetsFailed{Msg: "Anthropic request requires a native Messages target; unsupported fields: " + strings.Join(incompatible, ", "), Status: 400}
+		}
+	}
+	var attempts []attempt
+	var lastErr error
+	lastStatus := 0
+	for _, target := range targets {
+		if ctx.Err() != nil {
+			lastErr = ctx.Err()
+			break
+		}
+		provider, err := providers.GetProviderForPrincipal(target.Provider, principal)
+		if err != nil {
+			lastErr = err
+			attempts = append(attempts, attempt{Provider: target.Provider, Model: target.Model, Error: truncate(err.Error())})
+			continue
+		}
+		var result map[string]any
+		if providers.SupportsAnthropicMessages(provider) {
+			result, err = providers.CompleteAnthropicMessages(provider, target.Model, payload)
+		} else if requiresNative {
+			continue
+		} else if err = anthropicFallbackCompatibility(target, principal, messages, kw); err == nil {
+			var chat map[string]any
+			chat, err = providers.CompleteProviderContext(ctx, provider, target.Model, messages, kw)
+			if err == nil {
+				result = translate.OpenAIResponseToAnthropic(chat, target.Model)
+			}
+		}
+		if err != nil {
+			lastErr = err
+			if providers.IsConfig(err) {
+				lastStatus = 400
+			} else {
+				lastStatus = providers.UpstreamStatus(err)
+			}
+			attempts = append(attempts, attempt{Provider: target.Provider, Model: target.Model, Error: truncate(err.Error()), Throttled: providers.IsThrottle(err)})
+			if providers.IsInvocation(err) && !providers.AnthropicMessagesRetryable(err) {
+				recordChain(requested, attempts, nil, principal)
+				return nil, nil, &AllTargetsFailed{Msg: err.Error(), Status: providers.UpstreamStatus(err)}
+			}
+			continue
+		}
+		attempts = append(attempts, attempt{Provider: target.Provider, Model: target.Model, OK: true})
+		served := target
+		recordChain(requested, attempts, &served, principal)
+		return result, &served, nil
+	}
+	recordChain(requested, attempts, nil, principal)
+	message := "no compatible Anthropic Messages target"
+	if lastErr != nil {
+		message = lastErr.Error()
+	}
+	return nil, nil, &AllTargetsFailed{Msg: message, Status: lastStatus}
+}
+
+func anthropicFallbackCompatibility(target Target, principal *config.Principal, messages []map[string]any, kw providers.Kwargs) error {
+	if err := anthropicControlsCompatibility(target, principal, kw); err != nil {
+		return err
+	}
+	hasImages := false
+	for _, message := range messages {
+		parts, _ := message["content"].([]any)
+		for _, raw := range parts {
+			part, _ := raw.(map[string]any)
+			if part["type"] == "image_url" {
+				hasImages = true
+			}
+		}
+	}
+	if !hasImages {
+		return nil
+	}
+	model, ok := providers.CatalogLookupForPrincipal(target.Provider, target.Model, principal)
+	if !ok || model.Capabilities == nil {
+		return &providers.ConfigError{Msg: "Anthropic image adaptation requires verified model vision capability"}
+	}
+	if vision, _ := model.Capabilities["vision"].(bool); !vision {
+		return &providers.ConfigError{Msg: "Anthropic image adaptation target is not vision-capable"}
+	}
+	return nil
+}
+
+func anthropicControlsCompatibility(target Target, principal *config.Principal, kw providers.Kwargs) error {
+	providerConfig := config.Get().Providers[target.Provider]
+	if providerConfig == nil {
+		return &providers.ConfigError{Msg: "provider is not configured"}
+	}
+	providerType := strings.ToLower(strings.TrimSpace(providerConfig.Type))
+	if providerType == "anthropic" {
+		return nil
+	}
+	if _, present := kw["thinking"]; present {
+		if providerType != "github_copilot" {
+			return &providers.ConfigError{Msg: "selected provider cannot preserve Anthropic thinking"}
+		}
+		if providerConfig.ForceApiSupport {
+			model, ok := providers.CatalogLookupForPrincipal(target.Provider, target.Model, principal)
+			if !ok || translate.PreferredEndpoint(model.SupportedSurfaces) != "chat" {
+				return &providers.ConfigError{Msg: "selected provider cannot preserve Anthropic thinking on a Responses-only model"}
+			}
+		}
+	}
+	switch providerType {
+	case "openai_compatible", "openai", "github_copilot", "bedrock", "litellm", "azure_openai":
+		return nil
+	}
+	if metadata, ok := kw["metadata"].(map[string]any); ok && len(metadata) > 0 {
+		return &providers.ConfigError{Msg: "selected provider cannot preserve Anthropic metadata"}
+	}
+	if kw["reasoning_effort"] != nil {
+		return &providers.ConfigError{Msg: "selected provider cannot preserve Anthropic output_config.effort"}
+	}
+	return nil
+}
+
 type ResponsesExecutionStream struct {
 	Iter   providers.StreamIter
 	Native bool
 }
 
 func ExecuteResponsesStream(
+	targets []Target,
+	payload map[string]any,
+	requested string,
+	principal *config.Principal,
+) (*ResponsesExecutionStream, *Target, error) {
+	return ExecuteResponsesStreamContext(context.Background(), targets, payload, requested, principal)
+}
+
+func ExecuteResponsesStreamContext(
+	ctx context.Context,
 	targets []Target,
 	payload map[string]any,
 	requested string,
@@ -354,8 +619,14 @@ func ExecuteResponsesStream(
 	var lastErr error
 	lastStatus := 0
 	for index := range targets {
+		if err := ctx.Err(); err != nil {
+			return nil, nil, err
+		}
 		target := targets[index]
 		provider, err := providers.GetProviderForPrincipal(target.Provider, principal)
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			return nil, nil, ctxErr
+		}
 		if err != nil {
 			attempts = append(attempts, attempt{
 				Provider: target.Provider, Model: target.Model,
@@ -364,7 +635,13 @@ func ExecuteResponsesStream(
 			lastErr = err
 			continue
 		}
-		stream, _, err := providers.StreamResponses(provider, target.Model, payload)
+		stream, _, err := providers.StreamResponsesContext(ctx, provider, target.Model, payload)
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			if stream != nil {
+				_ = stream.Close()
+			}
+			return nil, nil, ctxErr
+		}
 		native := true
 		if errors.Is(err, providers.ErrResponsesUnsupported) {
 			native = false
@@ -388,7 +665,16 @@ func ExecuteResponsesStream(
 				})
 				continue
 			}
-			stream, err = provider.Stream(target.Model, chatMessages, chatKw)
+			if ctxErr := ctx.Err(); ctxErr != nil {
+				return nil, nil, ctxErr
+			}
+			stream, err = providers.StreamProviderContext(ctx, provider, target.Model, chatMessages, chatKw)
+			if ctxErr := ctx.Err(); ctxErr != nil {
+				if stream != nil {
+					_ = stream.Close()
+				}
+				return nil, nil, ctxErr
+			}
 		}
 		if err != nil {
 			attempts = append(attempts, attempt{
@@ -462,7 +748,7 @@ func responsesFallbackCompatibility(
 	if len(tools) > 0 {
 		switch providerType {
 		case "openai_compatible", "openai", "github_copilot", "bedrock", "litellm",
-			"anthropic", "ollama":
+			"azure_openai", "anthropic", "ollama":
 		default:
 			return &providers.ConfigError{
 				Msg: "selected provider cannot preserve Responses tools",
@@ -487,7 +773,7 @@ func responsesFallbackCompatibility(
 	}
 	if kw["reasoning_effort"] != nil {
 		switch providerType {
-		case "openai_compatible", "openai", "github_copilot", "bedrock", "litellm":
+		case "openai_compatible", "openai", "github_copilot", "bedrock", "litellm", "azure_openai":
 		default:
 			return &providers.ConfigError{
 				Msg: "selected provider cannot preserve Responses reasoning controls",
@@ -496,21 +782,32 @@ func responsesFallbackCompatibility(
 	}
 	if metadata, ok := kw["metadata"].(map[string]any); ok && len(metadata) > 0 {
 		switch providerType {
-		case "openai_compatible", "openai", "github_copilot", "bedrock", "litellm":
+		case "openai_compatible", "openai", "github_copilot", "bedrock", "litellm", "azure_openai":
 		default:
 			return &providers.ConfigError{
 				Msg: "selected provider cannot preserve Responses metadata",
 			}
 		}
 	}
+	if _, present := kw["parallel_tool_calls"]; present {
+		switch providerType {
+		case "openai_compatible", "openai", "github_copilot", "bedrock", "litellm", "azure_openai":
+		default:
+			return &providers.ConfigError{Msg: "selected provider cannot preserve Responses parallel_tool_calls"}
+		}
+	}
 	return nil
 }
 
-func executeCompleteWithTrace(targets []Target, messages []providers.Message, requested string, principal *config.Principal, kw providers.Kwargs) (map[string]any, *Target, []AttemptTrace, error) {
+func executeCompleteWithTrace(ctx context.Context, targets []Target, messages []providers.Message, requested string, principal *config.Principal, kw providers.Kwargs) (map[string]any, *Target, []AttemptTrace, error) {
 	var attempts []attempt
 	trace := make([]AttemptTrace, 0, len(targets))
 	var lastErr error
 	for i := range targets {
+		if ctx.Err() != nil {
+			lastErr = ctx.Err()
+			break
+		}
 		t := targets[i]
 		prov, err := providers.GetProviderForPrincipal(t.Provider, principal)
 		if err != nil {
@@ -520,7 +817,7 @@ func executeCompleteWithTrace(targets []Target, messages []providers.Message, re
 			lastErr = err
 			continue
 		}
-		result, err := prov.Complete(t.Model, messages, kw)
+		result, err := providers.CompleteProviderContext(ctx, prov, t.Model, messages, kw)
 		if err != nil {
 			throttled := providers.IsThrottle(err)
 			attempts = append(attempts, attempt{Provider: t.Provider, Model: t.Model, OK: false, Error: truncate(err.Error()), Throttled: throttled})
@@ -544,20 +841,57 @@ func executeCompleteWithTrace(targets []Target, messages []providers.Message, re
 
 // ExecuteStream runs the chain for a streaming request, failing over pre-first-byte.
 func ExecuteStream(targets []Target, messages []providers.Message, requested string, principal *config.Principal, kw providers.Kwargs) (providers.StreamIter, *Target, error) {
+	return ExecuteStreamContext(context.Background(), targets, messages, requested, principal, kw)
+}
+
+func ExecuteStreamContext(ctx context.Context, targets []Target, messages []providers.Message, requested string, principal *config.Principal, kw providers.Kwargs) (providers.StreamIter, *Target, error) {
+	return executeStreamContext(ctx, targets, messages, requested, principal, kw, nil)
+}
+
+func ExecuteAnthropicStreamContext(ctx context.Context, targets []Target, messages []providers.Message, requested string, principal *config.Principal, kw providers.Kwargs) (providers.StreamIter, *Target, error) {
+	return executeStreamContext(ctx, targets, messages, requested, principal, kw, func(target Target) error {
+		return anthropicControlsCompatibility(target, principal, kw)
+	})
+}
+
+func executeStreamContext(ctx context.Context, targets []Target, messages []providers.Message, requested string, principal *config.Principal, kw providers.Kwargs, validate func(Target) error) (providers.StreamIter, *Target, error) {
 	var attempts []attempt
 	var lastErr error
+	lastStatus := 0
 	for i := range targets {
+		if err := ctx.Err(); err != nil {
+			return nil, nil, err
+		}
 		t := targets[i]
+		if validate != nil {
+			if err := validate(t); err != nil {
+				attempts = append(attempts, attempt{Provider: t.Provider, Model: t.Model, Error: truncate(err.Error())})
+				lastErr = err
+				lastStatus = 400
+				continue
+			}
+		}
 		prov, err := providers.GetProviderForPrincipal(t.Provider, principal)
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			return nil, nil, ctxErr
+		}
 		if err != nil {
 			attempts = append(attempts, attempt{Provider: t.Provider, Model: t.Model, OK: false, Error: truncate(err.Error()), Throttled: providers.IsThrottle(err)})
 			lastErr = err
+			lastStatus = providers.UpstreamStatus(err)
 			continue
 		}
-		it, err := prov.Stream(t.Model, messages, kw)
+		it, err := providers.StreamProviderContext(ctx, prov, t.Model, messages, kw)
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			if it != nil {
+				_ = it.Close()
+			}
+			return nil, nil, ctxErr
+		}
 		if err != nil {
 			attempts = append(attempts, attempt{Provider: t.Provider, Model: t.Model, OK: false, Error: truncate(err.Error()), Throttled: providers.IsThrottle(err)})
 			lastErr = err
+			lastStatus = providers.UpstreamStatus(err)
 			continue
 		}
 		attempts = append(attempts, attempt{Provider: t.Provider, Model: t.Model, OK: true})
@@ -570,12 +904,9 @@ func ExecuteStream(targets []Target, messages []providers.Message, requested str
 	if lastErr != nil {
 		msg = lastErr.Error()
 	}
-	return nil, nil, &AllTargetsFailed{Msg: msg, Status: providers.UpstreamStatus(lastErr)}
+	return nil, nil, &AllTargetsFailed{Msg: msg, Status: lastStatus}
 }
 
 func truncate(s string) string {
-	if len(s) > 200 {
-		return s[:200]
-	}
-	return s
+	return providers.SanitizeDiagnosticTextLimit(s, 200)
 }

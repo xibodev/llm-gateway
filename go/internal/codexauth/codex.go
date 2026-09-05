@@ -11,7 +11,11 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"llmgw/internal/diagnostics"
 )
+
+const maxAuthDiagnosticChars = 512
 
 var (
 	UserCodeURL      = "https://auth.openai.com/api/accounts/deviceauth/usercode"
@@ -49,15 +53,52 @@ type TokenSet struct {
 }
 
 type RefreshError struct {
+	StatusCode  int
 	Code        string
 	Description string
 }
 
-func (e *RefreshError) Error() string {
-	if e.Description != "" {
-		return "Codex refresh failed: " + e.Code + ": " + e.Description
+type AuthError struct {
+	Operation   string
+	StatusCode  int
+	Code        string
+	Description string
+}
+
+func (e *AuthError) Error() string {
+	message := "Codex " + e.Operation + " failed"
+	if e.StatusCode != 0 {
+		message += fmt.Sprintf(" (HTTP %d)", e.StatusCode)
 	}
-	return "Codex refresh failed: " + e.Code
+	if e.Code != "" {
+		message += ": " + e.Code
+	}
+	if e.Description != "" && e.Description != e.Code {
+		message += ": " + e.Description
+	}
+	return diagnostics.SanitizeTextLimit(message, maxAuthDiagnosticChars)
+}
+
+func authError(operation string, status int, code, description string) *AuthError {
+	return &AuthError{
+		Operation: operation, StatusCode: status,
+		Code:        diagnostics.SanitizeTextLimit(strings.TrimSpace(code), maxAuthDiagnosticChars),
+		Description: diagnostics.SanitizeTextLimit(strings.TrimSpace(description), maxAuthDiagnosticChars),
+	}
+}
+
+func (e *RefreshError) Error() string {
+	message := "Codex refresh failed"
+	if e.StatusCode != 0 {
+		message += fmt.Sprintf(" (HTTP %d)", e.StatusCode)
+	}
+	if e.Code != "" {
+		message += ": " + e.Code
+	}
+	if e.Description != "" {
+		message += ": " + e.Description
+	}
+	return diagnostics.SanitizeTextLimit(message, maxAuthDiagnosticChars)
 }
 
 func StartDeviceFlow(clientID string) (DeviceFlow, error) {
@@ -71,12 +112,12 @@ func StartDeviceFlow(clientID string) (DeviceFlow, error) {
 	request.Header.Set("Content-Type", "application/json")
 	response, err := HTTPClient().Do(request)
 	if err != nil {
-		return DeviceFlow{}, fmt.Errorf("Codex device authorization transport: %w", err)
+		return DeviceFlow{}, authError("device authorization", 0, "transport", err.Error())
 	}
 	defer response.Body.Close()
-	raw, _ := io.ReadAll(response.Body)
+	raw, _ := io.ReadAll(io.LimitReader(response.Body, 1<<20))
 	if response.StatusCode >= 400 {
-		return DeviceFlow{}, fmt.Errorf("Codex device authorization returned %d", response.StatusCode)
+		return DeviceFlow{}, authError("device authorization", response.StatusCode, "", "")
 	}
 	payload := map[string]any{}
 	if json.Unmarshal(raw, &payload) != nil {
@@ -111,10 +152,10 @@ func PollAndExchange(flow DeviceFlow) (string, TokenSet, error) {
 	request.Header.Set("Content-Type", "application/json")
 	response, err := HTTPClient().Do(request)
 	if err != nil {
-		return "error", TokenSet{}, fmt.Errorf("Codex device token transport: %w", err)
+		return "error", TokenSet{}, authError("device token", 0, "transport", err.Error())
 	}
 	defer response.Body.Close()
-	raw, _ := io.ReadAll(response.Body)
+	raw, _ := io.ReadAll(io.LimitReader(response.Body, 1<<20))
 	if response.StatusCode == http.StatusForbidden || response.StatusCode == http.StatusNotFound {
 		return "pending", TokenSet{}, nil
 	}
@@ -133,7 +174,7 @@ func PollAndExchange(flow DeviceFlow) (string, TokenSet, error) {
 			if code == "" {
 				code = fmt.Sprintf("http_%d", response.StatusCode)
 			}
-			return "denied", TokenSet{}, fmt.Errorf("Codex device authorization denied: %s", code)
+			return "denied", TokenSet{}, authError("device authorization", response.StatusCode, code, "")
 		}
 	}
 	authorizationCode := firstString(payload, "authorization_code", "code")
@@ -194,11 +235,11 @@ func Revoke(clientID, refreshToken, accessToken string) error {
 	request.Header.Set("Content-Type", "application/json")
 	response, err := HTTPClient().Do(request)
 	if err != nil {
-		return err
+		return authError("revoke", 0, "transport", err.Error())
 	}
 	defer response.Body.Close()
 	if response.StatusCode >= 400 {
-		return fmt.Errorf("Codex revoke returned %d", response.StatusCode)
+		return authError("revoke", response.StatusCode, "", "")
 	}
 	return nil
 }
@@ -209,22 +250,26 @@ func tokenRequest(body io.Reader, contentType string, isRefresh bool) (TokenSet,
 	request.Header.Set("Content-Type", contentType)
 	response, err := HTTPClient().Do(request)
 	if err != nil {
-		return TokenSet{}, fmt.Errorf("Codex OAuth token transport: %w", err)
+		return TokenSet{}, authError("OAuth token", 0, "transport", err.Error())
 	}
 	defer response.Body.Close()
-	raw, _ := io.ReadAll(response.Body)
+	raw, _ := io.ReadAll(io.LimitReader(response.Body, 1<<20))
 	payload := map[string]any{}
 	_ = json.Unmarshal(raw, &payload)
 	if response.StatusCode >= 400 {
 		code := firstString(payload, "error", "code")
 		description := firstString(payload, "error_description", "message")
-		if isRefresh {
-			return TokenSet{}, &RefreshError{Code: code, Description: description}
-		}
 		if code == "" {
 			code = fmt.Sprintf("http_%d", response.StatusCode)
 		}
-		return TokenSet{}, fmt.Errorf("Codex OAuth token exchange failed: %s", code)
+		if isRefresh {
+			return TokenSet{}, &RefreshError{
+				StatusCode:  response.StatusCode,
+				Code:        diagnostics.SanitizeTextLimit(code, maxAuthDiagnosticChars),
+				Description: diagnostics.SanitizeTextLimit(description, maxAuthDiagnosticChars),
+			}
+		}
+		return TokenSet{}, authError("OAuth token exchange", response.StatusCode, code, description)
 	}
 	access := firstString(payload, "access_token")
 	if access == "" {

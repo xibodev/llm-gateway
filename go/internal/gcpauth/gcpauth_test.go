@@ -9,6 +9,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"encoding/pem"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -248,6 +249,65 @@ func TestAccessTokenSurfacesExchangeFailure(t *testing.T) {
 		t.Fatal("expected an error")
 	} else if !strings.Contains(err.Error(), "Invalid JWT Signature") {
 		t.Fatalf("error should carry Google's reason, got: %v", err)
+	}
+}
+
+func TestAccessTokenSanitizesSyntheticEndpointDiagnostics(t *testing.T) {
+	ResetCache()
+	secret := "llmgw_" + strings.Repeat("a", 32)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusUnauthorized)
+		_, _ = fmt.Fprintf(w, `{"error":"invalid_grant","error_description":"Bearer malicious-bearer owner@example.test api_key=%s %s"}`, secret, strings.Repeat("z", 700))
+	}))
+	defer server.Close()
+	raw, _ := testKeyJSON(t, server.URL)
+	cred, err := Parse([]byte(raw))
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = AccessToken(cred, CloudPlatformScope)
+	tokenErr := &TokenError{}
+	if !errors.As(err, &tokenErr) || tokenErr.StatusCode != http.StatusUnauthorized || tokenErr.Code != "invalid_grant" {
+		t.Fatalf("error=%v tokenError=%+v", err, tokenErr)
+	}
+	if len([]rune(tokenErr.Description)) > maxAuthDiagnosticChars || strings.Contains(err.Error(), secret) || strings.Contains(err.Error(), "malicious-bearer") || strings.Contains(err.Error(), "owner@example.test") {
+		t.Fatalf("unsafe or unbounded error: %q", err)
+	}
+}
+
+type syntheticRoundTripper func(*http.Request) (*http.Response, error)
+
+func (f syntheticRoundTripper) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }
+
+func TestAccessTokenSanitizesSyntheticTransportURL(t *testing.T) {
+	ResetCache()
+	oldClient := httpClient
+	httpClient = &http.Client{Transport: syntheticRoundTripper(func(r *http.Request) (*http.Response, error) {
+		return nil, fmt.Errorf("dial %s?access_token=query-secret for owner@example.test", r.URL)
+	})}
+	t.Cleanup(func() { httpClient = oldClient })
+	raw, _ := testKeyJSON(t, "https://tokens.example.test/exchange")
+	cred, err := Parse([]byte(raw))
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = AccessToken(cred, CloudPlatformScope)
+	tokenErr := &TokenError{}
+	if !errors.As(err, &tokenErr) || tokenErr.Code != "transport" || strings.Contains(err.Error(), "query-secret") || strings.Contains(err.Error(), "owner@example.test") {
+		t.Fatalf("unsafe transport error: %v", err)
+	}
+}
+
+func TestTokenErrorFinalMessageIsSanitizedAndBounded(t *testing.T) {
+	secret := "llmgw_" + strings.Repeat("e", 32)
+	err := &TokenError{
+		StatusCode:  http.StatusBadGateway,
+		Code:        strings.Repeat("c", maxAuthDiagnosticChars-len(secret)) + secret,
+		Description: strings.Repeat("d", maxAuthDiagnosticChars-len("owner@example.test")) + "owner@example.test",
+	}
+	message := err.Error()
+	if len([]rune(message)) > maxAuthDiagnosticChars || strings.Contains(message, secret) || strings.Contains(message, "owner@example.test") {
+		t.Fatalf("unsafe or unbounded final error: %q", message)
 	}
 }
 

@@ -1,6 +1,7 @@
 package api
 
 import (
+	"errors"
 	"net/http"
 	"sort"
 	"strconv"
@@ -148,6 +149,44 @@ func handleUserCreateKey(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 200, map[string]any{"token": issued.Token, "key": issued.APIKey})
 }
 
+func handleUserRevealKey(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Cache-Control", "no-store")
+	w.Header().Set("Pragma", "no-cache")
+	principal, ok := requireSSOUser(w, r)
+	if !ok {
+		return
+	}
+	keyID := strings.TrimSpace(r.PathValue("id"))
+	key, found, err := iam.APIKeyByID(keyID)
+	if err != nil {
+		writeError(w, 500, "Identity store unavailable.")
+		return
+	}
+	if !found || key.PrincipalID != principal.ID {
+		writeError(w, 404, "unknown key")
+		return
+	}
+	token, found, err := iam.RevealAPIKey(keyID)
+	if !found {
+		writeError(w, 404, "unknown key")
+		return
+	}
+	if errors.Is(err, iam.ErrAPIKeyNotRevealable) {
+		writeError(w, 409, "This key predates encrypted key recovery and cannot be revealed.")
+		return
+	}
+	if err != nil {
+		writeError(w, 500, "Encrypted key store unavailable.")
+		return
+	}
+	_ = iam.RecordAudit(iam.AuditEvent{
+		ActorPrincipalID: principal.ID, Action: "api_key.reveal",
+		TargetType: "api_key", TargetID: key.ID, Result: "success",
+		Detail: map[string]any{"source": "self-service"},
+	})
+	writeJSON(w, 200, map[string]any{"token": token})
+}
+
 func handleUserRevokeKey(w http.ResponseWriter, r *http.Request) {
 	principal, ok := requireSSOUser(w, r)
 	if !ok {
@@ -278,7 +317,7 @@ func handleUserCopilotLoginStart(w http.ResponseWriter, r *http.Request) {
 	}
 	dc, err := copilotauth.StartDeviceFlow()
 	if err != nil {
-		writeError(w, 502, truncate200(err.Error()))
+		writeError(w, 502, oauthErrorText(err.Error()))
 		return
 	}
 	writeJSON(w, 200, map[string]any{
@@ -306,7 +345,7 @@ func handleUserCopilotLoginPoll(w http.ResponseWriter, r *http.Request) {
 			PrincipalID: principal.ID, ProviderID: "copilot", Kind: "github_oauth",
 			Source: iam.ConnectionSourceUser, MakeDefault: true, AccessToken: result.AccessToken,
 		}); err != nil {
-			writeError(w, 500, err.Error())
+			writeError(w, 500, oauthErrorText(err.Error()))
 			return
 		}
 		providers.ForgetProviderForPrincipal("copilot", principal.ID)
@@ -317,10 +356,7 @@ func handleUserCopilotLoginPoll(w http.ResponseWriter, r *http.Request) {
 			Detail: map[string]any{"provider": "copilot", "source": "self-service"},
 		})
 	}
-	response := map[string]any{"status": result.Status}
-	if result.Error != "" {
-		response["error"] = result.Error
-	}
+	response := safeOAuthPollResponse(result.Status, result.Error)
 	writeJSON(w, 200, response)
 }
 
@@ -330,7 +366,7 @@ func handleUserCopilotRevoke(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := iam.RevokeProviderCredential(principal.ID, "copilot"); err != nil {
-		writeError(w, 404, err.Error())
+		writeError(w, 404, oauthErrorText(err.Error()))
 		return
 	}
 	providers.ForgetProviderForPrincipal("copilot", principal.ID)

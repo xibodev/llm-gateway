@@ -1,60 +1,39 @@
 package providers
 
 import (
-	"bufio"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"strings"
 	"time"
 )
 
-// httpStreamIter reads an SSE response line-by-line, stripping "data:" prefixes
-// and skipping blanks / [DONE]. Mid-stream transport errors surface via Err.
+// httpStreamIter returns complete SSE data payloads and surfaces parser or
+// mid-stream transport errors via Err.
 type httpStreamIter struct {
 	resp   *http.Response
-	reader *bufio.Reader
+	reader *sseRecordReader
 	err    error
 	prefix string // error message prefix for this provider
 }
 
 func newHTTPStreamIter(resp *http.Response, prefix string) *httpStreamIter {
-	return &httpStreamIter{resp: resp, reader: bufio.NewReader(resp.Body), prefix: prefix}
+	return &httpStreamIter{resp: resp, reader: newSSERecordReader(resp.Body), prefix: prefix}
 }
 
 func (it *httpStreamIter) Next() (string, bool) {
-	for {
-		line, err := it.reader.ReadString('\n')
-		if len(line) > 0 {
-			text := strings.TrimRight(line, "\r\n")
-			if text == "" {
-				if err != nil {
-					it.finish(err)
-					return "", false
-				}
-				continue
-			}
-			if strings.HasPrefix(text, "data:") {
-				text = strings.TrimSpace(text[len("data:"):])
-			}
-			if text == "" || text == "[DONE]" {
-				if err != nil {
-					it.finish(err)
-					return "", false
-				}
-				continue
-			}
-			return text, true
-		}
-		if err != nil {
-			it.finish(err)
-			return "", false
-		}
+	payload, ok := it.reader.Next()
+	if !ok {
+		it.finish(it.reader.Err())
 	}
+	return payload, ok
 }
 
 func (it *httpStreamIter) finish(err error) {
-	if err != nil && err != io.EOF {
+	if _, ok := err.(*StreamRecordTooLargeError); ok {
+		it.err = err
+	} else if err != nil && err != io.EOF {
 		it.err = &InvocationError{Msg: it.prefix + ": streaming transport error: " + err.Error()}
 	}
 }
@@ -95,9 +74,6 @@ func extractError(body []byte) string {
 		if s, ok := obj["error"].(string); ok {
 			return s
 		}
-		if len(body) > 512 {
-			return string(body[:512])
-		}
 		return string(body)
 	}
 	t := strings.TrimSpace(string(body))
@@ -105,4 +81,16 @@ func extractError(body []byte) string {
 		return "no body"
 	}
 	return t
+}
+
+// HTTPInvocationError converts a non-success HTTP response into the provider
+// error type used by the gateway while preserving its status for the client.
+func HTTPInvocationError(prefix string, status int, body []byte) error {
+	return invocationStatus(
+		SanitizeDiagnosticTextLimit(
+			fmt.Sprintf("%s: upstream returned %d: %s", prefix, status, extractError(body)),
+			diagnosticErrorLimit,
+		),
+		status,
+	)
 }

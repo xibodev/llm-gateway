@@ -1,15 +1,24 @@
 package providers
 
-import "regexp"
+import "llmgw/internal/diagnostics"
 
-// Redaction of secrets/PII that might appear in an upstream error body before we
-// surface it. Shared by every OpenAI-standard provider.
-var (
-	emailRE = regexp.MustCompile(`(?i)\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b`)
-	tokenRE = regexp.MustCompile(`\b(?:gh[oupsr]_[A-Za-z0-9_]{10,}|sk-[A-Za-z0-9_-]{10,}|[A-Fa-f0-9]{20,}|[A-Za-z0-9]{20,})\b`)
+const (
+	redactedDiagnostic   = "[redacted]"
+	diagnosticErrorLimit = 2048
 )
 
-func redact(text string) string {
-	text = emailRE.ReplaceAllString(text, "[redacted]")
-	return tokenRE.ReplaceAllString(text, "[redacted]")
+// SanitizeDiagnosticText removes credential-shaped and personally identifying
+// values from text that may be returned to a caller or written to diagnostics.
+// Applying it repeatedly produces the same result.
+func SanitizeDiagnosticText(text string) string {
+	return diagnostics.SanitizeText(text)
 }
+
+// SanitizeDiagnosticTextLimit sanitizes text before limiting it to maxChars.
+// Sanitizing first prevents a truncated credential prefix from evading the
+// complete credential patterns above.
+func SanitizeDiagnosticTextLimit(text string, maxChars int) string {
+	return diagnostics.SanitizeTextLimit(text, maxChars)
+}
+
+func redact(text string) string { return SanitizeDiagnosticText(text) }

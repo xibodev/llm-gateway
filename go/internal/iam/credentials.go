@@ -336,7 +336,7 @@ FROM provider_credentials WHERE principal_id=? AND provider_id=?`,
 func credentialKey() ([]byte, error) {
 	raw := strings.TrimSpace(config.Get().CredentialEncryptionKey)
 	if raw == "" {
-		return nil, fmt.Errorf("LLMGW_CREDENTIAL_ENCRYPTION_KEY is required for BYOC credentials")
+		return nil, fmt.Errorf("LLMGW_CREDENTIAL_ENCRYPTION_KEY is required for encrypted credentials")
 	}
 	decoders := []func(string) ([]byte, error){
 		base64.RawURLEncoding.DecodeString,

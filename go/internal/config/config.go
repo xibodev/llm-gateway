@@ -18,7 +18,7 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-const Version = "0.1.0"
+const Version = "0.2.0"
 
 // ProviderConfig is one connected upstream.
 type ProviderConfig struct {
@@ -60,9 +60,8 @@ type EndpointConfig struct {
 	Failover []EndpointMember `yaml:"failover" json:"failover"`
 }
 
-// Deprecated: use EndpointConfig. Retained for one release so external
-// callers written against the pre-rename name keep compiling; the
-// client-facing routing target is called an endpoint now, not a category.
+// Deprecated: use EndpointConfig. Retained until client evidence and a
+// documented release boundary make removal safe.
 type CategoryConfig = EndpointConfig
 
 // Deprecated: use EndpointMember. See CategoryConfig.
@@ -177,7 +176,7 @@ func Defaults() *Settings {
 			},
 			Overrides: map[string]ProviderPolicy{},
 		},
-		Savings:                        SavingsConfig{Enabled: true, PriceCatalog: map[string]map[string]float64{}},
+		Savings:                        SavingsConfig{Enabled: false, PriceCatalog: map[string]map[string]float64{}},
 		OpenAICompatibleBaseURL:        "https://api.openai.com/v1",
 		OpenAICompatibleTimeoutSeconds: 300.0,
 		OllamaBaseURL:                  "http://127.0.0.1:11434",

@@ -5,6 +5,8 @@ package api
 import (
 	"encoding/json"
 	"net/http"
+
+	"llmgw/internal/providers"
 )
 
 // errorPayload matches the Python error envelope shape.
@@ -32,7 +34,11 @@ func writeJSON(w http.ResponseWriter, status int, v any) {
 
 // writeError writes the standard error envelope.
 func writeError(w http.ResponseWriter, status int, message string) {
-	writeJSON(w, status, errorPayload(message, httpExceptionType(status), itoa(status)))
+	writeJSON(w, status, errorPayload(
+		providers.SanitizeDiagnosticTextLimit(message, 2048),
+		httpExceptionType(status),
+		itoa(status),
+	))
 }
 
 func itoa(n int) string {

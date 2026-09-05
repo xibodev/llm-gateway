@@ -8,13 +8,21 @@
 package providers
 
 import (
+	"context"
+	"encoding/json"
 	"errors"
 	"strings"
+	"time"
 
 	"llmgw/internal/iam"
 )
 
-var ErrResponsesUnsupported = errors.New("provider model does not support native Responses API")
+var (
+	ErrResponsesUnsupported           = errors.New("provider model does not support native Responses API")
+	ErrAnthropicMessagesUnsupported   = errors.New("provider does not support native Anthropic Messages API")
+	ErrAnthropicTokenCountUnsupported = errors.New("provider does not support native Anthropic token counting")
+	ErrInvalidAnthropicTokenCount     = errors.New("invalid Anthropic token-count response")
+)
 
 // Message and Kwargs mirror the dynamic dicts the Python pipeline passes around.
 type Message = map[string]any
@@ -33,8 +41,8 @@ type ModelInfo struct {
 	// changed with the field: a pre-rename file therefore unmarshals into a
 	// nil list here. That is handled by catalogEntry.SchemaVersion, which
 	// discards unstamped entries instead of serving surface-less rows — the
-	// persisted format gets a hard cut-over, not the one-release dual-key
-	// window the public /v1/models response gets (see api/models.go).
+	// persisted format gets a hard cut-over, unlike the public /v1/models
+	// compatibility alias (see api/models.go).
 	SupportedSurfaces []string `json:"supported_surfaces,omitempty"`
 }
 
@@ -58,12 +66,51 @@ type Provider interface {
 	IsStub() bool
 }
 
+// ContextProvider is the optional non-streaming context-aware provider surface.
+// Provider remains unchanged while implementations migrate incrementally.
+type ContextProvider interface {
+	CompleteContext(context.Context, string, []Message, Kwargs) (map[string]any, error)
+}
+
+type ContextStreamProvider interface {
+	StreamContext(context.Context, string, []Message, Kwargs) (StreamIter, error)
+}
+
+func CompleteProviderContext(ctx context.Context, provider Provider, model string, messages []Message, kw Kwargs) (map[string]any, error) {
+	if contextual, ok := provider.(ContextProvider); ok {
+		return contextual.CompleteContext(ctx, model, messages, kw)
+	}
+	return provider.Complete(model, messages, kw)
+}
+
+func StreamProviderContext(ctx context.Context, provider Provider, model string, messages []Message, kw Kwargs) (StreamIter, error) {
+	if contextual, ok := provider.(ContextStreamProvider); ok {
+		return contextual.StreamContext(ctx, model, messages, kw)
+	}
+	return provider.Stream(model, messages, kw)
+}
+
 type detailedCompleter interface {
 	CompleteWithObservation(
 		model string,
 		messages []Message,
 		kw Kwargs,
 	) (map[string]any, *iam.ProviderAccountObservation, error)
+}
+
+type detailedContextCompleter interface {
+	CompleteContextWithObservation(context.Context, string, []Message, Kwargs) (map[string]any, *iam.ProviderAccountObservation, error)
+}
+
+func CompleteProviderContextWithObservation(ctx context.Context, provider Provider, model string, messages []Message, kw Kwargs) (map[string]any, *iam.ProviderAccountObservation, error) {
+	if detailed, ok := provider.(detailedContextCompleter); ok {
+		return detailed.CompleteContextWithObservation(ctx, model, messages, kw)
+	}
+	if contextual, ok := provider.(ContextProvider); ok {
+		response, err := contextual.CompleteContext(ctx, model, messages, kw)
+		return response, nil, err
+	}
+	return CompleteProviderWithObservation(provider, model, messages, kw)
 }
 
 func CompleteProviderWithObservation(
@@ -90,6 +137,132 @@ type ResponsesProvider interface {
 	) (StreamIter, *iam.ProviderAccountObservation, error)
 }
 
+type ContextResponsesProvider interface {
+	CompleteResponsesContext(context.Context, string, map[string]any) (map[string]any, *iam.ProviderAccountObservation, error)
+}
+
+type ContextResponsesStreamProvider interface {
+	StreamResponsesContext(context.Context, string, map[string]any) (StreamIter, *iam.ProviderAccountObservation, error)
+}
+
+// AnthropicMessagesProvider is an optional non-streaming native Messages
+// surface. Provider remains OpenAI-shaped for all existing callers.
+type AnthropicMessagesProvider interface {
+	CompleteAnthropicMessages(model string, payload map[string]any) (map[string]any, error)
+}
+
+func CompleteAnthropicMessages(provider Provider, model string, payload map[string]any) (map[string]any, error) {
+	if messages, ok := provider.(AnthropicMessagesProvider); ok {
+		return messages.CompleteAnthropicMessages(model, payload)
+	}
+	return nil, ErrAnthropicMessagesUnsupported
+}
+
+func SupportsAnthropicMessages(provider Provider) bool {
+	for provider != nil {
+		if _, ok := provider.(AnthropicMessagesProvider); ok {
+			if unwrapper, wrapped := provider.(interface{ Unwrap() Provider }); wrapped {
+				provider = unwrapper.Unwrap()
+				continue
+			}
+			return true
+		}
+		return false
+	}
+	return false
+}
+
+// AnthropicMessagesRetryable selects the failures safe to repeat: transport
+// errors (status 0), 408, 429, and transient 500/502/503/504 responses.
+func AnthropicMessagesRetryable(err error) bool {
+	if !IsInvocation(err) {
+		return false
+	}
+	switch UpstreamStatus(err) {
+	case 0, 408, 429, 500, 502, 503, 504:
+		return true
+	default:
+		return false
+	}
+}
+
+// AnthropicTokenCounter is an optional native Anthropic count_tokens surface.
+type AnthropicTokenCounter interface {
+	CountAnthropicTokens(model string, payload map[string]any, version string, beta []string) (json.Number, error)
+}
+
+func CountAnthropicTokens(provider Provider, model string, payload map[string]any, version string, beta []string) (json.Number, error) {
+	if counter, ok := provider.(AnthropicTokenCounter); ok {
+		return counter.CountAnthropicTokens(model, payload, version, beta)
+	}
+	return "", ErrAnthropicTokenCountUnsupported
+}
+
+func SupportsAnthropicTokenCount(provider Provider) bool {
+	for provider != nil {
+		if _, ok := provider.(AnthropicTokenCounter); ok {
+			if unwrapper, wrapped := provider.(interface{ Unwrap() Provider }); wrapped {
+				provider = unwrapper.Unwrap()
+				continue
+			}
+			return true
+		}
+		unwrapper, ok := provider.(interface{ Unwrap() Provider })
+		if !ok {
+			return false
+		}
+		provider = unwrapper.Unwrap()
+	}
+	return false
+}
+
+func (r *ResilientProvider) CountAnthropicTokens(model string, payload map[string]any, version string, beta []string) (json.Number, error) {
+	if !SupportsAnthropicTokenCount(r.inner) {
+		return "", ErrAnthropicTokenCountUnsupported
+	}
+	if err := r.checkCircuit(); err != nil {
+		return "", err
+	}
+	for attempt, attempts := 1, max1(r.policy.RetryMaxAttempts); ; attempt++ {
+		result, err := CountAnthropicTokens(r.inner, model, payload, version, beta)
+		if err == nil {
+			r.recordSuccess()
+			return result, nil
+		}
+		if !AnthropicMessagesRetryable(err) || attempt >= attempts {
+			if AnthropicMessagesRetryable(err) {
+				r.recordFailure()
+			}
+			return "", err
+		}
+		time.Sleep(time.Duration(r.nextBackoff(attempt) * float64(time.Second)))
+	}
+}
+
+func (r *ResilientProvider) CompleteAnthropicMessages(model string, payload map[string]any) (map[string]any, error) {
+	if !SupportsAnthropicMessages(r.inner) {
+		return nil, ErrAnthropicMessagesUnsupported
+	}
+	if err := r.checkCircuit(); err != nil {
+		return nil, err
+	}
+	for attempt, attempts := 1, max1(r.policy.RetryMaxAttempts); ; attempt++ {
+		result, err := CompleteAnthropicMessages(r.inner, model, payload)
+		if err == nil {
+			r.recordSuccess()
+			return result, nil
+		}
+		if errors.Is(err, ErrAnthropicMessagesUnsupported) || !AnthropicMessagesRetryable(err) {
+			return nil, err
+		}
+		if attempt >= attempts {
+			r.recordFailure()
+			return nil, err
+		}
+		time.Sleep(time.Duration(r.nextBackoff(attempt) * float64(time.Second)))
+	}
+}
+
 func CompleteResponses(
 	provider Provider,
 	model string,
@@ -101,6 +274,13 @@ func CompleteResponses(
 	return nil, nil, ErrResponsesUnsupported
 }
 
+func CompleteResponsesContext(ctx context.Context, provider Provider, model string, payload map[string]any) (map[string]any, *iam.ProviderAccountObservation, error) {
+	if responses, ok := provider.(ContextResponsesProvider); ok {
+		return responses.CompleteResponsesContext(ctx, model, payload)
+	}
+	return CompleteResponses(provider, model, payload)
+}
+
 func StreamResponses(
 	provider Provider,
 	model string,
@@ -110,6 +290,18 @@ func StreamResponses(
 		return responses.StreamResponses(model, payload)
 	}
 	return nil, nil, ErrResponsesUnsupported
+}
+
+func StreamResponsesContext(
+	ctx context.Context,
+	provider Provider,
+	model string,
+	payload map[string]any,
+) (StreamIter, *iam.ProviderAccountObservation, error) {
+	if responses, ok := provider.(ContextResponsesStreamProvider); ok {
+		return responses.StreamResponsesContext(ctx, model, payload)
+	}
+	return StreamResponses(provider, model, payload)
 }
 
 func ResponsesPayloadIsStateful(payload map[string]any) bool {
@@ -184,7 +376,9 @@ type CatalogError struct {
 	Status int
 }
 
-func (e *CatalogError) Error() string { return e.Detail }
+func (e *CatalogError) Error() string {
+	return SanitizeDiagnosticTextLimit(e.Detail, diagnosticErrorLimit)
+}
 
 func catalogError(code, detail string, status int) error {
 	return &CatalogError{Code: code, Detail: detail, Status: status}
@@ -195,7 +389,7 @@ func catalogError(code, detail string, status int) error {
 func CatalogFailure(err error) (code, detail string, status int) {
 	var catalogErr *CatalogError
 	if asError(err, &catalogErr) {
-		return catalogErr.Code, catalogErr.Detail, catalogErr.Status
+		return catalogErr.Code, catalogErr.Error(), catalogErr.Status
 	}
 	if err == nil {
 		return "", "", 0
@@ -243,13 +437,17 @@ type InvocationError struct {
 	Status int
 }
 
-func (e *InvocationError) Error() string { return e.Msg }
+func (e *InvocationError) Error() string {
+	return SanitizeDiagnosticTextLimit(e.Msg, diagnosticErrorLimit)
+}
 
 // ConfigError is a provider configuration problem (surfaced as 500, no failover
 // retry semantics beyond the chain).
 type ConfigError struct{ Msg string }
 
-func (e *ConfigError) Error() string { return e.Msg }
+func (e *ConfigError) Error() string {
+	return SanitizeDiagnosticTextLimit(e.Msg, diagnosticErrorLimit)
+}
 
 func invocation(format string) error { return &InvocationError{Msg: format} }
 

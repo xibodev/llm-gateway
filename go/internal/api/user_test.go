@@ -2,6 +2,7 @@ package api
 
 import (
 	"bytes"
+	"encoding/base64"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -33,6 +34,7 @@ func TestSSOUserSelfServiceKeyLifecycle(t *testing.T) {
 		s.APIKey = "admin-secret"
 		s.Providers = map[string]*config.ProviderConfig{}
 		s.Endpoints = map[string]*config.EndpointConfig{}
+		s.CredentialEncryptionKey = base64.RawURLEncoding.EncodeToString(make([]byte, 32))
 	})
 	principal, _ := iam.EnsurePrincipalBySubject(
 		"human", "authentik:user-self", "self@example.com", "Self User",
@@ -85,6 +87,10 @@ func TestSSOUserSelfServiceKeyLifecycle(t *testing.T) {
 		t.Fatalf("issue: %d %+v", status, issued)
 	}
 	key := issued["key"].(map[string]any)
+	status, revealed := request("POST", "/user/api/keys/"+key["id"].(string)+"/reveal", nil)
+	if status != http.StatusOK || revealed["token"] != issued["token"] {
+		t.Fatalf("reveal: %d token_matches=%v", status, revealed["token"] == issued["token"])
+	}
 	status, me = request("GET", "/user/api/me", nil)
 	if status != http.StatusOK || len(me["keys"].([]any)) != 1 {
 		t.Fatalf("me after issue: %d %+v", status, me)
@@ -94,6 +100,38 @@ func TestSSOUserSelfServiceKeyLifecycle(t *testing.T) {
 	)
 	if status != http.StatusOK || revoked["ok"] != true {
 		t.Fatalf("revoke: %d %+v", status, revoked)
+	}
+}
+
+func TestSSOUserCannotRevealAnotherPrincipalsKey(t *testing.T) {
+	t.Setenv("LLMGW_STATE_DIR", t.TempDir())
+	iam.ResetForTests()
+	t.Cleanup(iam.ResetForTests)
+	_, _ = iam.Initialize()
+	config.Update(func(s *config.Settings) {
+		s.SSOEnabled = true
+		s.SSOSharedSecret = "proxy-secret"
+		s.SSOAutoProvision = true
+		s.CredentialEncryptionKey = base64.RawURLEncoding.EncodeToString(make([]byte, 32))
+	})
+	owner, _ := iam.EnsurePrincipalBySubject("human", "authentik:key-owner", "", "Key Owner")
+	project, _ := iam.CreateProject("private-key", "Private Key")
+	_ = iam.SetMembership(project.ID, owner.ID, "owner")
+	issued, _ := iam.IssueKey(iam.KeyCreate{ProjectID: project.ID, PrincipalID: owner.ID, Name: "private"})
+	server := httptest.NewServer(NewServer())
+	defer server.Close()
+	origin, _ := url.Parse(server.URL)
+	req, _ := http.NewRequest(http.MethodPost, server.URL+"/user/api/keys/"+issued.ID+"/reveal", nil)
+	req.Header.Set("Origin", origin.Scheme+"://"+origin.Host)
+	req.Header.Set(ssoSecretHeader, "proxy-secret")
+	req.Header.Set(ssoSubjectHeader, "other-user")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusNotFound {
+		t.Fatalf("cross-principal reveal status=%d, want 404", resp.StatusCode)
 	}
 }
 

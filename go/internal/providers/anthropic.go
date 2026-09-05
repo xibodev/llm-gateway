@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strings"
 
 	"llmgw/internal/translate"
 )
@@ -82,6 +83,9 @@ func (p AnthropicNativeProvider) payload(model string, messages []Message, strea
 			payload["tools"] = t
 		}
 	}
+	if metadata, ok := kw["metadata"].(map[string]any); ok {
+		payload["metadata"] = metadata
+	}
 	if thinking, ok := kw["thinking"].(map[string]any); ok && len(thinking) > 0 {
 		payload["thinking"] = thinking
 	}
@@ -102,13 +106,124 @@ func (p AnthropicNativeProvider) Complete(model string, messages []Message, kw K
 	defer resp.Body.Close()
 	raw, _ := io.ReadAll(resp.Body)
 	if resp.StatusCode >= 400 {
-		return nil, invocation(fmt.Sprintf("anthropic: upstream returned %d: %s", resp.StatusCode, extractError(raw)))
+		return nil, invocationStatus(
+			fmt.Sprintf("anthropic: upstream returned %d: %s", resp.StatusCode, extractError(raw)),
+			resp.StatusCode,
+		)
 	}
 	var anthropicResp map[string]any
 	if json.Unmarshal(raw, &anthropicResp) != nil {
 		return nil, invocation("anthropic: invalid JSON in upstream response")
 	}
 	return translate.AnthropicResponseToOpenAI(anthropicResp, model), nil
+}
+
+func (p AnthropicNativeProvider) CompleteAnthropicMessages(model string, payload map[string]any) (map[string]any, error) {
+	request := make(map[string]any, len(payload))
+	for key, value := range payload {
+		request[key] = value
+	}
+	request["model"] = model
+	request["stream"] = false
+	preamble, _ := request["_llmgw_preamble"].(string)
+	delete(request, "_llmgw_preamble")
+	if preamble != "" {
+		switch system := request["system"].(type) {
+		case string:
+			request["system"] = preamble + "\n\n" + system
+		case []any:
+			request["system"] = append([]any{map[string]any{"type": "text", "text": preamble}}, system...)
+		default:
+			request["system"] = preamble
+		}
+	}
+	body, err := json.Marshal(request)
+	if err != nil {
+		return nil, &ConfigError{Msg: "anthropic: invalid Messages request"}
+	}
+	req, _ := http.NewRequest("POST", p.base()+"/v1/messages", bytes.NewReader(body))
+	req.Header = p.headers()
+	resp, err := httpClient(p.timeout()).Do(req)
+	if err != nil {
+		return nil, invocation("anthropic: upstream transport error: " + err.Error())
+	}
+	defer resp.Body.Close()
+	raw, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode >= 400 {
+		return nil, invocationStatus(fmt.Sprintf("anthropic: upstream returned %d: %s", resp.StatusCode, extractError(raw)), resp.StatusCode)
+	}
+	var result map[string]any
+	decoder := json.NewDecoder(bytes.NewReader(raw))
+	decoder.UseNumber()
+	if decoder.Decode(&result) != nil {
+		return nil, invocation("anthropic: invalid JSON in upstream response")
+	}
+	return result, nil
+}
+
+func (p AnthropicNativeProvider) CountAnthropicTokens(model string, payload map[string]any, version string, beta []string) (json.Number, error) {
+	request := make(map[string]any, len(payload))
+	for key, value := range payload {
+		request[key] = value
+	}
+	request["model"] = model
+	body, err := json.Marshal(request)
+	if err != nil {
+		return "", &ConfigError{Msg: "anthropic: invalid token-count request"}
+	}
+	req, _ := http.NewRequest("POST", p.base()+"/v1/messages/count_tokens", bytes.NewReader(body))
+	req.Header = p.headers()
+	if validAnthropicHeader(version) {
+		req.Header.Set("anthropic-version", strings.TrimSpace(version))
+	}
+	for _, value := range beta {
+		if validAnthropicHeader(value) {
+			req.Header.Add("anthropic-beta", strings.TrimSpace(value))
+		}
+	}
+	resp, err := httpClient(p.timeout()).Do(req)
+	if err != nil {
+		return "", invocation("anthropic: token-count transport error: " + err.Error())
+	}
+	defer resp.Body.Close()
+	raw, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode >= 400 {
+		return "", invocationStatus(fmt.Sprintf("anthropic: token count returned %d: %s", resp.StatusCode, extractError(raw)), resp.StatusCode)
+	}
+	var result struct {
+		InputTokens json.Number `json:"input_tokens"`
+	}
+	decoder := json.NewDecoder(bytes.NewReader(raw))
+	decoder.UseNumber()
+	if decoder.Decode(&result) != nil || !nonnegativeInteger(result.InputTokens.String()) {
+		return "", ErrInvalidAnthropicTokenCount
+	}
+	return result.InputTokens, nil
+}
+
+func validAnthropicHeader(value string) bool {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return false
+	}
+	for _, r := range value {
+		if r < 0x20 || r == 0x7f {
+			return false
+		}
+	}
+	return true
+}
+
+func nonnegativeInteger(value string) bool {
+	if value == "" {
+		return false
+	}
+	for _, r := range value {
+		if r < '0' || r > '9' {
+			return false
+		}
+	}
+	return true
 }
 
 func (p AnthropicNativeProvider) Stream(model string, messages []Message, kw Kwargs) (StreamIter, error) {
@@ -122,7 +237,10 @@ func (p AnthropicNativeProvider) Stream(model string, messages []Message, kw Kwa
 	if resp.StatusCode >= 400 {
 		raw, _ := io.ReadAll(resp.Body)
 		resp.Body.Close()
-		return nil, invocation(fmt.Sprintf("anthropic: upstream returned %d: %s", resp.StatusCode, extractError(raw)))
+		return nil, invocationStatus(
+			fmt.Sprintf("anthropic: upstream returned %d: %s", resp.StatusCode, extractError(raw)),
+			resp.StatusCode,
+		)
 	}
 	// Translate Anthropic SSE -> OpenAI chunks eagerly into a buffered iterator.
 	return newAnthropicStreamIter(resp, model), nil
@@ -169,7 +287,10 @@ func (p AnthropicNativeProvider) ListModels() []ModelInfo {
 			continue
 		}
 		label, _ := m["display_name"].(string)
-		out = append(out, ModelInfo{ID: id, Vendor: "anthropic", Label: label})
+		out = append(out, ModelInfo{
+			ID: id, Vendor: "anthropic", Label: label,
+			SupportedSurfaces: []string{"/v1/messages"},
+		})
 	}
 	return out
 }
@@ -180,6 +301,7 @@ type anthropicStreamIter struct {
 	resp *http.Response
 	ch   chan string
 	done bool
+	err  error
 }
 
 func newAnthropicStreamIter(resp *http.Response, model string) *anthropicStreamIter {
@@ -187,10 +309,17 @@ func newAnthropicStreamIter(resp *http.Response, model string) *anthropicStreamI
 	go func() {
 		defer close(it.ch)
 		defer resp.Body.Close()
-		reader := newLineReader(resp.Body)
-		translate.AnthropicSSEToOpenAIChunks(reader, model, func(chunk string) {
+		reader := newSSERecordReader(resp.Body)
+		translate.AnthropicSSEToOpenAIChunks(func() (string, bool) {
+			payload, ok := reader.Next()
+			if !ok {
+				return "", false
+			}
+			return "data: " + payload, true
+		}, model, func(chunk string) {
 			it.ch <- chunk
 		})
+		it.err = reader.Err()
 	}()
 	return it
 }
@@ -199,5 +328,5 @@ func (it *anthropicStreamIter) Next() (string, bool) {
 	c, ok := <-it.ch
 	return c, ok
 }
-func (it *anthropicStreamIter) Err() error   { return nil }
+func (it *anthropicStreamIter) Err() error   { return it.err }
 func (it *anthropicStreamIter) Close() error { return nil }

@@ -103,6 +103,47 @@ func TestV043TextOnlyMultipartCollapsesToString(t *testing.T) {
 	}
 }
 
+func TestResponsesFallbackAcceptsCodingClientHints(t *testing.T) {
+	_, kw, err := ResponsesRequestToChat(map[string]any{
+		"input":               "hello",
+		"client_metadata":     map[string]any{"client": "fixture"},
+		"include":             []any{},
+		"parallel_tool_calls": false,
+		"prompt_cache_key":    "fixture-cache-key",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if value, ok := kw["parallel_tool_calls"].(bool); !ok || value {
+		t.Fatalf("parallel_tool_calls=%#v", kw["parallel_tool_calls"])
+	}
+	if _, ok := kw["client_metadata"]; ok {
+		t.Fatalf("client_metadata leaked into Chat kwargs: %+v", kw)
+	}
+	if _, ok := kw["include"]; ok {
+		t.Fatalf("include leaked into Chat kwargs: %+v", kw)
+	}
+	if _, ok := kw["prompt_cache_key"]; ok {
+		t.Fatalf("prompt_cache_key leaked into Chat kwargs: %+v", kw)
+	}
+}
+
+func TestResponsesFallbackRejectsInvalidParallelToolCalls(t *testing.T) {
+	if _, _, err := ResponsesRequestToChat(map[string]any{
+		"input": "hello", "parallel_tool_calls": "false",
+	}); err == nil {
+		t.Fatal("non-boolean parallel_tool_calls unexpectedly converted")
+	}
+}
+
+func TestResponsesFallbackRejectsInvalidMetadata(t *testing.T) {
+	if _, _, err := ResponsesRequestToChat(map[string]any{
+		"input": "hello", "metadata": "fixture",
+	}); err == nil {
+		t.Fatal("non-object metadata unexpectedly converted")
+	}
+}
+
 func TestV043AnthropicPreservesDeveloperAsSystem(t *testing.T) {
 	system, messages := OpenAIMessagesToAnthropic([]map[string]any{
 		{"role": "developer", "content": "developer policy"},
@@ -118,9 +159,6 @@ func TestV043ResponsesFallbackRejectsLossyFeatures(t *testing.T) {
 	for name, payload := range map[string]map[string]any{
 		"structured output": {
 			"input": "hello", "text": map[string]any{"format": map[string]any{"type": "json_schema"}},
-		},
-		"reasoning summary": {
-			"input": "hello", "reasoning": map[string]any{"summary": "auto"},
 		},
 		"structured instructions": {
 			"input": "hello",
@@ -151,6 +189,12 @@ func TestV043ResponsesFallbackRejectsLossyFeatures(t *testing.T) {
 				"parameters":      map[string]any{"type": "object"},
 				"allowed_callers": []any{"code_interpreter"},
 			}},
+		},
+		"unsupported include": {
+			"input": "hello", "include": []any{"reasoning.encrypted_content"},
+		},
+		"unsupported reasoning summary": {
+			"input": "hello", "reasoning": map[string]any{"summary": "auto"},
 		},
 	} {
 		t.Run(name, func(t *testing.T) {

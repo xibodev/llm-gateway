@@ -146,7 +146,10 @@ func (p OllamaProvider) Complete(model string, messages []Message, kw Kwargs) (m
 	defer resp.Body.Close()
 	raw, _ := io.ReadAll(resp.Body)
 	if resp.StatusCode >= 400 {
-		return nil, invocation(fmt.Sprintf("ollama: request failed (%d): %s", resp.StatusCode, extractError(raw)))
+		return nil, invocationStatus(
+			fmt.Sprintf("ollama: request failed (%d): %s", resp.StatusCode, extractError(raw)),
+			resp.StatusCode,
+		)
 	}
 	var data map[string]any
 	if json.Unmarshal(raw, &data) != nil {
@@ -189,10 +192,15 @@ func (it *ollamaStreamIter) Next() (string, bool) {
 		return "", false
 	}
 	for {
-		line, err := it.reader.ReadString('\n')
-		if strings.TrimSpace(line) != "" {
+		line, err := readBoundedLine(it.reader, maxStreamRecordWireSize, "NDJSON")
+		if _, ok := err.(*StreamRecordTooLargeError); ok {
+			it.done = true
+			it.err = err
+			return "", false
+		}
+		if strings.TrimSpace(string(line)) != "" {
 			var event map[string]any
-			if json.Unmarshal([]byte(strings.TrimSpace(line)), &event) == nil {
+			if json.Unmarshal([]byte(strings.TrimSpace(string(line))), &event) == nil {
 				message, _ := event["message"].(map[string]any)
 				if message == nil {
 					message = map[string]any{}
@@ -262,7 +270,10 @@ func (p OllamaProvider) Stream(model string, messages []Message, kw Kwargs) (Str
 	if resp.StatusCode >= 400 {
 		raw, _ := io.ReadAll(resp.Body)
 		resp.Body.Close()
-		return nil, invocation(fmt.Sprintf("ollama: request failed (%d): %s", resp.StatusCode, extractError(raw)))
+		return nil, invocationStatus(
+			fmt.Sprintf("ollama: request failed (%d): %s", resp.StatusCode, extractError(raw)),
+			resp.StatusCode,
+		)
 	}
 	return &ollamaStreamIter{resp: resp, reader: bufio.NewReader(resp.Body), model: model}, nil
 }

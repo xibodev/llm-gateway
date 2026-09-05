@@ -154,6 +154,9 @@ func round6(f float64) float64 {
 
 // Totals is the headline usage rollup.
 func Totals(includeStubs bool) map[string]any {
+	if !config.Get().Savings.Enabled {
+		return zeroTotals()
+	}
 	db, err := savingsConn()
 	if err != nil {
 		return zeroTotals()
@@ -184,6 +187,9 @@ func zeroTotals() map[string]any {
 
 // ByProject returns per project+key rollups.
 func ByProject(includeStubs bool) []map[string]any {
+	if !config.Get().Savings.Enabled {
+		return []map[string]any{}
+	}
 	db, err := savingsConn()
 	if err != nil {
 		return []map[string]any{}
@@ -217,6 +223,9 @@ func ByProject(includeStubs bool) []map[string]any {
 
 // RecentUsage returns the most recent usage rows.
 func RecentUsage(limit int) []map[string]any {
+	if !config.Get().Savings.Enabled {
+		return []map[string]any{}
+	}
 	db, err := savingsConn()
 	if err != nil {
 		return []map[string]any{}

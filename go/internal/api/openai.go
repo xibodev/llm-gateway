@@ -1,9 +1,13 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
+	"io"
+	"math"
 	"net/http"
+	"strconv"
 	"time"
 
 	"llmgw/internal/config"
@@ -88,7 +92,7 @@ func handleChat(w http.ResponseWriter, r *http.Request) {
 		writeError(w, 422, "invalid request body")
 		return
 	}
-	chatDispatch(w, &req, principal, "openai.chat")
+	chatDispatch(w, r, &req, principal, "openai.chat")
 }
 
 func handleResponses(w http.ResponseWriter, r *http.Request) {
@@ -137,7 +141,7 @@ func responsesToChatRequest(rr *responsesRequest) *chatRequest {
 	}
 }
 
-func chatDispatch(w http.ResponseWriter, req *chatRequest, principal *config.Principal, endpoint string) {
+func chatDispatch(w http.ResponseWriter, r *http.Request, req *chatRequest, principal *config.Principal, endpoint string) {
 	started := time.Now()
 	resolution, err := router.ResolveForPrincipal(req.Model, principal)
 	if err != nil {
@@ -174,11 +178,11 @@ func chatDispatch(w http.ResponseWriter, req *chatRequest, principal *config.Pri
 	}
 
 	if req.Stream {
-		streamChatSSE(w, targets, msgs, req.Model, principal, kw, endpoint, started)
+		streamChatSSE(w, r.Context(), targets, msgs, req.Model, principal, kw, endpoint, started)
 		return
 	}
 
-	response, served, err := router.ExecuteComplete(targets, msgs, req.Model, principal, kw)
+	response, served, err := router.ExecuteCompleteContext(r.Context(), targets, msgs, req.Model, principal, kw)
 	if err != nil {
 		recordFailureUsage(
 			endpoint, req.Model, principal, upstreamErrorStatus(err), "upstream",
@@ -197,8 +201,25 @@ func chatDispatch(w http.ResponseWriter, req *chatRequest, principal *config.Pri
 		}
 	}
 	response["model"] = served.Model
+	normalizeChatResponseEnvelope(response)
 	recordFromResponse(endpoint, req.Model, served, principal, response, time.Since(started).Milliseconds())
 	writeJSON(w, 200, response)
+}
+
+func normalizeChatResponseEnvelope(response map[string]any) {
+	if object, ok := response["object"]; !ok || object == nil || object == "" {
+		response["object"] = "chat.completion"
+	}
+	choices, _ := response["choices"].([]any)
+	for index, raw := range choices {
+		choice, ok := raw.(map[string]any)
+		if !ok {
+			continue
+		}
+		if _, exists := choice["index"]; !exists {
+			choice["index"] = index
+		}
+	}
 }
 
 // writeUpstreamError surfaces the real upstream status + (redacted) detail when
@@ -207,7 +228,7 @@ func writeUpstreamError(w http.ResponseWriter, err error) {
 	status := upstreamErrorStatus(err)
 	var atf *router.AllTargetsFailed
 	if errors.As(err, &atf) && status >= 400 {
-		writeError(w, status, atf.Msg)
+		writeError(w, status, atf.Error())
 		return
 	}
 	if providers.IsConfig(err) {
@@ -225,12 +246,19 @@ func upstreamErrorStatus(err error) int {
 	if providers.IsConfig(err) {
 		return 500
 	}
+	if status := providers.UpstreamStatus(err); status >= 300 && status <= 599 {
+		return status
+	}
 	return 502
 }
 
-func streamChatSSE(w http.ResponseWriter, targets []router.Target, msgs []providers.Message, requested string, principal *config.Principal, kw providers.Kwargs, endpoint string, started time.Time) {
-	it, served, err := router.ExecuteStream(targets, msgs, requested, principal, kw)
+func streamChatSSE(w http.ResponseWriter, ctx context.Context, targets []router.Target, msgs []providers.Message, requested string, principal *config.Principal, kw providers.Kwargs, endpoint string, started time.Time) {
+	it, served, err := router.ExecuteStreamContext(ctx, targets, msgs, requested, principal, kw)
 	if err != nil {
+		if ctx.Err() != nil {
+			recordClientCancelled(endpoint, requested, principal, started)
+			return
+		}
 		// Pre-first-byte failure: no SSE headers sent yet, so surface a real
 		// HTTP error (with the upstream status) rather than a 200 error chunk.
 		recordFailureUsage(
@@ -240,8 +268,8 @@ func streamChatSSE(w http.ResponseWriter, targets []router.Target, msgs []provid
 		writeUpstreamError(w, err)
 		return
 	}
+	defer it.Close()
 
-	flusher, _ := w.(http.Flusher)
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("Cache-Control", "no-cache")
 	w.Header().Set("Connection", "keep-alive")
@@ -254,13 +282,33 @@ func streamChatSSE(w http.ResponseWriter, targets []router.Target, msgs []provid
 			break
 		}
 		accumulateStreamUsage(chunk, usageAcc)
-		writeSSE(w, flusher, chunk)
+		if ctx.Err() != nil {
+			recordClientCancelled(endpoint, requested, principal, started)
+			return
+		}
+		if err := writeChatSSE(w, chunk); err != nil {
+			recordClientCancelled(endpoint, requested, principal, started)
+			return
+		}
 	}
 	if it.Err() != nil {
-		writeSSE(w, flusher, jsonStr(providerErrorPayloadOpenAI()))
+		if ctx.Err() != nil {
+			recordClientCancelled(endpoint, requested, principal, started)
+			return
+		}
+		if err := writeSSE(w, jsonStr(providerErrorPayloadOpenAI())); err != nil {
+			recordClientCancelled(endpoint, requested, principal, started)
+			return
+		}
 	}
-	writeSSE(w, flusher, "[DONE]")
-	_ = it.Close()
+	if ctx.Err() != nil {
+		recordClientCancelled(endpoint, requested, principal, started)
+		return
+	}
+	if err := writeSSE(w, "[DONE]"); err != nil {
+		recordClientCancelled(endpoint, requested, principal, started)
+		return
+	}
 	router.RecordUsage(router.UsageRecord{
 		Endpoint: endpoint, RequestedModel: requested, RoutedModel: served.Model,
 		Provider: served.Provider, Project: principal.Project, Key: principal.Key,
@@ -270,11 +318,51 @@ func streamChatSSE(w http.ResponseWriter, targets []router.Target, msgs []provid
 	})
 }
 
-func writeSSE(w http.ResponseWriter, flusher http.Flusher, data string) {
-	_, _ = w.Write([]byte("data: " + data + "\n\n"))
-	if flusher != nil {
-		flusher.Flush()
+func writeAndFlush(w http.ResponseWriter, payload []byte) error {
+	for len(payload) > 0 {
+		n, err := w.Write(payload)
+		if n > len(payload) {
+			return io.ErrShortWrite
+		}
+		payload = payload[n:]
+		if err != nil {
+			return err
+		}
+		if n == 0 {
+			return io.ErrShortWrite
+		}
 	}
+	if err := http.NewResponseController(w).Flush(); err != nil && !errors.Is(err, http.ErrNotSupported) {
+		return err
+	}
+	return nil
+}
+
+func writeSSE(w http.ResponseWriter, data string) error {
+	return writeAndFlush(w, []byte("data: "+data+"\n\n"))
+}
+
+func writeChatSSE(w http.ResponseWriter, data string) error {
+	var chunk map[string]json.RawMessage
+	if err := json.Unmarshal([]byte(data), &chunk); err == nil && chunk != nil {
+		rawObject, exists := chunk["object"]
+		normalize := !exists
+		if exists {
+			var object *string
+			normalize = json.Unmarshal(rawObject, &object) == nil && (object == nil || *object == "")
+		}
+		if normalize {
+			chunk["object"] = json.RawMessage(`"chat.completion.chunk"`)
+			if normalized, err := json.Marshal(chunk); err == nil {
+				data = string(normalized)
+			}
+		}
+	}
+	return writeSSE(w, data)
+}
+
+func recordClientCancelled(endpoint, requested string, principal *config.Principal, started time.Time) {
+	recordFailureUsage(endpoint, requested, principal, 499, "client_cancelled", started)
 }
 
 func providerErrorPayloadOpenAI() map[string]any {
@@ -307,13 +395,38 @@ func accumulateStreamUsage(chunk string, acc map[string]int) {
 }
 
 func firstInt(m map[string]any, keys ...string) int {
+	limit := math.Ldexp(1, strconv.IntSize-1)
+	fromFloat := func(n float64) int {
+		if math.IsNaN(n) || math.IsInf(n, 0) || math.Trunc(n) != n || n < -limit || n >= limit {
+			return 0
+		}
+		return int(n)
+	}
 	for _, k := range keys {
 		if v, ok := m[k]; ok {
 			switch n := v.(type) {
 			case float64:
-				return int(n)
+				return fromFloat(n)
 			case int:
 				return n
+			case int64:
+				if strconv.IntSize == 32 && (n > math.MaxInt32 || n < math.MinInt32) {
+					return 0
+				}
+				return int(n)
+			case json.Number:
+				value, err := n.Int64()
+				if err == nil {
+					if strconv.IntSize == 32 && (value > math.MaxInt32 || value < math.MinInt32) {
+						return 0
+					}
+					return int(value)
+				}
+				valueFloat, err := strconv.ParseFloat(string(n), 64)
+				if err == nil {
+					return fromFloat(valueFloat)
+				}
+				return 0
 			}
 		}
 	}
