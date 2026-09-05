@@ -8,11 +8,12 @@ Ship a reliable single-node, self-hosted gateway for Claude Code, Codex, and
 Copilot CLI, while preserving the same HTTP behavior for browsers, SDKs, backend
 applications, and direct HTTP clients.
 
-The current release needs stable model selection, core Anthropic Messages and
-OpenAI Chat/Responses compatibility, simple ordered failover, safe credentials,
-correct cancellation, and a real-provider smoke test. It does not need
-hyperscale throughput, high availability, dynamic account scheduling, quota
-marketplaces, or a universal translation framework.
+The shipped compatibility baseline covers stable model selection, core Anthropic
+Messages and OpenAI Chat/Responses behavior, simple ordered failover, safe
+credentials, cancellation, and real-provider smoke tests. The current release
+adds single-node operability. It does not need hyperscale throughput, high
+availability, dynamic account scheduling, quota marketplaces, or a universal
+translation framework.
 
 ## Delivery policy
 
@@ -30,33 +31,14 @@ marketplaces, or a universal translation framework.
   require explicit operator participation. Never commit credentials or local
   identity data.
 
-## Completed on staging
-
-- Dependency and project-policy correctness fixes.
-- Provider, OAuth, audit, outbox, and proxy-error diagnostic redaction.
-- Edge TTS handshake status, retry, and cleanup fixes.
-- `gateway.db` remains authoritative; the legacy savings ledger is opt-in.
-- Gateway-side Claude, Codex, and Copilot wire-contract fixtures.
-- Deterministic, policy-aware Claude model discovery and selection.
-- Native non-streaming Anthropic Messages pass-through and strict adapted core
-  compatibility.
-- Native and estimated Claude token counting, including the bare count route.
-- Bounded SSE and NDJSON records.
-- Request cancellation already reaches OpenAI-compatible Chat/Responses,
-  Google Chat, and Claude requests adapted through those paths.
-
-These are implementation and fixture results. They do not claim an installed
-Claude CLI has selected a model successfully against Docker; that remains part
-of the release gate below.
-
 ## Current release
 
 | ID | State | Work and acceptance |
 | --- | --- | --- |
-| `CANCEL-001` | `partial` | Coding endpoints now stop OpenAI-compatible Chat/Responses and adapted Messages streams on request cancellation or downstream write/flush failure, close upstream work, suppress success terminals and retry/failover after abort, and record one `499/client_cancelled` row. Codex forwards the request context. Native Anthropic streaming, direct proxy endpoints, and the remaining provider breadth stay deferred; token-count cancellation remains non-billable and records no usage. |
-| `SMOKE-001` | `done` | The disposable Docker gateway is connected to a private real Copilot account with a synced catalog. Direct checks passed for models, Messages, token counting, Chat, Responses, and the client stream forms. Disposable gateway keys were revoked after every run. |
-| `CLI-UAT-001` | `partial` | Installed host clients pass against Docker with process-scoped credentials: Claude Code completes a minimal prompt and one Read-only flow on `claude-sonnet-5`; Codex completes a native Responses call on `copilot/gpt-5.6-sol`; Copilot CLI completes a BYOK Chat call on `copilot/claude-sonnet-5`. Each run revoked its disposable key and confirmed `401` afterward. The remaining operator checks are Claude's interactive `/model` picker and physical Ctrl+C cancellation. |
-| `RELEASE-001` | `queued` | When `CANCEL-001`, `SMOKE-001`, and `CLI-UAT-001` pass and GitHub CI is green, open one reviewed `staging -> main` PR. Do not add unrelated hardening to that promotion. |
+| `OPS-001` | `queued` | Add atomic, restorable single-node backups of configuration and SQLite state, with explicit inspect and restore commands and tests that prove a restored gateway retains IAM and routing state. |
+| `OPS-002` | `queued` | Add bounded retention for request logs, audit events, usage events, quota counters, outbox history, and obsolete backups without deleting active control-plane state. |
+| `OPS-003` | `queued` | Inject semantic version, commit, and build time into binaries and images; expose them through `llmgw version`, `/health`, and the admin state without relying on manually edited constants. |
+| `OPS-004` | `queued` | Consolidate tag validation, checksums, SBOM/provenance, binary artifacts, and multi-architecture image publication into one release workflow with a dry-run path. |
 
 ## Cancellation contract
 
@@ -115,14 +97,14 @@ test, inspection, and cleanup commands; they must not persist or print secrets.
 | Effort | Re-entry trigger |
 | --- | --- |
 | Throughput and high availability | A real deployment needs high traffic or multiple gateway nodes. Existing direct-handler benchmarks remain diagnostic only; strict minted-key SQLite throughput is not a release target. |
-| Broad provider-by-provider cancellation cleanup | A synchronous public endpoint fails the central `CANCEL-001` integration test or a real client leaves work running. Do not resume the preserved broad cancellation branch wholesale. |
+| Broad provider-by-provider cancellation cleanup | A synchronous public endpoint fails the central cancellation integration test or a real client leaves work running. Do not resume the preserved broad cancellation branch wholesale. |
+| Manual installed-client interaction checks | A client upgrade changes behavior or the next client-compatibility release is prepared. Recheck Claude's interactive `/model` picker and physical Ctrl+C alongside the Codex and Copilot smoke. |
 | Async video/background job cancellation | A supported provider exposes a stable cancellation API and users need it. |
 | Optional sanitized body logging | Metadata and request IDs prove insufficient for an operational incident. Raw body logging remains off by default. |
 | Full browser journey suite | Console regressions become a recurring support issue. |
 | Advanced key-policy editing | Operators routinely require policy fields not adequately managed today. |
 | Provider breadth, multi-account routing, provider quota, and alternate routing strategies | A concrete user requirement names the provider or routing behavior and a focused fixture can prove it. |
 | Formal management OpenAPI | A third-party management client requires a versioned contract. |
-| Backup, retention, version injection, and broader deployment automation | Schedule as a separate operability/release milestone after this client-compatibility release. |
 
 ## Removed from the product plan
 
