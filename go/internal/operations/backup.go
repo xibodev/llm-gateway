@@ -183,6 +183,9 @@ func PruneBackups(keep int) (int, error) {
 		valid = append(valid, candidate{path: path, created: created})
 	}
 	sort.Slice(valid, func(i, j int) bool { return valid[i].created.After(valid[j].created) })
+	if len(valid) <= keep {
+		return 0, nil
+	}
 	removed := 0
 	for _, candidate := range valid[keep:] {
 		if err := os.Remove(candidate.path); err != nil {

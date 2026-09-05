@@ -215,6 +215,9 @@ func TestPruneBackupsKeepsNewestVerifiedArchives(t *testing.T) {
 	if err := os.WriteFile(foreign, []byte("keep"), 0o600); err != nil {
 		t.Fatal(err)
 	}
+	if removed, err := PruneBackups(7); err != nil || removed != 0 {
+		t.Fatalf("under-limit prune removed=%d err=%v", removed, err)
+	}
 	if removed, err := PruneBackups(2); err != nil || removed != 1 {
 		t.Fatalf("removed=%d err=%v", removed, err)
 	}
