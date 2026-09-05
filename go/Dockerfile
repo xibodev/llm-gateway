@@ -1,7 +1,9 @@
-# syntax=docker/dockerfile:1
+# syntax=docker/dockerfile:1@sha256:ecfaec9ed6d810b56388c508f4121597bfbba70d41a6dfeee4d8cad5f295fc32
+ARG SOURCE_DATE_EPOCH=0
 #
 # Build the console before compiling Go so the final binary embeds only local assets.
-FROM --platform=$BUILDPLATFORM node:22-alpine AS console-builder
+FROM --platform=$BUILDPLATFORM node:22-alpine@sha256:c610fcdfb1d5b4740dd70c284ed3cb16bb857e0f7166196e36a5501df7a3aa32 AS console-builder
+ARG SOURCE_DATE_EPOCH
 WORKDIR /console
 COPY internal/web/console/package.json internal/web/console/package-lock.json ./
 RUN npm ci --ignore-scripts --no-audit --no-fund
@@ -18,6 +20,7 @@ ARG TARGETARCH
 ARG VERSION=0.0.0-dev
 ARG COMMIT=unknown
 ARG BUILD_TIME=unknown
+ARG SOURCE_DATE_EPOCH
 
 # Cache modules first.
 COPY go.mod go.sum ./
@@ -35,11 +38,12 @@ RUN CGO_ENABLED=0 GOOS=${TARGETOS:-linux} GOARCH=${TARGETARCH:-amd64} \
     && mkdir -p /out/state
 
 # ---- runtime -------------------------------------------------------------- #
-FROM gcr.io/distroless/static-debian12:nonroot
+FROM gcr.io/distroless/static-debian12:nonroot@sha256:afa5c872c891853ca7fcf1f12c3edb23f7eeef36189728842dd51042ff57f7ab
 
 ARG VERSION=0.0.0-dev
 ARG COMMIT=unknown
 ARG BUILD_TIME=unknown
+ARG SOURCE_DATE_EPOCH
 LABEL org.opencontainers.image.version=$VERSION \
       org.opencontainers.image.revision=$COMMIT \
       org.opencontainers.image.created=$BUILD_TIME
