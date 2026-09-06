@@ -2,8 +2,10 @@ package operations
 
 import (
 	"database/sql"
+	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"llmgw/internal/config"
@@ -149,6 +151,45 @@ func TestRecoverPreparedRestoreRemovesNewDestination(t *testing.T) {
 		t.Fatal(err)
 	}
 	assertAbsent(t, destination, staged, restoreJournalPath())
+}
+
+func TestRestoreJournalFailureRemovesStagedFiles(t *testing.T) {
+	state := t.TempDir()
+	configPath := filepath.Join(state, "config.yaml")
+	t.Setenv("LLMGW_STATE_DIR", state)
+	t.Setenv("LLMGW_CONFIG", configPath)
+	iam.ResetForTests()
+	t.Cleanup(iam.ResetForTests)
+	if _, err := iam.Initialize(); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(configPath, []byte("providers: {}\nendpoints: {}\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(state, "secrets.json"), []byte(`{"fixture":"secret"}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	archive := filepath.Join(t.TempDir(), "state.tar.gz")
+	if _, err := CreateBackup(archive); err != nil {
+		t.Fatal(err)
+	}
+	iam.ResetForTests()
+
+	originalWriter := writeRestoreJournalFile
+	writeRestoreJournalFile = func(restoreJournal) error { return errors.New("fixture journal failure") }
+	t.Cleanup(func() { writeRestoreJournalFile = originalWriter })
+	if _, err := RestoreBackup(archive); err == nil || !strings.Contains(err.Error(), "fixture journal failure") {
+		t.Fatalf("restore error = %v", err)
+	}
+	for _, dir := range []string{state, filepath.Dir(configPath)} {
+		matches, err := filepath.Glob(filepath.Join(dir, ".llmgw-restore-*.tmp"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(matches) != 0 {
+			t.Fatalf("staged restore files remain: %v", matches)
+		}
+	}
 }
 
 func mustWrite(t *testing.T, path, value string) {

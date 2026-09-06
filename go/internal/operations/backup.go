@@ -45,6 +45,8 @@ var sqliteBackupFiles = map[string]bool{
 	"gateway.db": true, "telemetry.db": true, "usage.db": true,
 }
 
+var writeRestoreJournalFile = writeRestoreJournal
+
 type BackupEntry struct {
 	Name   string `json:"name"`
 	Size   int64  `json:"size"`
@@ -378,6 +380,17 @@ func RestoreBackup(path string) (BackupInspection, error) {
 		available[entry.Name] = true
 	}
 	replacements := make([]restoreEntry, 0, len(destinations)+9)
+	journalOwnsStaged := false
+	defer func() {
+		if journalOwnsStaged {
+			return
+		}
+		for _, entry := range replacements {
+			if entry.Staged != "" {
+				_ = os.Remove(entry.Staged)
+			}
+		}
+	}()
 	names := make([]string, 0, len(destinations))
 	for name := range destinations {
 		names = append(names, name)
@@ -417,9 +430,10 @@ func RestoreBackup(path string) (BackupInspection, error) {
 		}
 	}
 	journal := restoreJournal{Phase: "prepared", Entries: replacements}
-	if err := writeRestoreJournal(journal); err != nil {
+	if err := writeRestoreJournalFile(journal); err != nil {
 		return BackupInspection{}, err
 	}
+	journalOwnsStaged = true
 	journalPath := restoreJournalPath()
 	for _, entry := range replacements {
 		if entry.HadOriginal {
@@ -436,7 +450,7 @@ func RestoreBackup(path string) (BackupInspection, error) {
 		}
 	}
 	journal.Phase = "committed"
-	if err := writeRestoreJournal(journal); err != nil {
+	if err := writeRestoreJournalFile(journal); err != nil {
 		rollbackErr := rollbackRestore(journalPath, replacements)
 		return BackupInspection{}, errors.Join(fmt.Errorf("record committed restore: %w", err), rollbackErr)
 	}
