@@ -1,83 +1,420 @@
-# Publish standalone binaries on a version tag.
-#
-#   git tag v0.0.1 && git push origin v0.0.1
-#     -> llmgw_v0.0.1_windows_amd64.zip, ..._linux_amd64.tar.gz, ...
-#
-# The gateway is pure Go (modernc.org/sqlite, no cgo), so every target
-# cross-compiles from one runner and needs no C toolchain.
-#
-# Gated on ci.yml: a tag cannot publish binaries unless the suite passes.
+# Build and publish immutable binaries and a multi-architecture image.
+# Tag pushes publish. Manual dispatch is always a read-only dry run.
 name: release
 
 on:
   push:
     tags: ["v*"]
-  workflow_dispatch: {}
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Version to build in vMAJOR.MINOR.PATCH form; never publishes
+        required: true
+        type: string
 
 permissions:
-  contents: write
+  contents: read
+
+env:
+  DOCKER_BUILD_RECORD_UPLOAD: "false"
+
+concurrency:
+  group: release-pipeline
+  cancel-in-progress: false
 
 jobs:
+  validate:
+    name: validate release identity
+    runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.identity.outputs.tag }}
+      version: ${{ steps.identity.outputs.version }}
+      commit: ${{ steps.identity.outputs.commit }}
+      build_time: ${{ steps.identity.outputs.build_time }}
+      source_date_epoch: ${{ steps.identity.outputs.source_date_epoch }}
+      release_exists: ${{ steps.identity.outputs.release_exists }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Validate semantic version
+        id: identity
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REQUESTED_TAG: ${{ github.event_name == 'push' && github.ref_name || inputs.version }}
+        run: |
+          set -euo pipefail
+          if ! printf '%s' "$REQUESTED_TAG" | grep -Eq '^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$'; then
+            echo "version must match vMAJOR.MINOR.PATCH" >&2
+            exit 1
+          fi
+          if [ "$GITHUB_EVENT_NAME" = "push" ]; then
+            git fetch --no-tags origin main:refs/remotes/origin/main
+            release_exists=false
+            if release=$(gh release view "$REQUESTED_TAG" --json isDraft 2>/dev/null); then
+              if [ "$(printf '%s' "$release" | jq -r .isDraft)" != "true" ]; then
+                echo "release already exists; published version tags are immutable" >&2
+                exit 1
+              fi
+              release_exists=true
+            fi
+            if [ "$release_exists" = "true" ]; then
+              git merge-base --is-ancestor "$GITHUB_SHA" origin/main || {
+                echo "draft release commit is no longer on main" >&2
+                exit 1
+              }
+            else
+              test "$(git rev-parse origin/main)" = "$GITHUB_SHA" || {
+                echo "new release tags must point at the current main head" >&2
+                exit 1
+              }
+            fi
+            previous=$(git tag --list 'v*' | grep -E '^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$' | grep -v -Fx "$REQUESTED_TAG" | sort -V | tail -1 || true)
+            if [ -n "$previous" ] && [ "$(printf '%s\n%s\n' "$previous" "$REQUESTED_TAG" | sort -V | tail -1)" != "$REQUESTED_TAG" ]; then
+              echo "release version must be newer than $previous" >&2
+              exit 1
+            fi
+          else
+            release_exists=false
+          fi
+          build_time=$(date -u -d "$(git show -s --format=%cI "$GITHUB_SHA")" +'%Y-%m-%dT%H:%M:%SZ')
+          source_date_epoch=$(git show -s --format=%ct "$GITHUB_SHA")
+          {
+            echo "tag=$REQUESTED_TAG"
+            echo "version=${REQUESTED_TAG#v}"
+            echo "commit=$GITHUB_SHA"
+            echo "build_time=$build_time"
+            echo "source_date_epoch=$source_date_epoch"
+            echo "release_exists=$release_exists"
+          } >> "$GITHUB_OUTPUT"
+
   ci:
+    needs: validate
     uses: ./.github/workflows/ci.yml
 
   binaries:
-    needs: ci
+    name: binaries / SBOM / checksums
+    needs: [validate, ci]
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    permissions:
+      contents: read
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
 
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
         with:
           go-version: 1.26.6
           cache-dependency-path: go/go.sum
 
-      - uses: actions/setup-node@v4
+      - name: Install Syft
+        uses: anchore/sbom-action/download-syft@e22c389904149dbc22b58101806040fa8d37a610 # v0
         with:
-          node-version: "22"
-          cache: npm
-          cache-dependency-path: go/internal/web/console/package-lock.json
+          syft-version: v1.42.3
 
-      # dist/ is committed, but rebuild it so a release can never ship a stale
-      # console that no commit accounts for.
-      - name: Build console
-        working-directory: go/internal/web/console
-        run: npm ci && npm run build
-
-      - name: Cross-compile
+      - name: Build release artifacts
         working-directory: go
         env:
+          VERSION: ${{ needs.validate.outputs.version }}
+          COMMIT: ${{ needs.validate.outputs.commit }}
+          BUILD_TIME: ${{ needs.validate.outputs.build_time }}
+          TAG: ${{ needs.validate.outputs.tag }}
           CGO_ENABLED: "0"
         run: |
-          set -eu
-          version="${GITHUB_REF_NAME#v}"
+          set -euo pipefail
           mkdir -p ../dist
+          ldflags="-s -w -X=llmgw/internal/buildinfo.Version=$VERSION -X=llmgw/internal/buildinfo.Commit=$COMMIT -X=llmgw/internal/buildinfo.BuildTime=$BUILD_TIME"
           for target in windows/amd64 linux/amd64 linux/arm64 darwin/amd64 darwin/arm64; do
             os="${target%/*}"
             arch="${target#*/}"
             ext=""
             [ "$os" = "windows" ] && ext=".exe"
-            echo "building $os/$arch"
-            GOOS="$os" GOARCH="$arch" go build \
-              -trimpath -ldflags="-s -w" -o "llmgw${ext}" ./cmd/llmgw
-            name="llmgw_${GITHUB_REF_NAME}_${os}_${arch}"
+            name="llmgw_${TAG}_${os}_${arch}"
+            GOOS="$os" GOARCH="$arch" go build -trimpath -ldflags="$ldflags" -o "llmgw${ext}" ./cmd/llmgw
+            syft "file:llmgw${ext}" -o "spdx-json=../dist/${name}.spdx.json"
+            jq --arg created "$BUILD_TIME" --arg namespace "https://spdx.org/spdxdocs/${name}" \
+              '.creationInfo.created = $created | .documentNamespace = $namespace' \
+              "../dist/${name}.spdx.json" > "../dist/${name}.spdx.json.tmp"
+            mv "../dist/${name}.spdx.json.tmp" "../dist/${name}.spdx.json"
+            if [ "$os/$arch" = "linux/amd64" ]; then
+              output=$(./llmgw version)
+              printf '%s\n' "$output"
+              printf '%s\n' "$output" | grep -Fx "llm-gateway $VERSION"
+              printf '%s\n' "$output" | grep -Fx "commit $COMMIT"
+              printf '%s\n' "$output" | grep -Fx "build_time $BUILD_TIME"
+            fi
             if [ "$os" = "windows" ]; then
-              zip -q "../dist/${name}.zip" "llmgw${ext}"
+              touch -d "$BUILD_TIME" "llmgw${ext}"
+              zip -Xq "../dist/${name}.zip" "llmgw${ext}"
             else
-              tar -czf "../dist/${name}.tar.gz" "llmgw${ext}"
+              tar --sort=name --mtime="$BUILD_TIME" --owner=0 --group=0 --numeric-owner -czf "../dist/${name}.tar.gz" "llmgw${ext}"
             fi
             rm -f "llmgw${ext}"
           done
-          echo "built version ${version}"
+          cd ../dist
+          mapfile -t artifacts < <(find . -maxdepth 1 -type f ! -name SHA256SUMS -printf '%f\n' | sort)
+          sha256sum "${artifacts[@]}" > SHA256SUMS
+          sha256sum -c SHA256SUMS
+          test "$(find . -maxdepth 1 -type f \( -name '*.zip' -o -name '*.tar.gz' \) | wc -l)" -eq 5
+          test "$(find . -maxdepth 1 -type f -name '*.spdx.json' | wc -l)" -eq 5
+          for sbom in *.spdx.json; do
+            jq -e '.spdxVersion | startswith("SPDX-")' "$sbom" >/dev/null
+          done
 
-      - name: Checksums
-        working-directory: dist
-        run: sha256sum * > SHA256SUMS
-
-      - name: Publish release
-        uses: softprops/action-gh-release@v2
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: github.event_name == 'push' && github.ref_type == 'tag'
         with:
-          files: dist/*
-          generate_release_notes: true
-          fail_on_unmatched_files: true
+          name: release-assets-${{ needs.validate.outputs.tag }}
+          path: dist/*
+          if-no-files-found: error
+          retention-days: 7
+          overwrite: true
+
+  image-dry-run:
+    name: image dry run
+    if: github.event_name == 'workflow_dispatch'
+    needs: [validate, ci, binaries]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+
+      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
+        with:
+          version: v0.36.1
+          driver-opts: image=moby/buildkit:v0.32.2@sha256:28a898719c18a33f4e8000685287fa36fd0dd9560c6440227d3a732d79bb41d8
+
+      - name: Build OCI image without publishing
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
+        with:
+          context: go
+          file: go/Dockerfile
+          platforms: linux/amd64,linux/arm64
+          push: false
+          outputs: type=oci,dest=/tmp/llmgw-image.tar
+          sbom: generator=docker.io/docker/buildkit-syft-scanner@sha256:ae4f3b554449e7e25548e7d8ccc029d17357348e30c6e3df01b92bc93654d6a9
+          provenance: mode=max
+          build-args: |
+            VERSION=${{ needs.validate.outputs.version }}
+            COMMIT=${{ needs.validate.outputs.commit }}
+            BUILD_TIME=${{ needs.validate.outputs.build_time }}
+            SOURCE_DATE_EPOCH=${{ needs.validate.outputs.source_date_epoch }}
+
+      - name: Verify OCI archive
+        run: |
+          set -euo pipefail
+          mkdir /tmp/llmgw-oci
+          tar -xf /tmp/llmgw-image.tar -C /tmp/llmgw-oci
+          digest=$(jq -r '.manifests[0].digest' /tmp/llmgw-oci/index.json)
+          nested="/tmp/llmgw-oci/blobs/${digest/:/\/}"
+          jq -e '[.manifests[] | select(.platform.os == "linux") | .platform.architecture] | sort == ["amd64", "arm64"]' "$nested" >/dev/null
+          mapfile -t attestations < <(jq -r '.manifests[] | select(.annotations["vnd.docker.reference.type"] == "attestation-manifest") | .digest' "$nested")
+          test "${#attestations[@]}" -eq 2
+          for attestation in "${attestations[@]}"; do
+            manifest="/tmp/llmgw-oci/blobs/${attestation/:/\/}"
+            jq -e '
+              [.layers[].annotations["in-toto.io/predicate-type"]] as $types |
+              ($types | index("https://spdx.dev/Document")) != null and
+              any($types[]; startswith("https://slsa.dev/provenance/"))
+            ' "$manifest" >/dev/null
+          done
+
+  release-stage:
+    name: stage draft release
+    if: github.event_name == 'push' && github.ref_type == 'tag'
+    needs: [validate, ci, binaries]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: release-assets-${{ needs.validate.outputs.tag }}
+          path: dist
+
+      - name: Verify downloaded checksums
+        working-directory: dist
+        run: sha256sum -c SHA256SUMS
+
+      - name: Stage draft release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ needs.validate.outputs.tag }}
+        run: |
+          if [ "${{ needs.validate.outputs.release_exists }}" = "true" ]; then
+            gh release upload "$TAG" dist/* --clobber
+          else
+            gh release create "$TAG" dist/* --draft --generate-notes --verify-tag --title "$TAG"
+          fi
+
+  image-publish:
+    name: publish image
+    if: github.event_name == 'push' && github.ref_type == 'tag'
+    needs: [validate, ci, binaries, release-stage]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+      attestations: write
+      id-token: write
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+
+      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
+        with:
+          version: v0.36.1
+          driver-opts: image=moby/buildkit:v0.32.2@sha256:28a898719c18a33f4e8000685287fa36fd0dd9560c6440227d3a732d79bb41d8
+
+      - uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Check immutable version image
+        id: existing
+        env:
+          VERSION: ${{ needs.validate.outputs.version }}
+          COMMIT: ${{ needs.validate.outputs.commit }}
+          DRAFT_EXISTS: ${{ needs.validate.outputs.release_exists }}
+        run: |
+          set -euo pipefail
+          image="ghcr.io/${GITHUB_REPOSITORY}:$VERSION"
+          inspect_error=$(mktemp)
+          if manifest=$(docker buildx imagetools inspect "$image" --format '{{json .Manifest}}' 2>"$inspect_error"); then
+            test "$DRAFT_EXISTS" = "true" || {
+              echo "version image exists without a resumable draft release" >&2
+              exit 1
+            }
+            printf '%s' "$manifest" | jq -e '
+              ([.manifests[] | select(.platform.os == "linux") | .platform.architecture] | sort) == ["amd64", "arm64"] and
+              ([.manifests[] | select(.annotations["vnd.docker.reference.type"] == "attestation-manifest")] | length) >= 2
+            ' >/dev/null || {
+              echo "existing version image is incomplete" >&2
+              exit 1
+            }
+            images=$(docker buildx imagetools inspect "$image" --format '{{json .Image}}')
+            printf '%s' "$images" | jq -e --arg version "$VERSION" --arg commit "$COMMIT" '
+              [. | to_entries[] | select(.key == "linux/amd64" or .key == "linux/arm64")] as $images |
+              ($images | length) == 2 and
+              all($images[]; .value.config.Labels["org.opencontainers.image.version"] == $version and
+                             .value.config.Labels["org.opencontainers.image.revision"] == $commit)
+            ' >/dev/null || {
+              echo "existing version image does not match this release commit" >&2
+              exit 1
+            }
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+            echo "digest=$(printf '%s' "$manifest" | jq -r .digest)" >> "$GITHUB_OUTPUT"
+          elif grep -Eqi 'not found|manifest unknown|name unknown' "$inspect_error"; then
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+          else
+            cat "$inspect_error" >&2
+            echo "registry inspection failed; refusing to overwrite a version tag" >&2
+            exit 1
+          fi
+
+      - name: Build and publish image
+        id: image
+        if: steps.existing.outputs.exists != 'true'
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
+        with:
+          context: go
+          file: go/Dockerfile
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ghcr.io/${{ github.repository }}:${{ needs.validate.outputs.version }}
+          labels: |
+            org.opencontainers.image.version=${{ needs.validate.outputs.version }}
+            org.opencontainers.image.revision=${{ needs.validate.outputs.commit }}
+            org.opencontainers.image.created=${{ needs.validate.outputs.build_time }}
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+          sbom: generator=docker.io/docker/buildkit-syft-scanner@sha256:ae4f3b554449e7e25548e7d8ccc029d17357348e30c6e3df01b92bc93654d6a9
+          provenance: mode=max
+          build-args: |
+            VERSION=${{ needs.validate.outputs.version }}
+            COMMIT=${{ needs.validate.outputs.commit }}
+            BUILD_TIME=${{ needs.validate.outputs.build_time }}
+            SOURCE_DATE_EPOCH=${{ needs.validate.outputs.source_date_epoch }}
+
+      - name: Attest image provenance
+        uses: actions/attest-build-provenance@43d14bc2b83dec42d39ecae14e916627a18bb661 # v3
+        with:
+          subject-name: ghcr.io/${{ github.repository }}
+          subject-digest: ${{ steps.image.outputs.digest || steps.existing.outputs.digest }}
+          push-to-registry: true
+
+      - name: Confirm immutable version image
+        env:
+          EXISTING_DIGEST: ${{ steps.existing.outputs.digest }}
+          BUILT_DIGEST: ${{ steps.image.outputs.digest }}
+        run: |
+          digest="${BUILT_DIGEST:-$EXISTING_DIGEST}"
+          test -n "$digest"
+          echo "immutable version image: $digest"
+
+      - name: Validate published image manifests
+        env:
+          VERSION: ${{ needs.validate.outputs.version }}
+          COMMIT: ${{ needs.validate.outputs.commit }}
+        run: |
+          set -euo pipefail
+          image="ghcr.io/${GITHUB_REPOSITORY}:$VERSION"
+          manifest=$(docker buildx imagetools inspect "$image" --format '{{json .Manifest}}')
+          printf '%s' "$manifest" | jq -e '
+            ([.manifests[] | select(.platform.os == "linux") | .platform.architecture] | sort) == ["amd64", "arm64"]
+          ' >/dev/null
+          images=$(docker buildx imagetools inspect "$image" --format '{{json .Image}}')
+          printf '%s' "$images" | jq -e --arg version "$VERSION" --arg commit "$COMMIT" '
+            [. | to_entries[] | select(.key == "linux/amd64" or .key == "linux/arm64")] as $images |
+            ($images | length) == 2 and
+            all($images[]; .value.config.Labels["org.opencontainers.image.version"] == $version and
+                           .value.config.Labels["org.opencontainers.image.revision"] == $commit)
+          ' >/dev/null
+          mapfile -t attestations < <(printf '%s' "$manifest" | jq -r '.manifests[] | select(.annotations["vnd.docker.reference.type"] == "attestation-manifest") | .digest')
+          test "${#attestations[@]}" -eq 2
+          for attestation in "${attestations[@]}"; do
+            raw=$(docker buildx imagetools inspect "ghcr.io/${GITHUB_REPOSITORY}@${attestation}" --raw)
+            printf '%s' "$raw" | jq -e '
+              [.layers[].annotations["in-toto.io/predicate-type"]] as $types |
+              ($types | index("https://spdx.dev/Document")) != null and
+              any($types[]; startswith("https://slsa.dev/provenance/"))
+            ' >/dev/null
+          done
+
+  release-publish:
+    name: publish GitHub release
+    if: github.event_name == 'push' && github.ref_type == 'tag'
+    needs: [validate, image-publish, release-stage]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      attestations: write
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: release-assets-${{ needs.validate.outputs.tag }}
+          path: dist
+
+      - name: Verify downloaded checksums
+        working-directory: dist
+        run: sha256sum -c SHA256SUMS
+
+      - name: Attest release assets
+        uses: actions/attest-build-provenance@43d14bc2b83dec42d39ecae14e916627a18bb661 # v3
+        with:
+          subject-path: dist/*
+
+      - name: Publish staged release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ needs.validate.outputs.tag }}
+        run: gh release edit "$TAG" --draft=false

@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"llmgw/internal/buildinfo"
 	"llmgw/internal/config"
 	"llmgw/internal/copilotauth"
 	"llmgw/internal/gcpauth"
@@ -284,8 +285,11 @@ func handleState(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	build := buildinfo.Current()
 	writeJSON(w, 200, map[string]any{
-		"version":       config.Version,
+		"version":       build.Version,
+		"commit":        build.Commit,
+		"build_time":    build.BuildTime,
 		"auth_required": !s.AllowUnauthenticatedAPI,
 		"sso": map[string]any{
 			"enabled": s.SSOEnabled, "admin_group": s.SSOAdminGroup,

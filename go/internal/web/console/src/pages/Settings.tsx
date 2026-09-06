@@ -125,7 +125,7 @@ export function Settings({ data, mode, onNavigate }: { data: JSONRecord; mode: C
   const ssoEnabled = sso.enabled === true;
   return (
     <div class="page-stack">
-      <PageHeading eyebrow="Governance" title="Settings" detail="Project budgets and allowlists, authentication posture, and the immutable audit history." actions={<button class="button button--secondary" type="button" onClick={() => void loadAudit()}><RefreshCw size={16} /> Refresh audit</button>} />
+      <PageHeading eyebrow="Governance" title="Settings" detail="Project budgets and allowlists, authentication posture, and retained audit history." actions={<button class="button button--secondary" type="button" onClick={() => void loadAudit()}><RefreshCw size={16} /> Refresh audit</button>} />
       {notice ? <section class="action-notice action-notice--success" role="status"><strong>Saved</strong><span>{notice}</span></section> : null}
       <section class="settings-grid">
         <article class="surface"><ShieldCheck size={20} /><p class="eyebrow">Authentication</p><h2>{mode === "portal" ? "Private portal session" : ssoEnabled ? "Single sign-on" : "Gateway administrator access"}</h2><p>Mutation requests require same-origin validation. Provider credentials and API-key values are never represented in settings state. SSO and encryption settings are environment-driven — see the deployment guide.</p></article>

@@ -5,6 +5,7 @@ import (
 	"sort"
 	"strings"
 
+	"llmgw/internal/buildinfo"
 	"llmgw/internal/config"
 	"llmgw/internal/iam"
 	"llmgw/internal/providers"
@@ -594,7 +595,9 @@ func isChatModel(row providers.ModelInfo) bool {
 }
 
 func handleHealth(w http.ResponseWriter, r *http.Request) {
+	build := buildinfo.Current()
 	writeJSON(w, 200, map[string]any{
-		"status": "ok", "service": "llm-gateway", "version": config.Version,
+		"status": "ok", "service": "llm-gateway", "version": build.Version,
+		"commit": build.Commit, "build_time": build.BuildTime,
 	})
 }

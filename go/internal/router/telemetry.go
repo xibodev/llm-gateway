@@ -166,6 +166,37 @@ func TelemetryStats() map[string]any {
 	return map[string]any{"events": events, "throttled": throttled, "by_requested": byReq}
 }
 
+func PruneTelemetryBefore(cutoff int64) (int64, error) {
+	path := filepath.Join(config.StateDir(), "telemetry.db")
+	if _, err := os.Stat(path); os.IsNotExist(err) {
+		return 0, nil
+	} else if err != nil {
+		return 0, err
+	}
+	db, err := telConn()
+	if err != nil {
+		return 0, err
+	}
+	var total int64
+	for {
+		result, err := db.Exec(`DELETE FROM failover_events WHERE id IN (
+            SELECT id FROM failover_events WHERE ts < ? ORDER BY id LIMIT 500
+        )`, cutoff)
+		if err != nil {
+			return total, err
+		}
+		removed, err := result.RowsAffected()
+		if err != nil {
+			return total, err
+		}
+		total += removed
+		if removed < 500 {
+			return total, nil
+		}
+		time.Sleep(time.Millisecond)
+	}
+}
+
 // ResetTelemetryState drops the cached DB handle (test helper).
 func ResetTelemetryState() {
 	telMu.Lock()

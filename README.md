@@ -98,8 +98,36 @@ wire profiles and known gaps.
 LLMGW_API_KEY=... docker compose up -d --build
 ```
 Builds `go/Dockerfile` (distroless, nonroot), mounts your config read-only and
-persists gateway state in a named volume at `/state`. For a real box with TLS,
+seeds a writable volume copy on first start, then persists gateway state in the
+named volume at `/state`. Later console edits and backup restores update that
+volume copy without modifying `config.local.yaml`. For a real box with TLS,
 use `deploy/docker-compose.prod.yml` + `Caddyfile` — see `deploy/DEPLOY.md`.
+
+## Back up and restore
+
+Stop the gateway before maintenance, then use the built-in verified archive:
+
+```bash
+llmgw backup create /secure/path/llmgw-state.tar.gz
+llmgw backup inspect /secure/path/llmgw-state.tar.gz
+llmgw backup restore /secure/path/llmgw-state.tar.gz --force
+```
+
+The archive contains configuration, catalog and OAuth caches, configured
+checkpointed SQLite state, and legacy secret files. It may contain
+credentials, and is written with owner-only permissions. Keep the deployment's
+`LLMGW_CREDENTIAL_ENCRYPTION_KEY` separately; it is never copied into a backup.
+Archive checksums detect corruption but do not authenticate the archive; protect
+it from replacement as well as disclosure.
+Request logs are intentionally excluded because optional body logging may contain
+large prompts and responses; retain those separately when incident policy needs
+them.
+The gateway also bounds operational history by default: 90 days of usage and
+failover telemetry, 365 days of audit events, 400 days of delivered notification
+tombstones, completed quota periods, two request-log generations, and seven
+verified built-in backups. `LLMGW_RETENTION_*` and `LLMGW_BACKUP_KEEP` override
+those limits; active control-plane state and retryable notifications are never
+pruned.
 
 ## Local console
 
@@ -116,6 +144,17 @@ npm run check:dist
 ```
 
 The generated `dist/` assets are committed because Go embeds them. The Go runtime does not need Node.js.
+
+`llmgw version`, `/health`, and `/admin/api/state` report the same semantic
+version, source commit, and RFC3339 build time. Development builds use explicit
+`0.0.0-dev` and `unknown` values; release binaries and images inject immutable
+provenance during their build.
+
+Version tags on the current `main` head publish five platform archives, SPDX
+SBOMs, verified checksums, provenance attestations, and a versioned
+two-architecture GHCR image through one release workflow. Actions and base images
+are pinned. A manual dispatch performs the same builds only on ephemeral runners;
+it has no artifact upload, registry login, or release-publishing step.
 
 ## Google providers
 

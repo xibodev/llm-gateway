@@ -9,7 +9,9 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"io"
 	"log"
 	"net/http"
 	"os"
@@ -20,16 +22,23 @@ import (
 	"time"
 
 	"llmgw/internal/api"
+	"llmgw/internal/buildinfo"
 	"llmgw/internal/config"
 	"llmgw/internal/iam"
+	"llmgw/internal/operations"
+	"llmgw/internal/router"
 )
 
-const usage = `Usage: llmgw [serve|health|version]
+const usage = `Usage: llmgw [serve|health|version|backup]
 
 Commands:
   serve   Run the gateway HTTP server (default when no command is given).
   health  Probe the local server's /health endpoint; exit non-zero on failure
-          (for the distroless image's Docker/compose healthcheck).
+           (for the distroless image's Docker/compose healthcheck).
+  backup create [archive]       Create an offline, verified state backup.
+  backup inspect <archive>      Validate and summarize a backup.
+  backup restore <archive> --force
+                                Replace offline state from a verified backup.
 
 Environment:
   LLMGW_HOST=127.0.0.1  LLMGW_PORT=8787
@@ -52,7 +61,13 @@ func main() {
 	case "-h", "--help", "help":
 		fmt.Print(usage)
 	case "version", "--version":
-		fmt.Println("llm-gateway " + config.Version)
+		printVersion(os.Stdout)
+	case "backup":
+		config.Load()
+		if err := backupCommand(os.Args[2:], os.Stdout); err != nil {
+			fmt.Fprintln(os.Stderr, "backup:", err)
+			os.Exit(1)
+		}
 	default:
 		fmt.Fprintf(os.Stderr, "llmgw: unknown command %q\n\n%s", cmd, usage)
 		os.Exit(2)
@@ -78,6 +93,14 @@ func healthCheck() {
 }
 
 func serve() {
+	lock, err := operations.AcquireStateLock()
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer lock.Release()
+	if err := operations.RecoverInterruptedRestore(); err != nil {
+		log.Fatal(err)
+	}
 	config.Load()
 	if migrated, err := iam.Initialize(); err != nil {
 		log.Fatalf("initialize IAM control plane: %v", err)
@@ -87,6 +110,8 @@ func serve() {
 			migrated.Keys, migrated.Projects, migrated.Principals,
 		)
 	}
+	retentionStop := startRetention()
+	defer retentionStop()
 
 	// Local providers are surfaced via the /admin "Detect local" button, not
 	// hardwired. Opt in to silent auto-add on startup with LLMGW_AUTODISCOVER_LOCAL=1.
@@ -111,7 +136,7 @@ func serve() {
 	}
 
 	go func() {
-		log.Printf("llm-gateway %s listening on http://%s (admin at /admin)", config.Version, addr)
+		log.Printf("llm-gateway %s (%s) listening on http://%s (admin at /admin)", buildinfo.Version, buildinfo.Commit, addr)
 		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			log.Fatalf("server error: %v", err)
 		}
@@ -124,6 +149,103 @@ func serve() {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	_ = srv.Shutdown(ctx)
+}
+
+func printVersion(output io.Writer) {
+	info := buildinfo.Current()
+	fmt.Fprintf(output, "llm-gateway %s\ncommit %s\nbuild_time %s\n", info.Version, info.Commit, info.BuildTime)
+}
+
+func startRetention() func() {
+	stop := make(chan struct{})
+	run := func() {
+		now := time.Now()
+		policy := iam.DefaultRetentionPolicy()
+		result, err := iam.PruneOperationalHistory(now, policy)
+		if err != nil {
+			log.Printf("retention: %v", err)
+			return
+		}
+		cutoff := now.AddDate(0, 0, -policy.UsageDays).Unix()
+		telemetry, telemetryErr := router.PruneTelemetryBefore(cutoff)
+		savings, savingsErr := router.PruneSavingsBefore(cutoff)
+		backups, backupErr := operations.PruneDefaultBackups()
+		if err := errors.Join(telemetryErr, savingsErr, backupErr); err != nil {
+			log.Printf("retention: %v", err)
+		}
+		if result != (iam.RetentionResult{}) || telemetry > 0 || savings > 0 || backups > 0 {
+			log.Printf("retention pruned usage=%d audit=%d key_quotas=%d project_quotas=%d outbox=%d telemetry=%d savings=%d backups=%d",
+				result.UsageEvents, result.AuditEvents, result.KeyQuotaCounters,
+				result.ProjectQuotaCounters, result.DeliveredOutbox,
+				telemetry, savings, backups)
+		}
+	}
+	go func() {
+		run()
+		ticker := time.NewTicker(24 * time.Hour)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ticker.C:
+				run()
+			case <-stop:
+				return
+			}
+		}
+	}()
+	return func() { close(stop) }
+}
+
+func backupCommand(args []string, output io.Writer) error {
+	if len(args) == 0 {
+		return fmt.Errorf("expected create, inspect, or restore")
+	}
+	switch args[0] {
+	case "create":
+		if len(args) > 2 {
+			return fmt.Errorf("usage: llmgw backup create [archive]")
+		}
+		path := ""
+		if len(args) == 2 {
+			path = args[1]
+		}
+		inspection, err := operations.CreateBackup(path)
+		if err != nil {
+			return err
+		}
+		fmt.Fprintf(output, "backup created: %s\n", inspection.Path)
+		return printInspection(output, inspection)
+	case "inspect":
+		if len(args) != 2 {
+			return fmt.Errorf("usage: llmgw backup inspect <archive>")
+		}
+		inspection, err := operations.InspectBackup(args[1])
+		if err != nil {
+			return err
+		}
+		return printInspection(output, inspection)
+	case "restore":
+		if len(args) != 3 || args[2] != "--force" {
+			return fmt.Errorf("usage: llmgw backup restore <archive> --force")
+		}
+		inspection, err := operations.RestoreBackup(args[1])
+		if err != nil {
+			return err
+		}
+		fmt.Fprintln(output, "backup restored")
+		return printInspection(output, inspection)
+	default:
+		return fmt.Errorf("unknown backup command %q", args[0])
+	}
+}
+
+func printInspection(output io.Writer, inspection operations.BackupInspection) error {
+	fmt.Fprintf(output, "format: %d\ncreated: %s\nschema: %d\n", inspection.Format, inspection.CreatedAt, inspection.SchemaVersion)
+	fmt.Fprintf(output, "files: %s\n", strings.Join(inspection.Files, ", "))
+	for _, name := range []string{"projects", "principals", "api_keys", "provider_connections"} {
+		fmt.Fprintf(output, "%s: %d\n", name, inspection.Counts[name])
+	}
+	return nil
 }
 
 func getenv(key, def string) string {

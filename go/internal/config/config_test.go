@@ -1,6 +1,7 @@
 package config
 
 import (
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -90,6 +91,29 @@ func TestKeyGovernance(t *testing.T) {
 func ptr(b bool) *bool        { return &b }
 func ptrInt(i int) *int       { return &i }
 func ptrInt64(i int64) *int64 { return &i }
+
+func TestLoadSeedsWritableConfigOnce(t *testing.T) {
+	dir := t.TempDir()
+	target := filepath.Join(dir, "state", "config.yaml")
+	seed := filepath.Join(dir, "seed.yaml")
+	t.Setenv("LLMGW_STATE_DIR", filepath.Join(dir, "state"))
+	t.Setenv("LLMGW_CONFIG", target)
+	t.Setenv("LLMGW_CONFIG_SEED", seed)
+	if err := os.WriteFile(seed, []byte("providers:\n  seeded:\n    type: echo\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	loaded := Load()
+	if loaded.Providers["seeded"] == nil {
+		t.Fatal("seeded provider was not loaded")
+	}
+	if err := os.WriteFile(seed, []byte("providers:\n  replaced:\n    type: echo\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	loaded = Load()
+	if loaded.Providers["seeded"] == nil || loaded.Providers["replaced"] != nil {
+		t.Fatalf("existing writable config was overwritten: %+v", loaded.Providers)
+	}
+}
 
 func TestSaveLoadRoundTrip(t *testing.T) {
 	dir := t.TempDir()
