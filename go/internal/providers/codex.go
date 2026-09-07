@@ -362,8 +362,10 @@ func (p CodexProvider) ListModelsWithError() (
 	for _, value := range entries {
 		entry := value.(map[string]any)
 		id, _ := entry["id"].(string)
+		id = strings.TrimSpace(id)
 		if id == "" {
 			id, _ = entry["name"].(string)
+			id = strings.TrimSpace(id)
 		}
 		vendor, _ := entry["vendor"].(string)
 		if vendor == "" {
