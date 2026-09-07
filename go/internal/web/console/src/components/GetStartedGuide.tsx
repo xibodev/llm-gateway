@@ -43,11 +43,11 @@ export function buildGuideSteps(data: JSONRecord): GuideStep[] {
   });
   const configured = statuses.filter((status) => status.configured === true);
   const catalogSynced = statuses.some((status) => numberValue(status.model_count) > 0);
-  const verified = statuses.some((status) => stringValue(status.last_verified_at) !== "");
+  const verified = statuses.some((status) => asRecord(status.readiness).model_verified === true);
   // Point each step at the provider that still needs it, rather than whichever
   // configured provider happens to sort first.
   const needsCatalog = configured.find((status) => numberValue(status.model_count) === 0) ?? configured[0];
-  const needsVerify = configured.find((status) => stringValue(status.last_verified_at) === "") ?? configured[0];
+  const needsVerify = configured.find((status) => asRecord(status.readiness).model_verified !== true) ?? configured[0];
 
   return [
     {
