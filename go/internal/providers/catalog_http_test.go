@@ -64,6 +64,9 @@ func TestCatalogResponseSizeBoundaryAndCache(t *testing.T) {
 		{"ollama", `{"models":[{"name":"fixture-model"}],"private":"fixture-secret"}`, func(base string) Provider {
 			return OllamaProvider{BaseURL: base, Timeout: 5}
 		}},
+		{"azure", `{"data":[{"id":"fixture-deployment","model":"gpt-4o","status":"succeeded"}],"private":"fixture-secret"}`, func(base string) Provider {
+			return AzureOpenAIProvider{BaseURL: base, APIKey: "fixture-key", Timeout: 5}
+		}},
 	} {
 		for _, oversized := range []bool{false, true} {
 			name := "exact-boundary"
@@ -107,5 +110,37 @@ func TestCatalogResponseSizeBoundaryAndCache(t *testing.T) {
 				}
 			})
 		}
+	}
+}
+
+func TestAzureOversizedLaterPagePreservesCache(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Query().Get("after") == "next" {
+			_, _ = io.WriteString(w, `{"data":[],"private":"fixture-secret"}`)
+			_, _ = io.CopyN(w, &catalogPaddingReader{}, catalogMaxResponseBytes)
+			return
+		}
+		_, _ = io.WriteString(w, `{"data":[{"id":"fixture-deployment","model":"gpt-4o"}],"has_more":true,"last_id":"next"}`)
+	}))
+	defer server.Close()
+	setupCatalogReadTest(t, server.URL)
+	cacheMu.Lock()
+	cache["catalog-read"] = AzureOpenAIProvider{BaseURL: server.URL, APIKey: "fixture-key", Timeout: 5}
+	cacheMu.Unlock()
+	stale := time.Now().Add(-2 * catalogTTL)
+	catMu.Lock()
+	catData["catalog-read"] = catalogEntry{SchemaVersion: catalogSchemaVersion, Models: []ModelInfo{{ID: "old"}}, RefreshedAt: stale}
+	catMu.Unlock()
+	result := ReadCatalogForPrincipal("catalog-read", nil)
+	cached, refreshed := CatalogCached("catalog-read")
+	code, detail, status := CatalogFailure(result.Err)
+	if code != "catalog_not_discoverable" || status != 200 || detail != "Provider catalog response exceeded the size limit." ||
+		result.Diagnostics.Status != "error" || !result.Diagnostics.Stale || !result.Diagnostics.FromCache ||
+		len(result.Models) != 1 || result.Models[0].ID != "old" || !result.RefreshedAt.Equal(stale) ||
+		len(cached) != 1 || cached[0].ID != "old" || !refreshed.Equal(stale) {
+		t.Fatalf("oversized Azure page replaced stale cache: %+v cache=%+v", result, cached)
+	}
+	if strings.Contains(result.Err.Error(), "fixture-secret") {
+		t.Fatal("size failure disclosed response data")
 	}
 }
