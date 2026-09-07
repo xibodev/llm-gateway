@@ -403,7 +403,8 @@ test("overview shows an evidence-driven first-run guide for admins", () => {
   assert.match(guide, /activeProjectIDs\.has/);
   assert.match(guide, /Verify inference with a test completion/);
   assert.match(guide, /Mint a project API key/);
-  assert.match(guide, /last_verified_at/);
+  assert.match(guide, /statuses\.some\(\(status\) => asRecord\(status\.readiness\)\.model_verified === true\)/);
+  assert.doesNotMatch(guide, /last_verified_at/);
   assert.match(guide, /localStorage/);
   assert.match(guide, /llmgw\.console\.setup-guide-dismissed/);
 });
@@ -517,6 +518,7 @@ test("setup guide points each step at the provider that still needs it", () => {
   const guide = readFileSync(resolve(root, "src/components/GetStartedGuide.tsx"), "utf8");
   assert.match(guide, /needsCatalog/);
   assert.match(guide, /needsVerify/);
+  assert.match(guide, /configured\.find\(\(status\) => asRecord\(status\.readiness\)\.model_verified !== true\)/);
   assert.doesNotMatch(guide, /firstConfigured/);
 });
 
