@@ -178,8 +178,9 @@ llmgw backup restore /secure/path/llmgw-state.tar.gz --force
 ```
 
 For a stopped Compose service whose pinned image has these commands, use
-`docker compose ... run --rm --no-deps gateway backup create /state/backups/upgrade.tar.gz`
-with the same project, files and environment arguments as above; substitute
+`docker compose ... run --rm --no-deps gateway backup create "${CONTAINER_STATE_DIR:?set the verified container state directory}/backups/upgrade.tar.gz"`
+with the same verified container state directory, persistent mount, project, files
+and environment arguments as above; substitute
 `backup inspect` or `backup restore ... --force` as needed. Copy the resulting
 archive out of the state volume to protected storage. There is no shell in the
 gateway image. These commands expect the built-in manifest/checksum archive, not
