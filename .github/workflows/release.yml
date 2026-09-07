@@ -17,6 +17,8 @@ permissions:
 
 env:
   DOCKER_BUILD_RECORD_UPLOAD: "false"
+  # Release staging and publication have no checkout to infer a repository from.
+  GH_REPO: ${{ github.repository }}
 
 concurrency:
   group: release-pipeline
@@ -34,6 +36,15 @@ jobs:
       source_date_epoch: ${{ steps.identity.outputs.source_date_epoch }}
       release_exists: ${{ steps.identity.outputs.release_exists }}
     steps:
+      # Exercise the same checkout-free context on tag pushes and read-only dry runs.
+      - name: Verify release repository context without checkout
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          test "$GH_REPO" = "$GITHUB_REPOSITORY"
+          gh release list --limit 1 --json tagName >/dev/null
+
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           fetch-depth: 0
