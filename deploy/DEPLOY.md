@@ -80,28 +80,39 @@ migrated database.
    at `/state`; the production example binds `deploy/state` there. Changing the
    project name can silently select a new named volume. Do not run `down -v`.
 4. Retain the original encryption key separately in the secret store, plus the
-   deployment configuration/environment and any configured state outside `/state`
-   (for example, an external config, savings database or OAuth cache). A database
-   backup without its encryption key cannot recover encrypted credentials.
+   deployment configuration/environment and any configured state outside the
+   state directory (for example, an external config, savings database or OAuth
+   cache). A database backup without its encryption key cannot recover encrypted
+   credentials.
 5. Drain traffic and stop **all** writers before taking the snapshot. For releases
    without a backup CLI, archive the entire stopped state volume, including any
    SQLite `-wal` and `-shm` files, config, secrets and caches, not just `gateway.db`.
    Do not start a newer binary against the original state to make this snapshot.
 
 Example for the existing gateway container, in a POSIX shell. `BACKUP_DIR` must
-already be a private directory outside the state volume and repository. Stop on
+already be a private directory outside the state volume and repository. Set
+`CONTAINER_STATE_DIR` to the absolute state directory **inside the existing
+container**, derived from its effective `LLMGW_STATE_DIR` and mount configuration,
+not a host path or the maintenance shell's environment. The supplied Compose
+examples use `/state`; custom deployments must use their actual path. Verify it
+contains the expected `gateway.db`, config and caches before proceeding. Stop on
 any command failure; the archive is sensitive and is not encrypted:
 
 ```bash
 set -eu
 umask 077
 set -C
+: "${CONTAINER_STATE_DIR:?set the verified container state directory}"
+case "$CONTAINER_STATE_DIR" in
+  /*) ;;
+  *) printf '%s\n' 'CONTAINER_STATE_DIR must be an absolute container path' >&2; exit 1 ;;
+esac
 test -d "$BACKUP_DIR"
 export LLMGW_IMAGE="$OLD_IMAGE"
 GATEWAY_CONTAINER=$(docker compose -p "$COMPOSE_PROJECT" -f "$COMPOSE_FILE" --env-file "$ENV_FILE" ps -q gateway)
 test -n "$GATEWAY_CONTAINER"
 docker compose -p "$COMPOSE_PROJECT" -f "$COMPOSE_FILE" --env-file "$ENV_FILE" stop gateway
-docker cp "$GATEWAY_CONTAINER":/state/. - > "$BACKUP_DIR/pre-upgrade.tar"
+docker cp "$GATEWAY_CONTAINER:$CONTAINER_STATE_DIR/." - > "$BACKUP_DIR/pre-upgrade.tar"
 tar -tf "$BACKUP_DIR/pre-upgrade.tar" >/dev/null
 ```
 
