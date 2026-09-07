@@ -67,10 +67,10 @@ func enforceKeyPolicy(p *config.Principal, requestedModel, resolvedCategory stri
 }
 
 // authorizeKeyPolicy enforces routing and credential policy without consuming
-// inference quotas. Non-inference operations such as token counting use it.
+// inference quotas, then checks availability. Token counting also uses it.
 func authorizeKeyPolicy(p *config.Principal, requestedModel, resolvedCategory string, targets []router.Target) ([]router.Target, int, string) {
 	if p == nil || p.Token == "" {
-		return targets, 0, "" // admin / unauthenticated-local: unrestricted
+		return availableRouteTargets(targets) // admin / unauthenticated-local: unrestricted
 	}
 	projectPolicy, err := iam.GetProjectPolicy(p.ProjectID)
 	if err != nil {
@@ -126,5 +126,21 @@ func authorizeKeyPolicy(p *config.Principal, requestedModel, resolvedCategory st
 		return nil, 403, "This principal has no active provider credential for the requested route."
 	}
 	targets = credentialTargets
-	return targets, 0, ""
+	return availableRouteTargets(targets)
+}
+
+// Resolution retains disabled-only routes so policy denials take precedence
+// over availability. Never pass those targets to execution or consume a quota.
+func availableRouteTargets(targets []router.Target) ([]router.Target, int, string) {
+	available := make([]router.Target, 0, len(targets))
+	for _, target := range targets {
+		if cfg := config.Get().Providers[target.Provider]; cfg != nil && cfg.Disabled {
+			continue
+		}
+		available = append(available, target)
+	}
+	if len(available) == 0 {
+		return nil, 404, (&router.ModelNotFoundError{Unavailable: true}).Error()
+	}
+	return available, 0, ""
 }

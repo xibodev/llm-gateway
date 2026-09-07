@@ -134,6 +134,67 @@ func TestCatalogReadFailedRefreshCannotRestoreInvalidatedRows(t *testing.T) {
 	}
 }
 
+func TestCatalogReadSuccessfulRefreshUsesAuthoritativeSnapshot(t *testing.T) {
+	for _, scenario := range []string{"replaced", "empty", "invalidated"} {
+		t.Run(scenario, func(t *testing.T) {
+			upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				_, _ = w.Write([]byte(`{"data":[{"id":"fetched-model"}]}`))
+			}))
+			defer upstream.Close()
+			setupCatalogReadTest(t, upstream.URL)
+			principal := &config.Principal{PrincipalID: "fixture-owner", PrincipalKind: "human"}
+			key := catalogCacheKey("catalog-read", principal)
+			current := catalogEntry{SchemaVersion: catalogSchemaVersion,
+				Models: []ModelInfo{{ID: "replacement-model"}}}
+			if scenario == "empty" {
+				current.Models = []ModelInfo{}
+			}
+			result := readCatalogForPrincipal("catalog-read", principal, func(providerID string, caller *config.Principal) ([]ModelInfo, *iam.ProviderAccountObservation, error) {
+				models, observation, err := RefreshCatalogForPrincipalWithError(providerID, caller)
+				if err != nil || len(models) != 1 || models[0].ID != "fetched-model" {
+					t.Fatalf("refresh: %+v %v", models, err)
+				}
+				// Interleave a write or invalidation after the successful store,
+				// before the read takes its final snapshot, without scheduler timing.
+				if scenario == "invalidated" {
+					generation := catalogGenerationFor(key)
+					ForgetCatalogForPrincipal(providerID, caller.PrincipalID)
+					if storeEntryIfGeneration(key, models, generation) {
+						t.Fatal("invalidation accepted a stale write")
+					}
+					storeEntry(providerID, []ModelInfo{{ID: "other-scope-model"}})
+				} else {
+					catMu.Lock()
+					current.RefreshedAt = catData[key].RefreshedAt.Add(time.Second)
+					catData[key] = current
+					catMu.Unlock()
+				}
+				return models, observation, err
+			})
+			if result.Diagnostics.SourceScope != "principal" || result.Diagnostics.FromCache || result.Diagnostics.Stale {
+				t.Fatalf("diagnostics: %+v", result)
+			}
+			if scenario == "invalidated" {
+				if result.Err == nil || result.Diagnostics.Status != "error" || result.Diagnostics.FailureCode != "catalog_state_changed" ||
+					len(result.Models) != 0 || !result.RefreshedAt.IsZero() {
+					t.Fatalf("invalidation restored removed rows or borrowed another scope: %+v", result)
+				}
+				return
+			}
+			if result.Err != nil || !result.RefreshedAt.Equal(current.RefreshedAt) || len(result.Models) != len(current.Models) {
+				t.Fatalf("snapshot: %+v, want %+v", result, current)
+			}
+			if scenario == "empty" {
+				if result.Diagnostics.Status != "empty" {
+					t.Fatalf("empty snapshot: %+v", result)
+				}
+			} else if result.Diagnostics.Status != "synced" || result.Models[0].ID != current.Models[0].ID {
+				t.Fatalf("mixed snapshot: %+v", result)
+			}
+		})
+	}
+}
+
 type catalogReadErrorProvider struct{ Provider }
 
 func (catalogReadErrorProvider) ListModelsWithError() ([]ModelInfo, *iam.ProviderAccountObservation, error) {

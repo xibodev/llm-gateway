@@ -97,10 +97,6 @@ func catalogReadiness(providerID string, principal *config.Principal, catalog pr
 	result["catalog_source_scope"] = catalog.Diagnostics.SourceScope
 	result["catalog_synced"] = !catalog.RefreshedAt.IsZero()
 	result["catalog_stale"] = catalog.Diagnostics.Stale
-	if catalog.Err != nil {
-		result["model_verified"] = false
-		result["verification_state"] = "catalog_error"
-	}
 	return result
 }
 

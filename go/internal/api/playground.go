@@ -173,6 +173,10 @@ func enforcePlaygroundPolicy(principal *config.Principal, requestedModel, resolv
 		}
 		targets = filtered
 	}
+	targets, status, message := availableRouteTargets(targets)
+	if status != 0 {
+		return nil, status, message
+	}
 	if err := iam.CheckAndConsumeProjectRequest(principal.ProjectID, time.Now()); err != nil {
 		var exceeded *iam.QuotaExceeded
 		if errors.As(err, &exceeded) {

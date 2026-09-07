@@ -202,6 +202,13 @@ type CatalogDiagnostics struct {
 // ReadCatalogForPrincipal never borrows another caller's cache or runs inference.
 // A successful empty discovery replaces old rows and is cached for the same TTL.
 func ReadCatalogForPrincipal(providerID string, principal *config.Principal) CatalogReadResult {
+	return readCatalogForPrincipal(providerID, principal, RefreshCatalogForPrincipalWithError)
+}
+
+func readCatalogForPrincipal(
+	providerID string, principal *config.Principal,
+	refresh func(string, *config.Principal) ([]ModelInfo, *iam.ProviderAccountObservation, error),
+) CatalogReadResult {
 	result := CatalogReadResult{Diagnostics: CatalogDiagnostics{SourceScope: "gateway"}}
 	if principal != nil && principal.PrincipalID != "" {
 		result.Diagnostics.SourceScope = "principal"
@@ -223,15 +230,20 @@ func ReadCatalogForPrincipal(providerID string, principal *config.Principal) Cat
 			result.Models, result.RefreshedAt = e.Models, e.RefreshedAt
 			result.Diagnostics.FromCache = true
 		} else {
-			result.Models, _, result.Err = RefreshCatalogForPrincipalWithError(providerID, principal)
-			// Re-read after discovery: invalidation while fetching must not restore
-			// rows captured before a credential or configuration change.
+			_, _, result.Err = refresh(providerID, principal)
+			// Use one authoritative snapshot for both rows and timestamp: another
+			// refresh or invalidation may have superseded the discovery result.
 			if current, exists := cachedEntry(cacheKey); exists {
-				result.RefreshedAt = current.RefreshedAt
+				result.Models, result.RefreshedAt = current.Models, current.RefreshedAt
 				if result.Err != nil {
-					result.Models = current.Models
 					result.Diagnostics.FromCache = true
 				}
+			} else if result.Err == nil {
+				result.Err = catalogError(
+					"catalog_state_changed",
+					"Provider configuration changed during catalog refresh.",
+					0,
+				)
 			}
 		}
 	}

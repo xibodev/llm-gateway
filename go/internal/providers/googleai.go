@@ -625,6 +625,15 @@ func googleVideoResult(decoded map[string]any) (string, []byte, string) {
 
 // ---- catalog ------------------------------------------------------------- //
 
+// Vertex's unfiltered Model Garden can contain over 14,000 rows. Bound the
+// entire walk, including duplicates and filtered rows, as well as each body:
+// per-request timeouts and repeated-token detection do not bound unique tokens.
+const (
+	googleCatalogMaxPages         = 100
+	googleCatalogMaxModels        = 20000
+	googleCatalogMaxResponseBytes = 8 << 20
+)
+
 // ListModels reports the models this surface exposes. AI Studio publishes a
 // machine-readable catalogue with supportedGenerationMethods, which is the
 // honest source for capability. Vertex was long believed to expose no public
@@ -680,10 +689,18 @@ func (p GoogleAIProvider) ListModelsWithError() (
 	models := make([]ModelInfo, 0)
 	query := url.Values{"pageSize": {"1000"}}
 	seen := map[string]bool{}
-	for {
+	modelCount := 0
+	for page := 0; ; page++ {
+		if page >= googleCatalogMaxPages {
+			return nil, nil, catalogError("catalog_not_discoverable", "Provider catalog listing exceeded the page limit.", 0)
+		}
 		decoded, err := p.discoverModels(p.baseURL+"/models?"+query.Encode(), "models")
 		if err != nil {
 			return nil, nil, err
+		}
+		modelCount += len(decoded["models"].([]any))
+		if modelCount > googleCatalogMaxModels {
+			return nil, nil, catalogError("catalog_not_discoverable", "Provider catalog listing exceeded the model limit.", 0)
 		}
 		models = append(models, parseAIStudioModels(decoded)...)
 		next, _ := decoded["nextPageToken"].(string)
@@ -712,7 +729,15 @@ func (p GoogleAIProvider) discoverModels(endpoint, field string) (map[string]any
 	if err != nil {
 		return nil, catalogError("catalog_transport_error", "Provider catalog request could not reach the upstream service.", 0)
 	}
+	limited := &io.LimitedReader{R: resp.Body, N: googleCatalogMaxResponseBytes + 1}
+	resp.Body = struct {
+		io.Reader
+		io.Closer
+	}{limited, resp.Body}
 	decoded, err := decodeCatalogResponse(resp, field, "name")
+	if limited.N == 0 {
+		return nil, catalogError("catalog_not_discoverable", "Provider catalog response exceeded the size limit.", resp.StatusCode)
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -856,7 +881,11 @@ func (p GoogleAIProvider) vertexPublisherModels(publisher string) ([]ModelInfo, 
 	models := make([]ModelInfo, 0, 64)
 	pageToken := ""
 	seen := map[string]bool{}
-	for {
+	modelCount := 0
+	for page := 0; ; page++ {
+		if page >= googleCatalogMaxPages {
+			return nil, catalogError("catalog_not_discoverable", "Provider catalog listing exceeded the page limit.", 0)
+		}
 		// pageSize=1000 is rejected upstream; 200 is the measured working value.
 		query := url.Values{"pageSize": {"200"}}
 		if pageToken != "" {
@@ -872,6 +901,10 @@ func (p GoogleAIProvider) vertexPublisherModels(publisher string) ([]ModelInfo, 
 		decoded, err := p.discoverModels(endpoint, "publisherModels")
 		if err != nil {
 			return nil, err
+		}
+		modelCount += len(decoded["publisherModels"].([]any))
+		if modelCount > googleCatalogMaxModels {
+			return nil, catalogError("catalog_not_discoverable", "Provider catalog listing exceeded the model limit.", 0)
 		}
 		models = append(models, vertexManagedModels(decoded)...)
 		nextToken, _ := decoded["nextPageToken"].(string)
