@@ -219,6 +219,91 @@ func TestScopedReadinessStaleAndFailedVerification(t *testing.T) {
 	}
 }
 
+func TestCatalogErrorPreservesScopedVerification(t *testing.T) {
+	for _, scenario := range []struct {
+		name, scope, want string
+		age               time.Duration
+		gateway, noCheck  bool
+	}{
+		{name: "fresh", scope: "owner", want: "verified"},
+		{name: "stale", scope: "owner", age: 2 * time.Hour, want: "stale"},
+		{name: "other", scope: "other", want: "unknown"},
+		{name: "unknown", noCheck: true, want: "unknown"},
+		{name: "gateway-fresh", gateway: true, want: "verified"},
+		{name: "gateway-mismatch", gateway: true, scope: "other", want: "scope_mismatch"},
+	} {
+		t.Run(scenario.name, func(t *testing.T) {
+			var calls atomic.Int32
+			upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				calls.Add(1)
+				if r.Method != http.MethodGet || r.URL.Path != "/models" {
+					t.Errorf("unexpected inference: %s %s", r.Method, r.URL.Path)
+				}
+				http.Error(w, "api_key=fixture-secret", http.StatusBadGateway)
+			}))
+			defer upstream.Close()
+			setupCatalogDiagnosticAPI(t, upstream.URL)
+			owner, err := iam.CreatePrincipal("human", "fixture:verification-owner", "", "Owner")
+			if err != nil {
+				t.Fatal(err)
+			}
+			scope := scenario.scope
+			if scope == "owner" {
+				scope = owner.ID
+			}
+			if !scenario.noCheck {
+				if err := iam.RecordProviderCheck(iam.ProviderCheck{
+					ProviderID: "diagnostic", Operation: iam.CheckVerify, ScopeKey: scope,
+					Success: true, Model: "private-verified-model", CheckedAt: time.Now().Add(-scenario.age).Unix(),
+				}); err != nil {
+					t.Fatal(err)
+				}
+			}
+			for _, route := range []string{"catalog", "models"} {
+				method := http.MethodGet
+				if route == "models" {
+					method = http.MethodPost
+				}
+				url := "/admin/api/providers/diagnostic/" + route
+				if !scenario.gateway {
+					url += "?principal_id=" + owner.ID
+				}
+				req := httptest.NewRequest(method, url, nil)
+				req.Header.Set("Authorization", "Bearer admin-secret")
+				rec := httptest.NewRecorder()
+				NewServer().ServeHTTP(rec, req)
+				var payload map[string]any
+				if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil || rec.Code != 200 {
+					t.Fatalf("response: %d %s %v", rec.Code, rec.Body.String(), err)
+				}
+				catalog := payload["catalog"].(map[string]any)
+				readiness := payload["readiness"].(map[string]any)
+				if catalog["status"] != "error" || catalog["failure_code"] != "catalog_http_error" || catalog["upstream_status"] != float64(502) ||
+					readiness["catalog_synced"] != false || len(payload["models"].([]any)) != 0 {
+					t.Fatalf("catalog failure lost: %+v", payload)
+				}
+				verified := scenario.want == "verified"
+				if readiness["model_verified"] != verified || readiness["verification_state"] != scenario.want ||
+					readiness["verification_stale"] != (scenario.want == "stale") {
+					t.Fatalf("verification changed by discovery failure: %+v", readiness)
+				}
+				if verified && readiness["verified_model"] != "private-verified-model" {
+					t.Fatalf("verified model lost: %+v", readiness)
+				}
+				if !verified && strings.Contains(rec.Body.String(), "private-verified-model") {
+					t.Fatal("response exposed unverified or other-scope model evidence")
+				}
+				if strings.Contains(rec.Body.String(), owner.ID) || strings.Contains(rec.Body.String(), "fixture-secret") {
+					t.Fatal("response exposed private diagnostics")
+				}
+			}
+			if calls.Load() != 2 {
+				t.Fatalf("discovery calls = %d, want 2", calls.Load())
+			}
+		})
+	}
+}
+
 func TestModelListRetainsBestEffortContractOnCatalogFailure(t *testing.T) {
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "fixture failure", http.StatusBadGateway)

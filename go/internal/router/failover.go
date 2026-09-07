@@ -116,6 +116,8 @@ func ResolveTargetsForPrincipal(
 
 // ResolveForPrincipal maps a requested model to an ordered failover chain and
 // preserves the exact configured category name used by the router.
+// Disabled-only routes retain their targets for authorization; callers must
+// check availability after policy enforcement and before executing the chain.
 func ResolveForPrincipal(
 	model string, principal *config.Principal,
 ) (Resolution, error) {
@@ -139,15 +141,17 @@ func ResolveForPrincipal(
 			out = append(out, Target{Provider: m.Provider, Model: m.Model})
 		}
 		if len(out) == 0 {
-			return Resolution{}, &ModelNotFoundError{Requested: name, Unavailable: true}
+			// Preserve identity for policy checks on unavailable routes only.
+			// In a mixed route, disabled members must not mask an enabled
+			// member's provider-policy or credential denial.
+			for _, m := range cat.Failover {
+				out = append(out, Target{Provider: m.Provider, Model: m.Model})
+			}
 		}
 		return Resolution{Targets: out, Category: categoryName}, nil
 	}
 	if head, tail, ok := strings.Cut(name, "/"); ok {
-		if cfg, exists := config.Get().Providers[head]; exists && tail != "" {
-			if cfg.Disabled {
-				return Resolution{}, &ModelNotFoundError{Requested: name, Unavailable: true}
-			}
+		if _, exists := config.Get().Providers[head]; exists && tail != "" {
 			return Resolution{Targets: []Target{{Provider: head, Model: tail}}}, nil
 		}
 	}

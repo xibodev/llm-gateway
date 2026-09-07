@@ -53,11 +53,13 @@ before serving HTTP. There is no separate migration CLI or supported database
 downgrade. Rehearse with a copy of your state; a successful upgrade of one
 installation is not a guarantee for every configuration or release pair.
 
-For `v0.1.0` to `v0.2.0`, the schema advances from migration 13 to 14, adding
-encrypted API-key recovery columns. Existing hash-only keys remain valid but do
-not become revealable merely by upgrading. Neither tag has a `backup` command.
-The current source includes further migrations and backup support; do not treat
-its features as already present in those published releases.
+Review the target's migrations against the installed release before upgrading.
+Existing hash-only keys remain valid but do not become revealable merely by
+upgrading to encrypted API-key recovery. Check the installed binary's
+`llmgw --help` for backup support; source documentation does not establish which
+commands the installed binary provides. If backup support is absent, use the
+offline snapshot below and retain it for rollback rather than downgrading the
+migrated database.
 
 ### Pin and snapshot
 
@@ -151,8 +153,8 @@ made after the snapshot; account for those before reopening traffic.
 
 ## Back up and restore
 
-The current source implements the following commands; `v0.1.0` and `v0.2.0` do
-not. Check the chosen release's `llmgw --help` before use. Run offline with the
+Check the installed binary's `llmgw --help` for the following commands before
+use; if absent, use the offline snapshot procedure above. Run offline with the
 same state/config environment as the service, not the maintenance user's default
 home. Restore destinations, including `LLMGW_CONFIG`, must be writable; an older
 deployment's read-only config mount cannot be replaced in place. Stop every

@@ -76,8 +76,8 @@ func TestDisabledProviderRouteAPIContract(t *testing.T) {
 			t.Fatalf("re-enabled provider unavailable: status=%d calls=%d body=%s", w.Code, calls.Load()-before, w.Body.String())
 		}
 	}
-	// The common resolver also protects the native API entry points, before
-	// adapters, credentials, or upstream requests can run.
+	// The shared policy boundary also protects the native API entry points,
+	// before adapters or upstream requests can run.
 	config.Update(func(s *config.Settings) { s.Providers["disabled"].Disabled = true })
 	for _, path := range []string{"/v1/responses", "/v1/messages"} {
 		before := calls.Load()
