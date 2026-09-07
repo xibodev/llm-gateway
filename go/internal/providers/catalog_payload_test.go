@@ -63,6 +63,11 @@ func TestCatalogPayloadValidationAndCache(t *testing.T) {
 				{"partial-decode", fmt.Sprintf(`{%q:[],"extra":`, provider.field), "catalog_invalid_json", 200, 0},
 				{"missing", `{}`, "catalog_invalid_shape", 200, 0},
 				{"null-body", `null`, "catalog_invalid_shape", 200, 0},
+				{"array-body", `["fixture-secret"]`, "catalog_invalid_shape", 200, 0},
+				{"string-body", `"fixture-secret"`, "catalog_invalid_shape", 200, 0},
+				{"number-body", `17`, "catalog_invalid_shape", 200, 0},
+				{"true-body", `true`, "catalog_invalid_shape", 200, 0},
+				{"false-body", `false`, "catalog_invalid_shape", 200, 0},
 				{"wrong-field", `{"unrelated":[]}`, "catalog_invalid_shape", 200, 0},
 				{"null-array", fmt.Sprintf(`{%q:null}`, provider.field), "catalog_invalid_shape", 200, 0},
 				{"object-array", fmt.Sprintf(`{%q:{}}`, provider.field), "catalog_invalid_shape", 200, 0},
@@ -105,6 +110,12 @@ func TestCatalogPayloadValidationAndCache(t *testing.T) {
 							len(result.Models) != 1 || result.Models[0].ID != "old" || !result.RefreshedAt.Equal(stale) ||
 							len(cached) != 1 || cached[0].ID != "old" || !refreshed.Equal(stale) {
 							t.Fatalf("failure lost diagnostics or stale cache: %+v, cache=%+v at %v", result, cached, refreshed)
+						}
+						if strings.HasSuffix(tc.name, "-body") && detail != "Provider catalog response was not a JSON object." {
+							t.Fatalf("non-object response has misleading detail: %q", detail)
+						}
+						if tc.code == "catalog_invalid_json" && detail != "Provider catalog response was not valid JSON." {
+							t.Fatalf("malformed JSON has misleading detail: %q", detail)
 						}
 						raw, _ := json.Marshal(result.Diagnostics)
 						for _, text := range []string{detail, result.Err.Error(), string(raw)} {

@@ -30,9 +30,13 @@ func decodeCatalogResponse(resp *http.Response, field string, identities ...stri
 	if err != nil {
 		return nil, catalogError("catalog_transport_error", "Provider catalog response could not be read.", resp.StatusCode)
 	}
-	var body map[string]any
-	if json.Unmarshal(raw, &body) != nil {
+	var decoded any
+	if json.Unmarshal(raw, &decoded) != nil {
 		return nil, catalogError("catalog_invalid_json", "Provider catalog response was not valid JSON.", resp.StatusCode)
+	}
+	body, ok := decoded.(map[string]any)
+	if !ok {
+		return nil, catalogError("catalog_invalid_shape", "Provider catalog response was not a JSON object.", resp.StatusCode)
 	}
 	items, ok := body[field].([]any)
 	if !ok {
