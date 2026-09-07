@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import test from "node:test";
+import ts from "typescript";
 
 const root = resolve(import.meta.dirname, "..");
 
@@ -403,7 +404,7 @@ test("overview shows an evidence-driven first-run guide for admins", () => {
   assert.match(guide, /activeProjectIDs\.has/);
   assert.match(guide, /Verify inference with a test completion/);
   assert.match(guide, /Mint a project API key/);
-  assert.match(guide, /statuses\.some\(\(status\) => asRecord\(status\.readiness\)\.model_verified === true\)/);
+  assert.match(guide, /asList\(status\.instances\)\.some/);
   assert.doesNotMatch(guide, /last_verified_at/);
   assert.match(guide, /localStorage/);
   assert.match(guide, /llmgw\.console\.setup-guide-dismissed/);
@@ -518,8 +519,36 @@ test("setup guide points each step at the provider that still needs it", () => {
   const guide = readFileSync(resolve(root, "src/components/GetStartedGuide.tsx"), "utf8");
   assert.match(guide, /needsCatalog/);
   assert.match(guide, /needsVerify/);
-  assert.match(guide, /configured\.find\(\(status\) => asRecord\(status\.readiness\)\.model_verified !== true\)/);
+  assert.match(guide, /configured\.find\(\(status\) => !verifiedProviders\.has\(status\)\)/);
   assert.doesNotMatch(guide, /firstConfigured/);
+});
+
+test("setup verification uses instance readiness and navigates to the owning tile", () => {
+  const guide = readFileSync(resolve(root, "src/components/GetStartedGuide.tsx"), "utf8");
+  const records = readFileSync(resolve(root, "src/lib/records.ts"), "utf8")
+    .replace(/^import type .*;$/gm, "").replaceAll("export function", "function");
+  const start = guide.indexOf("export function buildGuideSteps");
+  const end = guide.indexOf("export function GetStartedGuide", start);
+  assert.ok(start >= 0 && end > start);
+  const source = records + guide.slice(start, end).replace("export function", "function");
+  const { outputText } = ts.transpileModule(source, { compilerOptions: { target: ts.ScriptTarget.ES2022 } });
+  const buildGuideSteps = new Function(outputText + "; return buildGuideSteps;")();
+  const tile = (id, verified, extra = {}) => ({ id, configured: true,
+    readiness: { model_verified: false }, instances: [{ id: `${id}-instance`, readiness: { model_verified: verified } }], ...extra });
+  for (const [name, statuses, done, target] of [
+    ["fresh registry", [tile("registry", true)], true, "registry"],
+    ["historical stale", [tile("registry", false, { last_verified_at: "historical" })], false, "registry"],
+    ["failed instance", [tile("registry", false)], false, "registry"],
+    ["missing instances", [tile("registry", true, { instances: undefined })], false, "registry"],
+    ["aggregate cannot verify", [tile("registry", false, { readiness: { model_verified: true } })], false, "registry"],
+    ["custom instance", [tile("custom", true, { custom: true })], true, "custom"],
+    ["owning unverified tile", [tile("first", true), tile("second", false)], true, "second"],
+    ["mixed instances", [tile("registry", false, { instances: [{ readiness: { model_verified: false } }, { readiness: { model_verified: true } }] })], true, "registry"],
+  ]) {
+    const step = buildGuideSteps({ provider_statuses: statuses }).find((step) => step.title.startsWith("Verify inference"));
+    assert.equal(step.done, done, name);
+    assert.equal(step.pageDetail, target, name);
+  }
 });
 
 test("playground exercises image and video as their own surfaces", () => {
