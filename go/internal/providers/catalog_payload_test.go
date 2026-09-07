@@ -304,3 +304,47 @@ func TestVertexCatalogRejectsMalformedLaterPage(t *testing.T) {
 		t.Fatalf("partial catalog accepted: models=%+v error=%v calls=%d", models, err, calls.Load())
 	}
 }
+
+func TestVertexCatalogActionValuesAndCache(t *testing.T) {
+	for _, action := range []string{"requestAccess", "openGenerationAiStudio", "deploy", "deployGke", "multiDeployVertex"} {
+		for _, value := range []string{`false`, `17`, `"fixture-secret"`, `null`, `[]`, `{}`, `{"future":{"nested":[null,17]}}`} {
+			t.Run(action+"/"+value, func(t *testing.T) {
+				valid := strings.HasPrefix(value, "{")
+				server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+					if r.URL.Query().Get("pageToken") == "next" {
+						// Unknown extensions are not capability evidence and may evolve
+						// independently of the native action messages we consume.
+						_, _ = fmt.Fprintf(w, `{"publisherModels":[{"name":"publishers/google/models/gemini-fixture","supportedActions":{%q:%s,"futureAction":false}}]}`, action, value)
+						return
+					}
+					_, _ = fmt.Fprint(w, `{"publisherModels":[{"name":"publishers/google/models/gemini-first","supportedActions":{"requestAccess":{}}}],"nextPageToken":"next"}`)
+				}))
+				defer server.Close()
+				setupCatalogReadTest(t, server.URL)
+				cacheMu.Lock()
+				cache["catalog-read"] = NewVertexAIWithAccessToken(server.URL+"/v1", "fixture-token", "fixture-project", "global", 2)
+				cacheMu.Unlock()
+				stale := time.Now().Add(-2 * catalogTTL)
+				catMu.Lock()
+				catData["catalog-read"] = catalogEntry{SchemaVersion: catalogSchemaVersion, Models: []ModelInfo{{ID: "old"}}, RefreshedAt: stale}
+				catMu.Unlock()
+				result := ReadCatalogForPrincipal("catalog-read", nil)
+				cached, refreshed := CatalogCached("catalog-read")
+				if valid {
+					count := 1
+					if action == "requestAccess" || action == "openGenerationAiStudio" {
+						count = 2
+					}
+					if result.Err != nil || len(result.Models) != count || len(cached) != count || !refreshed.After(stale) {
+						t.Fatalf("legitimate action rejected: %+v cache=%+v", result, cached)
+					}
+				} else if code, detail, status := CatalogFailure(result.Err); code != "catalog_invalid_shape" || status != 200 ||
+					strings.Contains(detail, "fixture-secret") || !result.Diagnostics.Stale || !result.Diagnostics.FromCache ||
+					len(result.Models) != 1 || result.Models[0].ID != "old" || !result.RefreshedAt.Equal(stale) ||
+					len(cached) != 1 || cached[0].ID != "old" || !refreshed.Equal(stale) {
+					t.Fatalf("malformed action replaced stale cache: %+v cache=%+v", result, cached)
+				}
+			})
+		}
+	}
+}

@@ -414,12 +414,15 @@ func (s *chatToolStream) normalize(data string) string {
 	}
 	var chunk map[string]json.RawMessage
 	var choices []map[string]json.RawMessage
-	if json.Unmarshal([]byte(data), &chunk) != nil {
+	if json.Unmarshal([]byte(data), &chunk) != nil || chunk == nil {
+		// Lost events cannot be attributed to a choice; prior completeness
+		// no longer proves that a later stop safely represents a tool call.
+		s.disabled = true
 		return data
 	}
 	if raw, exists := chunk["choices"]; !exists {
 		return data
-	} else if json.Unmarshal(raw, &choices) != nil {
+	} else if json.Unmarshal(raw, &choices) != nil || choices == nil {
 		s.disabled = true
 		return data
 	}
@@ -444,7 +447,7 @@ func (s *chatToolStream) normalize(data string) string {
 			continue
 		}
 		var delta map[string]json.RawMessage
-		if raw, exists := choice["delta"]; exists && json.Unmarshal(raw, &delta) != nil {
+		if raw, exists := choice["delta"]; exists && (json.Unmarshal(raw, &delta) != nil || delta == nil) {
 			state.invalid = true
 		}
 		if raw, exists := delta["tool_calls"]; exists {
