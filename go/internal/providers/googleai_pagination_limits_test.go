@@ -38,8 +38,8 @@ func TestGoogleCatalogPaginationLimits(t *testing.T) {
 				{name: "filtered-model-overflow", pages: 3, rows: googleCatalogMaxModels / 2, lastRows: 1, filtered: true, failure: "model"},
 				{name: "single-page-model-overflow", pages: 1, lastRows: googleCatalogMaxModels + 1, failure: "model"},
 				{name: "complete-with-duplicates", pages: 2, rows: 1, lastRows: 1, duplicates: true, count: 2},
-				{name: "complete-at-body-limit", pages: 1, lastRows: 1, bodySize: googleCatalogMaxResponseBytes, count: 1},
-				{name: "oversized-later-body", pages: 2, rows: 1, lastRows: 1, bodySize: googleCatalogMaxResponseBytes + 1, failure: "size"},
+				{name: "complete-at-body-limit", pages: 1, lastRows: 1, bodySize: catalogMaxResponseBytes, count: 1},
+				{name: "oversized-later-body", pages: 2, rows: 1, lastRows: 1, bodySize: catalogMaxResponseBytes + 1, failure: "size"},
 			} {
 				t.Run(tc.name, func(t *testing.T) {
 					var calls atomic.Int32

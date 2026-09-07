@@ -8,6 +8,8 @@ import (
 	"strings"
 )
 
+const catalogMaxResponseBytes = 8 << 20
+
 // Catalog validation is separate from inference decoding: a bad discovery
 // response must not replace a usable cache with an apparently empty catalog.
 func decodeCatalogResponse(resp *http.Response, field string, identities ...string) (map[string]any, error) {
@@ -21,7 +23,10 @@ func decodeCatalogResponse(resp *http.Response, field string, identities ...stri
 		}
 		return nil, catalogError(code, detail, resp.StatusCode)
 	}
-	raw, err := io.ReadAll(resp.Body)
+	raw, err := io.ReadAll(io.LimitReader(resp.Body, catalogMaxResponseBytes+1))
+	if len(raw) > catalogMaxResponseBytes {
+		return nil, catalogError("catalog_not_discoverable", "Provider catalog response exceeded the size limit.", resp.StatusCode)
+	}
 	if err != nil {
 		return nil, catalogError("catalog_transport_error", "Provider catalog response could not be read.", resp.StatusCode)
 	}

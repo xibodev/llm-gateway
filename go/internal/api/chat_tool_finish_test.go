@@ -205,6 +205,11 @@ func TestChatToolFinishStreamRejectsAmbiguousOrMalformedDeltas(t *testing.T) {
 	start := `{"choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"id":"call_fixture","type":"function","function":{"name":"add_fixture","arguments":"{}"}}]}}]}`
 	stop := `{"choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}`
 	for _, invalid := range []string{
+		`{"choices":`,
+		`null`,
+		`{"choices":null}`,
+		`{"choices":[{"index":0,"delta":null}]}`,
+		`{"choices":[{"index":0,"delta":null,"finish_reason":"stop"}]}`,
 		`{"choices":[{"delta":{"tool_calls":[]}}]}`,
 		`{"choices":[{"index":null,"delta":{}}]}`,
 		`{"choices":[{"index":0,"delta":{"tool_calls":[{"function":{"arguments":"{}"}}]}}]}`,
@@ -229,4 +234,49 @@ func TestChatToolFinishStreamRejectsAmbiguousOrMalformedDeltas(t *testing.T) {
 			t.Fatal("oversized tracking state was retained or promoted")
 		}
 	})
+}
+
+func TestChatToolFinishMalformedChoiceIsolation(t *testing.T) {
+	start := `{"choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"id":"call_fixture","type":"function","function":{"name":"add_fixture","arguments":"{}"}}]}}]}`
+	for _, delta := range []string{`null`, `false`, `[]`, `"bad"`} {
+		t.Run(delta, func(t *testing.T) {
+			s := chatToolStream{choices: map[int]*chatToolChoice{}}
+			s.normalize(start)
+			s.normalize(strings.Replace(start, `"index":0`, `"index":1`, 1))
+			invalid := `{"choices":[{"index":0,"delta":` + delta + `}]}`
+			if got := s.normalize(invalid); got != invalid {
+				t.Fatalf("invalid event changed: %s", got)
+			}
+			stop := `{"provider_extra":{"large":9007199254740993},"choices":[{"index":0,"delta":{},"finish_reason":"stop"},{"index":1,"finish_reason":"stop","future":null}]}`
+			want := strings.Replace(stop, `"index":1,"finish_reason":"stop"`, `"index":1,"finish_reason":"tool_calls"`, 1)
+			var expected map[string]json.RawMessage
+			_ = json.Unmarshal([]byte(want), &expected)
+			var got map[string]json.RawMessage
+			_ = json.Unmarshal([]byte(s.normalize(stop)), &got)
+			// Normalize key ordering within choices without losing large extension numbers.
+			var expectedChoices, gotChoices []map[string]json.RawMessage
+			_ = json.Unmarshal(expected["choices"], &expectedChoices)
+			_ = json.Unmarshal(got["choices"], &gotChoices)
+			expected["choices"], _ = json.Marshal(expectedChoices)
+			got["choices"], _ = json.Marshal(gotChoices)
+			canonical, _ := json.Marshal(expected)
+			actual, _ := json.Marshal(got)
+			if string(actual) != string(canonical) {
+				t.Fatalf("choice isolation or missing terminal delta changed: got=%s want=%s", actual, canonical)
+			}
+		})
+	}
+}
+
+func TestChatToolFinishUnrelatedEventsPreserveTracking(t *testing.T) {
+	s := chatToolStream{choices: map[int]*chatToolChoice{}}
+	s.normalize(`{"choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"id":"call_fixture","type":"function","function":{"name":"add_fixture","arguments":"{}"}}]}}]}`)
+	for _, event := range []string{`{"usage":{"completion_tokens":1}}`, `{"choices":[],"future":null}`} {
+		if s.normalize(event) != event {
+			t.Fatal("unrelated event changed")
+		}
+	}
+	if got := s.normalize(`{"choices":[{"index":0,"finish_reason":"stop"}]}`); !strings.Contains(got, `"finish_reason":"tool_calls"`) {
+		t.Fatalf("valid tracking lost: %s", got)
+	}
 }

@@ -40,7 +40,8 @@ func scopedReadiness(checks []iam.ProviderCheck, scope string, aggregate bool) m
 		"source_scope": source, "model_verified": false,
 		"verification_state": "unknown", "verification_stale": false,
 	}
-	var latest, verify *iam.ProviderCheck
+	// Catalog-facing probes cannot establish or revoke inference evidence.
+	var verify *iam.ProviderCheck
 	for i := range checks {
 		check := &checks[i]
 		if check.ScopeKey != scope {
@@ -48,9 +49,6 @@ func scopedReadiness(checks []iam.ProviderCheck, scope string, aggregate bool) m
 				result["verification_state"] = "scope_mismatch"
 			}
 			continue
-		}
-		if latest == nil || check.CheckedAt >= latest.CheckedAt {
-			latest = check
 		}
 		if check.Operation == iam.CheckVerify && (verify == nil || check.CheckedAt >= verify.CheckedAt) {
 			verify = check
@@ -62,7 +60,7 @@ func scopedReadiness(checks []iam.ProviderCheck, scope string, aggregate bool) m
 	stale := time.Since(time.Unix(verify.CheckedAt, 0)) > time.Hour
 	result["verification_stale"] = stale
 	switch {
-	case !verify.Success || (latest != nil && !latest.Success):
+	case !verify.Success:
 		result["verification_state"] = "failed"
 	case stale:
 		result["verification_state"] = "stale"

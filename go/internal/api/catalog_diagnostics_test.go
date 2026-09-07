@@ -208,7 +208,7 @@ func TestScopedReadinessStaleAndFailedVerification(t *testing.T) {
 			checks := []iam.ProviderCheck{{Operation: iam.CheckVerify, ScopeKey: "owner", Success: true,
 				Model: "fixture-model", CheckedAt: time.Now().Add(-scenario.age).Unix()}}
 			if scenario.failed {
-				checks = append(checks, iam.ProviderCheck{Operation: iam.CheckCatalogSync,
+				checks = append(checks, iam.ProviderCheck{Operation: iam.CheckVerify,
 					ScopeKey: "owner", CheckedAt: time.Now().Unix()})
 			}
 			result := scopedReadiness(checks, "owner", false)
@@ -216,6 +216,34 @@ func TestScopedReadinessStaleAndFailedVerification(t *testing.T) {
 				t.Fatalf("readiness: %+v", result)
 			}
 		})
+	}
+}
+
+func TestScopedReadinessIgnoresNonVerifyFailures(t *testing.T) {
+	for _, operation := range []string{iam.CheckCatalogSync, iam.CheckReachability, iam.CheckCacheReset} {
+		for _, scope := range []string{"", "owner"} {
+			t.Run(operation+"/"+scope, func(t *testing.T) {
+				now := time.Now().Unix()
+				checks := []iam.ProviderCheck{
+					{Operation: operation, ScopeKey: scope, CheckedAt: now},
+					{Operation: iam.CheckVerify, ScopeKey: scope, Success: true, Model: "fixture-model", CheckedAt: now - 1},
+				}
+				result := scopedReadiness(checks, scope, scope == "")
+				if result["model_verified"] != true || result["verification_state"] != "verified" || result["verified_model"] != "fixture-model" {
+					t.Fatalf("nonverify failure erased verification: %+v", result)
+				}
+				checks[1].CheckedAt = now - int64((2*time.Hour)/time.Second)
+				result = scopedReadiness(checks, scope, scope == "")
+				if result["model_verified"] != false || result["verification_state"] != "stale" || result["verification_stale"] != true {
+					t.Fatalf("nonverify failure changed stale evidence: %+v", result)
+				}
+				checks[1].ScopeKey = "other"
+				result = scopedReadiness(checks, scope, scope == "")
+				if result["model_verified"] != false || result["verification_state"] != "scope_mismatch" {
+					t.Fatalf("nonverify failure borrowed other scope: %+v", result)
+				}
+			})
+		}
 	}
 }
 

@@ -629,9 +629,8 @@ func googleVideoResult(decoded map[string]any) (string, []byte, string) {
 // entire walk, including duplicates and filtered rows, as well as each body:
 // per-request timeouts and repeated-token detection do not bound unique tokens.
 const (
-	googleCatalogMaxPages         = 100
-	googleCatalogMaxModels        = 20000
-	googleCatalogMaxResponseBytes = 8 << 20
+	googleCatalogMaxPages  = 100
+	googleCatalogMaxModels = 20000
 )
 
 // ListModels reports the models this surface exposes. AI Studio publishes a
@@ -729,15 +728,7 @@ func (p GoogleAIProvider) discoverModels(endpoint, field string) (map[string]any
 	if err != nil {
 		return nil, catalogError("catalog_transport_error", "Provider catalog request could not reach the upstream service.", 0)
 	}
-	limited := &io.LimitedReader{R: resp.Body, N: googleCatalogMaxResponseBytes + 1}
-	resp.Body = struct {
-		io.Reader
-		io.Closer
-	}{limited, resp.Body}
 	decoded, err := decodeCatalogResponse(resp, field, "name")
-	if limited.N == 0 {
-		return nil, catalogError("catalog_not_discoverable", "Provider catalog response exceeded the size limit.", resp.StatusCode)
-	}
 	if err != nil {
 		return nil, err
 	}
@@ -770,8 +761,18 @@ func (p GoogleAIProvider) discoverModels(endpoint, field string) (map[string]any
 				}
 			}
 		} else if value, exists := row["supportedActions"]; exists {
-			if _, ok := value.(map[string]any); !ok {
+			actions, ok := value.(map[string]any)
+			if !ok {
 				return invalid()
+			}
+			// Native actions are messages, including empty objects. Leave unknown
+			// extensions open, but never treat a malformed action as capability evidence.
+			for _, key := range []string{"openGenerationAiStudio", "requestAccess", "deploy", "deployGke", "multiDeployVertex"} {
+				if action, exists := actions[key]; exists {
+					if _, ok := action.(map[string]any); !ok {
+						return invalid()
+					}
+				}
 			}
 		}
 	}
