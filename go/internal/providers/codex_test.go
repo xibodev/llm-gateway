@@ -74,6 +74,25 @@ func TestCodexCatalogRefreshStoresModelsAfterCredentialRotation(t *testing.T) {
 	}
 }
 
+func TestCodexCatalogTrimsIdentityFallback(t *testing.T) {
+	for _, body := range []string{
+		`{"data":[{"id":" ","name":" valid-model "}]}`,
+		`{"data":[{"id":" valid-model ","name":"other-model"}]}`,
+		`{"data":[{"name":" valid-model "}]}`,
+	} {
+		t.Run(body, func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				_, _ = w.Write([]byte(body))
+			}))
+			defer server.Close()
+			models, _, err := listModelsWithError(catalogFixtureCodex(t, server.URL))
+			if err != nil || len(models) != 1 || models[0].ID != "valid-model" {
+				t.Fatalf("Codex identity not normalized: models=%+v err=%v", models, err)
+			}
+		})
+	}
+}
+
 func TestCodexProviderUsesResponsesRefreshesOnceAndCatalogsWithClientVersion(t *testing.T) {
 	setupCodexProviderTest(t)
 	human, err := iam.CreatePrincipal("human", "authentik:codex-owner", "", "Codex Owner")
