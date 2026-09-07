@@ -8,6 +8,8 @@ import (
 	"io"
 	"net/http"
 	"strings"
+
+	"llmgw/internal/iam"
 )
 
 // OllamaProvider talks to a local Ollama daemon over its native /api/chat,
@@ -279,38 +281,30 @@ func (p OllamaProvider) Stream(model string, messages []Message, kw Kwargs) (Str
 }
 
 func (p OllamaProvider) ListModels() []ModelInfo {
+	models, _, _ := p.ListModelsWithError()
+	return models
+}
+
+func (p OllamaProvider) ListModelsWithError() ([]ModelInfo, *iam.ProviderAccountObservation, error) {
 	timeout := p.Timeout
 	if timeout > 10 {
 		timeout = 10
 	}
 	resp, err := httpClient(timeout).Get(strings.TrimRight(p.BaseURL, "/") + "/api/tags")
 	if err != nil {
-		return nil
+		return nil, nil, catalogError("catalog_transport_error", "Provider catalog request could not reach the upstream service.", 0)
 	}
-	defer resp.Body.Close()
-	if resp.StatusCode >= 400 {
-		return nil
-	}
-	body, err := decodeJSON(resp.Body)
+	body, err := decodeCatalogResponse(resp, "models", "name", "model")
 	if err != nil {
-		return nil
+		return nil, nil, err
 	}
-	items, ok := body["models"].([]any)
-	if !ok {
-		return nil
-	}
-	var out []ModelInfo
+	items := body["models"].([]any)
+	out := make([]ModelInfo, 0, len(items))
 	for _, entry := range items {
-		m, ok := entry.(map[string]any)
-		if !ok {
-			continue
-		}
+		m := entry.(map[string]any)
 		name, _ := m["name"].(string)
-		if name == "" {
+		if strings.TrimSpace(name) == "" {
 			name, _ = m["model"].(string)
-		}
-		if name == "" {
-			continue
 		}
 		vendor := "ollama"
 		if details, ok := m["details"].(map[string]any); ok {
@@ -320,5 +314,5 @@ func (p OllamaProvider) ListModels() []ModelInfo {
 		}
 		out = append(out, ModelInfo{ID: name, Vendor: vendor})
 	}
-	return out
+	return out, nil, nil
 }

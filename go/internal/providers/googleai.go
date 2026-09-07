@@ -677,22 +677,80 @@ func (p GoogleAIProvider) ListModelsWithError() (
 			0,
 		)
 	}
-	decoded, status, err := p.do(http.MethodGet, p.baseURL+"/models?pageSize=1000", nil)
+	models := make([]ModelInfo, 0)
+	query := url.Values{"pageSize": {"1000"}}
+	seen := map[string]bool{}
+	for {
+		decoded, err := p.discoverModels(p.baseURL+"/models?"+query.Encode(), "models")
+		if err != nil {
+			return nil, nil, err
+		}
+		models = append(models, parseAIStudioModels(decoded)...)
+		next, _ := decoded["nextPageToken"].(string)
+		if next == "" {
+			return models, nil, nil
+		}
+		if seen[next] {
+			return nil, nil, catalogError("catalog_invalid_shape", "Provider catalog response repeated a page token.", http.StatusOK)
+		}
+		seen[next] = true
+		query.Set("pageToken", next)
+	}
+}
+
+func (p GoogleAIProvider) discoverModels(endpoint, field string) (map[string]any, error) {
+	req, err := http.NewRequest(http.MethodGet, endpoint, nil)
 	if err != nil {
-		code := "catalog_transport_error"
-		detail := "Provider catalog request could not reach the upstream service."
-		if invocation, ok := err.(*InvocationError); ok && invocation.Status > 0 {
-			code = "catalog_http_error"
-			detail = fmt.Sprintf("Provider catalog returned HTTP %d.", invocation.Status)
-			if invocation.Status == http.StatusUnauthorized ||
-				invocation.Status == http.StatusForbidden {
-				code = "catalog_authentication_failed"
-				detail = "Provider credential was rejected by the catalog API."
+		return nil, catalogError("catalog_transport_error", "Provider catalog request could not be created.", 0)
+	}
+	if p.bearerToken != "" {
+		req.Header.Set("Authorization", "Bearer "+p.bearerToken)
+	} else if p.apiKey != "" {
+		req.Header.Set("x-goog-api-key", p.apiKey)
+	}
+	resp, err := (&http.Client{Timeout: p.timeout}).Do(req)
+	if err != nil {
+		return nil, catalogError("catalog_transport_error", "Provider catalog request could not reach the upstream service.", 0)
+	}
+	decoded, err := decodeCatalogResponse(resp, field, "name")
+	if err != nil {
+		return nil, err
+	}
+	invalid := func() (map[string]any, error) {
+		return nil, catalogError("catalog_invalid_shape", "Provider catalog response contained invalid model metadata.", resp.StatusCode)
+	}
+	if token, exists := decoded["nextPageToken"]; exists {
+		if _, ok := token.(string); !ok {
+			return invalid()
+		}
+	}
+	for _, raw := range decoded[field].([]any) {
+		row := raw.(map[string]any)
+		name := row["name"].(string)
+		if strings.TrimSpace(name[strings.LastIndex(name, "/")+1:]) == "" {
+			return invalid()
+		}
+		// These fields drive filtering; malformed values are not evidence that
+		// a model is unsupported. Unknown methods/actions remain legitimate.
+		if field == "models" {
+			if value, exists := row["supportedGenerationMethods"]; exists {
+				methods, ok := value.([]any)
+				if !ok {
+					return invalid()
+				}
+				for _, method := range methods {
+					if text, ok := method.(string); !ok || strings.TrimSpace(text) == "" {
+						return invalid()
+					}
+				}
+			}
+		} else if value, exists := row["supportedActions"]; exists {
+			if _, ok := value.(map[string]any); !ok {
+				return invalid()
 			}
 		}
-		return nil, nil, catalogError(code, detail, status)
 	}
-	return parseAIStudioModels(decoded), nil, nil
+	return decoded, nil
 }
 
 // catalog is the terse spelling tests reach for; ListModelsWithError is the
@@ -797,6 +855,7 @@ func (p GoogleAIProvider) vertexPublisherModels(publisher string) ([]ModelInfo, 
 	}
 	models := make([]ModelInfo, 0, 64)
 	pageToken := ""
+	seen := map[string]bool{}
 	for {
 		// pageSize=1000 is rejected upstream; 200 is the measured working value.
 		query := url.Values{"pageSize": {"200"}}
@@ -810,26 +869,19 @@ func (p GoogleAIProvider) vertexPublisherModels(publisher string) ([]ModelInfo, 
 		endpoint := fmt.Sprintf(
 			"%s/v1beta1/publishers/%s/models?%s", base, publisher, query.Encode(),
 		)
-		decoded, status, err := p.do(http.MethodGet, endpoint, nil)
+		decoded, err := p.discoverModels(endpoint, "publisherModels")
 		if err != nil {
-			code := "catalog_transport_error"
-			detail := "Provider catalog request could not reach the upstream service."
-			if invocation, ok := err.(*InvocationError); ok && invocation.Status > 0 {
-				code = "catalog_http_error"
-				detail = fmt.Sprintf("Provider catalog returned HTTP %d.", invocation.Status)
-				if invocation.Status == http.StatusUnauthorized ||
-					invocation.Status == http.StatusForbidden {
-					code = "catalog_authentication_failed"
-					detail = "Provider credential was rejected by the catalog API."
-				}
-			}
-			return nil, catalogError(code, detail, status)
+			return nil, err
 		}
 		models = append(models, vertexManagedModels(decoded)...)
 		nextToken, _ := decoded["nextPageToken"].(string)
 		if nextToken == "" {
 			break
 		}
+		if seen[nextToken] {
+			return nil, catalogError("catalog_invalid_shape", "Provider catalog response repeated a page token.", http.StatusOK)
+		}
+		seen[nextToken] = true
 		pageToken = nextToken
 	}
 	return models, nil

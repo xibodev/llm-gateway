@@ -134,7 +134,7 @@ func buildModelList(principal *config.Principal) (map[string]any, error) {
 	modelSnapshot := map[string][]providers.ModelInfo{}
 	eligibleProviders := map[string]bool{}
 	for _, providerID := range providerIDs {
-		if !providerAllowed(principal, projectPolicy, providerID) {
+		if s.Providers[providerID].Disabled || !providerAllowed(principal, projectPolicy, providerID) {
 			continue
 		}
 		authorized, err := providers.ProviderCredentialAuthorized(providerID, principal)

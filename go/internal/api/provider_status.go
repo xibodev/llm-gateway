@@ -24,6 +24,84 @@ type configuredProviderSnapshot struct {
 	lastCheck          *iam.ProviderCheck
 	lastVerify         *iam.ProviderCheck
 	configurationIssue string
+	readiness          map[string]any
+}
+
+// Check history proves one model in one credential scope, never entitlement to
+// all discovered models. The freshness window matches the catalog's one hour.
+func scopedReadiness(checks []iam.ProviderCheck, scope string, aggregate bool) map[string]any {
+	source := "gateway"
+	if aggregate {
+		source = "aggregate"
+	} else if scope != "" {
+		source = "principal"
+	}
+	result := map[string]any{
+		"source_scope": source, "model_verified": false,
+		"verification_state": "unknown", "verification_stale": false,
+	}
+	var latest, verify *iam.ProviderCheck
+	for i := range checks {
+		check := &checks[i]
+		if check.ScopeKey != scope {
+			if check.Operation == iam.CheckVerify && check.Success {
+				result["verification_state"] = "scope_mismatch"
+			}
+			continue
+		}
+		if latest == nil || check.CheckedAt >= latest.CheckedAt {
+			latest = check
+		}
+		if check.Operation == iam.CheckVerify && (verify == nil || check.CheckedAt >= verify.CheckedAt) {
+			verify = check
+		}
+	}
+	if verify == nil {
+		return result
+	}
+	stale := time.Since(time.Unix(verify.CheckedAt, 0)) > time.Hour
+	result["verification_stale"] = stale
+	switch {
+	case !verify.Success || (latest != nil && !latest.Success):
+		result["verification_state"] = "failed"
+	case stale:
+		result["verification_state"] = "stale"
+	case verify.Model == "":
+		result["verification_state"] = "unknown"
+	default:
+		result["verification_state"] = "verified"
+		result["model_verified"] = true
+		result["verified_model"] = verify.Model
+		if aggregate {
+			result["source_scope"] = "gateway"
+		}
+	}
+	return result
+}
+
+func catalogReadiness(providerID string, principal *config.Principal, catalog providers.CatalogReadResult) map[string]any {
+	scope := providerCheckScope(principal)
+	checks, err := iam.LastProviderChecks(scope)
+	if err != nil {
+		return map[string]any{"model_verified": false, "verification_state": "unavailable"}
+	}
+	// Service/project checks are not represented by the human/gateway check
+	// schema. A gateway check must not become proof for a bound service project.
+	if principal != nil && principal.PrincipalKind == "service" {
+		return map[string]any{
+			"source_scope": "service_project", "model_verified": false,
+			"verification_state": "unknown", "verification_stale": false,
+		}
+	}
+	result := scopedReadiness(checks[providerID], scope, false)
+	result["catalog_source_scope"] = catalog.Diagnostics.SourceScope
+	result["catalog_synced"] = !catalog.RefreshedAt.IsZero()
+	result["catalog_stale"] = catalog.Diagnostics.Stale
+	if catalog.Err != nil {
+		result["model_verified"] = false
+		result["verification_state"] = "catalog_error"
+	}
+	return result
 }
 
 // providerStatus computes the honest status ladder for one configured
@@ -208,7 +286,8 @@ func providerStatusSnapshots(
 ) ([]map[string]any, error) {
 	connectionCounts := map[string]int{}
 	for _, connection := range connections {
-		if connection.PrincipalKind == "human" && connection.Status == "active" {
+		if connection.PrincipalKind == "human" && connection.Status == "active" &&
+			(checkScope == "" || connection.PrincipalID == checkScope) {
 			connectionCounts[connection.ProviderID]++
 		}
 	}
@@ -244,14 +323,36 @@ func providerStatusSnapshots(
 			credentialPresent = true
 		}
 		status, lastCheck, lastVerify := providerStatus(credentialPresent, len(models), allChecks[providerID])
+		readiness := scopedReadiness(allChecks[providerID], checkScope, checkScope == "")
+		readiness["catalog_source_scope"] = "principal"
+		if checkScope == "" {
+			readiness["catalog_source_scope"] = "aggregate"
+		}
+		readiness["catalog_synced"] = !refreshed.IsZero()
+		readiness["catalog_stale"] = !refreshed.IsZero() && time.Since(refreshed) > time.Hour
+		if status == "verified" && readiness["model_verified"] != true {
+			status = "configured"
+			if !refreshed.IsZero() {
+				status = "catalog_synced"
+			}
+		}
+		if status == "configured" && !refreshed.IsZero() {
+			status = "catalog_synced"
+		}
 		configurationIssue := providers.ProviderConfigurationIssue(providerID)
 		if configurationIssue != "" {
 			status = "misconfigured"
 			models = nil
 			refreshed = time.Time{}
+			readiness["model_verified"] = false
+			readiness["verification_state"] = "misconfigured"
+			readiness["catalog_synced"] = false
+			readiness["catalog_stale"] = false
 		}
 		if providerConfig.Disabled {
 			status = "disabled"
+			readiness["model_verified"] = false
+			readiness["verification_state"] = "disabled"
 		}
 		catalogState := "unknown"
 		refreshedAt := ""
@@ -280,7 +381,7 @@ func providerStatusSnapshots(
 			id: providerID, registryID: registryID, status: status, catalogState: catalogState,
 			catalogRefresh: refreshedAt, modelCount: len(models), connectionCount: connectionCounts[providerID],
 			disabled: providerConfig.Disabled, lastCheck: lastCheck, lastVerify: lastVerify,
-			configurationIssue: configurationIssue,
+			configurationIssue: configurationIssue, readiness: readiness,
 		}
 		configured = append(configured, snapshot)
 		if registryID != "" {
@@ -342,6 +443,7 @@ func providerStatusSnapshots(
 				"model_count": match.modelCount, "connection_count": match.connectionCount,
 				"catalog_state": match.catalogState, "catalog_refreshed": match.catalogRefresh,
 				"disabled": match.disabled, "configuration_issue": match.configurationIssue,
+				"readiness": match.readiness,
 			}, match.lastCheck, match.lastVerify))
 		}
 		snapshots = append(snapshots, providerSnapshotRow(map[string]any{
@@ -354,6 +456,7 @@ func providerStatusSnapshots(
 			"catalog_state": catalogState, "catalog_refreshed": catalogRefreshed,
 			"configuration_issue": strings.Join(configurationIssues, " "),
 			"instances":           instances, "instance_status_counts": instanceStatusCounts,
+			"readiness": map[string]any{"source_scope": "aggregate", "model_verified": false, "verification_state": "per_instance"},
 		}, lastCheck, lastVerify))
 	}
 	for _, snapshot := range configured {
@@ -374,6 +477,7 @@ func providerStatusSnapshots(
 			"model_count": snapshot.modelCount, "connection_count": snapshot.connectionCount,
 			"catalog_state": snapshot.catalogState, "catalog_refreshed": snapshot.catalogRefresh,
 			"disabled": snapshot.disabled, "configuration_issue": snapshot.configurationIssue,
+			"readiness": snapshot.readiness,
 		}, snapshot.lastCheck, snapshot.lastVerify)
 		snapshots = append(snapshots, providerSnapshotRow(map[string]any{
 			"id": snapshot.id, "registry_id": snapshot.registryID, "label": snapshot.id, "description": "Custom configured provider.",
@@ -391,6 +495,7 @@ func providerStatusSnapshots(
 			"configuration_issue":    snapshot.configurationIssue,
 			"instances":              []map[string]any{instance},
 			"instance_status_counts": map[string]int{snapshot.status: 1},
+			"readiness":              snapshot.readiness,
 		}, snapshot.lastCheck, snapshot.lastVerify))
 	}
 	sort.Slice(snapshots, func(i, j int) bool {
@@ -401,12 +506,21 @@ func providerStatusSnapshots(
 
 func providerSnapshotRow(row map[string]any, lastCheck, lastVerify *iam.ProviderCheck) map[string]any {
 	if lastCheck != nil {
+		row["last_check_source_scope"] = "gateway"
+		if lastCheck.ScopeKey != "" {
+			row["last_check_source_scope"] = "principal"
+		}
 		row["last_check_operation"] = lastCheck.Operation
 		row["last_check_success"] = lastCheck.Success
 		row["last_check_detail"] = lastCheck.Detail
 		row["last_checked_at"] = time.Unix(lastCheck.CheckedAt, 0).UTC().Format(time.RFC3339)
 	}
 	if lastVerify != nil {
+		row["last_verification_source_scope"] = "gateway"
+		if lastVerify.ScopeKey != "" {
+			row["last_verification_source_scope"] = "principal"
+		}
+		row["last_verification_stale"] = time.Since(time.Unix(lastVerify.CheckedAt, 0)) > time.Hour
 		row["last_verified_at"] = time.Unix(lastVerify.CheckedAt, 0).UTC().Format(time.RFC3339)
 		row["verified_model"] = lastVerify.Model
 	}
