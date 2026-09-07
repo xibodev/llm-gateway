@@ -374,7 +374,14 @@ func (p AzureOpenAIProvider) azureDeploymentsPage(pageURL string) (map[string]an
 			resp.StatusCode,
 		)
 	}
-	decoded, err := decodeJSON(resp.Body)
+	raw, err := io.ReadAll(io.LimitReader(resp.Body, catalogMaxResponseBytes+1))
+	if len(raw) > catalogMaxResponseBytes {
+		return nil, catalogError("catalog_not_discoverable", "Provider catalog response exceeded the size limit.", resp.StatusCode)
+	}
+	if err != nil {
+		return nil, catalogError("catalog_not_discoverable", "Azure OpenAI deployments response could not be read; the catalog is not discoverable.", resp.StatusCode)
+	}
+	decoded, err := decodeJSON(bytes.NewReader(raw))
 	if err != nil {
 		return nil, catalogError(
 			"catalog_not_discoverable",

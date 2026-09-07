@@ -103,9 +103,16 @@ named volume at `/state`. Later console edits and backup restores update that
 volume copy without modifying `config.local.yaml`. For a real box with TLS,
 use `deploy/docker-compose.prod.yml` + `Caddyfile` — see `deploy/DEPLOY.md`.
 
+For an existing installation, follow the repository-versioned
+[upgrade and rollback procedure](deploy/DEPLOY.md#upgrade-and-rollback), including
+the offline snapshot required when the installed release has no backup CLI.
+
 ## Back up and restore
 
-Stop the gateway before maintenance, then use the built-in verified archive:
+Check the installed binary's `llmgw --help` for backup support first. If absent,
+use the [offline snapshot procedure](deploy/DEPLOY.md#pin-and-snapshot). Stop the
+gateway before maintenance and retain its state/config environment, then use the
+built-in verified archive when available:
 
 ```bash
 llmgw backup create /secure/path/llmgw-state.tar.gz

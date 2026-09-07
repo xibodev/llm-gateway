@@ -591,14 +591,18 @@ func handleProviderModels(w http.ResponseWriter, r *http.Request) {
 		writeError(w, 400, err.Error())
 		return
 	}
-	rows := providers.CatalogModelsForPrincipal(pid, principal)
+	result := providers.ReadCatalogForPrincipal(pid, principal)
+	rows := result.Models
 	ids := []string{}
 	for _, row := range rows {
 		if row.ID != "" {
 			ids = append(ids, row.ID)
 		}
 	}
-	writeJSON(w, 200, map[string]any{"models": ids, "count": len(rows)})
+	writeJSON(w, 200, map[string]any{
+		"models": ids, "count": len(rows), "catalog": result.Diagnostics,
+		"readiness": catalogReadiness(pid, principal, result),
+	})
 }
 
 // catalogRowsWithLegacySurfaces renders catalog rows for the wire while keeping
@@ -643,9 +647,14 @@ func handleProviderCatalog(w http.ResponseWriter, r *http.Request) {
 		writeError(w, 400, err.Error())
 		return
 	}
-	rows := providers.CatalogModelsForPrincipal(pid, principal)
-	resp := map[string]any{"models": catalogRowsWithLegacySurfaces(rows)}
-	if t := providers.CatalogRefreshedAtForPrincipal(pid, principal); !t.IsZero() {
+	// Preserve the list response and HTTP 200 for existing consumers. Discovery
+	// failure (including stale fallback) is explicit in catalog.status/error data.
+	result := providers.ReadCatalogForPrincipal(pid, principal)
+	resp := map[string]any{
+		"models": catalogRowsWithLegacySurfaces(result.Models), "catalog": result.Diagnostics,
+		"readiness": catalogReadiness(pid, principal, result),
+	}
+	if t := result.RefreshedAt; !t.IsZero() {
 		resp["refreshed_at"] = t.UTC().Format(time.RFC3339)
 	}
 	writeJSON(w, 200, resp)

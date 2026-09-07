@@ -30,4 +30,31 @@ uses the installed host clients against the disposable Docker gateway after a
 real provider is connected. Cancellation uses the same HTTP request lifecycle
 for CLIs, SDKs, browsers, and backend applications.
 
+## Current-source API contracts
+
+These contracts describe the current implementation, not a claim that every
+published release includes them. See the [upgrade procedure](../deploy/DEPLOY.md#upgrade-and-rollback)
+before replacing a deployed image.
+
+- `GET /admin/api/providers/{id}/catalog` and
+  `POST /admin/api/providers/{id}/models` retain their `models` lists and HTTP 200
+  on discovery failure, with additive `catalog` and `readiness` diagnostics.
+  Check `catalog.status` (`synced`, `empty`, `error`), `failure_code`, optional
+  `upstream_status`, `stale`, `from_cache` and `source_scope`; cached rows can
+  accompany an error. `GET /v1/models` remains a best-effort list, not a readiness
+  probe. Discovery never runs inference. Verification applies only to the tested
+  model and credential scope; stale, aggregate or another principal's evidence is
+  not proof that a human or service/project can use all listed models.
+- Chat Completions normalize `finish_reason: "stop"` to `"tool_calls"` only when
+  every returned function call has a nonempty unique ID, name and complete
+  JSON-object arguments. Streaming checks accumulated calls per choice within
+  bounded tracking limits. Malformed/incomplete calls and other finish reasons
+  (including `length` and `content_filter`) are not promoted to successful tool
+  completion.
+- Disabled providers are omitted from public model/alias discovery and skipped
+  in endpoint chains, preserving enabled-member order. An exact disabled target
+  or an all-disabled endpoint returns JSON 404 before upstream calls or SSE start.
+  Disabled configuration remains visible to administrators. Authentication,
+  policy and operational upstream failures are not reclassified as disabled 404s.
+
 Adaptation fails closed for adaptive/enabled `thinking`, `redacted_thinking`, `cache_control`, structured output, documents, unsupported image sources/media types, error tool results, native Responses tools, and unknown top-level or content fields. Native non-stream responses preserve those semantic JSON fields, including IDs, model, thinking/signatures, cache usage, and stop data. Token-count request bodies are limited to 32 MiB. Token-count forwarding never copies gateway authentication or arbitrary caller headers: it uses only the resolved provider credential, a valid nonempty caller `anthropic-version` (otherwise the provider default), and caller `anthropic-beta` values for native Anthropic targets.

@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"strings"
 
+	"llmgw/internal/iam"
 	"llmgw/internal/translate"
 )
 
@@ -254,45 +255,40 @@ func (p AnthropicNativeProvider) timeout() float64 {
 }
 
 func (p AnthropicNativeProvider) ListModels() []ModelInfo {
+	models, _, _ := p.ListModelsWithError()
+	return models
+}
+
+func (p AnthropicNativeProvider) ListModelsWithError() ([]ModelInfo, *iam.ProviderAccountObservation, error) {
 	timeout := p.timeout()
 	if timeout > 10 {
 		timeout = 10
 	}
-	req, _ := http.NewRequest("GET", p.base()+"/v1/models", nil)
+	req, err := http.NewRequest("GET", p.base()+"/v1/models", nil)
+	if err != nil {
+		return nil, nil, catalogError("catalog_transport_error", "Provider catalog request could not be created.", 0)
+	}
 	req.Header = p.headers()
 	resp, err := httpClient(timeout).Do(req)
 	if err != nil {
-		return nil
+		return nil, nil, catalogError("catalog_transport_error", "Provider catalog request could not reach the upstream service.", 0)
 	}
-	defer resp.Body.Close()
-	if resp.StatusCode >= 400 {
-		return nil
-	}
-	body, err := decodeJSON(resp.Body)
+	body, err := decodeCatalogResponse(resp, "data", "id")
 	if err != nil {
-		return nil
+		return nil, nil, err
 	}
-	items, ok := body["data"].([]any)
-	if !ok {
-		return nil
-	}
-	var out []ModelInfo
+	items := body["data"].([]any)
+	out := make([]ModelInfo, 0, len(items))
 	for _, entry := range items {
-		m, ok := entry.(map[string]any)
-		if !ok {
-			continue
-		}
-		id, _ := m["id"].(string)
-		if id == "" {
-			continue
-		}
+		m := entry.(map[string]any)
+		id := m["id"].(string)
 		label, _ := m["display_name"].(string)
 		out = append(out, ModelInfo{
 			ID: id, Vendor: "anthropic", Label: label,
 			SupportedSurfaces: []string{"/v1/messages"},
 		})
 	}
-	return out
+	return out, nil, nil
 }
 
 // anthropicStreamIter reads the Anthropic SSE body and translates it to OpenAI

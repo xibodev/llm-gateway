@@ -1,10 +1,8 @@
 package providers
 
 import (
-	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"net/http"
 	"net/url"
 	"strings"
@@ -347,43 +345,27 @@ func (p CodexProvider) ListModelsWithError() (
 			)
 		}
 	}
-	defer response.Body.Close()
 	if response.StatusCode >= 400 {
+		response.Body.Close()
 		return nil, observation, catalogError(
 			"catalog_http_error",
 			fmt.Sprintf("Provider catalog returned HTTP %d.", response.StatusCode),
 			response.StatusCode,
 		)
 	}
-	raw, _ := io.ReadAll(response.Body)
-	payload := map[string]any{}
-	if json.Unmarshal(raw, &payload) != nil {
-		return nil, observation, catalogError(
-			"catalog_invalid_json",
-			"Provider catalog response was not valid JSON.",
-			response.StatusCode,
-		)
+	payload, err := decodeCatalogResponse(response, "data", "id", "name")
+	if err != nil {
+		return nil, observation, err
 	}
-	entries, ok := payload["data"].([]any)
-	if !ok {
-		return nil, observation, catalogError(
-			"catalog_invalid_shape",
-			"Provider catalog response did not contain a data array.",
-			response.StatusCode,
-		)
-	}
+	entries := payload["data"].([]any)
 	rows := make([]ModelInfo, 0, len(entries))
 	for _, value := range entries {
-		entry, ok := value.(map[string]any)
-		if !ok {
-			continue
-		}
+		entry := value.(map[string]any)
 		id, _ := entry["id"].(string)
+		id = strings.TrimSpace(id)
 		if id == "" {
 			id, _ = entry["name"].(string)
-		}
-		if id == "" {
-			continue
+			id = strings.TrimSpace(id)
 		}
 		vendor, _ := entry["vendor"].(string)
 		if vendor == "" {
