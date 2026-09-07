@@ -8,6 +8,7 @@ import (
 	"math"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"llmgw/internal/config"
@@ -219,7 +220,37 @@ func normalizeChatResponseEnvelope(response map[string]any) {
 		if _, exists := choice["index"]; !exists {
 			choice["index"] = index
 		}
+		if choice["finish_reason"] != "stop" {
+			continue
+		}
+		message, _ := choice["message"].(map[string]any)
+		tools, _ := message["tool_calls"].([]any)
+		valid := len(tools) > 0
+		ids := map[string]bool{}
+		for _, raw := range tools {
+			tool, _ := raw.(map[string]any)
+			function, _ := tool["function"].(map[string]any)
+			id, _ := tool["id"].(string)
+			name, _ := function["name"].(string)
+			arguments, _ := function["arguments"].(string)
+			if tool["type"] != "function" || ids[id] || !completeChatTool(id, name, arguments) {
+				valid = false
+				break
+			}
+			ids[id] = true
+		}
+		if valid {
+			choice["finish_reason"] = "tool_calls"
+		}
 	}
+}
+
+func completeChatTool(id, name, arguments string) bool {
+	// A tool-bearing stop is only repaired when every call is usable. Never
+	// promote truncated JSON, missing arguments, or non-object arguments.
+	arguments = strings.TrimSpace(arguments)
+	return strings.TrimSpace(id) != "" && strings.TrimSpace(name) != "" &&
+		strings.HasPrefix(arguments, "{") && json.Valid([]byte(arguments))
 }
 
 // writeUpstreamError surfaces the real upstream status + (redacted) detail when
@@ -276,6 +307,7 @@ func streamChatSSE(w http.ResponseWriter, ctx context.Context, targets []router.
 	w.WriteHeader(200)
 
 	usageAcc := map[string]int{"prompt_tokens": 0, "completion_tokens": 0}
+	toolState := chatToolStream{choices: map[int]*chatToolChoice{}}
 	for {
 		chunk, more := it.Next()
 		if !more {
@@ -286,7 +318,7 @@ func streamChatSSE(w http.ResponseWriter, ctx context.Context, targets []router.
 			recordClientCancelled(endpoint, requested, principal, started)
 			return
 		}
-		if err := writeChatSSE(w, chunk); err != nil {
+		if err := writeChatSSE(w, toolState.normalize(chunk)); err != nil {
 			recordClientCancelled(endpoint, requested, principal, started)
 			return
 		}
@@ -359,6 +391,137 @@ func writeChatSSE(w http.ResponseWriter, data string) error {
 		}
 	}
 	return writeSSE(w, data)
+}
+
+type chatToolDelta struct {
+	id, kind, name, arguments string
+}
+
+type chatToolChoice struct {
+	tools   map[int]*chatToolDelta
+	invalid bool
+}
+
+type chatToolStream struct {
+	choices  map[int]*chatToolChoice
+	bytes    int
+	disabled bool
+}
+
+func (s *chatToolStream) normalize(data string) string {
+	if s.disabled {
+		return data
+	}
+	var chunk map[string]json.RawMessage
+	var choices []map[string]json.RawMessage
+	if json.Unmarshal([]byte(data), &chunk) != nil {
+		return data
+	}
+	if raw, exists := chunk["choices"]; !exists {
+		return data
+	} else if json.Unmarshal(raw, &choices) != nil {
+		s.disabled = true
+		return data
+	}
+	changed := false
+	for _, choice := range choices {
+		var index *int
+		if json.Unmarshal(choice["index"], &index) != nil || index == nil || *index < 0 {
+			// Without a reliable index, subsequent deltas cannot be attributed.
+			s.disabled = true
+			return data
+		}
+		state := s.choices[*index]
+		if state == nil {
+			if len(s.choices) >= 128 {
+				s.disabled = true
+				return data
+			}
+			state = &chatToolChoice{tools: map[int]*chatToolDelta{}}
+			s.choices[*index] = state
+		}
+		if state.invalid {
+			continue
+		}
+		var delta map[string]json.RawMessage
+		if raw, exists := choice["delta"]; exists && json.Unmarshal(raw, &delta) != nil {
+			state.invalid = true
+		}
+		if raw, exists := delta["tool_calls"]; exists {
+			var tools []map[string]json.RawMessage
+			if json.Unmarshal(raw, &tools) != nil || tools == nil {
+				state.invalid = true
+			}
+			for _, tool := range tools {
+				var toolIndex *int
+				if json.Unmarshal(tool["index"], &toolIndex) != nil || toolIndex == nil || *toolIndex < 0 {
+					state.invalid = true
+					continue
+				}
+				call := state.tools[*toolIndex]
+				if call == nil {
+					if len(state.tools) >= 128 {
+						state.invalid = true
+						continue
+					}
+					call = &chatToolDelta{}
+					state.tools[*toolIndex] = call
+				}
+				var function map[string]json.RawMessage
+				if raw, exists := tool["function"]; exists && (json.Unmarshal(raw, &function) != nil || function == nil) {
+					state.invalid = true
+				}
+				for _, field := range []struct {
+					raw json.RawMessage
+					dst *string
+				}{{tool["id"], &call.id}, {tool["type"], &call.kind}, {function["name"], &call.name}, {function["arguments"], &call.arguments}} {
+					if field.raw == nil {
+						continue
+					}
+					var fragment *string
+					if json.Unmarshal(field.raw, &fragment) != nil || fragment == nil {
+						state.invalid = true
+						continue
+					}
+					s.bytes += len(*fragment)
+					// Bound retained state independently of upstream stream length.
+					// Above the limit, preserve the provider's reason unchanged.
+					if s.bytes > 1<<20 {
+						s.choices = nil
+						s.disabled = true
+						return data
+					}
+					*field.dst += *fragment
+				}
+			}
+		}
+		var reason string
+		if json.Unmarshal(choice["finish_reason"], &reason) != nil || reason == "" {
+			continue
+		}
+		valid := !state.invalid && len(state.tools) > 0
+		ids := map[string]bool{}
+		for _, call := range state.tools {
+			if call.kind != "function" || ids[call.id] || !completeChatTool(call.id, call.name, call.arguments) {
+				valid = false
+			}
+			ids[call.id] = true
+		}
+		if reason == "stop" && valid {
+			choice["finish_reason"] = json.RawMessage(`"tool_calls"`)
+			changed = true
+		}
+		// A second terminal cannot reuse previously completed tool deltas.
+		state.tools = nil
+		state.invalid = true
+	}
+	if changed {
+		chunk["choices"], _ = json.Marshal(choices)
+		if normalized, err := json.Marshal(chunk); err == nil {
+			return string(normalized)
+		}
+	}
+	return data
 }
 
 func recordClientCancelled(endpoint, requested string, principal *config.Principal, started time.Time) {

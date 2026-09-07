@@ -154,6 +154,10 @@ func GetProviderForPrincipal(
 	// for service principals resolving shared credential bindings.
 	cacheKey := providerCacheKey(providerID, principal)
 	for attempt := 0; attempt < 3; attempt++ {
+		// A cached transport must not bypass a provider being taken offline.
+		if cfg := config.Get().Providers[providerID]; cfg != nil && cfg.Disabled {
+			return nil, &ConfigError{Msg: "provider is disabled"}
+		}
 		cacheMu.Lock()
 		epoch := cacheEpoch
 		if cached, ok := cache[cacheKey]; ok {

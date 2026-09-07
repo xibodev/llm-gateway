@@ -249,42 +249,25 @@ func (p OpenAIProvider) ListModelsWithError() (
 			)
 		}
 	}
-	defer resp.Body.Close()
 	if resp.StatusCode >= 400 {
+		resp.Body.Close()
 		return nil, observation, catalogError(
 			"catalog_http_error",
 			fmt.Sprintf("Provider catalog returned HTTP %d.", resp.StatusCode),
 			resp.StatusCode,
 		)
 	}
-	body, err := decodeJSON(resp.Body)
+	body, err := decodeCatalogResponse(resp, "data", "id", "name")
 	if err != nil {
-		return nil, observation, catalogError(
-			"catalog_invalid_json",
-			"Provider catalog response was not valid JSON.",
-			resp.StatusCode,
-		)
+		return nil, observation, err
 	}
-	items, ok := body["data"].([]any)
-	if !ok {
-		return nil, observation, catalogError(
-			"catalog_invalid_shape",
-			"Provider catalog response did not contain a data array.",
-			resp.StatusCode,
-		)
-	}
+	items := body["data"].([]any)
 	out := []ModelInfo{}
 	for _, entry := range items {
-		m, ok := entry.(map[string]any)
-		if !ok {
-			continue
-		}
+		m := entry.(map[string]any)
 		id, _ := m["id"].(string)
-		if id == "" {
+		if strings.TrimSpace(id) == "" {
 			id, _ = m["name"].(string)
-		}
-		if id == "" {
-			continue
 		}
 		vendor, _ := m["vendor"].(string)
 		if vendor == "" {

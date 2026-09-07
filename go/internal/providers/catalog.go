@@ -176,24 +176,75 @@ func CatalogModels(providerID string) []ModelInfo {
 func CatalogModelsForPrincipal(
 	providerID string, principal *config.Principal,
 ) []ModelInfo {
-	if ProviderConfigurationIssue(providerID) != "" {
-		return nil
+	return ReadCatalogForPrincipal(providerID, principal).Models
+}
+
+// CatalogReadResult preserves discovery failures without discarding usable rows.
+// Models alone remain a best-effort compatibility API, not readiness evidence.
+type CatalogReadResult struct {
+	Models      []ModelInfo
+	RefreshedAt time.Time
+	Diagnostics CatalogDiagnostics
+	Err         error
+}
+
+type CatalogDiagnostics struct {
+	Status         string `json:"status"`
+	FailureCode    string `json:"failure_code,omitempty"`
+	Detail         string `json:"detail,omitempty"`
+	UpstreamStatus int    `json:"upstream_status,omitempty"`
+	Stale          bool   `json:"stale"`
+	FromCache      bool   `json:"from_cache"`
+	// SourceScope describes the cache boundary, not the credential's owner.
+	SourceScope string `json:"source_scope"`
+}
+
+// ReadCatalogForPrincipal never borrows another caller's cache or runs inference.
+// A successful empty discovery replaces old rows and is cached for the same TTL.
+func ReadCatalogForPrincipal(providerID string, principal *config.Principal) CatalogReadResult {
+	result := CatalogReadResult{Diagnostics: CatalogDiagnostics{SourceScope: "gateway"}}
+	if principal != nil && principal.PrincipalID != "" {
+		result.Diagnostics.SourceScope = "principal"
+		if principal.PrincipalKind == "service" && principal.ProjectID != "" {
+			result.Diagnostics.SourceScope = "service_project"
+		}
 	}
-	authorized, err := ProviderCredentialAuthorized(providerID, principal)
-	if err != nil || !authorized {
-		return nil
+	if issue := ProviderConfigurationIssue(providerID); issue != "" {
+		result.Err = catalogError("catalog_configuration_incomplete", issue, 0)
+	} else if CatalogRequiresPrincipal(providerID) && (principal == nil || strings.TrimSpace(principal.PrincipalID) == "") {
+		result.Err = catalogError("catalog_principal_required", "An active human principal is required for this private provider catalog.", 0)
+	} else if authorized, err := ProviderCredentialAuthorized(providerID, principal); err != nil || !authorized {
+		result.Err = catalogError("catalog_authentication_failed", "Provider credential is unavailable for catalog access.", 0)
 	}
 	cacheKey := catalogCacheKey(providerID, principal)
-	e, ok := cachedEntry(cacheKey)
-	if ok && time.Since(e.RefreshedAt) <= catalogTTL {
-		return e.Models
+	if result.Err == nil {
+		e, ok := cachedEntry(cacheKey)
+		if ok && time.Since(e.RefreshedAt) <= catalogTTL {
+			result.Models, result.RefreshedAt = e.Models, e.RefreshedAt
+			result.Diagnostics.FromCache = true
+		} else {
+			result.Models, _, result.Err = RefreshCatalogForPrincipalWithError(providerID, principal)
+			// Re-read after discovery: invalidation while fetching must not restore
+			// rows captured before a credential or configuration change.
+			if current, exists := cachedEntry(cacheKey); exists {
+				result.RefreshedAt = current.RefreshedAt
+				if result.Err != nil {
+					result.Models = current.Models
+					result.Diagnostics.FromCache = true
+				}
+			}
+		}
 	}
-	generation := catalogGenerationFor(cacheKey)
-	if models := ListProviderModelsForPrincipal(providerID, principal); len(models) > 0 {
-		storeEntryIfGeneration(cacheKey, models, generation)
-		return models
+	result.Diagnostics.Status = "synced"
+	if len(result.Models) == 0 {
+		result.Diagnostics.Status = "empty"
 	}
-	return e.Models
+	result.Diagnostics.Stale = !result.RefreshedAt.IsZero() && time.Since(result.RefreshedAt) > catalogTTL
+	if result.Err != nil {
+		result.Diagnostics.Status = "error"
+		result.Diagnostics.FailureCode, result.Diagnostics.Detail, result.Diagnostics.UpstreamStatus = CatalogFailure(result.Err)
+	}
+	return result
 }
 
 func catalogCacheKey(providerID string, principal *config.Principal) string {
