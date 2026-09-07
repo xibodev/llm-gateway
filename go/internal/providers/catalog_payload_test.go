@@ -32,6 +32,8 @@ func TestCatalogPayloadValidationAndCache(t *testing.T) {
 			}},
 		{"openai", "data", "/models", `{"id":"fixture-model","owned_by":"fixture"}`, "id", `{"name":"fixture-model","future":{"nested":[null,17]}}`,
 			func(base string) Provider { return OpenAIProvider{auth: catalogFixtureAuth{base: base}, Timeout: 2} }},
+		{"codex", "data", "/models", `{"id":"fixture-model","owned_by":"fixture"}`, "id", `{"name":"fixture-model","future":{"nested":[null,17]}}`,
+			func(base string) Provider { return catalogFixtureCodex(t, base) }},
 	} {
 		t.Run(provider.name, func(t *testing.T) {
 			for _, tc := range []struct {
@@ -78,7 +80,7 @@ func TestCatalogPayloadValidationAndCache(t *testing.T) {
 				{"unavailable", `fixture-secret`, "catalog_http_error", 503, 0},
 			} {
 				t.Run(tc.name, func(t *testing.T) {
-					if provider.name == "openai" && (tc.status == 401 || tc.status == 403) {
+					if (provider.name == "openai" || provider.name == "codex") && (tc.status == 401 || tc.status == 403) {
 						tc.code = "catalog_http_error"
 					}
 					var calls atomic.Int32

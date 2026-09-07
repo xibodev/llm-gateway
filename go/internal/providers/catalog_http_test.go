@@ -8,7 +8,17 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"llmgw/internal/codexauth"
 )
+
+func catalogFixtureCodex(t *testing.T, base string) Provider {
+	t.Helper()
+	oldURL := codexauth.ModelsURL
+	codexauth.ModelsURL = base + "/models"
+	t.Cleanup(func() { codexauth.ModelsURL = oldURL })
+	return CodexProvider{inner: OpenAIProvider{auth: catalogFixtureAuth{base: base}, Timeout: 5}}
+}
 
 // Generate padding indefinitely so the decoder, not the fixture, must stop reading.
 type catalogPaddingReader struct {
@@ -66,6 +76,9 @@ func TestCatalogResponseSizeBoundaryAndCache(t *testing.T) {
 		}},
 		{"azure", `{"data":[{"id":"fixture-deployment","model":"gpt-4o","status":"succeeded"}],"private":"fixture-secret"}`, func(base string) Provider {
 			return AzureOpenAIProvider{BaseURL: base, APIKey: "fixture-key", Timeout: 5}
+		}},
+		{"codex", `{"data":[{"id":"fixture-model"}],"private":"fixture-secret"}`, func(base string) Provider {
+			return catalogFixtureCodex(t, base)
 		}},
 	} {
 		for _, oversized := range []bool{false, true} {
