@@ -1,8 +1,15 @@
 # Deploying llm-gateway
 
-The Go build ships as a ~16 MB static binary / ~2 MB distroless image, so it runs
-comfortably on the cheapest Linux box. This directory has everything for a
-**cheap EC2 + docker compose + Caddy** deployment.
+For a fresh installation, use the public prebuilt image
+`ghcr.io/xibodev/llm-gateway:0.3.1` with the standalone
+[Quickstart](../docs/QUICKSTART.md#docker-compose). It needs no clone, build or
+config seed: create a private installation folder, `compose.yaml` and a
+generate-once `.env`, then run `docker compose up -d`. Keep the same folder,
+keys and state volume through [image upgrades](../docs/UPGRADING.md#standalone-image-installation).
+
+This directory instead contains the **source-based Docker Compose + Caddy**
+example and the detailed operator recovery procedure. Do not mix its paths,
+project name or bind-mounted state with the standalone image recipe.
 
 ## Files
 - `docker-compose.prod.yml` — gateway (loopback) + Caddy (TLS termination).
@@ -10,16 +17,27 @@ comfortably on the cheapest Linux box. This directory has everything for a
 - `.env.example` — the secrets/flags the compose reads.
 - `smoke.sh` — a safe live smoke test (`health`, `models`, one tiny chat).
 
-## First deploy (fresh box)
+## Developers: first source-based TLS deploy
+
+The following commands build the cloned code; they are not prerequisites for
+installing a published image. Choose the source release, configure the private
+environment (including both keys), and review the proxy configuration first.
+
 ```bash
-git clone <repo> && cd llm-gateway
+git clone --branch v0.3.1 https://github.com/xibodev/llm-gateway.git
+cd llm-gateway
 cp deploy/.env.example deploy/.env      # set LLMGW_API_KEY etc.
 mkdir -p deploy/state && sudo chown 65532:65532 deploy/state   # distroless nonroot uid
-docker compose -f deploy/docker-compose.prod.yml up -d --build
+docker compose --env-file deploy/.env -f deploy/docker-compose.prod.yml up -d --build
 
 # Sign Copilot in (device-code) + connect providers in the panel:
 #   https://<domain>/admin
 ```
+
+Run these from the clone root and reuse `--env-file deploy/.env` on subsequent
+commands for this source-based stack. Shell variables override that file, so
+clear stale key/flag overrides first. Keep its existing keys and `deploy/state`
+on upgrades; do not recopy `.env.example` over an existing environment.
 
 ## Configure identity, providers and keys
 
@@ -72,8 +90,11 @@ migrated database.
    source. The commands below assume `COMPOSE_FILE`, `COMPOSE_PROJECT` and
    `ENV_FILE` point to that deployment, with any existing override files retained.
    In its private Compose configuration, set the gateway's `image` to
-   `${LLMGW_IMAGE:?pin the gateway image}`. The repository Compose examples contain
-   `build:` and local image names; `--no-build` below avoids rebuilding them.
+   `${LLMGW_IMAGE:?pin the gateway image}`. This variable is introduced by your
+   private configuration; neither released repository Compose file reads it
+   by default. They contain `build:` and local image names; `--no-build` below
+   avoids rebuilding them. The standalone quickstart instead edits its literal
+   image pin and does not need this variable or override.
 3. Preserve the same state mount and environment, especially `LLMGW_STATE_DIR`,
    `LLMGW_CONFIG`, provider flags, authentication and
    `LLMGW_CREDENTIAL_ENCRYPTION_KEY`. The root Compose example uses a named volume
@@ -198,9 +219,11 @@ disclosure: checksums are not authentication. Keep the pre-upgrade rollback
 snapshot separate from newer backups and automatic backup retention.
 
 ## Alternative: systemd (no Docker)
-`go build -o llmgw ./cmd/llmgw`, ship the binary, and run it under systemd behind
-Caddy/nginx — see `go/README.md` for the unit. Disable proxy buffering so SSE
-streams.
+
+[Download and verify a native release](../docs/QUICKSTART.md#native-binary), then
+run it under systemd behind Caddy/nginx with the saved keys and explicit state
+paths. See `go/README.md` for the unit; disable proxy buffering for SSE streams.
+For developers building instead, run `go build -o llmgw ./cmd/llmgw` from `go/`.
 
 ---
 

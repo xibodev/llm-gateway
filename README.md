@@ -3,6 +3,20 @@
 Standalone, multi-provider LLM proxy for coding CLIs (Claude Code, GitHub Copilot CLI,
 Codex). A standalone service with no external coordination-plane dependency.
 
+## Website and Guides
+
+Visit the [product website](https://xibodev.github.io/llm-gateway/) for an overview
+and searchable documentation, or start with the repository guides:
+
+- [Quickstart](docs/QUICKSTART.md) and [client setup](docs/CLIENTS.md)
+- [Configuration](docs/CONFIGURATION.md) and [routing](docs/ROUTING.md)
+- [Providers](docs/PROVIDERS.md) and [API reference](docs/API.md)
+- [Operations](docs/OPERATIONS.md), [upgrading](docs/UPGRADING.md), and [limitations](docs/LIMITATIONS.md)
+
+The existing [wire compatibility](docs/CLI_COMPATIBILITY.md) and
+[deployment/rollback procedure](deploy/DEPLOY.md#upgrade-and-rollback) remain
+the detailed repository references.
+
 **Purpose:** connect your providers, then juggle subscription limits and survive
 outages. Address any real model as `provider/model`, or define **endpoints** —
 named, ordered failover chains of pinned real models that cascade on
@@ -51,14 +65,36 @@ into the binary at build time, so the runtime needs no Node.js. An earlier
 Python reference build lived under `src/llmgw/`; it was removed once the Go
 build reached parity, and remains in history if you need it.
 
-## Run (Go)
-```powershell
-cd go
-go run ./cmd/llmgw serve
+## Install
+
+Use the public prebuilt image `ghcr.io/xibodev/llm-gateway:0.3.1` (Linux amd64/arm64).
+No Git clone, build tools, or initial config file is required.
+
+1. Create a private installation folder with the standalone
+   [`compose.yaml` from Quickstart](docs/QUICKSTART.md#docker-compose).
+2. [Generate `.env` once](docs/QUICKSTART.md#save-secrets-once) with an administrator
+   key and a separate credential-encryption key. Keep both for the life of the state.
+3. From that folder, run:
+
+```bash
+docker compose up -d
 ```
-Open the panel at `http://127.0.0.1:8787/admin`. Providers/endpoints you build there persist to `~/.llmgw/config.yaml`. The IAM,
-hashed keys, encrypted provider connections, usage, quotas, audit and notification
-outbox live in `~/.llmgw/gateway.db` (SQLite WAL). The legacy system
+
+Open `http://127.0.0.1:8787/console`, sign in with `LLMGW_API_KEY` from `.env`, and
+configure a provider. The recipe binds only to localhost; choose another host
+port with its `LLMGW_PORT` setting. Configuration and SQLite state persist in the
+named volume at `/state`. Preserve the installation folder and back up `.env`
+securely, separately from state backups. Never regenerate the encryption key
+with existing state.
+
+Without Docker, [download and verify a native binary](docs/QUICKSTART.md#native-binary)
+for Windows x64, Linux x64/ARM64, or macOS Intel/Apple Silicon. See the
+[v0.3.1 release](https://github.com/xibodev/llm-gateway/releases/tag/v0.3.1) and
+[latest releases](https://github.com/xibodev/llm-gateway/releases/latest).
+For developer builds only, see [from source](docs/QUICKSTART.md#developers-from-source).
+
+The IAM, hashed keys, encrypted provider connections, usage, quotas, audit and
+notification outbox live in `gateway.db` (SQLite WAL). The legacy system
 `secrets.json` remains a compatibility/config seed; once a system connection is
 seeded, the database is authoritative and later config reloads do not overwrite it.
 
@@ -94,18 +130,19 @@ Pick a `provider/model` or an endpoint name from `GET /v1/models`. See
 wire profiles and known gaps.
 
 ## Deploy (container)
-```bash
-LLMGW_API_KEY=... docker compose up -d --build
-```
-Builds `go/Dockerfile` (distroless, nonroot), mounts your config read-only and
-seeds a writable volume copy on first start, then persists gateway state in the
-named volume at `/state`. Later console edits and backup restores update that
-volume copy without modifying `config.local.yaml`. For a real box with TLS,
-use `deploy/docker-compose.prod.yml` + `Caddyfile` — see `deploy/DEPLOY.md`.
+The default [standalone image installation](docs/QUICKSTART.md#docker-compose)
+needs only `compose.yaml`, `.env`, and its persistent volume. The image already
+contains `/llmgw`, the console, and a working exec-form healthcheck.
 
-For an existing installation, follow the repository-versioned
-[upgrade and rollback procedure](deploy/DEPLOY.md#upgrade-and-rollback), including
-the offline snapshot required when the installed release has no backup CLI.
+The repository root Compose file is a **developer source-build alternative**.
+It builds `go/Dockerfile` and seeds writable configuration from `config.local.yaml`
+once; its `LLMGW_HOST_PORT` setting differs from the standalone recipe. Do not
+mix their installation folders or volumes. For a source-based TLS stack, see
+[`deploy/DEPLOY.md`](deploy/DEPLOY.md).
+
+For existing installations, follow [Upgrading](docs/UPGRADING.md): back up offline,
+keep the same `.env` and volume, change the image pin, then pull and start without
+building. Older releases without the backup CLI need a full stopped-state snapshot.
 
 ## Back up and restore
 
