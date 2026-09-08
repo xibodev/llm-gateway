@@ -1,0 +1,15 @@
+[
+  {"title":"Home","url":"index.html","description":"Product overview, routing model, governance, and architecture.","keywords":"gateway failover openai anthropic coding cli"},
+  {"title":"Documentation","url":"docs.html","description":"Task-oriented documentation index.","keywords":"docs guide reference"},
+  {"title":"Quickstart","url":"quickstart.html","description":"Install the published image without cloning or building. Generate .env once and keep keys and state. Native binary downloads also available.","keywords":"install docker compose.yaml ghcr 0.3.1 prebuilt download SHA256 windows linux macos arm64 amd64 .env encryption key loopback powershell restart source"},
+  {"title":"Routing and architecture","url":"concepts.html","description":"Exact targets, named endpoints, retries, failover, adaptation, governance, and state.","keywords":"provider model endpoint retry circuit breaker architecture"},
+  {"title":"Configuration","url":"configuration.html","description":"YAML, environment precedence, provider instances, endpoint policy, retention, and state files.","keywords":"config yaml environment variable policy state"},
+  {"title":"Client setup","url":"clients.html","description":"Claude Code, Codex, GitHub Copilot CLI BYOK, and SDK profiles.","keywords":"claude codex copilot byok openai sdk anthropic"},
+  {"title":"Providers","url":"providers.html","description":"All curated integrations, authentication methods, scopes, and caveats.","keywords":"openai anthropic gemini vertex azure bedrock ollama localai edge tts"},
+  {"title":"API reference","url":"api.html","description":"Core public data-plane endpoints, aliases, authentication, streaming, and limits.","keywords":"chat responses messages embeddings audio images videos models"},
+  {"title":"Multi-user governance","url":"governance.html","description":"Humans, services, projects, keys, private connections, shared Copilot bindings, quotas, audit, and outbox.","keywords":"iam sso project principal key quota audit"},
+  {"title":"Operations","url":"operations.html","description":"Operate a published image or native binary with persistent keys and state. Source deployment, offline backup, restore and release verification.","keywords":"deploy image compose .env volume backup restore retention release provenance docker healthcheck"},
+  {"title":"Security","url":"security.html","description":"Trust boundaries, credentials, logging, backup safety, and private reporting.","keywords":"security sso aes gcm api key ssrf vulnerability"},
+  {"title":"Upgrading","url":"upgrading.html","description":"Back up offline, change the image pin, pull and start with the same .env and volume. Native and source upgrades, schema-safe rollback.","keywords":"upgrade docker compose pull image pin .env encryption backup migration categories endpoints rollback schema source"},
+  {"title":"Limitations","url":"limitations.html","description":"Explicit scale, protocol, routing, provider, UI, and operational boundaries.","keywords":"limitations non goals single node compatibility"}
+]

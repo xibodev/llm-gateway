@@ -1,182 +1,267 @@
 <!doctype html>
-<html lang="en" data-theme="dark">
+<html lang="en">
 <head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>llm-gateway — one gateway for your coding-CLI models</title>
-<meta name="description" content="A standalone, multi-provider LLM proxy for coding CLIs. Juggle subscription limits, survive outages, and reach any provider's models through one OpenAI/Anthropic-compatible endpoint.">
-<style>
-  :root{
-    --app:#0b0d10; --card:#14171c; --hl:#1a1e24; --sep:#242a31; --bd:#2a3038;
-    --hi:#f2f5f8; --fg:#c4ccd6; --mut:#8a94a2; --sub:#5f6b78;
-    --accent:#6ea8fe; --accent2:#4ea88a; --warn:#d9a441;
-    --radius:14px;
-  }
-  *{box-sizing:border-box}
-  html{scroll-behavior:smooth}
-  body{margin:0;background:radial-gradient(1200px 600px at 70% -10%,#141b26 0,var(--app) 55%);color:var(--fg);
-    font:15px/1.6 ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;-webkit-font-smoothing:antialiased}
-  a{color:inherit;text-decoration:none}
-  code,pre{font-family:ui-monospace,SFMono-Regular,"SF Mono",Menlo,Consolas,monospace}
-  .wrap{max-width:1080px;margin:0 auto;padding:0 22px}
-  .hi{color:var(--hi)} .mut{color:var(--mut)} .accent{color:var(--accent)}
-  .chip{display:inline-block;font-size:11px;padding:2px 9px;border-radius:999px;border:1px solid var(--bd);color:var(--mut);background:var(--hl)}
-
-  header{position:sticky;top:0;z-index:10;backdrop-filter:blur(10px);background:rgba(11,13,16,.72);border-bottom:1px solid var(--sep)}
-  nav{display:flex;align-items:center;gap:20px;height:60px}
-  .logo{display:flex;align-items:center;gap:10px;font-weight:700;color:var(--hi);letter-spacing:-.02em}
-  .logo .mark{width:26px;height:26px;border-radius:8px;background:linear-gradient(135deg,var(--accent),var(--accent2));display:grid;place-items:center;color:#0b0d10;font-weight:800}
-  nav .links{display:flex;gap:22px;margin-left:auto;align-items:center}
-  nav .links a{color:var(--mut);font-size:14px}
-  nav .links a:hover{color:var(--hi)}
-  .btn{display:inline-block;border-radius:10px;padding:9px 16px;font-size:14px;font-weight:600;border:1px solid var(--bd)}
-  .btn-p{background:linear-gradient(135deg,var(--accent),#5b93ea);color:#0b0d10;border:none}
-  .btn-p:hover{filter:brightness(1.05)}
-  .btn-g:hover{background:var(--hl);color:var(--hi)}
-
-  .hero{padding:84px 0 40px;text-align:center}
-  .hero h1{font-size:clamp(30px,5vw,52px);line-height:1.08;letter-spacing:-.03em;color:var(--hi);margin:0 auto 18px;max-width:14ch}
-  .hero p.lead{font-size:clamp(16px,2.2vw,20px);color:var(--mut);max-width:60ch;margin:0 auto 30px}
-  .hero .cta{display:flex;gap:12px;justify-content:center;flex-wrap:wrap}
-  .glow{position:relative}
-  .terminal{max-width:760px;margin:52px auto 0;text-align:left;border:1px solid var(--sep);border-radius:var(--radius);overflow:hidden;background:#0d1013;box-shadow:0 30px 80px -30px rgba(0,0,0,.7)}
-  .terminal .bar{display:flex;gap:7px;padding:12px 14px;border-bottom:1px solid var(--sep);background:#0f1216}
-  .terminal .bar i{width:11px;height:11px;border-radius:50%;background:#39404a;display:block}
-  .terminal pre{margin:0;padding:18px 20px;font-size:13px;line-height:1.7;color:#cdd6e0;overflow-x:auto}
-  .terminal .c{color:var(--sub)} .terminal .k{color:var(--accent)} .terminal .s{color:var(--accent2)} .terminal .o{color:#d98a4a}
-
-  section{padding:56px 0;border-top:1px solid var(--sep)}
-  h2{font-size:clamp(22px,3vw,30px);color:var(--hi);letter-spacing:-.02em;margin:0 0 8px}
-  .sub{color:var(--mut);margin:0 0 28px;max-width:62ch}
-  .grid{display:grid;gap:16px;grid-template-columns:repeat(auto-fit,minmax(250px,1fr))}
-  .feat{background:var(--card);border:1px solid var(--sep);border-radius:var(--radius);padding:20px}
-  .feat .ic{width:34px;height:34px;border-radius:9px;background:var(--hl);display:grid;place-items:center;margin-bottom:12px;font-size:17px}
-  .feat h3{margin:0 0 6px;color:var(--hi);font-size:16px}
-  .feat p{margin:0;color:var(--mut);font-size:14px}
-
-  .steps{display:grid;gap:16px;grid-template-columns:repeat(auto-fit,minmax(280px,1fr))}
-  .step{background:var(--card);border:1px solid var(--sep);border-radius:var(--radius);padding:20px}
-  .step .n{width:26px;height:26px;border-radius:8px;background:var(--hl);color:var(--accent);display:grid;place-items:center;font-weight:700;font-size:13px;margin-bottom:12px}
-  .step h3{margin:0 0 10px;color:var(--hi);font-size:15px}
-  .step pre{margin:0;background:#0d1013;border:1px solid var(--sep);border-radius:10px;padding:12px 14px;font-size:12.5px;color:#cdd6e0;overflow-x:auto;white-space:pre-wrap}
-  .step .k{color:var(--accent)} .step .s{color:var(--accent2)} .step .c{color:var(--sub)}
-
-  .note{display:flex;gap:12px;align-items:flex-start;background:var(--hl);border:1px solid var(--sep);border-radius:12px;padding:16px;color:var(--mut);font-size:14px;margin-top:22px}
-  footer{border-top:1px solid var(--sep);padding:34px 0;color:var(--sub);font-size:13px}
-  footer .row{display:flex;gap:16px;flex-wrap:wrap;align-items:center}
-  footer a{color:var(--mut)} footer a:hover{color:var(--hi)}
-  .disc{color:var(--sub);font-size:12px;margin-top:8px}
-</style>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>llm-gateway | One self-hosted gateway for coding CLI models</title>
+  <meta name="description" content="Route Claude Code, Codex, Copilot CLI BYOK, SDKs, and HTTP clients through one self-hosted multi-provider LLM gateway.">
+  <link rel="canonical" href="https://xibodev.github.io/llm-gateway/">
+  <meta property="og:title" content="llm-gateway">
+  <meta property="og:description" content="Exact model routing, ordered provider failover, governance, and core OpenAI/Anthropic APIs in one Go binary.">
+  <meta property="og:type" content="website">
+  <meta property="og:url" content="https://xibodev.github.io/llm-gateway/">
+  <meta name="theme-color" content="#252a6a">
+  <link rel="icon" href="favicon.svg" type="image/svg+xml">
+  <link rel="manifest" href="site.webmanifest">
+  <link rel="stylesheet" href="styles.css">
+  <script defer src="site.js"></script>
 </head>
 <body>
+  <a class="skip-link" href="#main">Skip to content</a>
+  <header class="site-header">
+    <div class="shell nav-shell">
+      <a class="brand" href="index.html" aria-label="llm-gateway home">
+        <svg viewBox="0 0 64 64" aria-hidden="true"><rect width="64" height="64" rx="12" fill="#252a6a"/><path d="M14 18h16v11h20M30 29v17h20" fill="none" stroke="#fff" stroke-width="6"/><circle cx="50" cy="29" r="5" fill="#d85e16"/><circle cx="50" cy="46" r="5" fill="#36d399"/></svg>
+        llm-gateway
+      </a>
+      <button class="menu-button" type="button" aria-expanded="false" aria-controls="site-menu" data-menu-button>Menu</button>
+      <nav class="site-nav" id="site-menu" aria-label="Primary navigation" data-menu>
+        <a href="index.html" aria-current="page">Product</a>
+        <a href="docs.html">Docs</a>
+        <a href="providers.html">Providers</a>
+        <a href="api.html">API</a>
+        <a href="operations.html">Operations</a>
+        <button class="nav-search" type="button" data-search-open>Search <kbd>Ctrl K</kbd></button>
+        <a href="https://github.com/xibodev/llm-gateway">GitHub</a>
+      </nav>
+    </div>
+  </header>
 
-<header><div class="wrap"><nav>
-  <a class="logo" href="#"><span class="mark">L</span> llm-gateway</a>
-  <div class="links">
-    <a href="#features">Features</a>
-    <a href="#quickstart">Quickstart</a>
-    <a href="#connect">Connect a CLI</a>
-    <a class="btn btn-g" href="https://github.com/" target="_blank" rel="noopener">GitHub &#8599;</a>
-  </div>
-</nav></div></header>
+  <main id="main">
+    <section class="hero">
+      <div class="shell hero-grid">
+        <div>
+          <p class="eyebrow">Self-hosted routing control plane</p>
+          <h1>One gateway.<br>Your models.<br>Explicit routes.</h1>
+          <p class="lead">Point Claude Code, Codex, Copilot CLI BYOK, SDKs, and HTTP clients at one base URL. Select an exact provider model or an ordered endpoint that can move past throttling and outages.</p>
+          <div class="hero-actions">
+            <a class="button" href="quickstart.html#compose">Install with Docker</a>
+            <a class="button secondary" href="docs.html">Read the docs</a>
+            <a class="button secondary" href="https://github.com/xibodev/llm-gateway/releases/latest">Download release</a>
+          </div>
+          <div class="hero-meta" aria-label="Product scope">
+            <span class="tag" data-tone="success">Single Go binary</span>
+            <span class="tag">OpenAI + Anthropic core</span>
+            <span class="tag">Local SQLite state</span>
+            <span class="tag" data-tone="warning">Single node</span>
+          </div>
+        </div>
 
-<main>
-<section class="hero" style="border-top:none">
-  <div class="wrap glow">
-    <span class="chip">Self-hosted &middot; OpenAI + Anthropic compatible</span>
-    <h1>One gateway for all your coding-CLI models</h1>
-    <p class="lead">A standalone, multi-provider LLM proxy for Claude Code, Copilot CLI and Codex.
-      Juggle subscription limits, survive outages, and reach any provider's models through one endpoint.</p>
-    <div class="cta">
-      <a class="btn btn-p" href="#quickstart">Get started</a>
-      <a class="btn btn-g" href="#features">See features</a>
+        <div class="route-board" role="img" aria-labelledby="route-title route-description">
+          <span class="route-label" id="route-title">endpoint / coding</span>
+          <span class="sr-only" id="route-description">A request reaches the coding endpoint. The first hosted model is throttled, the second provider serves successfully, and a local model remains available as the last fallback.</span>
+          <div class="rail r2" aria-hidden="true"></div>
+          <div class="node request"><strong>POST</strong><small>/v1/messages</small></div>
+          <div class="node endpoint"><strong>coding</strong><small>ordered endpoint</small></div>
+          <div class="node provider-a"><strong>hosted-a/model</strong><small>failed · HTTP 429</small></div>
+          <div class="node provider-b"><strong>hosted-b/model</strong><small>served · 2.1 s</small></div>
+          <div class="node provider-c"><strong>local/model</strong><small>standby · local</small></div>
+          <div class="trace-log" aria-hidden="true">
+            <span>$ resolve endpoint <b>coding</b></span>
+            <span class="fail">× hosted-a/model · throttled</span>
+            <span class="success">✓ hosted-b/model · response started</span>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <div class="proof-bar">
+      <div class="shell proof-grid">
+        <div class="proof"><strong>3 coding clients</strong><span>Fixture-backed Claude, Codex, and Copilot CLI wire profiles</span></div>
+        <div class="proof"><strong>10 public surfaces</strong><span>Models, Chat, Responses, Messages, embeddings, and media</span></div>
+        <div class="proof"><strong>19 registry entries</strong><span>Hosted, OAuth, cloud, local, client, and custom integrations</span></div>
+        <div class="proof"><strong>One state boundary</strong><span>IAM, policy, usage, quotas, audit, alerts, and recovery</span></div>
+      </div>
     </div>
 
-    <div class="terminal">
-      <div class="bar"><i></i><i></i><i></i></div>
-<pre><span class="c"># point your CLI at the gateway, then address any model as an endpoint&hellip;</span>
-<span class="k">curl</span> http://127.0.0.1:8787/v1/chat/completions \
-  -H <span class="s">"Content-Type: application/json"</span> \
-  -d <span class="s">'{"model":"smart","messages":[{"role":"user","content":"hi"}]}'</span>
+    <section class="section alt" id="routing">
+      <div class="shell">
+        <div class="section-heading">
+          <div><p class="eyebrow">Addressing</p><h2>Exact when you need control. Resilient when you need continuity.</h2></div>
+          <p>A model selector has one explicit meaning. No weighted scheduler, hidden classifier, or fabricated quota signal decides for you.</p>
+        </div>
+        <div class="split">
+          <div>
+            <h3><code>provider/model</code></h3>
+            <p class="muted measure">Send a request to one exact configured provider and native model ID. Provider retry policy may retry that target, but the gateway does not move it to another model.</p>
+            <div class="callout"><strong>Deterministic aliases</strong>Bare provider-native names are accepted only when they identify one unambiguous, policy-eligible exact target.</div>
+          </div>
+          <div>
+            <h3><code>endpoint</code></h3>
+            <p class="muted measure">Give an ordered list of pinned targets a stable name. Eligible Chat, Responses fallback, and adapted Messages requests can advance before output starts.</p>
+            <div class="callout warning"><strong>Failover is surface-specific</strong>Streaming stops moving after the first byte. Embeddings, audio, image, and video choose one eligible target.</div>
+          </div>
+        </div>
+        <p><a href="concepts.html">Read routing, retry, adaptation, and cancellation details →</a></p>
+      </div>
+    </section>
 
-<span class="c"># "smart" is your failover chain: try the premium model, fall back on 429/5xx</span>
-<span class="o">smart</span>: copilot/gpt-5.5  &rarr;  copilot/claude-sonnet-4.5  &rarr;  localai/gemma-3-4b-it</pre>
+    <section class="section" id="interfaces">
+      <div class="shell">
+        <div class="section-heading">
+          <div><p class="eyebrow">Interfaces</p><h2>One gateway base URL, multiple client grammars.</h2></div>
+          <p>Core protocol surfaces stay recognizable to coding CLIs and SDKs. Unsupported or lossy translated behavior fails before provider dispatch.</p>
+        </div>
+        <div class="feature-grid">
+          <article class="feature"><span class="feature-index">01 / CLIENT</span><h3>Claude Code</h3><p>Anthropic Messages, token counting, model discovery, tools, and streaming with strict compatibility checks.</p><code>ANTHROPIC_BASE_URL</code></article>
+          <article class="feature"><span class="feature-index">02 / CLIENT</span><h3>Codex</h3><p>A custom Responses provider with native state semantics when the selected target actually supports them.</p><code>wire_api = "responses"</code></article>
+          <article class="feature"><span class="feature-index">03 / CLIENT</span><h3>Copilot CLI BYOK</h3><p>Explicit Chat or Responses wire selection and exact wire model, without silently deleting native tools.</p><code>COPILOT_PROVIDER_WIRE_API</code></article>
+          <article class="feature"><span class="feature-index">04 / API</span><h3>OpenAI core</h3><p>Chat Completions, Responses, models, embeddings, transcription, speech, image, and video.</p><code>/v1/chat/completions</code></article>
+          <article class="feature"><span class="feature-index">05 / API</span><h3>Anthropic core</h3><p>Native or strictly adapted Messages plus native or marked estimated token counting.</p><code>/v1/messages</code></article>
+          <article class="feature"><span class="feature-index">06 / CONTROL</span><h3>Console and portal</h3><p>Embedded provider, endpoint, key, access, usage, policy, alert, audit, and owner workflows.</p><code>/console · /portal</code></article>
+        </div>
+        <p><a href="clients.html">Configure a coding client →</a> · <a href="api.html">Explore the API contract →</a></p>
+      </div>
+    </section>
+
+    <section class="section alt" id="quickstart">
+      <div class="shell split">
+        <div>
+          <p class="eyebrow">Authenticated quickstart</p>
+          <h2>Install the image. Configure your route.</h2>
+          <p class="muted measure">No clone or build required. Put this <code>compose.yaml</code> in your own private installation folder and <a href="quickstart.html#secrets">generate its .env once</a>. Then run <code>docker compose up -d</code> and open <code>http://127.0.0.1:8787/console</code>. Keep the folder, keys and state volume for restarts and upgrades.</p>
+          <ol>
+            <li>Create a human owner and project.</li>
+            <li>Connect and verify one provider.</li>
+            <li>Create an ordered endpoint.</li>
+            <li>Mint a project key for your CLI.</li>
+          </ol>
+          <p><a href="quickstart.html">Follow the complete quickstart →</a></p>
+        </div>
+        <div class="code-panel">
+          <div class="code-head"><span>compose.yaml · published image</span><button class="copy-button" type="button" data-copy="#home-quickstart">Copy</button></div>
+          <pre id="home-quickstart"><code>services:
+  gateway:
+    image: ghcr.io/xibodev/llm-gateway:0.3.1
+    ports:
+      - "127.0.0.1:${LLMGW_PORT:-8787}:8787"
+    environment:
+      LLMGW_API_KEY: ${LLMGW_API_KEY:?set LLMGW_API_KEY in .env}
+      LLMGW_CREDENTIAL_ENCRYPTION_KEY: ${LLMGW_CREDENTIAL_ENCRYPTION_KEY:?set LLMGW_CREDENTIAL_ENCRYPTION_KEY in .env}
+    volumes:
+      - state:/state
+    restart: unless-stopped
+
+volumes:
+  state:</code></pre>
+        </div>
+      </div>
+    </section>
+
+    <section class="section" id="providers">
+      <div class="shell">
+        <div class="section-heading">
+          <div><p class="eyebrow">Provider registry</p><h2>Hosted APIs, private subscriptions, local inference, and custom endpoints.</h2></div>
+          <p>Registry support describes a configuration path. Your account, deployment, location, model, and entitlement still require a catalog sync and real test completion.</p>
+        </div>
+        <div class="provider-band" aria-label="Provider integrations">
+          <span class="tag">GitHub Copilot</span><span class="tag">Claude Code</span><span class="tag">OpenAI Codex</span><span class="tag">OpenAI</span><span class="tag">Anthropic</span><span class="tag">Google Gemini</span><span class="tag">Google AI Studio</span><span class="tag">Vertex AI (Agent Platform)</span><span class="tag">OpenRouter</span><span class="tag">Groq</span><span class="tag">Mistral AI</span><span class="tag">Cerebras</span><span class="tag">Amazon Bedrock</span><span class="tag">Azure OpenAI</span><span class="tag">Ollama</span><span class="tag">LocalAI</span><span class="tag">Edge TTS</span><span class="tag">Custom OpenAI-compatible</span><span class="tag">Custom Anthropic-compatible</span>
+        </div>
+        <div class="split" style="margin-top:38px">
+          <div class="callout"><strong>Local detection</strong>Probe common Ollama, LocalAI, LM Studio, vLLM, Jan, text-generation web UI, and llama.cpp addresses. Detection reports candidates; you choose what to add.</div>
+          <div class="callout warning"><strong>Subscription boundaries</strong>Personal Copilot and Codex credentials stay human-private. Provider terms and OAuth registration limits still apply.</div>
+        </div>
+        <p><a href="providers.html">Compare every integration and caveat →</a></p>
+      </div>
+    </section>
+
+    <section class="section alt" id="governance">
+      <div class="shell split">
+        <div>
+          <p class="eyebrow">Request-path governance</p>
+          <h2>Identity and limits stay attached to every call.</h2>
+          <p class="muted measure">Humans, services, projects, memberships, and keys resolve before routing. Project and key policy intersect; an empty eligible target set fails closed.</p>
+          <ul>
+            <li>Model and provider allowlists</li>
+            <li>RPM and daily/monthly request limits</li>
+            <li>Daily input/output and monthly total tokens</li>
+            <li>Estimated cost and model-credit budgets</li>
+            <li>Persistent usage attribution and retained audit history</li>
+          </ul>
+          <p><a href="concepts.html#governance">Understand the governance path →</a></p>
+        </div>
+        <div class="route-board governance-board" role="img" aria-label="Governance sequence: gateway key, principal and project policy, endpoint resolution, provider credential, and usage accounting">
+          <div class="node"><strong>Gateway key</strong><small>hash · status · expiry</small></div>
+          <div class="node"><strong>Principal + project</strong><small>membership · role</small></div>
+          <div class="node"><strong>Policy intersection</strong><small>models · providers · quotas</small></div>
+          <div class="node"><strong>Credential resolution</strong><small>private · system · binding</small></div>
+          <div class="node"><strong>Exact target or endpoint</strong><small>served provider/model → usage, telemetry, alerts</small></div>
+        </div>
+      </div>
+    </section>
+
+    <section class="section" id="operations">
+      <div class="shell">
+        <div class="section-heading">
+          <div><p class="eyebrow">Single-node operations</p><h2>Built to recover, not just route.</h2></div>
+          <p>Operational state is local and explicit: inspectable backups, bounded history, crash recovery, immutable build identity, and verified release artifacts.</p>
+        </div>
+        <div class="feature-grid">
+          <article class="feature"><span class="feature-index">STATE</span><h3>Verified backups</h3><p>Checkpoint configured SQLite databases, catalog, config, recognized OAuth cache, and legacy state into a bounded archive.</p><code>llmgw backup create</code></article>
+          <article class="feature"><span class="feature-index">RECOVERY</span><h3>Journaled restore</h3><p>Validate before replacement, recover an interrupted prepared transaction, and reject newer unsupported schemas.</p><code>backup restore --force</code></article>
+          <article class="feature"><span class="feature-index">RETENTION</span><h3>Bounded history</h3><p>Batch-prune old usage, telemetry, audit, delivered outbox, completed quota periods, logs, and verified backups.</p><code>LLMGW_RETENTION_*</code></article>
+          <article class="feature"><span class="feature-index">PROVENANCE</span><h3>Build identity</h3><p>CLI, health, admin state, binaries, and images carry the same version, commit, and commit-derived time.</p><code>llmgw version</code></article>
+          <article class="feature"><span class="feature-index">RELEASE</span><h3>Supply-chain evidence</h3><p>Five archives, SPDX SBOMs, verified checksums, GitHub provenance, and two-architecture image attestations.</p><code>SHA256SUMS</code></article>
+          <article class="feature"><span class="feature-index">ALERTS</span><h3>Durable outbox</h3><p>Quota and key-expiry rules enqueue deduplicated work for an operator-owned external delivery worker.</p><code>/admin/api/outbox</code></article>
+        </div>
+        <p><a href="operations.html">Open the operations runbook →</a></p>
+      </div>
+    </section>
+
+    <section class="section alt" id="boundaries">
+      <div class="shell split">
+        <div>
+          <p class="eyebrow">Explicit boundaries</p>
+          <h2>Complex where correctness needs it. Deliberately small everywhere else.</h2>
+        </div>
+        <div>
+          <ul>
+            <li>Single-node SQLite, not clustered HA.</li>
+            <li>Core protocol compatibility, not every vendor API field.</li>
+            <li>Ordered failover, not quota-aware or weighted scheduling.</li>
+            <li>Operator-triggered local backups, not a remote backup service.</li>
+            <li>Trusted reverse-proxy SSO, not an embedded identity provider.</li>
+            <li>Private/LAN provider URLs allowed; SSRF blocking intentionally absent.</li>
+          </ul>
+          <p><a href="limitations.html">Read every limitation and non-goal →</a></p>
+        </div>
+      </div>
+    </section>
+
+    <section class="section" aria-labelledby="install-title">
+      <div class="shell split">
+        <div><p class="eyebrow">Apache-2.0 · self-hosted</p><h2 id="install-title">Put one private gateway between your clients and providers.</h2></div>
+        <div><p class="muted measure">Run the published Linux amd64/arm64 image, or <a href="quickstart.html#native">download a native binary</a> for Windows, Linux or macOS. No source build needed. Start on loopback and configure your provider in the embedded console.</p><div class="hero-actions"><a class="button" href="quickstart.html#compose">Install with Docker</a><a class="button secondary" href="https://github.com/xibodev/llm-gateway/releases/latest">Download release</a></div></div>
+      </div>
+    </section>
+  </main>
+
+  <footer class="site-footer">
+    <div class="shell">
+      <div class="footer-grid">
+        <div><strong>llm-gateway</strong><p>Self-hosted multi-provider LLM routing and governance for coding clients and core OpenAI/Anthropic HTTP consumers.</p></div>
+        <div><strong>Start</strong><a href="quickstart.html">Quickstart</a><a href="clients.html">Client setup</a><a href="providers.html">Providers</a></div>
+        <div><strong>Reference</strong><a href="api.html">API</a><a href="concepts.html">Routing</a><a href="operations.html">Operations</a></div>
+        <div><strong>Project</strong><a href="security.html">Security</a><a href="limitations.html">Limitations</a><a href="https://github.com/xibodev/llm-gateway">GitHub</a></div>
+      </div>
+      <div class="footer-bottom"><span>Apache License 2.0</span><span>Not affiliated with OpenAI, Anthropic, GitHub, Google, Microsoft, or other providers.</span></div>
     </div>
-  </div>
-</section>
+  </footer>
 
-<section id="features">
-  <div class="wrap">
-    <h2>Built to juggle providers</h2>
-    <p class="sub">Address a real model as <code>provider/model</code>, or define <b class="hi">endpoints</b> &mdash; named,
-      ordered failover chains that cascade across your providers on throttle, error, or timeout.</p>
-    <div class="grid">
-      <div class="feat"><div class="ic">&#128260;</div><h3>Endpoints &amp; failover</h3>
-        <p>One model name, an ordered chain of real targets. Fails over before the first streamed byte &mdash; invisible to the client.</p></div>
-      <div class="feat"><div class="ic">&#129517;</div><h3>API adaptation</h3>
-        <p>Opt-in: reach Responses-only models (like <code>gpt-5.5</code>) over the standard chat API &mdash; the gateway translates, deterministically, from each model's published capabilities.</p></div>
-      <div class="feat"><div class="ic">&#127968;</div><h3>Local providers</h3>
-        <p>Auto-discover Ollama, LocalAI, LM Studio &amp; more on your machine &mdash; surfaced, never hardwired. A free local model makes a great last link in a chain.</p></div>
-      <div class="feat"><div class="ic">&#128273;</div><h3>Project keys &amp; governance</h3>
-        <p>Mint per-project keys with expiry, model/provider allowlists, rate limits and daily budgets &mdash; disable any key instantly.</p></div>
-      <div class="feat"><div class="ic">&#127908;</div><h3>Multimodal</h3>
-        <p>Audio transcription &amp; speech (via LocalAI whisper/piper) and capability-aware vision routing &mdash; multimodal requests land on vision-capable models.</p></div>
-      <div class="feat"><div class="ic">&#9889;</div><h3>Tiny footprint</h3>
-        <p>A ~16&nbsp;MB static Go binary / ~2&nbsp;MB distroless image, ~15&nbsp;MiB idle RAM. <span class="mut">A Python build is available too.</span></p></div>
-    </div>
-  </div>
-</section>
-
-<section id="quickstart">
-  <div class="wrap">
-    <h2>Quickstart</h2>
-    <p class="sub">Run it, connect your providers in the panel, then point a CLI at it.</p>
-    <div class="steps">
-      <div class="step"><div class="n">1</div><h3>Run the gateway</h3>
-<pre><span class="c"># Docker (tiny distroless image)</span>
-<span class="k">docker</span> run -p 8787:8787 -v llmgw:/state \
-  llm-gateway-go</pre></div>
-      <div class="step"><div class="n">2</div><h3>Connect providers</h3>
-<pre><span class="c"># open the panel, add providers,</span>
-<span class="c"># sign into Copilot, build endpoints</span>
-http://127.0.0.1:8787/<span class="k">admin</span></pre></div>
-      <div class="step"><div class="n">3</div><h3>Address a model</h3>
-<pre><span class="c"># an endpoint name&hellip;</span>
-<span class="s">"model": "smart"</span>
-<span class="c"># &hellip;or an exact provider/model</span>
-<span class="s">"model": "copilot/gpt-4o-mini"</span></pre></div>
-    </div>
-  </div>
-</section>
-
-<section id="connect">
-  <div class="wrap">
-    <h2>Connect a coding CLI</h2>
-    <p class="sub">It speaks both the OpenAI and Anthropic wire formats &mdash; most tools just need a base URL and a key.</p>
-    <div class="steps">
-      <div class="step"><div class="n">&#9632;</div><h3>Claude Code</h3>
-<pre><span class="k">ANTHROPIC_BASE_URL</span>=http://127.0.0.1:8787
-<span class="k">ANTHROPIC_AUTH_TOKEN</span>=<span class="s">&lt;your key&gt;</span></pre></div>
-      <div class="step"><div class="n">&#9632;</div><h3>Codex</h3>
-<pre><span class="k">base_url</span>=http://127.0.0.1:8787/v1</pre></div>
-      <div class="step"><div class="n">&#9632;</div><h3>Copilot CLI (BYOK)</h3>
-<pre><span class="k">COPILOT_PROVIDER_BASE_URL</span>=http://127.0.0.1:8787/v1
-<span class="k">COPILOT_PROVIDER_API_KEY</span>=<span class="s">&lt;your key&gt;</span></pre></div>
-    </div>
-    <div class="note"><span>&#128161;</span><span>Pick a <code>provider/model</code> or an endpoint name from <code>GET /v1/models</code>.
-      Everything &mdash; providers, endpoints, keys, Copilot login, usage &amp; savings &mdash; is managed from <code>/admin</code>.</span></div>
-  </div>
-</section>
-</main>
-
-<footer><div class="wrap">
-  <div class="row">
-    <a class="logo" href="#" style="font-size:14px"><span class="mark" style="width:22px;height:22px">L</span> llm-gateway</a>
-    <span class="mut">Self-hosted LLM proxy for coding CLIs.</span>
-    <span style="margin-left:auto"><a href="https://github.com/" target="_blank" rel="noopener">GitHub</a></span>
-  </div>
-  <p class="disc">Using a GitHub Copilot subscription as a general gateway provider is a personal-use grey area, not a sanctioned public API &mdash; keep it on your own loopback gateway. Not affiliated with OpenAI, Anthropic, or GitHub.</p>
-</div></footer>
-
+  <dialog class="search-dialog" id="site-search" aria-labelledby="search-title">
+    <div class="search-head"><label class="sr-only" id="search-title" for="search-input">Search documentation</label><input id="search-input" type="search" placeholder="Search clients, APIs, providers, operations…" autocomplete="off"><button type="button" data-search-close>Close</button></div>
+    <div class="search-meta" role="status" aria-live="polite" data-search-count>0 results</div><div class="search-results" data-search-results></div>
+  </dialog>
+  <div class="sr-only" aria-live="polite" data-live-region></div>
 </body>
 </html>
