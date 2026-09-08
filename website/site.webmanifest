@@ -1,0 +1,10 @@
+{
+  "name": "llm-gateway",
+  "short_name": "llmgw",
+  "description": "Self-hosted multi-provider LLM gateway for coding CLIs and core OpenAI/Anthropic APIs.",
+  "start_url": "./",
+  "display": "standalone",
+  "background_color": "#f5f7fb",
+  "theme_color": "#252a6a",
+  "icons": [{"src":"favicon.svg","sizes":"any","type":"image/svg+xml"}]
+}
