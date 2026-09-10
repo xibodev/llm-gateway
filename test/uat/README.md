@@ -1,88 +1,86 @@
-# UAT stack — real integrations
+# Real-provider UAT
 
-UAT here means testing against the real deal: this stack has normal internet
-egress and exercises real provider APIs with real, operator-supplied
-credentials. Nothing upstream is mocked. Mocked, deterministic regression runs
-live in `test/integration/` and are explicitly *not* UAT.
+This stack builds the current worktree and talks to operator-supplied real
+providers. Nothing upstream is mocked. It binds only `127.0.0.1:8898`.
 
-One service: the gateway, built from `go/Dockerfile`, published on
-`127.0.0.1:8898`. It starts with an empty state volume on purpose — the UAT
-session begins exactly where a new operator begins, at the console's
-first-run journey.
-
-## Run
+## Create a fresh session
 
 ```bash
-cp test/uat/.env.uat.example test/uat/.env.uat   # first run only, then edit
+cp test/uat/.env.uat.example test/uat/.env.uat
+docker compose -f test/uat/docker-compose.uat.yml \
+  --env-file test/uat/.env.uat --project-name llmgw-uat down -v
 
-LLMGW_UAT_TAG=$(git rev-parse --short HEAD) \
-  docker compose -f test/uat/docker-compose.uat.yml \
-    --env-file test/uat/.env.uat \
-    --project-name llmgw-uat \
-    up --build --wait
+git diff --quiet && git diff --cached --quiet
+LLMGW_UAT_TAG="$(git rev-parse --short HEAD)" \
+LLMGW_BUILD_COMMIT="$(git rev-parse HEAD)" \
+LLMGW_BUILD_TIME="$(git show -s --format=%cI HEAD)" \
+docker compose -f test/uat/docker-compose.uat.yml \
+  --env-file test/uat/.env.uat --project-name llmgw-uat \
+  up --build --wait
 ```
 
-Open `http://127.0.0.1:8898/console`, sign in with the `LLMGW_API_KEY` value
-from your `.env.uat`.
+`down -v` before `up` guarantees fresh state. The named volume otherwise
+persists between runs.
 
-## UAT checklist (mirrors the console's Get-started guide)
+Open `http://127.0.0.1:8898/console` with the disposable `LLMGW_API_KEY`.
 
-Operator participation is required — real keys and a real OAuth device flow.
+## First-run acceptance
 
-1. **Access** — create a human owner and a project; add the owner as a member.
-2. **Provider (API key)** — connect a real provider (e.g. OpenAI, Gemini,
-   Groq) with a real key entered in the console.
-3. **Sync catalog** — the provider's real model list appears on its detail page.
-4. **Run test completion** — the provider reaches `Verified` status.
-5. **Provider (OAuth)** — GitHub Copilot device authorization end to end:
-   Add account → enter the code at github.com/login/device → connection stored
-   encrypted for the owner.
-6. **Edge TTS** — connect `edge_tts` (no credential), sync voices, run its
-   test synthesis, then `POST /v1/audio/speech` returns playable MP3 audio.
-7. **Route** — build a failover route across two real providers; run the
-   route test and inspect the fallback trace.
-8. **Key + CLI** — mint a project key and drive a real coding CLI
-   (`ANTHROPIC_BASE_URL`/`OPENAI_BASE_URL` → `http://127.0.0.1:8898`).
-9. **Governance** — set a project budget in Settings; verify the audit trail
-   recorded every step without secret values.
+1. Create a human and project; assign the human `owner` or `admin`.
+2. Connect a real API-key provider, sync its catalog, and run **Test completion**.
+3. Complete personal Copilot device authorization when that integration is in
+   scope.
+4. Connect `edge_tts`, sync voices, and run a real MP3 synthesis.
+5. Create and test an endpoint with two eligible providers.
+6. Mint a key that **acts as the human owner** when it must use that human's
+   private OAuth connection.
+7. Set project policy and inspect audit/usage without recording secret values.
 
-## Coding-client release gate
+## Direct endpoint gate
 
-For the `staging -> main` compatibility gate, connect a real provider rather
-than WireMock. Prefer a personal Copilot device authorization because its real
-catalog exercises Claude-family model discovery; Azure OpenAI may be added as a
-second exact-provider/failover check.
+```bash
+export BASE_URL=http://127.0.0.1:8898
+export KEY=<DISPOSABLE_PROJECT_KEY>
+export MODEL=<EXACT_PROVIDER_MODEL>
 
-Run Claude Code, Codex, and Copilot CLI on the host with process-scoped temporary
-environment variables or an ephemeral config directory pointing to
-`http://127.0.0.1:8898`. Do not install the clients in the gateway container and
-do not persist provider or gateway credentials in this repository.
+curl -fsS -H "Authorization: Bearer $KEY" "$BASE_URL/v1/models"
+curl -fsS -H "Authorization: Bearer $KEY" \
+  -H 'Content-Type: application/json' \
+  -d "{\"model\":\"$MODEL\",\"messages\":[{\"role\":\"user\",\"content\":\"Reply with: ok\"}],\"max_tokens\":64}" \
+  "$BASE_URL/v1/chat/completions"
+curl -fsS -H "Authorization: Bearer $KEY" \
+  -H 'Content-Type: application/json' \
+  -d "{\"model\":\"$MODEL\",\"input\":\"Reply with: ok\"}" \
+  "$BASE_URL/v1/responses"
+curl -fsS -H "Authorization: Bearer $KEY" \
+  -H 'Content-Type: application/json' \
+  -d "{\"model\":\"$MODEL\",\"messages\":[{\"role\":\"user\",\"content\":\"Reply with: ok\"}],\"max_tokens\":64}" \
+  "$BASE_URL/v1/messages"
+curl -fsS -H "Authorization: Bearer $KEY" \
+  -H 'Content-Type: application/json' \
+  -d "{\"model\":\"$MODEL\",\"messages\":[{\"role\":\"user\",\"content\":\"count this\"}]}" \
+  "$BASE_URL/v1/messages/count_tokens"
+```
 
-For Claude Code with a stored login or settings-level base URL, force API-key
-mode with `--bare`, put the gateway key in `ANTHROPIC_API_KEY`, and override
-`ANTHROPIC_BASE_URL` through per-invocation `--settings`. A Chat-only Claude
-target also needs thinking and prompt caching disabled for the core-profile
-smoke; the gateway intentionally rejects adaptive thinking, structured output,
-and cache controls rather than silently dropping them.
+Choose models whose catalog declares the required surface.
 
-Codex must use a model whose catalog row advertises `/responses`; a Chat-only
-model cannot preserve its encrypted reasoning state. Copilot CLI should use
-`COPILOT_PROVIDER_WIRE_API=completions` for a Chat-only model. Filter tools at
-the client for no-tool checks; the gateway does not discard native tools.
+## Installed-client gate
 
-The gate verifies:
+Use [`../../docs/CLIENTS.md`](../../docs/CLIENTS.md) with the UAT URL and a
+disposable key. Keep variables process-scoped or use an ephemeral client config.
 
-1. direct endpoint responses for models, Messages, token counting, Chat, and
-   Responses;
-2. Claude's model picker displays and selects the intended public model ID;
-3. one minimal prompt and one harmless tool-enabled Claude flow succeed;
-4. Ctrl+C stops the request without retry or failover;
-5. one Codex Responses request and one Copilot BYOK request succeed;
-6. gateway usage identifies the expected served provider/model.
+Verify:
 
-Record only client versions, selected public IDs, served provider/model, and
-pass/fail. Keep the disposable stack up for operator inspection, then use the
-teardown command below to remove its state.
+1. Claude's interactive model picker displays and selects the intended ID.
+2. Claude completes one prompt and one harmless Read-only tool flow.
+3. Physical Ctrl+C stops a stream without retry/failover.
+4. Codex completes one native Responses request.
+5. Copilot CLI BYOK completes one request on its configured wire API.
+6. Usage identifies the expected served provider/model.
+7. Revoking each disposable key produces `401` on reuse.
+
+Record only public client versions, model IDs, served provider/model, and
+pass/fail. Never record provider or gateway credentials.
 
 ## Tear down
 
@@ -91,6 +89,4 @@ docker compose -f test/uat/docker-compose.uat.yml \
   --env-file test/uat/.env.uat --project-name llmgw-uat down -v
 ```
 
-`down -v` destroys the state volume, including encrypted credentials — a UAT
-session never leaves residue. Revoke any real API keys you minted upstream if
-they were created only for the session.
+Revoke disposable upstream credentials when applicable.

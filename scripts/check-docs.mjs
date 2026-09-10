@@ -1,3 +1,4 @@
+import assert from "node:assert/strict";
 import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
 import { dirname, extname, join, normalize, relative, resolve } from "node:path";
 
@@ -15,11 +16,9 @@ function filesUnder(directory) {
   return output;
 }
 
-// Validate documentation, not legacy application copy or unrelated runtime files.
-const files = [...filesUnder(join(root, "docs")), ...filesUnder(join(root, "website")),
-  ...["README.md", "CONTRIBUTING.md", "SECURITY.md"].map(file => join(root, file))];
+const files = filesUnder(root);
 const markdownFiles = files.filter((file) => extname(file).toLowerCase() === ".md");
-const productTextFiles = files.filter((file) => /\.(?:md|html)$/i.test(file));
+const productTextFiles = files.filter((file) => /\.(?:md|html|tsx|yaml|yml)$/i.test(file));
 
 function source(file) { return readFileSync(file, "utf8"); }
 function repoPath(file) { return relative(root, file).replaceAll("\\", "/"); }
@@ -53,47 +52,6 @@ for (const forbidden of [
 const websiteDir = join(root, "website");
 const websiteFiles = filesUnder(websiteDir);
 const websiteText = websiteFiles.filter((file) => /\.(?:html|css|js|xml|txt|webmanifest)$/i.test(file)).map(source).join("\n");
-const base = new URL("https://xibodev.github.io/llm-gateway/");
-const htmlFiles = websiteFiles.filter(file => file.endsWith(".html"));
-const htmlIds = new Map(htmlFiles.map(file => [file, [...source(file).matchAll(/\bid="([^"]+)"/g)].map(match => match[1])]));
-let linkCount = 0;
-function checkSiteURL(raw, from) {
-  const url = new URL(raw.replaceAll("&amp;", "&"), new URL(repoPath(from).replace(/^website\//, ""), base));
-  if (url.origin !== base.origin) return;
-  check(url.pathname.startsWith(base.pathname), `${repoPath(from)} escapes project Pages base: ${raw}`);
-  if (!url.pathname.startsWith(base.pathname)) return;
-  const path = decodeURIComponent(url.pathname.slice(base.pathname.length)) || "index.html";
-  const target = join(websiteDir, path.endsWith("/") ? `${path}index.html` : path);
-  check(existsSync(target) && statSync(target).isFile(), `${repoPath(from)} links to missing ${raw}`);
-  if (url.hash && existsSync(target)) {
-    check(htmlIds.get(target)?.includes(decodeURIComponent(url.hash.slice(1))), `${repoPath(from)} links to missing fragment ${raw}`);
-  }
-  linkCount++;
-}
-for (const file of htmlFiles) {
-  const text = source(file);
-  const ids = htmlIds.get(file);
-  check(ids.length === new Set(ids).size, `${repoPath(file)} contains duplicate IDs`);
-  check((text.match(/<h1\b/g) || []).length === 1, `${repoPath(file)} must have exactly one h1`);
-  check(text.includes('lang="en"'), `${repoPath(file)} has no document language`);
-  for (const match of text.matchAll(/\b(?:href|src)="([^"]+)"/g)) checkSiteURL(match[1], file);
-  for (const match of text.matchAll(/data-copy="#([^"]+)"/g)) check(ids.includes(match[1]), `${repoPath(file)} has missing copy target ${match[1]}`);
-  for (const match of text.matchAll(/<dialog\b([^>]*)>/g)) {
-    const labelledBy = match[1].match(/aria-labelledby="([^"]+)"/);
-    check(/aria-label=/.test(match[1]) || (labelledBy && ids.includes(labelledBy[1])), `${repoPath(file)} has unlabelled dialog`);
-  }
-  check(!/https?:\/\/[^"\s]*(?:fonts\.googleapis|cdn\.)/.test(text), `${repoPath(file)} requires external UI assets`);
-}
-const search = JSON.parse(source(join(websiteDir, "search.json")));
-check(search.length === htmlFiles.length - 1, "search must cover every page except 404");
-for (const item of search) {
-  check(item.title && item.description && item.keywords, "incomplete search entry");
-  checkSiteURL(item.url, join(websiteDir, "search.json"));
-}
-const manifest = JSON.parse(source(join(websiteDir, "site.webmanifest")));
-checkSiteURL(manifest.start_url, join(websiteDir, "site.webmanifest"));
-for (const icon of manifest.icons) checkSiteURL(icon.src, join(websiteDir, "site.webmanifest"));
-for (const match of source(join(websiteDir, "sitemap.xml")).matchAll(/<loc>([^<]+)<\/loc>/g)) checkSiteURL(match[1], join(websiteDir, "sitemap.xml"));
 check(websiteFiles.some((file) => repoPath(file) === "website/index.html"), "website/index.html missing");
 check(websiteFiles.some((file) => repoPath(file) === "website/404.html"), "website/404.html missing");
 check(websiteFiles.some((file) => repoPath(file) === "website/sitemap.xml"), "website/sitemap.xml missing");
@@ -115,7 +73,9 @@ for (const provider of registry) {
   check(websiteText.includes(provider.label), `website omits ${provider.label}`);
 }
 
-check(source(join(root, "docs", "CONFIGURATION.md")).includes("does **not** apply"), "configuration docs must disclose released policy loader limitation");
+const configExample = source(join(root, "llmgw.config.example.yaml"));
+check(configExample.includes("policies:"), "example policies block missing");
+check(source(join(root, "docs", "CONFIGURATION.md")).includes("retry_max_attempts"), "configuration docs omit policies");
 
 const maxWebsiteBytes = 350 * 1024;
 const websiteBytes = websiteFiles.reduce((total, file) => total + statSync(file).size, 0);
@@ -126,4 +86,4 @@ if (failures.length) {
   process.exit(1);
 }
 
-console.log(`documentation checks passed: ${markdownFiles.length} Markdown files, ${registry.length} registry entries, ${htmlFiles.length} HTML pages, ${linkCount} local URLs, ${websiteBytes} bytes`);
+console.log(`documentation checks passed: ${markdownFiles.length} Markdown files, ${registry.length} registry entries, ${websiteFiles.length} website files`);

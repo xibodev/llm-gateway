@@ -25,6 +25,10 @@ services:
     build:
       context: ../../go
       dockerfile: Dockerfile
+      args:
+        VERSION: 0.0.0-dev
+        COMMIT: ${LLMGW_BUILD_COMMIT:-unknown}
+        BUILD_TIME: ${LLMGW_BUILD_TIME:-unknown}
     image: llm-gateway-go:uat-${LLMGW_UAT_TAG:-local}
     container_name: llmgw-uat-gateway
     restart: "no"

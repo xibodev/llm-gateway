@@ -1,0 +1,38 @@
+name: Provider or roster source request
+description: Request human review of a provider or source-specific extractor
+title: '[Roster request] '
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Requests require human review and source-specific extractor code pinned
+        to a reviewed repository snapshot. Filing this form does not add a provider,
+        fetch a URL, run code, or trigger publication. Use public evidence only.
+  - type: dropdown
+    id: request-type
+    attributes:
+      label: Request type
+      options:
+        - Provider candidate
+        - Directory source or extractor
+    validations:
+      required: true
+  - type: input
+    id: public-source
+    attributes:
+      label: Public source repository or provider documentation
+      placeholder: https://github.com/example/directory
+    validations:
+      required: true
+  - type: textarea
+    id: evidence
+    attributes:
+      label: Evidence and extraction proposal
+      description: Describe protocol, authentication, offer limits, regional distinctions, source license, and the extractor change needed. Unknown details are acceptable.
+    validations:
+      required: true
+  - type: textarea
+    id: assets
+    attributes:
+      label: Logo provenance and permission
+      description: Optional public license and attribution evidence. Remote SVGs are not embedded.

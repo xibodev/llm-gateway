@@ -90,8 +90,9 @@ invariant; keep that pattern when adding a credential type.
 ## Before you push
 
 ```bash
-cd go && go build ./... && go vet ./... && go test ./...
-cd internal/web/console && npm ci && npm run lint && npm test && npm run check:dist
+cd go && go build ./... && go vet ./... && go test ./... && govulncheck ./...
+cd internal/web/console && npm ci && npm audit --audit-level=high && npm run lint && npm test && npm run check:dist
+cd ../../../.. && node scripts/check-docs.mjs
 ```
 
 `check:dist` matters: `dist/` is committed because the Go binary embeds it, so a
@@ -102,8 +103,9 @@ console source change **must** be rebuilt and committed with it or CI fails.
 - Match the surrounding code: comment density, naming, and error style.
 - Comments explain **why**, not what. Prefer a comment that records a decision or
   a trap over one that restates the code.
-- Keep the dependency tree small. This project has **three** direct Go
-  dependencies and cross-compiles to four platforms with `CGO_ENABLED=0`. Prefer
+- Keep the dependency tree small. The direct Go dependency set is deliberately
+  small, and releases cross-compile five OS/architecture artifacts with
+  `CGO_ENABLED=0`. Prefer
   the standard library; a new dependency needs a reason that survives review.
 - No AI attribution trailers in commit messages.
 - Do not commit dates or version stamps into documentation — git records history.

@@ -1,11 +1,12 @@
 # llm-gateway config (providers + endpoints). Point LLMGW_CONFIG at this file.
 #
-# API keys are NOT stored here. Enter them in the /admin panel (saved to
-# ~/.llmgw/secrets.json, perms 0600) or reference an env var with ${ENV:NAME}.
+# Do not commit real provider credentials. Prefer ${ENV:NAME} references or the
+# console's encrypted connection flow. The compatibility path may retain a
+# plaintext owner-only secrets.json seed; protect state and backups accordingly.
 
 providers:
   copilot:
-    type: github_copilot            # sign in via /admin (device code); no key needed
+    type: github_copilot            # sign in as a human owner via the console
   openrouter:
     type: openai_compatible
     base_url: https://openrouter.ai/api/v1
@@ -25,12 +26,11 @@ providers:
 endpoints:
   smart:
     failover:
-      - { provider: copilot, model: claude-sonnet-4.5 }               # within-provider ...
-      - { provider: copilot, model: gpt-5.5 }                          # ... fallback
-      - { provider: openrouter, model: anthropic/claude-3.5-sonnet }   # ... then cross-provider
+      - { provider: copilot, model: <copilot-model-id> }
+      - { provider: openrouter, model: <openrouter-model-id> }
   cheap:
     failover:
-      - { provider: copilot, model: gpt-4o-mini }
+      - { provider: copilot, model: <small-model-id> }
 
 policies:
   defaults:

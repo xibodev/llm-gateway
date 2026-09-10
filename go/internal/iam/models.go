@@ -30,6 +30,9 @@ type Membership struct {
 }
 
 type KeyPolicy struct {
+	AllowedRoutes       []string `json:"allowed_routes,omitempty"`
+	RoutesOnly          bool     `json:"routes_only,omitempty"`
+	AdminManaged        bool     `json:"admin_managed,omitempty"`
 	AllowedModels       []string `json:"allowed_models,omitempty"`
 	AllowedProviders    []string `json:"allowed_providers,omitempty"`
 	RPM                 int      `json:"rpm,omitempty"`

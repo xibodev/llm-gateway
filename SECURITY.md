@@ -1,106 +1,121 @@
-# Security posture
+# Security policy
 
-`llm-gateway` is an **internal multi-user coding-CLI gateway**, not a public SaaS
-relay. Human users authenticate through a trusted SSO reverse proxy; CLIs and
-service principals authenticate with scoped API keys. Administrators, project
-owners, members and services are distinct principals.
+llm-gateway is an internal, self-hosted gateway, not a public SaaS relay. Run it
+on loopback or a private network, terminate TLS at a trusted reverse proxy, and
+do not expose the raw listener to untrusted clients.
 
-## Authentication & authorization
-- **Admin auth**: Authentik/SSO admin-group assertions signed by a reverse-proxy
-  shared secret, or the static `LLMGW_API_KEY` recovery credential. Project keys
-  cannot call admin APIs.
-- **User auth**: Authentik/SSO assertions provision human principals and power
-  `/portal`; same-origin checks protect SSO-authenticated mutations.
-- **API auth**: `llmgw_...` keys assigned to exactly one principal and
-  project. Requests authenticate against SHA-256 hashes; encrypted token copies
-  support explicit owner/admin reveal when credential encryption is configured.
-- **Governance**: key + aggregate project policies enforce model/provider
-  allowlists and persistent minute/day/month request, token, estimated-cost and
-  model-credit limits through atomic SQLite counters.
-- Constant-time comparison for admin keys.
+## Supported versions
 
-## Secrets
-- Provider API keys are AES-256-GCM encrypted in `gateway.db` for named system
-  and per-human connections. `~/.llmgw/secrets.json` (**0600**) remains a
-  compatibility/config seed, never a committed file. Secrets are never returned
-  by list APIs (only connection metadata and `api_key_set`).
-- IAM, hashed API keys, usage, quotas, audit and notification events live in
-  `~/.llmgw/gateway.db` (**0600**, SQLite WAL).
-- Provider connections, per-human BYOC credentials and gateway-managed shared
-  provider credentials are encrypted with AES-256-GCM using
-  `LLMGW_CREDENTIAL_ENCRYPTION_KEY`; the key itself is environment-only. Shared
-  credentials require an explicit active project/provider/principal-kind
-  binding and are never returned by an API.
-- Upstream error bodies are **redacted** (emails + token-shaped strings) before
-  they are surfaced or logged.
-- Request logging is opt-in (`LLMGW_LOG_REQUESTS=1`) and records metadata only.
-  Model-level telemetry remains in the usage ledger; the request log does not
-  buffer request content merely to extract a model name.
-  Full prompt/provider-response capture requires the separate unsafe opt-in
-  `LLMGW_LOG_REQUEST_BODIES=1`; those bodies can contain credentials, PII, or
-  proprietary content. Logs rotate at 100 MiB by default
-  (`LLMGW_LOG_REQUESTS_MAX_BYTES`).
+Security fixes are delivered on the latest published release line. Before
+reporting an issue, reproduce it against the latest release when doing so does
+not risk data or credential exposure.
 
-## Containers
-- **Go**: `gcr.io/distroless/static-debian12:nonroot` — a static, stripped
-  binary, no shell or package manager, non-root by default.
-- **Console**: Node.js and Vite run only while building the embedded static
-  assets; neither ships in the runtime image. Build dependencies are still part
-  of the release supply chain and must be audited.
-- **Dependency audit probes**: run `cd go && govulncheck ./...` and
-  `cd internal/web/console && npm audit`. A healthy release has no unresolved
-  applicable advisories. Current remediation work is tracked in
-  [`BACKLOG.md`](BACKLOG.md) rather than recorded here as a claim that goes stale.
-- **Release provenance**: tag releases produce per-binary SPDX SBOMs, verified
-  SHA-256 checksums, build-provenance attestations, and a multi-architecture
-  image with BuildKit SBOM/provenance. Tags must name the current `main` head,
-  build inputs are pinned, and manual dispatch is a non-publishing dry run.
+## Private reporting
 
-## SSRF — intentionally not guarded
-The gateway connects to **operator-configured** provider base URLs, which
-routinely include loopback/LAN addresses (Ollama, LocalAI, LM Studio, vLLM).
-Blocking private/loopback targets would break the product's core local-provider
-feature. Because the operator controls provider URLs and the service is meant for
-loopback, request-forgery guards are deliberately omitted.
+Report vulnerabilities through GitHub's private vulnerability reporting for
+`xibodev/llm-gateway`:
 
-Do not expose the container port directly. Bind it to loopback and front it with
-TLS + Authentik. Caddy must overwrite the SSO assertion secret/header; never
-trust identity headers received directly from a client.
+<https://github.com/xibodev/llm-gateway/security/advisories/new>
 
-## GitHub Copilot as a provider
-Using a Copilot subscription as a general gateway provider remains a grey area,
-not a sanctioned public API. In multi-user mode, each human may connect their own
-Copilot entitlement (BYOC). A service principal cannot own a human credential or
-inherit a global credential implicitly. An administrator may import the configured
-gateway credential into the encrypted store and bind it to one project, provider
-and principal kind. Resolution is own human BYOC first, then that exact active
-binding; absent, disabled or revoked credentials and bindings fail closed.
+Do not open a public issue for an undisclosed vulnerability. Never include real
+keys, tokens, hostnames, account identifiers, personal data, production logs, or
+runtime configuration. Use synthetic reproduction data.
 
-## Reporting
-This is a personal project. If you find a security issue, open an issue in the
-repository (omit any secrets/tokens from the report).
+## Authentication and authorization
 
-## Console and OAuth boundaries
+- **Administrator**: static `LLMGW_API_KEY` or verified SSO identity in the
+  configured admin group. Project keys cannot call admin APIs.
+- **Human portal**: verified reverse-proxy SSO identity. Mutations must be
+  same-origin.
+- **Data plane**: static gateway key or active project key, unless deliberate
+  unauthenticated local mode is enabled.
+- **Gateway key**: assigned to one principal/project and authenticated against a
+  SHA-256 hash.
+- **Recoverable key**: encrypted with AES-GCM only when credential encryption was
+  configured at issuance; reveal is owner/admin-only, no-store, and audited.
+- **Governance**: project/key allowlists and request, token, estimated-cost, and
+  credit limits execute in the request path.
 
-- `/console` uses locally bundled assets only. The browser does not load a CDN dependency or runtime Node service.
-- OAuth access, refresh, and ID tokens are kept together in the existing AES-GCM encrypted provider-connection boundary. List, poll, refresh, audit, and playground responses expose only safe connection metadata.
-- GitHub Copilot and official OpenAI Codex OAuth connections are human-private. Codex persistence is owner-local and experimental; it is never a service/system credential or shared entitlement.
-- Claude Code is supported as a documented Anthropic gateway client. The project does not implement reverse-engineered Claude personal OAuth, cookie providers, or MITM credential capture.
-- The playground runs on the server with project policy and keyless project counters. Its response is scrubbed of credential-shaped fields before it reaches the browser.
+Static admin-key comparison is constant-time.
 
-## Provider expansion policy
+## SSO boundary
 
-Provider-platform ideas in `docs/PROVIDER_PARITY.md` are design research, not
-committed scope. Any demand-driven expansion must preserve these boundaries:
+The gateway trusts Authentik-style headers only when accompanied by
+`X-LLMGW-SSO-Secret`. A trusted reverse proxy must authenticate the client,
+overwrite that header, forward verified identity fields, and block direct access
+to the gateway.
 
-- Official API-key, OAuth and local/no-auth integrations are preferred.
-- Official CLI-token imports or subscription OAuth with uncertain proxy terms
-  are human-owner only, disabled by default and require an explicit risk
-  acknowledgement recorded in audit.
-- Browser-cookie extraction, stealth session reuse and MITM credential capture
-  remain out of scope.
-- Provider/account/model/quota APIs expose operational metadata only; they never
-  return credentials or token-shaped payloads.
-- Multiple provider accounts must be isolated in cache keys and routing state.
-- Automated tests use local fixtures, while human UAT uses real integrations
-  with synthetic identity/project data and disposable encrypted state.
+The included Caddy configuration is a TLS/static-admin starting point. It is not
+a complete SSO deployment.
+
+## Credentials and state
+
+Human provider API-key and OAuth connections use AES-256-GCM with
+`LLMGW_CREDENTIAL_ENCRYPTION_KEY`. List, audit, and playground responses expose
+metadata rather than provider token values.
+
+System provider keys entered through the administration path can also remain in
+owner-only plaintext `secrets.json` for compatibility. Therefore the project does
+not claim universal encryption at rest. Protect the entire state directory.
+
+Generic API-key provider resolution can fall back to a system connection without
+a project binding. The supported exact project/provider/principal-kind binding
+boundary applies to gateway-owned Copilot credentials used by services. Personal
+Copilot and Codex OAuth connections remain human-private.
+
+## Diagnostics and logging
+
+Credential-shaped upstream diagnostics are sanitized before being surfaced or
+persisted. Audit details are structured-sanitized.
+
+Request logging is off by default. `LLMGW_LOG_REQUESTS=1` records metadata only.
+`LLMGW_LOG_REQUEST_BODIES=1` is an unsafe separate opt-in and can persist prompts,
+responses, credentials, personal data, and proprietary source. Request logs are
+excluded from built-in backups.
+
+## Backup security
+
+Built-in archives can contain configuration, encrypted connections, plaintext
+compatibility secrets, API-key recovery ciphertext, provider caches, and local
+usage state. They are created with owner-only permissions; Windows uses a
+protected current-user/SYSTEM DACL.
+
+Checksums and SQLite integrity checks detect corruption, not malicious archive
+replacement. Protect backups from disclosure and tampering. Keep
+`LLMGW_CREDENTIAL_ENCRYPTION_KEY` separately; it is deliberately not archived.
+
+## Containers and releases
+
+- Runtime image: static binary in a non-root distroless container with no shell
+  or package manager.
+- Console: local embedded assets; Node.js is build-time only.
+- Release inputs: GitHub action revisions, Node, Syft, Buildx, BuildKit,
+  Dockerfile frontend, and base images are pinned in the workflow. GitHub-hosted
+  runner images remain platform-managed.
+- Release outputs: verified checksums, per-binary SPDX SBOMs, GitHub provenance,
+  and Linux amd64/arm64 image SPDX/SLSA attestations.
+- Manual release dispatch: non-publishing and produces no retained artifact.
+
+Healthy release probes are `govulncheck ./...`, `npm audit --audit-level=high`,
+workflow lint, Dockerfile validation, and the repository test suites.
+
+## SSRF is intentionally not blocked
+
+Operators configure provider base URLs, including loopback and LAN services such
+as Ollama, LocalAI, LM Studio, vLLM, and llama.cpp. Blocking private addresses
+would break a core feature. Treat provider administration as privileged and do
+not expose it to untrusted users.
+
+## Provider-specific boundaries
+
+- GitHub Copilot gateway use is a personal-use grey area, not a sanctioned public
+  provider API. Respect provider terms and keep entitlements owner-private.
+- OpenAI does not currently document third-party Codex client registration. The
+  gateway does not embed the official CLI's first-party client ID.
+- Claude personal-subscription OAuth, browser-cookie extraction, MITM
+  interception, and stealth session reuse are not implemented.
+- Edge TTS uses an unofficial public read-aloud service and may change.
+
+See [`docs/LIMITATIONS.md`](docs/LIMITATIONS.md) for the complete product
+boundary and [`docs/OPERATIONS.md`](docs/OPERATIONS.md) for secure deployment and
+recovery.

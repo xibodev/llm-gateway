@@ -182,6 +182,9 @@ func NewServer() http.Handler {
 	mux.HandleFunc("POST /admin/api/copilot/login/start", handleCopilotLoginStart)
 	mux.HandleFunc("POST /admin/api/copilot/login/poll", handleCopilotLoginPoll)
 	mux.HandleFunc("POST /admin/api/copilot/logout", handleCopilotLogout)
+	mux.HandleFunc("GET /admin/api/provider-roster", handleAdminRoster)
+	mux.HandleFunc("POST /admin/api/provider-roster/refresh", handleRefreshRoster)
+	mux.HandleFunc("GET /user/api/provider-roster", handleUserRoster)
 
 	return aliasMiddleware(requestLogMiddleware(mux))
 }

@@ -1,161 +1,187 @@
-# Multi-user control plane
+# Multi-user governance
 
-The production Go gateway remains one static binary with `gateway.db` as its
-authoritative SQLite control-plane store. The current build also writes optional
-local usage/failover sidecars; their removal from request latency is tracked in
-`BACKLOG.md`. The gateway does not require Postgres, Redis, an embedded IdP,
-SMTP or notification SDKs.
+llm-gateway is a single-node internal gateway. Its multi-user boundary combines
+trusted reverse-proxy SSO for humans with scoped gateway keys for CLIs and
+services.
 
 ## Identity model
 
-- **Human principal**: provisioned from Authentik SSO; may connect named private
-  provider API keys, its own Copilot OAuth entitlement, and use `/portal`.
-- **Service principal**: created by an administrator for a workload; cannot own
-  a human Copilot subscription. It may use a gateway-managed provider credential
-  only through an explicit project/provider/`service` binding.
-- **Project**: membership and aggregate policy boundary.
-- **Membership roles**: owner, admin, member, viewer.
-- **API key**: belongs to exactly one principal + project; requests authenticate
-  against its SHA-256 hash, while an encrypted token copy can be revealed only by
-  that principal or an administrator.
+- **Human principal**: provisioned from verified reverse-proxy identity headers.
+  Can own named private API-key and OAuth connections and use `/portal`.
+- **Service principal**: created by an administrator for a workload. Cannot own a
+  human subscription connection.
+- **System principal**: built-in owner for gateway-managed shared credentials.
+- **Project**: membership and aggregate-policy boundary.
+- **Membership**: `owner`, `admin`, `member`, or `viewer`.
+- **Gateway key**: belongs to exactly one principal and project.
+
+## Authentication boundaries
+
+### Administrator
+
+`/admin/api/*` accepts either:
+
+- the static `LLMGW_API_KEY` recovery/administrator credential; or
+- a verified SSO identity in `LLMGW_SSO_ADMIN_GROUP`.
+
+A gateway-issued project key is never an administrator credential.
+
+### Human portal
+
+`/user/api/*` requires verified SSO identity headers. SSO-authenticated mutations
+must also be same-origin.
+
+### Data plane
+
+`/v1/*` accepts a static gateway key or an active gateway-issued project key.
+The resolved principal carries project, role, model/provider policy, and quota
+limits through the request path.
 
 ## SSO trust boundary
 
-Caddy/Authentik protects `/admin`, `/portal`, `/admin/api/*` and `/user/api/*`.
-It forwards `X-Authentik-Uid`, username, email, name and groups, and overwrites
-`X-LLMGW-SSO-Secret` with a value shared with the gateway. The container port is
-loopback-only. The gateway rejects SSO mutations without a same-origin `Origin`.
+The gateway does not implement an embedded identity provider or generic OIDC
+flow. A trusted reverse proxy must:
 
-`LLMGW_API_KEY` remains a recovery/admin credential. A project API key is never
-an admin credential.
+1. authenticate the human;
+2. overwrite `X-LLMGW-SSO-Secret` with the configured shared secret;
+3. forward the verified `X-Authentik-Uid`, username, email, name, and groups;
+4. prevent direct client access to the gateway listener;
+5. terminate TLS for remote access.
+
+The included Caddy example is a TLS/static-admin starting point, not a turnkey
+Authentik deployment. Add and test your own identity middleware before enabling
+multi-user access.
 
 ## Provider connections
 
-Each human may own multiple named connections for one configured provider, such
-as `gemini/personal` and `gemini/work`. Connections are AES-256-GCM encrypted,
-never returned by list APIs, and cannot be owned by service principals. One
-connection is the deterministic default for that human/provider pair. Revoking
-the default promotes another active connection when one exists.
+Humans can own multiple named private connections for a provider. One active
+connection is the deterministic default. Revoking the default promotes another
+active connection when one exists.
 
-Resolution order is:
+Generic API-key provider resolution is:
 
-1. the calling human's default connection;
-2. the encrypted system connection;
-3. the legacy config/secrets-store credential.
+1. calling human's active default private connection;
+2. encrypted system connection;
+3. legacy YAML/environment/`secrets.json` credential.
 
-The current runtime resolves the deterministic default connection for a
-human/provider pair. Earlier account-aware routing ideas remain in
-`docs/PROVIDER_PARITY.md` as design research; they are not committed product
-scope.
+The generic system fallback is not project-binding-gated today.
 
-Config credentials seed a missing system connection only when
-`LLMGW_CREDENTIAL_ENCRYPTION_KEY` is configured. Existing database connections
-are never overwritten on restart. An explicit admin provider update is the
-credential-rotation path.
+### Copilot shared-service exception
 
-## Copilot BYOC
+Copilot applies a stricter credential boundary:
 
-Each human completes GitHub's device-code flow. The OAuth token is encrypted with
-AES-256-GCM using `LLMGW_CREDENTIAL_ENCRYPTION_KEY`. Copilot session caches are
-fingerprint-isolated. Provider instances and catalogs are cached per project and
-principal for service bindings, preventing cross-project credential/session reuse.
-Human BYOC caches remain principal-scoped, preserving existing client catalogs.
+1. an active human uses that human's own active OAuth connection;
+2. a service can use a gateway-owned credential only through an active binding
+   for the exact active project, provider, and `service` principal kind;
+3. otherwise the provider contributes no models and cannot be routed.
 
-Credential resolution is deterministic:
+Membership, project, principal, binding, and credential status are checked on
+resolution. Project and key allowlists remain a separate intersecting gate.
 
-1. an active human principal's own active credential for the provider;
-2. an active gateway-owned credential selected by an active binding for the
-   caller's exact active project, provider and principal kind;
-3. otherwise no credential, so the provider contributes no models and cannot be
-   routed.
+### Codex
 
-Membership, project status, principal status, binding status and credential status
-are checked on every resolution, including before a cached catalog is returned.
-Key and project model/provider policies remain a separate intersecting gate.
+Codex OAuth connections are experimental, human-private, and not assignable to
+services or the system principal. The operator must supply an OAuth client ID
+they are authorized to use; the gateway does not embed the official CLI's
+first-party client ID.
 
-## Shared provider credential admin API
+## Shared Copilot credential API
 
-All endpoints require admin authentication. Responses and audit details contain
-metadata only, never OAuth/provider tokens.
+These administrator APIs expose metadata only:
 
-- `POST /admin/api/providers/{provider}/shared-credential/import` with
-  `{"source":"configured"}` encrypts the currently configured gateway credential
-  under the gateway system principal and returns credential metadata.
-- `POST /admin/api/projects/{project}/provider-credential-bindings` with
-  `provider_id`, `principal_kind` and `credential_id` creates or replaces the
-  exact binding.
-- `GET /admin/api/projects/{project}/provider-credential-bindings` lists binding
-  metadata.
-- `POST /admin/api/projects/{project}/provider-credential-bindings/status` sets
-  an existing binding to `active`, `disabled` or `revoked`.
-- `POST /admin/api/provider-credentials/status` sets an encrypted credential to
-  `active`, `disabled` or `revoked` by `id`.
+- `POST /admin/api/providers/{provider}/shared-credential/import`
+- `GET /admin/api/projects/{project}/provider-credential-bindings`
+- `POST /admin/api/projects/{project}/provider-credential-bindings`
+- `POST /admin/api/projects/{project}/provider-credential-bindings/status`
+- `POST /admin/api/provider-credentials/status`
 
-Each mutation writes an audit event and invalidates provider/catalog caches.
+They import the supported gateway-owned credential, bind it to an exact project
+and principal kind, and manage status. These mutations are audited and invalidate
+credential-dependent provider/catalog caches.
 
-## Quotas
+## Gateway keys
 
-Key and project policies support:
+Issued tokens contain 192 random bits and use a SHA-256 hash for authentication.
+When `LLMGW_CREDENTIAL_ENCRYPTION_KEY` is configured at issuance, an AES-GCM
+encrypted copy supports explicit reveal:
 
-- model/provider allowlists,
-- requests per minute/day/month,
-- daily input/output tokens,
-- monthly total tokens,
-- daily/monthly estimated micro-USD,
+- a human can reveal only a key owned by that principal;
+- an administrator can reveal any recoverable key;
+- reveal responses are `no-store`/`no-cache` and create an audit event;
+- keys issued before encrypted recovery remain valid but return `409` on reveal;
+- restore requires the original encryption key.
+
+Disabled, expired, and revoked state controls authentication. Reveal authorization
+is based on ownership/admin access rather than key status.
+
+`admin_managed` is a server-controlled, key-only flag. New administrator-issued
+keys are admin-managed; an administrator updating a key's policy, status, or
+expiry also sets the flag. Owners cannot change those fields through the portal
+afterward, including disabling or re-enabling a key. They can still reveal a
+recoverable token and revoke their key. Clients cannot clear the flag.
+
+Existing persisted keys remain owner-editable until an administrator updates
+them, regardless of who originally issued them. Upgrading alone does not lock
+their policy; see [`UPGRADING.md`](UPGRADING.md).
+
+## Policy and quotas
+
+Key and project policy support:
+
+- model and provider allowlists;
+- requests per minute, day, and month;
+- daily input/output tokens and monthly total tokens;
+- daily/monthly estimated micro-USD;
 - daily/monthly model credits.
 
-SQLite transactions consume request slots before dispatch. Usage counters are
-reconciled after the response. Token/cost limits can exceed by at most one
-in-flight request; request-count and RPM limits are strict.
+Keys additionally support `allowed_routes` and `routes_only`; these and
+`admin_managed` are not project policy fields. A non-empty `allowed_routes`
+restricts named endpoints but does not itself block direct models. `routes_only`
+requires an allowed route and blocks direct model IDs and bare model aliases.
+Grants follow endpoint edits and are bound to the name, including deletion and
+recreation under that name. They still intersect with key/project model and
+provider policy and credential eligibility. They neither bind an upstream
+account/connection nor provide per-HTTP-surface ACLs. See
+[`ROUTING.md`](ROUTING.md).
 
-These are **downstream gateway quotas** applied to gateway-issued keys and
-projects. They are distinct from upstream provider quotas such as subscription
-reset periods. Upstream quota adapters and quota-sharing ideas are deferred
-design research, not current routing behavior.
+Project and key allowlists intersect. Request-count slots are consumed in SQLite
+before provider dispatch. Token, estimated-cost, and credit counters reconcile
+after response completion, so those limits may exceed by one in-flight request;
+request-count limits are strict.
 
-## Usage, audit and notifications
+These are downstream gateway limits, not provider subscription quotas. The
+gateway does not currently perform quota-aware account scheduling. Unknown
+upstream quota remains unknown.
 
-`gateway.db` records principal/project/key attribution, endpoint, model,
-provider, status, latency, tokens, estimated cost and credits. Admin statistics
-group by project, principal, key, provider and model. Every management mutation
-is audit logged.
+## Usage, audit, and notifications
 
-Alert rules create deduplicated durable outbox events for quota thresholds and
-key expiry. Windmill drains the outbox and owns email/Chatwoot formatting and
-delivery; see `deploy/windmill/`.
+`gateway.db` records request attribution, status, latency, requested and served
+models, provider, tokens, estimated cost, credits, and error code. Admin reports
+group by project, principal, key, provider, and model.
 
-## Migration and backup
+Audit history is append-only during its configured retention window. Many
+security-sensitive and identity/credential mutations are audited, but the project
+does not claim every management mutation is currently covered.
 
-On first Go startup:
+Quota and key-expiry rules create a durable, deduplicated outbox. The gateway
+does not send email or chat messages itself; an external worker such as the
+example under `deploy/windmill/` claims and settles outbox events.
 
-1. plaintext `keys.json` is transactionally imported as hashed keys and removed;
-2. existing `usage.db` history is copied into `gateway.db` and current-period
-   quota counters are rebuilt;
-3. legacy single-provider credentials are exposed as the default named
-   connection without changing their ciphertext;
-4. configured system credentials seed the encrypted connection store only when
-   absent;
-5. migrations are idempotent through `schema_migrations` and `control_metadata`;
-6. `provider_credential_bindings` is added without changing existing
-   principals, projects, keys or human provider credentials.
+## Console and portal
 
-Stop the gateway and run `llmgw backup create <archive>`. The command checkpoints
-configured SQLite state into standalone databases, copies configuration,
-catalog, OAuth cache and supported legacy state, writes checksums, and verifies
-the completed archive. Use
-`llmgw backup inspect <archive>` before `llmgw backup restore <archive> --force`.
-The process lock prevents maintenance from racing `serve`. Keep the encryption
-key in the secret manager; it is not archived and encrypted credentials are
-unusable without it.
+`/admin` redirects to the embedded `/console` administration SPA. `/portal`
+serves the same bundle in owner mode and calls only `/user/api/*`.
 
-## Console and official OAuth
+The primary console supports provider lifecycle, models, endpoint routes,
+playground, keys, access, usage, alerts, project policy, and retained audit
+history. Management APIs exist for shared Copilot bindings even though the
+primary console does not yet expose every binding control.
 
-The primary console is `/console`; owner portal mode is `/portal`. The same local bundle chooses the user API boundary in portal mode and the admin API boundary in console mode. Legacy documents are retained at `/admin-legacy` and `/portal-legacy`.
+Legacy documents remain at `/admin-legacy` and `/portal-legacy` for compatibility;
+new deployments should use `/console` and `/portal`.
 
-OAuth connections use encrypted provider-connection envelopes with safe expiry/account metadata only. GitHub Copilot uses its official device flow. OpenAI Codex uses official device authorization and a PKCE authorization-code exchange, configured with `openai_codex_client_id`; the resulting connection is experimental, owner-local, and not assignable to services. Claude Code is a gateway client using the documented Anthropic protocol, with supported Anthropic API/gateway credentials rather than personal OAuth.
+## Storage and recovery
 
-Owner/admin playground requests require an explicit project and record the selected human/project attribution. They consume project request counters without creating a browser API key. Provider subscription quota values remain `unknown` unless an adapter supplies verified data; unknown is never rendered as a numeric remaining percentage.
-
-Before any rollout, create and inspect a built-in backup. Rollback restores that
-archive and the prior immutable image; a binary older than a schema change
-should not be paired with state that has already migrated past it.
+The authoritative control plane is local SQLite. No Postgres, Redis, embedded
+IdP, SMTP SDK, or runtime Node service is required. Backup, retention, migration,
+and restore behavior are documented in [`OPERATIONS.md`](OPERATIONS.md).

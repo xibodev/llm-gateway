@@ -1,267 +1,161 @@
 # llm-gateway
 
-Standalone, multi-provider LLM proxy for coding CLIs (Claude Code, GitHub Copilot CLI,
-Codex). A standalone service with no external coordination-plane dependency.
+Self-hosted, single-node LLM gateway for Claude Code, Codex, GitHub Copilot CLI
+BYOK, SDKs, and direct HTTP clients.
 
-## Website and Guides
+Point clients at one gateway, address an exact configured model as
+`provider/model`, or create a named endpoint with an ordered failover chain.
+The gateway exposes core OpenAI and Anthropic protocol surfaces, enforces
+project and key policy, and ships an embedded administration console in one Go
+binary.
 
-Visit the [product website](https://xibodev.github.io/llm-gateway/) for an overview
-and searchable documentation, or start with the repository guides:
+## What it does
 
-- [Quickstart](docs/QUICKSTART.md) and [client setup](docs/CLIENTS.md)
-- [Configuration](docs/CONFIGURATION.md) and [routing](docs/ROUTING.md)
-- [Providers](docs/PROVIDERS.md) and [API reference](docs/API.md)
-- [Operations](docs/OPERATIONS.md), [upgrading](docs/UPGRADING.md), and [limitations](docs/LIMITATIONS.md)
+- Routes OpenAI Chat Completions, Responses, embeddings, audio, image, and video
+  requests plus Anthropic Messages and token counting.
+- Selects exact models, deterministic unambiguous aliases, or named ordered
+  endpoint chains.
+- Advances eligible chat requests after upstream throttling, server errors, or
+  timeouts before output starts.
+- Connects curated hosted, OAuth, local, and custom compatible providers.
+- Enforces model/provider allowlists and persistent request, token, estimated
+  cost, and model-credit limits at key and project scope.
+- Stores IAM, encrypted connections, usage, quotas, alerts, and retained audit
+  history in local SQLite.
+- Provides `/console` for administrators and `/portal` for SSO-authenticated
+  human owners.
+- Creates inspectable offline backups, bounds operational history, and reports
+  immutable release build identity.
 
-The existing [wire compatibility](docs/CLI_COMPATIBILITY.md) and
-[deployment/rollback procedure](deploy/DEPLOY.md#upgrade-and-rollback) remain
-the detailed repository references.
+This is an internal gateway, not a public relay, provider marketplace, quota
+scheduler, or high-availability control plane. See
+[`docs/LIMITATIONS.md`](docs/LIMITATIONS.md) for explicit boundaries.
 
-**Purpose:** connect your providers, then juggle subscription limits and survive
-outages. Address any real model as `provider/model`, or define **endpoints** —
-named, ordered failover chains of pinned real models that cascade on
-429/5xx/timeout, within a provider and/or across providers.
+## Quickstart
 
-## Surfaces
-- `POST /v1/messages`, `POST /v1/messages/count_tokens` — Anthropic Messages (Claude Code)
-- `POST /v1/chat/completions`, `POST /v1/responses` — OpenAI (Codex, Copilot BYOK)
-- `POST /v1/audio/transcriptions`, `POST /v1/audio/speech` — audio STT/TTS (proxied to an OpenAI-compatible provider such as LocalAI, or synthesized natively by the built-in `edge_tts` provider — Microsoft Edge read-aloud voices, no credential; its endpoint/token/voice defaults are baked in and overridable via `base_url`, `api_key`, `default_voice`)
-- `POST /v1/images/generations` — image generation (OpenAI-shaped, returns `b64_json`)
-- `POST /v1/videos/generations` — video generation; starts a long-running job, or polls one when the body carries `operation`
-- `GET /v1/models` — every provider's real models, namespaced `provider/model`, plus your endpoint names
-- `GET /admin` — SSO/admin control plane: providers, users/services, projects,
-  memberships, private provider connections, policies, keys, usage, alerts and audit
-- `GET /portal` — SSO self-service: personal keys, usage, provider API-key
-  connections and per-human Copilot BYOC
-- `GET /health`
-
-Multimodal requests (images) route to vision-capable models automatically. API
-keys use hashes for authentication and encrypted copies may be revealed by their
-owner or an administrator. Key and project governance supports
-expiry, model/provider allowlists, persistent RPM, daily/monthly request, token,
-estimated-cost and model-credit budgets. Opt-in **API adaptation** lets a
-`/chat/completions` request reach a Responses-only model (e.g. `gpt-5.5`). See
-`docs/MULTI_USER.md`, [`BACKLOG.md`](BACKLOG.md), `SECURITY.md` and `deploy/`.
-`BACKLOG.md` is the single implementation and product-scope tracker; broader
-provider-platform ideas remain design research in `docs/PROVIDER_PARITY.md`.
-
-Provider credentials are resolved explicitly. Humans use their own encrypted
-BYOC credential first. A service can use a gateway-managed encrypted provider
-credential only when its active project has an active binding for that exact
-provider and the `service` principal kind. Provider, project and key model
-allowlists still intersect after credential resolution; no provider token is
-returned to the workload.
-
-## Model addressing (no tiers, no classifier, no aliases)
-- `provider/model` — that exact model on that provider (e.g. `copilot/gpt-4o-mini`). No failover.
-- an **endpoint** name — cascades through its pinned models in order (failover).
-- a bare **provider-native** name — normalized onto the matching catalog model, so a coding CLI can pass names straight through. Claude Code's `/model` picker sends Anthropic-native rows like `claude-opus-4-8[1m]`; the gateway maps that to `copilot/claude-opus-4.8` (version dots/dashes unified, a `[…]` context tag dropped). A name with no catalog match (e.g. a retired `claude-opus-4`) still `404`s.
-- anything else → `404` (pick from `GET /v1/models`).
-
-## Implementation
-
-Go (`go/`) is the only implementation. The console is a Preact bundle embedded
-into the binary at build time, so the runtime needs no Node.js. An earlier
-Python reference build lived under `src/llmgw/`; it was removed once the Go
-build reached parity, and remains in history if you need it.
-
-## Install
-
-Use the public prebuilt image `ghcr.io/xibodev/llm-gateway:0.3.1` (Linux amd64/arm64).
-No Git clone, build tools, or initial config file is required.
-
-1. Create a private installation folder with the standalone
-   [`compose.yaml` from Quickstart](docs/QUICKSTART.md#docker-compose).
-2. [Generate `.env` once](docs/QUICKSTART.md#save-secrets-once) with an administrator
-   key and a separate credential-encryption key. Keep both for the life of the state.
-3. From that folder, run:
+### Docker Compose
 
 ```bash
-docker compose up -d
+git clone https://github.com/xibodev/llm-gateway.git
+cd llm-gateway
+cp llmgw.config.example.yaml config.local.yaml
+
+export LLMGW_API_KEY="$(openssl rand -base64 32)"
+export LLMGW_CREDENTIAL_ENCRYPTION_KEY="$(openssl rand -base64 32)"
+docker compose up -d --build
 ```
 
-Open `http://127.0.0.1:8787/console`, sign in with `LLMGW_API_KEY` from `.env`, and
-configure a provider. The recipe binds only to localhost; choose another host
-port with its `LLMGW_PORT` setting. Configuration and SQLite state persist in the
-named volume at `/state`. Preserve the installation folder and back up `.env`
-securely, separately from state backups. Never regenerate the encryption key
-with existing state.
+Open `http://127.0.0.1:8787/console` and enter the administrator key from
+`LLMGW_API_KEY`. The source configuration is mounted read-only and seeds a
+writable copy in the state volume on first start.
 
-Without Docker, [download and verify a native binary](docs/QUICKSTART.md#native-binary)
-for Windows x64, Linux x64/ARM64, or macOS Intel/Apple Silicon. See the
-[v0.3.1 release](https://github.com/xibodev/llm-gateway/releases/tag/v0.3.1) and
-[latest releases](https://github.com/xibodev/llm-gateway/releases/latest).
-For developer builds only, see [from source](docs/QUICKSTART.md#developers-from-source).
-
-The IAM, hashed keys, encrypted provider connections, usage, quotas, audit and
-notification outbox live in `gateway.db` (SQLite WAL). The legacy system
-`secrets.json` remains a compatibility/config seed; once a system connection is
-seeded, the database is authoritative and later config reloads do not overwrite it.
-
-## Config
-`providers` (curated registry integration or advanced type + base URL) and
-`endpoints` (failover chains). Fully editable from `/admin`, or hand-edit — see
-`llmgw.config.example.yaml`. Curated registry metadata supplies known endpoints,
-authentication methods and planned OAuth integrations without embedding a Node
-runtime or a plugin marketplace.
-
-The `endpoints:` config key is canonical; the pre-rename `categories:` key still
-loads as a compatibility alias. Removal is deferred until client evidence shows
-it is safe; see [Deprecations](#deprecations).
-
-Human-owned provider connections are named, encrypted and private to that
-principal. A personal connection overrides the system credential only for that
-principal; other callers continue using the encrypted system connection or legacy
-config secret. OAuth subscription connections cannot be assigned to service or
-system principals.
-
-## API adaptation (`force_api_support`, experimental)
-Some OpenAI-family models speak only one API (for example, Copilot GPT-5.x models that require `/responses`). Adaptation is **off by default**: without opt-in, the gateway passes the provider's real HTTP status and error detail through.
-
-Opt in per provider with `force_api_support: true` or per request with `"force_api_support": true`. The gateway uses the persisted model catalog's `supported_surfaces` (the pre-rename `supported_endpoints` field, deprecated) to decide deterministically, translates Chat Completions to Responses when needed, and marks adapted replies with `X-LLMGW-Adapted` (request-level opt-in also echoes `forced_support` in the body).
-
-## Wire up a CLI
-- **Claude Code:** `ANTHROPIC_BASE_URL=http://127.0.0.1:8787` + `ANTHROPIC_API_KEY=<LLMGW_API_KEY>`; use `--bare` to force API-key mode when a stored OAuth login exists
-- **Codex:** provider `base_url=http://127.0.0.1:8787/v1`
-- **Copilot CLI (BYOK):** `COPILOT_PROVIDER_BASE_URL=http://127.0.0.1:8787/v1` + `COPILOT_PROVIDER_API_KEY=<LLMGW_API_KEY>`
-
-Pick a `provider/model` or an endpoint name from `GET /v1/models`. See
-[`docs/CLI_COMPATIBILITY.md`](docs/CLI_COMPATIBILITY.md) for the fixture-backed
-wire profiles and known gaps.
-
-## Deploy (container)
-The default [standalone image installation](docs/QUICKSTART.md#docker-compose)
-needs only `compose.yaml`, `.env`, and its persistent volume. The image already
-contains `/llmgw`, the console, and a working exec-form healthcheck.
-
-The repository root Compose file is a **developer source-build alternative**.
-It builds `go/Dockerfile` and seeds writable configuration from `config.local.yaml`
-once; its `LLMGW_HOST_PORT` setting differs from the standalone recipe. Do not
-mix their installation folders or volumes. For a source-based TLS stack, see
-[`deploy/DEPLOY.md`](deploy/DEPLOY.md).
-
-For existing installations, follow [Upgrading](docs/UPGRADING.md): back up offline,
-keep the same `.env` and volume, change the image pin, then pull and start without
-building. Older releases without the backup CLI need a full stopped-state snapshot.
-
-## Back up and restore
-
-Check the installed binary's `llmgw --help` for backup support first. If absent,
-use the [offline snapshot procedure](deploy/DEPLOY.md#pin-and-snapshot). Stop the
-gateway before maintenance and retain its state/config environment, then use the
-built-in verified archive when available:
+Check the process and build identity:
 
 ```bash
-llmgw backup create /secure/path/llmgw-state.tar.gz
+curl -fsS http://127.0.0.1:8787/health
+curl -fsS -H "Authorization: Bearer ${LLMGW_API_KEY}" \
+  http://127.0.0.1:8787/admin/api/state
+```
+
+The full first-run journey and Windows commands are in
+[`docs/QUICKSTART.md`](docs/QUICKSTART.md).
+
+## Client setup
+
+| Client | Gateway configuration |
+| --- | --- |
+| Claude Code | `ANTHROPIC_BASE_URL=http://127.0.0.1:8787` and a gateway key in `ANTHROPIC_API_KEY` or `ANTHROPIC_AUTH_TOKEN` |
+| Codex | Custom provider with `base_url = "http://127.0.0.1:8787/v1"`, `env_key = "LLMGW_API_KEY"`, and `wire_api = "responses"` |
+| Copilot CLI BYOK | `COPILOT_PROVIDER_BASE_URL=http://127.0.0.1:8787/v1`, gateway key, explicit wire API, and exact wire model |
+| OpenAI SDKs | `OPENAI_BASE_URL=http://127.0.0.1:8787/v1` and `OPENAI_API_KEY=<gateway key>` |
+
+Use an ID returned by `GET /v1/models`. Complete, copyable profiles and their
+known limits are in [`docs/CLIENTS.md`](docs/CLIENTS.md).
+
+## Public data plane
+
+| Method | Path | Purpose |
+| --- | --- | --- |
+| `GET` | `/health` | Process health and build identity; no authentication |
+| `GET` | `/v1/models` | Policy- and credential-eligible models, endpoint rows, and safe aliases |
+| `POST` | `/v1/chat/completions` | OpenAI-shaped chat, tools, streaming, and vision filtering |
+| `POST` | `/v1/responses` | Native Responses or strict stateless Chat fallback |
+| `POST` | `/v1/messages` | Native or strictly adapted Anthropic Messages |
+| `POST` | `/v1/messages/count_tokens` | Native count or marked deterministic estimate |
+| `POST` | `/v1/embeddings` | Single-target OpenAI-shaped embedding proxy |
+| `POST` | `/v1/audio/transcriptions` | Single-target multipart speech-to-text proxy |
+| `POST` | `/v1/audio/speech` | OpenAI-shaped or native Edge TTS speech synthesis |
+| `POST` | `/v1/images/generations` | Inline base64 image generation through a capable provider |
+| `POST` | `/v1/videos/generations` | Start or poll a long-running video operation |
+
+Except for `/health`, data-plane requests require a static gateway key or a
+gateway-issued project key unless unauthenticated local mode was explicitly
+enabled. See [`docs/API.md`](docs/API.md) for aliases, request limits, streaming,
+adaptation, cancellation, and per-surface failover semantics.
+
+## Model addressing
+
+- `provider/model`: one exact target. Provider retry policy may retry it, but
+  there is no cross-target route failover.
+- Endpoint name: an ordered chain of pinned provider/model members.
+- Bare provider-native name: accepted only when normalization produces one
+  unambiguous policy-eligible target.
+- Unknown selector: `404`; choose an ID from `GET /v1/models`.
+
+Streaming can move to another target only before the first response byte.
+Embeddings, audio, image, and video use the first eligible target rather than
+walking a cross-model chain. See [`docs/ROUTING.md`](docs/ROUTING.md).
+
+## Providers and credentials
+
+The curated registry includes API-key, OAuth, local/no-auth, Google, Azure,
+Bedrock, and custom compatible integrations. Registry availability means the
+configuration/runtime path exists; it does not guarantee that a particular
+account, model, region, or installed client has passed live verification.
+
+Generic API-key providers resolve a human's private default connection first,
+then a system connection, then a legacy config seed. Copilot has a stricter
+shared-service path: a service requires an exact active project/provider/kind
+binding. Codex OAuth is human-private. See [`docs/PROVIDERS.md`](docs/PROVIDERS.md)
+and [`docs/MULTI_USER.md`](docs/MULTI_USER.md).
+
+## Operations
+
+State defaults to `~/.llmgw`. Stop the gateway before backup or restore:
+
+```bash
+llmgw backup create
 llmgw backup inspect /secure/path/llmgw-state.tar.gz
 llmgw backup restore /secure/path/llmgw-state.tar.gz --force
 ```
 
-The archive contains configuration, catalog and OAuth caches, configured
-checkpointed SQLite state, and legacy secret files. It may contain
-credentials, and is written with owner-only permissions. Keep the deployment's
-`LLMGW_CREDENTIAL_ENCRYPTION_KEY` separately; it is never copied into a backup.
-Archive checksums detect corruption but do not authenticate the archive; protect
-it from replacement as well as disclosure.
-Request logs are intentionally excluded because optional body logging may contain
-large prompts and responses; retain those separately when incident policy needs
-them.
-The gateway also bounds operational history by default: 90 days of usage and
-failover telemetry, 365 days of audit events, 400 days of delivered notification
-tombstones, completed quota periods, two request-log generations, and seven
-verified built-in backups. `LLMGW_RETENTION_*` and `LLMGW_BACKUP_KEEP` override
-those limits; active control-plane state and retryable notifications are never
-pruned.
-
-## Local console
-
-Open `http://127.0.0.1:8787/console` for the locally embedded operational console. The playground follows the selected model's capability: chat models get a conversation thread, speech models a text-to-audio surface with playback, and transcription models an audio upload. `/admin` redirects there; `/admin-legacy` and `/portal-legacy` remain available while teams transition. `/portal` serves the same bundle in owner mode and calls only `/user/api/*`; console administration calls only `/admin/api/*`. The bundle has no CDN, external font, or runtime Node dependency.
-
-For console source work:
-```powershell
-cd go/internal/web/console
-npm ci
-npm run lint
-npm test
-npm run build
-npm run check:dist
-```
-
-The generated `dist/` assets are committed because Go embeds them. The Go runtime does not need Node.js.
+The default create command writes under `<state>/backups`, where
+`LLMGW_BACKUP_KEEP` applies. Explicit external archive paths are not pruned.
+Archives can contain credentials; checksums detect corruption, not authorship,
+and `LLMGW_CREDENTIAL_ENCRYPTION_KEY` remains external.
 
 `llmgw version`, `/health`, and `/admin/api/state` report the same semantic
-version, source commit, and RFC3339 build time. Development builds use explicit
-`0.0.0-dev` and `unknown` values; release binaries and images inject immutable
-provenance during their build.
+version, source commit, and RFC3339 build time. See
+[`docs/OPERATIONS.md`](docs/OPERATIONS.md) for deployment, retention, logging,
+backup, recovery, release verification, and rollback.
 
-Version tags on the current `main` head publish five platform archives, SPDX
-SBOMs, verified checksums, provenance attestations, and a versioned
-two-architecture GHCR image through one release workflow. Actions and base images
-are pinned. A manual dispatch performs the same builds only on ephemeral runners;
-it has no artifact upload, registry login, or release-publishing step.
+## Documentation
 
-## Google providers
+- [Quickstart](docs/QUICKSTART.md)
+- [Configuration reference](docs/CONFIGURATION.md)
+- [Client profiles](docs/CLIENTS.md)
+- [Provider integrations](docs/PROVIDERS.md)
+- [Routing and failover](docs/ROUTING.md)
+- [Data-plane API](docs/API.md)
+- [Multi-user governance](docs/MULTI_USER.md)
+- [Operations](docs/OPERATIONS.md)
+- [Compatibility and upgrades](docs/UPGRADING.md)
+- [Limitations](docs/LIMITATIONS.md)
+- [Security policy](SECURITY.md)
+- [Contributing](CONTRIBUTING.md)
 
-Google is reachable through two surfaces that share a request grammar and little
-else, so they are separate providers:
-
-| | `ai_studio` | `vertex_ai` |
-|---|---|---|
-| Host | `generativelanguage.googleapis.com` | `{region-}aiplatform.googleapis.com` |
-| Auth | API key | service-account key (JSON) or a service-account-bound API key |
-| Config | `api_key` | `api_key` or an uploaded key, plus `project`, `location` |
-| Billing | Gemini API prepay credits | Cloud billing account |
-
-Model ids differ between them for the same underlying model, and availability is
-per model *and* per location: `gemini-3.5-flash` answers at `location: global`
-while Veo answers only in a region such as `us-central1`. Configure one provider
-per location you need — the model id you use must match the surface.
-
-## Supported private OAuth boundary
-
-- **GitHub Copilot:** official GitHub device authorization, private to one human principal.
-- **OpenAI Codex:** device authorization and PKCE code exchange, stored as an encrypted owner-local experimental connection and used through the Codex Responses transport. Set an `openai_codex_client_id` you are authorized to operate before starting this flow. OpenAI does not currently document third-party Codex client registration, so the gateway intentionally does not embed the official CLI's first-party client ID.
-- **Claude Code:** a documented Anthropic gateway client. Configure an Anthropic API key or supported gateway credential upstream; the gateway does not implement Claude personal-subscription OAuth.
-
-Automated OAuth tests use only local mocked endpoints and fake tokens. No real provider login is required for development or validation.
-
-## Deprecations
-
-The `categories` → `endpoints` rename is in progress. Most old spellings still
-work alongside the new ones — but one could not be kept, because a single field
-cannot carry two values at once.
-
-### Still accepted or emitted as compatibility aliases
-
-| Deprecated | Replacement |
-|---|---|
-| `categories:` config key | `endpoints:` config key |
-| `POST /admin/api/categories`, `DELETE /admin/api/categories/{name}` | `POST /admin/api/endpoints`, `DELETE /admin/api/endpoints/{name}` |
-| `"categories"` key in the `/admin/api/state` payload | `"endpoints"` key (both are currently emitted, same value) |
-| `supported_endpoints` on a model row (`GET /v1/models`, `GET /admin/api/providers/{id}/catalog`) | `supported_surfaces` (both are currently emitted, same value) |
-
-No removal release is scheduled. The aliases remain until a documented release
-boundary and client evidence show they can be removed without breaking users.
-
-### Already changed — breaking, no compatibility path
-
-| Was | Is now |
-|---|---|
-| `owned_by: "category"` on a `GET /v1/models` routing-chain row | `owned_by: "endpoint"` |
-
-`owned_by` holds exactly one string, so there is no dual-emission window for it:
-from this release a routing-chain row reads `owned_by: "endpoint"`.
-**Upgrade note:** a client that filters or branches on `owned_by == "category"`
-stops matching those rows the moment the gateway is upgraded. Match
-`"endpoint"`, or accept either value while you migrate.
-
-Persisted state has no compatibility window either: the cached provider catalog
-(`catalog.json` in the state directory) carries a schema version, and entries
-written before this release are discarded and re-discovered on first read rather
-than reinterpreted under the new field names.
+The public website is published from `website/` through GitHub Pages.
 
 ## License
 
-Apache License 2.0 — see [LICENSE](LICENSE) and [NOTICE](NOTICE).
-
-Contributing and agent instructions: [AGENTS.md](AGENTS.md).
+Apache License 2.0. See [LICENSE](LICENSE) and [NOTICE](NOTICE).

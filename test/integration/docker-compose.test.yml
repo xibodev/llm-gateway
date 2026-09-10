@@ -1,6 +1,6 @@
 # docker-compose.test.yml — sealed INTEGRATION stack for llm-gateway (mocked upstreams)
 #
-# Mode: local-docker / sealed (internal: true network; no egress). Every
+# Mode: local Docker with mocked upstreams. Every
 # upstream is WireMock, so no real provider credential is ever required.
 #
 # Usage:
@@ -24,6 +24,10 @@ services:
     build:
       context: ../../go          # relative to this file: repo root → go/
       dockerfile: Dockerfile
+      args:
+        VERSION: 0.0.0-dev
+        COMMIT: ${LLMGW_BUILD_COMMIT:-unknown}
+        BUILD_TIME: ${LLMGW_BUILD_TIME:-unknown}
     image: llm-gateway-go:int-${LLMGW_UAT_TAG:-local}
     container_name: llmgw-int-gateway
     restart: "no"
@@ -35,7 +39,7 @@ services:
       LLMGW_STATE_DIR: /state
       LLMGW_API_KEY: ${LLMGW_API_KEY}
       LLMGW_ALLOW_UNAUTHENTICATED_API: "0"
-      LLMGW_SSO_ENABLED: "1"
+      LLMGW_SSO_ENABLED: "0"
       LLMGW_SSO_SHARED_SECRET: ${LLMGW_SSO_SHARED_SECRET}
       LLMGW_SSO_ADMIN_GROUP: llmgw-admin
       LLMGW_SSO_AUTO_PROVISION: "1"
@@ -124,7 +128,7 @@ volumes:
   test-llmgw-state:
     name: test-llmgw-state-int
 
-# ── Network (internal=true; no NAT, no egress) ───────────────────────────────
+# ── Networks: mocked upstream network + loopback host bridge ────────────────
 networks:
   uat:
     name: llmgw-int-network
