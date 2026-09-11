@@ -77,6 +77,12 @@ export function Playground({ data, mode, principalID, onPrincipalIDChange, prese
       stringValue(project.status, "active") === "active" && allowed.has(stringValue(project.id)));
   }, [data, scopedPrincipalID]);
 
+  useEffect(() => {
+    if (mode === "admin" && !principalID && humans.length) {
+      onPrincipalIDChange(stringValue(humans[0].id));
+    }
+  }, [mode, principalID, humans]);
+
   const [catalog, setCatalog] = useState<JSONRecord | null>(null);
   const [catalogError, setCatalogError] = useState("");
   const [projectID, setProjectID] = useState("");
