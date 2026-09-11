@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/netip"
 	"net/url"
+	"os"
 	"strings"
 	"time"
 )
@@ -43,10 +44,18 @@ func publicIP(ip netip.Addr) bool {
 	return true
 }
 
+func allowInsecureRoster() bool {
+	v := strings.ToLower(strings.TrimSpace(os.Getenv("LLMGW_ROSTER_ALLOW_INSECURE")))
+	return v == "1" || v == "true" || v == "yes" || v == "on"
+}
+
 func publicURL(raw string) (*url.URL, error) {
 	invalid := errors.New("Roster URL must be public HTTPS without credentials or query parameters.")
 	u, err := url.Parse(raw)
-	if err != nil || len(raw) > 4096 || u.Scheme != "https" || u.Opaque != "" || u.User != nil || u.RawQuery != "" || u.ForceQuery || u.Fragment != "" || u.Hostname() == "" || strings.ContainsAny(raw, "\\#") {
+	if err != nil || len(raw) > 4096 || u.Opaque != "" || u.User != nil || u.RawQuery != "" || u.ForceQuery || u.Fragment != "" || u.Hostname() == "" || strings.ContainsAny(raw, "\\#") {
+		return nil, invalid
+	}
+	if u.Scheme != "https" && !allowInsecureRoster() {
 		return nil, invalid
 	}
 	host := strings.ToLower(u.Hostname())
