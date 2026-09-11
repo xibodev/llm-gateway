@@ -76,6 +76,11 @@ func authorizeKeyPolicy(p *config.Principal, requestedModel, resolvedCategory st
 	if err != nil {
 		return nil, 500, "Project policy store unavailable."
 	}
+	if (resolvedCategory == "" && p.RoutesOnly) ||
+		(resolvedCategory != "" && (p.RoutesOnly || len(p.AllowedRoutes) > 0) &&
+			!containsStr(p.AllowedRoutes, resolvedCategory)) {
+		return nil, 403, "This key is not allowed to use the requested route or direct model."
+	}
 	if !modelPolicyAllows(projectPolicy.AllowedModels, requestedModel, resolvedCategory, targets) {
 		return nil, 403, "This project is not allowed to use model '" + requestedModel + "'."
 	}

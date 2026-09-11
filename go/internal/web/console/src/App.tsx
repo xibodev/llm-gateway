@@ -22,7 +22,10 @@ function routeFromHash(mode: ConsoleMode): ConsoleRoute {
   const raw = window.location.hash.replace(/^#\/?/, "");
   const [candidate, ...rest] = raw.split("/");
   const page = navigationFor(mode).some((item) => item.id === candidate) ? (candidate as PageID) : "overview";
-  return { page, detail: page === candidate ? decodeURIComponent(rest.join("/")) : "" };
+  let detail = "";
+  try { detail = page === candidate ? decodeURIComponent(rest.join("/")) : ""; }
+  catch { /* A malformed hash must not prevent the console from loading. */ }
+  return { page, detail };
 }
 
 function StaticAdminSignIn({ error, onSignedIn }: { error: string | null; onSignedIn: () => void }) {
@@ -126,8 +129,16 @@ export function App() {
       case "routes": content = <Routes data={data} mode={mode} detail={route.detail} onChanged={refresh} onNavigate={navigate} />; break;
       case "models": content = <ModelsEndpoints data={data} mode={mode} principalID={catalogPrincipalID} onPrincipalIDChange={setCatalogPrincipalID} />; break;
       case "playground": content = <Playground data={data} mode={mode} principalID={catalogPrincipalID} onPrincipalIDChange={setCatalogPrincipalID} preset={route.detail} onPresetConsumed={() => setRoute({ page: "playground", detail: route.detail })} onBack={route.detail ? () => navigate("providers", route.detail.split("/")[0]) : undefined} />; break;
-      case "keys": content = <ApiKeys data={data} mode={mode} onChanged={refresh} />; break;
-      case "access": content = <Access data={data} mode={mode} onChanged={refresh} />; break;
+      case "keys": {
+        const params = new URLSearchParams(route.detail);
+        const ownerID = params.get("owner") || undefined;
+        const projectID = params.get("project") || undefined;
+        const routeName = params.get("route") || undefined;
+        const initialContext = ownerID || projectID || routeName ? { ownerID, projectID, routeName } : undefined;
+        content = <ApiKeys key={route.detail} data={data} mode={mode} onChanged={refresh} initialContext={initialContext} />;
+        break;
+      }
+      case "access": content = <Access data={data} mode={mode} onChanged={refresh} onNavigate={navigate} />; break;
       case "usage": content = <UsageQuotas data={data} mode={mode} />; break;
       case "alerts": content = <Alerts data={data} />; break;
       case "settings": content = <Settings data={data} mode={mode} onNavigate={navigate} />; break;

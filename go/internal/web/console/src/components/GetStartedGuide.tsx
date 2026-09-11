@@ -43,13 +43,11 @@ export function buildGuideSteps(data: JSONRecord): GuideStep[] {
   });
   const configured = statuses.filter((status) => status.configured === true);
   const catalogSynced = statuses.some((status) => numberValue(status.model_count) > 0);
-  const verifiedProviders = new Set(statuses.filter((status) =>
-    asList(status.instances).some((instance) => asRecord(asRecord(instance).readiness).model_verified === true)));
-  const verified = verifiedProviders.size > 0;
+  const verified = statuses.some((status) => stringValue(status.last_verified_at) !== "");
   // Point each step at the provider that still needs it, rather than whichever
   // configured provider happens to sort first.
   const needsCatalog = configured.find((status) => numberValue(status.model_count) === 0) ?? configured[0];
-  const needsVerify = configured.find((status) => !verifiedProviders.has(status)) ?? configured[0];
+  const needsVerify = configured.find((status) => stringValue(status.last_verified_at) === "") ?? configured[0];
 
   return [
     {
@@ -84,7 +82,7 @@ export function buildGuideSteps(data: JSONRecord): GuideStep[] {
     },
     {
       title: "Mint a project API key",
-      detail: "Shown once, stored hashed. This is what your coding CLI authenticates with.",
+      detail: "Stored hashed for authentication and encrypted for owner/admin reveal when credential encryption is configured.",
       action: "Open API keys", page: "keys", done: keys.length > 0,
     },
     {

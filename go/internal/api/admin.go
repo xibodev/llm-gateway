@@ -240,6 +240,9 @@ func handleState(w http.ResponseWriter, r *http.Request) {
 			"expired": k.Expired, "created": k.CreatedAt, "expires_at": k.ExpiresAt,
 			"last_used_at":      k.LastUsedAt,
 			"allowed_models":    k.Policy.AllowedModels,
+			"allowed_routes":    k.Policy.AllowedRoutes,
+			"routes_only":       k.Policy.RoutesOnly,
+			"admin_managed":     k.Policy.AdminManaged,
 			"allowed_providers": k.Policy.AllowedProviders,
 			"rpm":               k.Policy.RPM, "daily_requests": k.Policy.DailyRequests,
 			"monthly_requests":      k.Policy.MonthlyRequests,
@@ -591,18 +594,14 @@ func handleProviderModels(w http.ResponseWriter, r *http.Request) {
 		writeError(w, 400, err.Error())
 		return
 	}
-	result := providers.ReadCatalogForPrincipal(pid, principal)
-	rows := result.Models
+	rows := providers.CatalogModelsForPrincipal(pid, principal)
 	ids := []string{}
 	for _, row := range rows {
 		if row.ID != "" {
 			ids = append(ids, row.ID)
 		}
 	}
-	writeJSON(w, 200, map[string]any{
-		"models": ids, "count": len(rows), "catalog": result.Diagnostics,
-		"readiness": catalogReadiness(pid, principal, result),
-	})
+	writeJSON(w, 200, map[string]any{"models": ids, "count": len(rows)})
 }
 
 // catalogRowsWithLegacySurfaces renders catalog rows for the wire while keeping
@@ -647,14 +646,9 @@ func handleProviderCatalog(w http.ResponseWriter, r *http.Request) {
 		writeError(w, 400, err.Error())
 		return
 	}
-	// Preserve the list response and HTTP 200 for existing consumers. Discovery
-	// failure (including stale fallback) is explicit in catalog.status/error data.
-	result := providers.ReadCatalogForPrincipal(pid, principal)
-	resp := map[string]any{
-		"models": catalogRowsWithLegacySurfaces(result.Models), "catalog": result.Diagnostics,
-		"readiness": catalogReadiness(pid, principal, result),
-	}
-	if t := result.RefreshedAt; !t.IsZero() {
+	rows := providers.CatalogModelsForPrincipal(pid, principal)
+	resp := map[string]any{"models": catalogRowsWithLegacySurfaces(rows)}
+	if t := providers.CatalogRefreshedAtForPrincipal(pid, principal); !t.IsZero() {
 		resp["refreshed_at"] = t.UTC().Format(time.RFC3339)
 	}
 	writeJSON(w, 200, resp)
@@ -815,6 +809,8 @@ type keyBody struct {
 	Name                string   `json:"name"`
 	ExpiresAt           int64    `json:"expires_at"`
 	AllowedModels       []string `json:"allowed_models"`
+	AllowedRoutes       []string `json:"allowed_routes"`
+	RoutesOnly          bool     `json:"routes_only"`
 	AllowedProviders    []string `json:"allowed_providers"`
 	RPM                 int      `json:"rpm"`
 	DailyRequests       int      `json:"daily_requests"`
@@ -881,9 +877,11 @@ func handleCreateKey(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+	policy := keyPolicyFromBody(body)
+	policy.AdminManaged = true
 	issued, err := iam.IssueKey(iam.KeyCreate{
 		ProjectID: project.ID, PrincipalID: principalID, Name: name,
-		ExpiresAt: body.ExpiresAt, Policy: keyPolicyFromBody(body),
+		ExpiresAt: body.ExpiresAt, Policy: policy,
 	})
 	if err != nil {
 		writeError(w, 400, err.Error())
@@ -928,6 +926,8 @@ type keyUpdateBody struct {
 	Disabled            *bool     `json:"disabled"`
 	ExpiresAt           *int64    `json:"expires_at"`
 	AllowedModels       *[]string `json:"allowed_models"`
+	AllowedRoutes       *[]string `json:"allowed_routes"`
+	RoutesOnly          *bool     `json:"routes_only"`
 	AllowedProviders    *[]string `json:"allowed_providers"`
 	RPM                 *int      `json:"rpm"`
 	DailyRequests       *int      `json:"daily_requests"`
@@ -979,6 +979,14 @@ func handleUpdateKey(w http.ResponseWriter, r *http.Request) {
 	}
 	policy := key.Policy
 	changedPolicy := false
+	if body.AllowedRoutes != nil {
+		policy.AllowedRoutes = *body.AllowedRoutes
+		changedPolicy = true
+	}
+	if body.RoutesOnly != nil {
+		policy.RoutesOnly = *body.RoutesOnly
+		changedPolicy = true
+	}
 	if body.AllowedModels != nil {
 		policy.AllowedModels = *body.AllowedModels
 		changedPolicy = true
@@ -1009,11 +1017,15 @@ func handleUpdateKey(w http.ResponseWriter, r *http.Request) {
 	applyInt64(body.MonthlyCostMicroUSD, &policy.MonthlyCostMicroUSD)
 	applyInt64(body.DailyCreditsMilli, &policy.DailyCreditsMilli)
 	applyInt64(body.MonthlyCreditsMilli, &policy.MonthlyCreditsMilli)
-	update := iam.KeyUpdate{Status: status, ExpiresAt: body.ExpiresAt}
+	update := iam.KeyUpdate{Status: status, ExpiresAt: body.ExpiresAt, Admin: true, ExpectedPolicy: &key.Policy}
 	if changedPolicy {
 		update.Policy = &policy
 	}
 	if err := iam.UpdateAPIKey(keyID, update); err != nil {
+		if errors.Is(err, iam.ErrAPIKeyConflict) {
+			writeError(w, 409, err.Error())
+			return
+		}
 		writeError(w, 400, err.Error())
 		return
 	}
@@ -1031,7 +1043,8 @@ func handleRevokeKey(w http.ResponseWriter, r *http.Request) {
 		writeError(w, 404, "unknown key")
 		return
 	}
-	if err := iam.RevokeAPIKey(keyID); err != nil {
+	status := "revoked"
+	if err := iam.UpdateAPIKey(keyID, iam.KeyUpdate{Status: &status, Admin: true}); err != nil {
 		writeError(w, 404, err.Error())
 		return
 	}

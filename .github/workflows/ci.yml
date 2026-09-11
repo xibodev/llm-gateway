@@ -100,3 +100,6 @@ jobs:
 
       - name: Validate container definition
         run: docker buildx build --check --file go/Dockerfile go
+
+      - name: Validate documentation and website
+        run: node scripts/check-docs.mjs

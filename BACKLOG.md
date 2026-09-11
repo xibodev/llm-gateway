@@ -31,15 +31,6 @@ translation framework.
   require explicit operator participation. Never commit credentials or local
   identity data.
 
-## Current release
-
-| ID | State | Work and acceptance |
-| --- | --- | --- |
-| `OPS-001` | `queued` | Add atomic, restorable single-node backups of configuration and SQLite state, with explicit inspect and restore commands and tests that prove a restored gateway retains IAM and routing state. |
-| `OPS-002` | `queued` | Add bounded retention for request logs, audit events, usage events, quota counters, outbox history, and obsolete backups without deleting active control-plane state. |
-| `OPS-003` | `queued` | Inject semantic version, commit, and build time into binaries and images; expose them through `llmgw version`, `/health`, and the admin state without relying on manually edited constants. |
-| `OPS-004` | `queued` | Consolidate tag validation, checksums, SBOM/provenance, binary artifacts, and multi-architecture image publication into one release workflow with a dry-run path. |
-
 ## Cancellation contract
 
 Cancellation is an HTTP lifecycle concern, not a provider dialect or CLI

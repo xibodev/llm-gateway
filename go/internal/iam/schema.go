@@ -476,6 +476,10 @@ CREATE INDEX idx_outbox_delivered_retention
 ON outbox_events(delivered_at) WHERE status='delivered';
 `,
 	},
+	{
+		version: 16,
+		sql:     `ALTER TABLE api_keys ADD COLUMN scope_json TEXT NOT NULL DEFAULT '{}';`,
+	},
 }
 
 func SchemaVersion() int { return len(migrations) }

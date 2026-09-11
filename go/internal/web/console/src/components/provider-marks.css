@@ -1,0 +1,23 @@
+.provider-mark.provider-mark--local > svg {
+  display: block;
+  width: 80%;
+  height: 80%;
+}
+
+.provider-mark.provider-mark--monochrome > svg { color: #20252b; }
+:root[data-theme="dark"] .provider-mark.provider-mark--monochrome > svg { color: #e4e9ef; }
+
+/* Preserve the supplied palette where a dark canvas would hide part of a mark. */
+.provider-mark.provider-mark--pale > svg {
+  background: #f4f7fa;
+  border-radius: 3px;
+  padding: 2px;
+  box-sizing: border-box;
+}
+
+.provider-mark--local .provider-mark__initials {
+  font-size: 0.65rem;
+  font-weight: 750;
+  line-height: 1;
+  white-space: nowrap;
+}

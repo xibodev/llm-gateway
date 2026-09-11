@@ -159,7 +159,7 @@ tbody tr:last-child td { border-bottom: 0; }
   .topbar { min-height: 58px; padding: 0 16px; }
   .menu-button, .sidebar-close { display: inline-grid; }
   .sidebar-close { margin-left: auto; }
-  .topbar__layout { display: none; }
+  .topbar__layout { display: inline-grid; margin-left: 8px; }
   .topbar__context { margin-left: 12px; margin-right: auto; }
   .topbar__label { display: none; }
   .topbar__identity { max-width: 170px; margin-left: 8px; }

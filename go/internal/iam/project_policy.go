@@ -3,6 +3,7 @@ package iam
 import (
 	"database/sql"
 	"encoding/json"
+	"fmt"
 	"time"
 )
 
@@ -13,6 +14,9 @@ type ProjectPolicy struct {
 }
 
 func SetProjectPolicy(projectID string, policy KeyPolicy) (ProjectPolicy, error) {
+	if len(policy.AllowedRoutes) > 0 || policy.RoutesOnly || policy.AdminManaged {
+		return ProjectPolicy{}, fmt.Errorf("allowed_routes, routes_only and admin_managed are key-only policy fields")
+	}
 	if err := validatePolicy(policy); err != nil {
 		return ProjectPolicy{}, err
 	}

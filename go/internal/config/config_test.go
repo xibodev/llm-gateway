@@ -252,6 +252,33 @@ endpoints:
 	}
 }
 
+func TestProviderPoliciesLoadAndRoundTrip(t *testing.T) {
+	settings := parseSettingsForTest(t, `
+policies:
+  defaults:
+    retry_max_attempts: 3
+    retry_initial_backoff_seconds: 0.25
+    retry_max_backoff_seconds: 5
+    retry_backoff_multiplier: 1.5
+    circuit_failure_threshold: 6
+    circuit_cooldown_seconds: 45
+  overrides:
+    copilot:
+      retry_max_attempts: 1
+      circuit_failure_threshold: 2
+`)
+	if settings.Policies.Defaults.RetryMaxAttempts != 3 ||
+		settings.Policies.Defaults.CircuitCooldownSeconds != 45 ||
+		settings.Policies.Overrides["copilot"].CircuitFailureThreshold != 2 {
+		t.Fatalf("policies did not load: %+v", settings.Policies)
+	}
+	reloaded := parseSettingsForTest(t, serialiseSettingsForTest(t, settings))
+	if reloaded.Policies.Defaults.RetryInitialBackoffSeconds != 0.25 ||
+		reloaded.Policies.Overrides["copilot"].RetryMaxAttempts != 1 {
+		t.Fatalf("policies did not round-trip: %+v", reloaded.Policies)
+	}
+}
+
 // When both keys are present the new one wins, and the old one must not
 // silently merge — an operator mid-migration should get a predictable result.
 //

@@ -1,0 +1,65 @@
+.provider-hub .provider-toolbar { align-items: stretch; flex-direction: column; gap: 12px; padding: 0; border: 0; box-shadow: none; background: transparent; }
+.provider-hub .search-field { max-width: 440px; }
+.provider-hub .filter-row { flex-wrap: wrap; overflow: visible; }
+.provider-hub .provider-group { gap: 8px; }
+.provider-hub .provider-group > header { justify-content: flex-start; gap: 10px; }
+.provider-hub .provider-group > header h2 { margin: 0; font-size: 0.88rem; font-weight: 600; }
+.provider-hub__context { margin: 0; color: #596574; font-size: 0.78rem; }
+.provider-shelf { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 4px; padding: 8px; border: 1px solid #dce1e6; border-radius: 6px; background: #fff; }
+.provider-shelf__trigger { display: flex; align-items: center; gap: 10px; min-width: 0; min-height: 48px; padding: 8px 10px; border: 1px solid transparent; border-radius: 4px; background: transparent; color: inherit; font: inherit; font-size: 0.8rem; text-align: left; cursor: pointer; }
+.provider-shelf__trigger > span:last-child { overflow-wrap: anywhere; }
+.provider-shelf__trigger:hover { background: #f0f4f9; }
+.provider-shelf__trigger--selected { background: #edf3fc; border-color: #b7cce7; color: #235591; }
+.provider-shelf__trigger .provider-mark { width: 24px; height: 24px; border: 0; background: transparent; flex-shrink: 0; }
+.provider-shelf__trigger > span:first-child { display: flex; flex-shrink: 0; }
+.provider-hub .provider-mark img { display: block; max-width: 100%; object-fit: contain; }
+.provider-hub .provider-hub__expanded { grid-column: 1 / -1; padding: 20px; margin-top: 4px; border: 0; border-top: 1px solid #dce1e6; border-radius: 0; box-shadow: none; gap: 16px; }
+.provider-hub__expanded > header { align-items: center; min-width: 0; flex-wrap: wrap; }
+.provider-hub__identity { flex: 1; min-width: 120px; overflow-wrap: anywhere; }
+.provider-hub .provider-hub__expanded h2 { margin: 0 0 4px; font-size: 1rem; }
+.provider-hub .provider-hub__expanded > header .status-pill { max-width: 180px; white-space: normal; margin-left: 0; }
+.provider-hub__detail-link { padding: 8px; min-height: 36px; border: 0; background: transparent; font: inherit; font-size: 0.8rem; color: #285fa6; text-decoration: underline; text-underline-offset: 3px; cursor: pointer; }
+.provider-hub .provider-hub__details dl, .provider-hub .provider-roster-metadata dl { margin: 12px 0; grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.provider-hub .provider-hub__expanded dd { display: block; }
+.provider-hub .provider-hub__expanded p { max-width: 75ch; }
+.provider-hub .provider-hub__expanded p + p { margin-top: 8px; }
+.provider-hub .provider-hub__expanded a { color: #285fa6; font-size: 0.78rem; text-underline-offset: 3px; }
+.provider-hub .provider-hub__expanded > footer { margin: 0; align-items: flex-start; flex-wrap: wrap; }
+.provider-hub .provider-hub__expanded .provider-actions { justify-content: flex-start; }
+.provider-hub .provider-client-note { margin: 0; }
+.provider-hub .provider-hub__expanded .form-error { color: #9c3e3a; }
+.provider-roster-status { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.provider-roster-status p { margin: 0; font-size: 0.75rem; color: #596574; }
+.provider-roster-status .button { flex-shrink: 0; font-size: 0.75rem; }
+.provider-roster-metadata h3 { margin: 0 0 8px; font-size: 0.85rem; }
+.provider-roster-metadata > section + section { border-top: 1px solid #dce1e6; padding-top: 16px; margin-top: 16px; }
+.provider-roster-links { display: flex; flex-wrap: wrap; gap: 12px 20px; margin-top: 12px; }
+.provider-shelf__trigger:focus-visible, .provider-hub__detail-link:focus-visible, .provider-roster-links a:focus-visible { outline: 2px solid #2f65aa; outline-offset: 2px; }
+
+:root[data-theme="dark"] .provider-shelf { background: #171c24; border-color: #343e4c; }
+:root[data-theme="dark"] .provider-mark--monochrome > svg { color: #e4e9ef; }
+:root[data-theme="dark"] .provider-hub .provider-mark img { background: #f4f7fa; border-radius: 3px; padding: 2px; }
+:root[data-theme="dark"] .provider-shelf__trigger:hover { background: #252f3d; }
+:root[data-theme="dark"] .provider-shelf__trigger--selected { background: #25354c; border-color: #54749d; color: #c5dcf8; }
+:root[data-theme="dark"] .provider-hub .provider-hub__expanded, :root[data-theme="dark"] .provider-roster-metadata > section + section { border-color: #343e4c; background: transparent; }
+:root[data-theme="dark"] .provider-hub__context, :root[data-theme="dark"] .provider-roster-status p { color: #b2bdca; }
+:root[data-theme="dark"] .provider-hub__detail-link, :root[data-theme="dark"] .provider-hub .provider-hub__expanded a { color: #9abfed; }
+:root[data-theme="dark"] .provider-hub .provider-hub__expanded .form-error { color: #e1aaa5; }
+:root[data-theme="dark"] .provider-shelf__trigger:focus-visible, :root[data-theme="dark"] .provider-hub__detail-link:focus-visible, :root[data-theme="dark"] .provider-roster-links a:focus-visible { outline-color: #9abfed; }
+
+@media (min-width: 1450px) { .provider-shelf { grid-template-columns: repeat(6, minmax(0, 1fr)); } }
+@media (max-width: 1120px) { .provider-shelf { grid-template-columns: repeat(4, minmax(0, 1fr)); } }
+@media (max-width: 820px) {
+  .provider-shelf { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .provider-hub .provider-hub__details dl, .provider-hub .provider-roster-metadata dl { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+@media (max-width: 500px) {
+  .provider-hub .search-field { max-width: none; }
+  .provider-hub .filter-chip { min-height: 40px; white-space: normal; }
+  .provider-shelf { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 3px; padding: 6px; }
+  .provider-shelf__trigger { gap: 7px; padding: 8px 7px; min-height: 44px; font-size: 0.78rem; }
+  .provider-hub .provider-hub__expanded { padding: 14px 6px; }
+  .provider-hub .provider-hub__details dl, .provider-hub .provider-roster-metadata dl { grid-template-columns: minmax(0, 1fr); }
+  .provider-hub__detail-link { min-height: 44px; }
+  .provider-roster-status { align-items: flex-start; flex-direction: column; }
+}

@@ -1,16 +1,14 @@
-# Production deployment for the Go build of llm-gateway.
-#   cheap EC2 (or any Linux box) + docker compose + Caddy TLS.
+# Production deployment starting point: versioned gateway image + Caddy TLS.
 #
 #   cp .env.example .env   # fill in secrets
 #   mkdir -p state && sudo chown 65532:65532 state   # distroless nonroot uid
-#   docker compose -f deploy/docker-compose.prod.yml up -d --build
+#   LLMGW_IMAGE=ghcr.io/xibodev/llm-gateway:<version> \
+#     docker compose -f deploy/docker-compose.prod.yml up -d
 #
 # The gateway is loopback-only; Caddy terminates TLS and reverse-proxies it.
 services:
   gateway:
-    build:
-      context: ../go
-    image: llm-gateway-go:latest
+    image: ${LLMGW_IMAGE:?set LLMGW_IMAGE to a versioned GHCR tag or digest}
     restart: unless-stopped
     environment:
       LLMGW_HOST: 0.0.0.0
@@ -21,7 +19,15 @@ services:
       LLMGW_ALLOW_UNAUTHENTICATED_API: ${LLMGW_ALLOW_UNAUTHENTICATED_API:-0}
       LLMGW_EXPERIMENTAL_COPILOT_PROVIDER: ${LLMGW_EXPERIMENTAL_COPILOT_PROVIDER:-0}
       LLMGW_CREDENTIAL_ENCRYPTION_KEY: ${LLMGW_CREDENTIAL_ENCRYPTION_KEY:-}
+      LLMGW_SSO_ENABLED: ${LLMGW_SSO_ENABLED:-0}
+      LLMGW_SSO_SHARED_SECRET: ${LLMGW_SSO_SHARED_SECRET:-}
+      LLMGW_SSO_ADMIN_GROUP: ${LLMGW_SSO_ADMIN_GROUP:-llmgw-admin}
+      LLMGW_SSO_AUTO_PROVISION: ${LLMGW_SSO_AUTO_PROVISION:-1}
       LLMGW_GITHUB_COPILOT_CACHE_DIR: /state/cache
+      # Discovery-only updates; registered providers and credentials are never reconciled.
+      LLMGW_PROVIDER_ROSTER_AUTO_REFRESH: ${LLMGW_PROVIDER_ROSTER_AUTO_REFRESH:-true}
+      LLMGW_PROVIDER_ROSTER_URL: ${LLMGW_PROVIDER_ROSTER_URL:-}
+      LLMGW_PROVIDER_ROSTER_PUBLIC_KEY: ${LLMGW_PROVIDER_ROSTER_PUBLIC_KEY:-}
       LLMGW_LOG_REQUESTS: ${LLMGW_LOG_REQUESTS:-0}
       LLMGW_LOG_REQUEST_BODIES: ${LLMGW_LOG_REQUEST_BODIES:-0}
       LLMGW_LOG_REQUESTS_MAX_BYTES: ${LLMGW_LOG_REQUESTS_MAX_BYTES:-104857600}
@@ -37,7 +43,7 @@ services:
       - "8787"
 
   caddy:
-    image: caddy:2
+    image: caddy:2.10.2-alpine
     restart: unless-stopped
     ports:
       - "80:80"
@@ -48,6 +54,8 @@ services:
       - caddy-config:/config
     depends_on:
       - gateway
+    environment:
+      LLMGW_DOMAIN: ${LLMGW_DOMAIN:?set LLMGW_DOMAIN}
 
 volumes:
   caddy-data:

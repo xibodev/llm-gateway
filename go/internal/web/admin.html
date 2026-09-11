@@ -533,7 +533,7 @@ tailwind.config={theme:{extend:{
               <div x-show="doc==='keys'" class="space-y-5">
                 <div><h3>Projects &amp; API keys</h3><p class="mt-2">Mint bearer tokens scoped to a <b class="text-hi">project</b> and a <b class="text-hi">key name</b>. Each request carries one, so the gateway can attribute cost and failover behaviour back to the project that made it.</p></div>
                 <div class="space-y-2">
-                  <p>&bull; <b class="text-hi">Mint</b> on <a class="lnk" @click="go('keys')">Keys</a> — the <code>llmgw_…</code> token is shown once; copy it then.</p>
+                  <p>&bull; <b class="text-hi">Mint</b> on <a class="lnk" @click="go('keys')">Keys</a> — copy the generated <code>llmgw_…</code> token now.</p>
                   <p>&bull; <b class="text-hi">Use</b> it as the Bearer token / API key in any CLI (see <a class="lnk" @click="doc='connect'">Connect a CLI</a>).</p>
                   <p>&bull; <b class="text-hi">Attribution</b> shows up on <a class="lnk" @click="go('usage')">Usage → By project &amp; key</a>.</p>
                   <p>&bull; <b class="text-hi">Revoke</b> anytime from the Keys table — the token stops working immediately.</p>
@@ -582,7 +582,7 @@ tailwind.config={theme:{extend:{
                 <div class="overflow-hidden rounded border border-sep"><table class="w-full text-sm">
                   <thead><tr class="label"><th class="text-left font-medium px-4 py-2">Path</th><th class="text-left font-medium px-4 py-2">Contents</th></tr></thead>
                   <tbody class="text-fg">
-                    <tr class="border-t border-sep"><td class="px-4 py-1.5"><code>config.yaml</code></td><td class="px-4 py-1.5">Providers, endpoints, policies (no keys) — safe to read/commit</td></tr>
+                    <tr class="border-t border-sep"><td class="px-4 py-1.5"><code>config.yaml</code></td><td class="px-4 py-1.5">Providers, endpoints, policies (no keys) — contains no secret values</td></tr>
                     <tr class="border-t border-sep"><td class="px-4 py-1.5"><code>secrets.json</code></td><td class="px-4 py-1.5">Provider API keys, 0600</td></tr>
                     <tr class="border-t border-sep"><td class="px-4 py-1.5"><code>keys.json</code></td><td class="px-4 py-1.5">Minted project keys, 0600</td></tr>
                     <tr class="border-t border-sep"><td class="px-4 py-1.5"><code>usage.db</code></td><td class="px-4 py-1.5">Cost/usage ledger (project + key)</td></tr>

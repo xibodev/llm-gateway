@@ -201,7 +201,8 @@ func handleUserRevokeKey(w http.ResponseWriter, r *http.Request) {
 		writeError(w, 404, "unknown key")
 		return
 	}
-	if err := iam.RevokeAPIKey(key.ID); err != nil {
+	status := "revoked"
+	if err := iam.UpdateAPIKey(key.ID, iam.KeyUpdate{Status: &status, OwnerPrincipalID: principal.ID}); err != nil {
 		writeError(w, 400, err.Error())
 		return
 	}
@@ -255,6 +256,14 @@ func handleUserUpdateKey(w http.ResponseWriter, r *http.Request) {
 	}
 	policy := key.Policy
 	changed := false
+	if body.AllowedRoutes != nil {
+		policy.AllowedRoutes = *body.AllowedRoutes
+		changed = true
+	}
+	if body.RoutesOnly != nil {
+		policy.RoutesOnly = *body.RoutesOnly
+		changed = true
+	}
 	if body.AllowedModels != nil {
 		policy.AllowedModels = *body.AllowedModels
 		changed = true
@@ -285,11 +294,19 @@ func handleUserUpdateKey(w http.ResponseWriter, r *http.Request) {
 	applyInt64(body.MonthlyCostMicroUSD, &policy.MonthlyCostMicroUSD)
 	applyInt64(body.DailyCreditsMilli, &policy.DailyCreditsMilli)
 	applyInt64(body.MonthlyCreditsMilli, &policy.MonthlyCreditsMilli)
-	update := iam.KeyUpdate{Status: status, ExpiresAt: body.ExpiresAt}
+	update := iam.KeyUpdate{Status: status, ExpiresAt: body.ExpiresAt, OwnerPrincipalID: principal.ID, ExpectedPolicy: &key.Policy}
 	if changed {
 		update.Policy = &policy
 	}
 	if err := iam.UpdateAPIKey(key.ID, update); err != nil {
+		if errors.Is(err, iam.ErrAPIKeyAdminManaged) {
+			writeError(w, 403, err.Error())
+			return
+		}
+		if errors.Is(err, iam.ErrAPIKeyConflict) {
+			writeError(w, 409, err.Error())
+			return
+		}
 		writeError(w, 400, err.Error())
 		return
 	}
@@ -382,6 +399,7 @@ func handleUserCopilotRevoke(w http.ResponseWriter, r *http.Request) {
 func keyPolicyFromBody(body keyBody) iam.KeyPolicy {
 	return iam.KeyPolicy{
 		AllowedModels: body.AllowedModels, AllowedProviders: body.AllowedProviders,
+		AllowedRoutes: body.AllowedRoutes, RoutesOnly: body.RoutesOnly,
 		RPM: body.RPM, DailyRequests: body.DailyRequests,
 		MonthlyRequests:     body.MonthlyRequests,
 		DailyInputTokens:    body.DailyInputTokens,
