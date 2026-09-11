@@ -473,6 +473,109 @@ async function run() {
     console.log('[UAT] All three routing and governance security boundaries verified!');
   });
 
+  // ─────────────────────────────────────────────────────────────────────────────
+  // Step 8: 3-Provider Cascading Failover Juggling (Provider X -> Y -> Z)
+  // ─────────────────────────────────────────────────────────────────────────────
+  await logStep('08-cascading-failover-three-providers', async () => {
+    // Stand up 3 distinct mock provider servers
+    const srvX = http.createServer((q, r) => {
+      r.setHeader('Content-Type', 'application/json');
+      if (q.url.includes('/models')) {
+        r.writeHead(200);
+        r.end(JSON.stringify({ object: 'list', data: [{ id: 'model-x', object: 'model' }] }));
+        return;
+      }
+      r.writeHead(429);
+      r.end(JSON.stringify({ error: { message: 'Provider X Rate Limit Exceeded', code: 429 } }));
+    }).listen(18081, '127.0.0.1');
+
+    const srvY = http.createServer((q, r) => {
+      r.setHeader('Content-Type', 'application/json');
+      if (q.url.includes('/models')) {
+        r.writeHead(200);
+        r.end(JSON.stringify({ object: 'list', data: [{ id: 'model-y', object: 'model' }] }));
+        return;
+      }
+      r.writeHead(503);
+      r.end(JSON.stringify({ error: { message: 'Provider Y Overloaded', code: 503 } }));
+    }).listen(18082, '127.0.0.1');
+
+    const srvZ = http.createServer((q, r) => {
+      r.setHeader('Content-Type', 'application/json');
+      if (q.url.includes('/models')) {
+        r.writeHead(200);
+        r.end(JSON.stringify({ object: 'list', data: [{ id: 'model-z', object: 'model' }] }));
+        return;
+      }
+      r.writeHead(200);
+      r.end(JSON.stringify({
+        id: 'chatcmpl-cascade-z', object: 'chat.completion', created: Date.now(), model: 'model-z',
+        choices: [{ index: 0, message: { role: 'assistant', content: 'Resolved via cascading failover to Provider Z!' }, finish_reason: 'stop' }],
+        usage: { prompt_tokens: 15, completion_tokens: 10, total_tokens: 25 }
+      }));
+    }).listen(18083, '127.0.0.1');
+
+    try {
+      // 1. Register Providers X, Y, Z
+      await api('/admin/api/providers', { method: 'POST', body: JSON.stringify({ id: 'prov-x', label: 'Provider X', type: 'openai_compatible', base_url: 'http://127.0.0.1:18081/v1', api_key: 'k-x' }) });
+      await api('/admin/api/providers', { method: 'POST', body: JSON.stringify({ id: 'prov-y', label: 'Provider Y', type: 'openai_compatible', base_url: 'http://127.0.0.1:18082/v1', api_key: 'k-y' }) });
+      await api('/admin/api/providers', { method: 'POST', body: JSON.stringify({ id: 'prov-z', label: 'Provider Z', type: 'openai_compatible', base_url: 'http://127.0.0.1:18083/v1', api_key: 'k-z' }) });
+
+      // 2. Sync catalogs
+      await api('/admin/api/providers/prov-x/refresh', { method: 'POST' });
+      await api('/admin/api/providers/prov-y/refresh', { method: 'POST' });
+      await api('/admin/api/providers/prov-z/refresh', { method: 'POST' });
+
+      // 3. Create route 'zz-cascade'
+      const routeRes = await api('/admin/api/endpoints', {
+        method: 'POST',
+        body: JSON.stringify({
+          name: 'zz-cascade',
+          failover: [
+            { provider: 'prov-x', model: 'model-x' },
+            { provider: 'prov-y', model: 'model-y' },
+            { provider: 'prov-z', model: 'model-z' }
+          ]
+        })
+      });
+      if (!routeRes.ok) throw new Error(`Failed to create cascade route: ${routeRes.text}`);
+
+      // 4. Client invokes route 'zz-cascade'
+      console.log('[UAT] Sending request to route "zz-cascade"...');
+      const res = await fetch(`${BASE_URL}/v1/chat/completions`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${ADMIN_KEY}` },
+        body: JSON.stringify({ model: 'zz-cascade', messages: [{ role: 'user', content: 'test cascade' }] })
+      });
+
+      console.log('[UAT] Cascade response status:', res.status);
+      const data = await res.json();
+      console.log('[UAT] Served message:', data.choices?.[0]?.message?.content);
+
+      if (res.status !== 200 || !data.choices?.[0]?.message?.content?.includes('Provider Z')) {
+        throw new Error(`Cascading failover did not reach Provider Z: ${JSON.stringify(data)}`);
+      }
+
+      // 5. Verify telemetry chain
+      const telem = await api('/admin/api/telemetry');
+      const events = telem.json?.recent || telem.json?.events || telem.json?.recent_events || [];
+      const cascadeEvent = events.find(e => e.requested === 'zz-cascade');
+      if (!cascadeEvent) throw new Error('Telemetry did not record failover event for zz-cascade');
+
+      console.log('[UAT] Telemetry attempts recorded:', cascadeEvent.attempts?.length);
+      console.log('[UAT] Telemetry served target:', cascadeEvent.served);
+
+      if (cascadeEvent.attempts?.length !== 3 || cascadeEvent.served !== 'prov-z/model-z') {
+        throw new Error(`Unexpected telemetry chain: ${JSON.stringify(cascadeEvent)}`);
+      }
+      console.log('[UAT] 3-Provider cascading failover juggling 100% verified!');
+    } finally {
+      srvX.close();
+      srvY.close();
+      srvZ.close();
+    }
+  });
+
   // Cleanup
   await browser.close();
   mockServer.close();
