@@ -21,6 +21,11 @@ function capabilityList(value: unknown): string { return Object.keys(asRecord(va
 
 export function ModelsEndpoints({ data, mode, principalID, onPrincipalIDChange }: { data: JSONRecord; mode: ConsoleMode; principalID: string; onPrincipalIDChange: (principalID: string) => void }) {
   const humans = asList(data.principals).map(asRecord).filter((principal) => stringValue(principal.kind) === "human" && stringValue(principal.status, "active") === "active");
+  useEffect(() => {
+    if (mode === "admin" && !principalID && humans.length) {
+      onPrincipalIDChange(stringValue(humans[0].id));
+    }
+  }, [mode, principalID, humans]);
   const [catalog, setCatalog] = useState<JSONRecord | null>(null);
   const [error, setError] = useState("");
   const [filter, setFilter] = useModelFilter();
