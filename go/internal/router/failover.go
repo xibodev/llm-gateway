@@ -130,6 +130,20 @@ func ResolveForPrincipal(
 		return Resolution{}, err
 	}
 	if cat != nil {
+		if principal != nil && len(principal.AllowedRoutes) > 0 {
+			allowed := false
+			for _, r := range principal.AllowedRoutes {
+				if strings.EqualFold(r, categoryName) {
+					allowed = true
+					break
+				}
+			}
+			if !allowed {
+				return Resolution{}, &ModelNotFoundError{Requested: name}
+			}
+		} else if principal != nil && principal.RoutesOnly && len(principal.AllowedRoutes) == 0 {
+			return Resolution{}, &ModelNotFoundError{Requested: name}
+		}
 		if len(cat.Failover) == 0 {
 			return Resolution{}, &ModelNotFoundError{Requested: name}
 		}
@@ -149,6 +163,9 @@ func ResolveForPrincipal(
 			}
 		}
 		return Resolution{Targets: out, Category: categoryName}, nil
+	}
+	if principal != nil && principal.RoutesOnly {
+		return Resolution{}, &ModelNotFoundError{Requested: name}
 	}
 	if head, tail, ok := strings.Cut(name, "/"); ok {
 		if _, exists := config.Get().Providers[head]; exists && tail != "" {
@@ -214,6 +231,9 @@ func resolveNativeAlias(
 // NativeAliasCandidates returns policy- and credential-authorized catalog
 // targets grouped by the canonical key used for bare-name resolution.
 func NativeAliasCandidates(principal *config.Principal) (map[string][]Target, error) {
+	if principal != nil && principal.RoutesOnly {
+		return map[string][]Target{}, nil
+	}
 	s := config.Get()
 	project := iam.ProjectPolicy{}
 	if principal != nil && principal.ProjectID != "" {

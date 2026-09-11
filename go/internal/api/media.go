@@ -150,6 +150,29 @@ func handleVideoGenerations(w http.ResponseWriter, r *http.Request) {
 
 	// A request carrying an operation is a poll, not a new generation.
 	if operation := strings.TrimSpace(body.Operation); operation != "" {
+		if strings.HasPrefix(operation, "http://") || strings.HasPrefix(operation, "https://") {
+			recordFailureUsage("openai.videos", body.Model, principal, 400, "invalid_operation", started)
+			writeError(w, 400, "operation must not be a full URL")
+			return
+		}
+		opModel := ""
+		const marker = "models/"
+		if idx := strings.Index(operation, marker); idx >= 0 {
+			rest := operation[idx+len(marker):]
+			if end := strings.Index(rest, "/operations/"); end >= 0 {
+				opModel = rest[:end]
+			}
+		}
+		if opModel == "" {
+			recordFailureUsage("openai.videos", body.Model, principal, 400, "invalid_operation", started)
+			writeError(w, 400, "could not derive model from operation")
+			return
+		}
+		if opModel != upstreamModel {
+			recordFailureUsage("openai.videos", body.Model, principal, 403, "operation_model_forbidden", started)
+			writeError(w, 403, "operation does not belong to authorized model")
+			return
+		}
 		job, err := generator.PollVideo(operation)
 		if err != nil {
 			writeUpstreamError(w, err)
