@@ -110,7 +110,10 @@ export function createSafeFetcher({ resolver = lookup, request = https.request, 
         if (!addresses.length || addresses.some(a => !isPublicAddress(a.address) || isIP(a.address) !== a.family)) {
           throw new FetchError('blocked_address');
         }
-        const pinned = [...addresses].sort((a, b) => a.address < b.address ? -1 : a.address > b.address ? 1 : 0)[0];
+        const pinned = [...addresses].sort((a, b) => {
+          if (a.family !== b.family) return a.family === 4 ? -1 : 1;
+          return a.address < b.address ? -1 : a.address > b.address ? 1 : 0;
+        })[0];
         return new Promise((resolve, reject) => {
           req = request(url, {
             method: 'GET', agent: false, family: pinned.family,
@@ -135,6 +138,7 @@ export function createSafeFetcher({ resolver = lookup, request = https.request, 
             res.on('aborted', () => reject(new FetchError('aborted')));
             res.on('end', () => resolve({ status: res.statusCode, headers: res.headers, body: Buffer.concat(chunks) }));
           });
+          req.on('socket', socket => socket.on('error', reject));
           req.on('error', reject);
           req.end();
         });
