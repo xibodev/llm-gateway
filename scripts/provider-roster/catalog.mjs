@@ -17,6 +17,7 @@ export const API_EVIDENCE = Object.freeze(Object.fromEntries([
   ['https://api.siliconflow.cn/v1', 'openai', 'https://docs.siliconflow.cn/en/api-reference/chat-completions/chat-completions'],
   ['https://api.siliconflow.com/v1', 'openai', 'https://docs.siliconflow.com/en/api-reference/chat-completions/chat-completions'],
   ['https://api.anthropic.com', 'anthropic', 'https://docs.anthropic.com/en/api/messages'],
+  ['https://opencode.ai/zen/v1', 'openai', 'https://opencode.ai/zen'],
 ].map(([url, protocol, evidence]) => [url, { protocol, auth: 'api_key', evidence }])));
 
 // A prose homepage is never promoted to an API endpoint, even when its brand is known.
@@ -46,6 +47,7 @@ export const LOGO_SOURCES = Object.freeze([
   { hosts: ['z.ai', 'api.z.ai'], url: 'https://z.ai/favicon.png' },
   { hosts: ['platform.stability.ai', 'api.stability.ai'], url: 'https://platform.stability.ai/favicon.png' },
   { hosts: ['api.ai21.com', 'docs.ai21.com', 'studio.ai21.com'], url: 'https://docs.ai21.com/favicon.png' },
+  { hosts: ['opencode.ai'], url: 'https://opencode.ai/apple-touch-icon.png' },
 ].map(asset => ({ ...asset, license: 'Provider trademark; original asset rights retained; used for identification.' })));
 
 // Reviewed official signup/site origins, not an approval inferred from a community link.
