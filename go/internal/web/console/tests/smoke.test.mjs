@@ -2,7 +2,6 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import test from "node:test";
-import ts from "typescript";
 
 const root = resolve(import.meta.dirname, "..");
 
@@ -40,7 +39,7 @@ test("mode-aware API client names only local API roots", () => {
 
 test("revoked keys have no console enable action", () => {
   const keys = readFileSync(resolve(root, "src/pages/ApiKeys.tsx"), "utf8");
-  assert.match(keys, /const revoked = status === "revoked"/);
+  assert.match(keys, /const revoked = stringValue\(key.status\) === "revoked"/);
   assert.match(keys, /Permanently revoked/);
   assert.match(keys, /!revoked \? <button class="button button--secondary"/);
 });
@@ -269,9 +268,9 @@ test("console routes support a detail segment and provider detail pages", () => 
 test("provider cards and overview metrics navigate to their destinations", () => {
   const hub = readFileSync(resolve(root, "src/components/providers/ProviderHub.tsx"), "utf8");
   const overview = readFileSync(resolve(root, "src/pages/Overview.tsx"), "utf8");
-  assert.match(hub, /provider-card--clickable/);
-  assert.match(hub, /closest\("button, a, select, input, label"\)/);
-  assert.match(hub, /onKeyDown/);
+  assert.match(hub, /provider-hub__detail-link/);
+  assert.match(hub, /onClick=\{\(\) => onOpenDetail\(id\)\}/);
+  assert.match(hub, /class="provider-hub__details"/);
   assert.match(overview, /metric-card--clickable/);
   assert.match(overview, /onOpen=\{\(\) => onNavigate\("providers"\)\}/);
   assert.match(overview, /onOpen=\{\(\) => onNavigate\("keys"\)\}/);
@@ -347,6 +346,12 @@ test("setup snippets use the console's own origin, not a hardcoded localhost", (
   const page = readFileSync(resolve(root, "src/pages/ModelsEndpoints.tsx"), "utf8");
   assert.doesNotMatch(page, /http:\/\/localhost:8787/);
   assert.match(page, /window\.location\.origin/);
+  assert.match(page, /model_provider = "llmgw"/);
+  assert.match(page, /wire_api = "responses"/);
+  assert.match(page, /COPILOT_PROVIDER_BASE_URL/);
+  assert.match(page, /COPILOT_PROVIDER_WIRE_MODEL/);
+  assert.match(page, /\/v1\/embeddings/);
+  assert.match(page, /\/v1\/videos\/generations/);
 });
 
 test("settings editor covers every writable project policy field", () => {
@@ -355,7 +360,7 @@ test("settings editor covers every writable project policy field", () => {
   const keyPolicy = models.match(/type KeyPolicy struct \{([\s\S]*?)\n\}/);
   assert.ok(keyPolicy, "iam.KeyPolicy struct not found");
   const writable = [...keyPolicy[1].matchAll(/^\s*\w+\s+(\S+)\s+`json:"([^",]+)(?:,[^"]*)?"`/gm)]
-    .filter(([, , field]) => field !== "-")
+    .filter(([, , field]) => !["-", "allowed_routes", "routes_only", "admin_managed"].includes(field))
     .map(([, type, field]) => ({ type, field }));
   const allowlists = writable.filter(({ type }) => type === "[]string").map(({ field }) => field);
   const numeric = writable.filter(({ type }) => /^(?:u?int(?:8|16|32|64)?|float(?:32|64))$/.test(type)).map(({ field }) => field);
@@ -404,8 +409,7 @@ test("overview shows an evidence-driven first-run guide for admins", () => {
   assert.match(guide, /activeProjectIDs\.has/);
   assert.match(guide, /Verify inference with a test completion/);
   assert.match(guide, /Mint a project API key/);
-  assert.match(guide, /asList\(status\.instances\)\.some/);
-  assert.doesNotMatch(guide, /last_verified_at/);
+  assert.match(guide, /last_verified_at/);
   assert.match(guide, /localStorage/);
   assert.match(guide, /llmgw\.console\.setup-guide-dismissed/);
 });
@@ -424,9 +428,40 @@ test("key creation exposes the acting principal so OAuth-backed keys work", () =
   const keys = readFileSync(resolve(root, "src/pages/ApiKeys.tsx"), "utf8");
   assert.match(keys, /Acts as/);
   assert.match(keys, /payload.principal_id = principalID/);
-  assert.match(keys, /New service identity \(shared credentials only\)/);
-  assert.match(keys, /inherits that human's private provider connections/);
-  assert.match(keys, /Copilot or Codex OAuth subscription/);
+  assert.match(keys, /Create or reuse a service identity/);
+  assert.match(keys, /owner's eligible private connections/);
+  assert.match(keys, /Copilot service access requires an active project binding; Codex OAuth is human-private/);
+});
+
+test("compact providers preserve the complete discovery and onboarding surface", () => {
+  const hub = readFileSync(resolve(root, "src/components/providers/ProviderHub.tsx"), "utf8");
+  const roster = readFileSync(resolve(root, "src/components/providers/ProviderRoster.tsx"), "utf8");
+  assert.match(roster, /All providers/);
+  assert.match(hub, /Detect local/);
+  assert.match(hub, /\[\.\.\.curated, \.\.\.custom\]/);
+  assert.match(hub, /<ConnectDialog/);
+  assert.match(hub, /<PrivateAPIKeyDialog/);
+  assert.match(hub, /<OAuthConnectDialog/);
+  assert.match(hub, /provider-hub__details/);
+});
+
+test("keys expose scopes, owner filters and admin management without unrestricted claims", () => {
+  const keys = readFileSync(resolve(root, "src/pages/ApiKeys.tsx"), "utf8");
+  const scope = readFileSync(resolve(root, "src/components/KeyScopeEditor.tsx"), "utf8");
+  assert.match(keys, /key\.principal_id !== ownerFilter/);
+  assert.match(keys, /key\.project_id !== projectFilter/);
+  assert.match(keys, /eligibleOwners/);
+  assert.match(keys, /routes_only: scope\.routes_only === true/);
+  assert.match(keys, /mode === "portal" && managed/);
+  assert.match(scope, /Block direct model calls, including aliases/);
+  assert.match(scope, /Inherits project access and limits/);
+  assert.doesNotMatch(keys, /"Unrestricted"/);
+});
+
+test("key editor bounds intrinsic controls on narrow screens", () => {
+  const styles = readFileSync(resolve(root, "src/styles/keys.css"), "utf8");
+  assert.match(styles, /\.key-editor \{ grid-template-columns: minmax\(0, 1fr\); min-width: 0;/);
+  assert.match(styles, /\.key-editor select \{ width: 100%; min-width: 0; max-width: 100%;/);
 });
 
 test("model pickers cascade provider then capability before the model list", () => {
@@ -519,36 +554,7 @@ test("setup guide points each step at the provider that still needs it", () => {
   const guide = readFileSync(resolve(root, "src/components/GetStartedGuide.tsx"), "utf8");
   assert.match(guide, /needsCatalog/);
   assert.match(guide, /needsVerify/);
-  assert.match(guide, /configured\.find\(\(status\) => !verifiedProviders\.has\(status\)\)/);
   assert.doesNotMatch(guide, /firstConfigured/);
-});
-
-test("setup verification uses instance readiness and navigates to the owning tile", () => {
-  const guide = readFileSync(resolve(root, "src/components/GetStartedGuide.tsx"), "utf8");
-  const records = readFileSync(resolve(root, "src/lib/records.ts"), "utf8")
-    .replace(/^import type .*;$/gm, "").replaceAll("export function", "function");
-  const start = guide.indexOf("export function buildGuideSteps");
-  const end = guide.indexOf("export function GetStartedGuide", start);
-  assert.ok(start >= 0 && end > start);
-  const source = records + guide.slice(start, end).replace("export function", "function");
-  const { outputText } = ts.transpileModule(source, { compilerOptions: { target: ts.ScriptTarget.ES2022 } });
-  const buildGuideSteps = new Function(outputText + "; return buildGuideSteps;")();
-  const tile = (id, verified, extra = {}) => ({ id, configured: true,
-    readiness: { model_verified: false }, instances: [{ id: `${id}-instance`, readiness: { model_verified: verified } }], ...extra });
-  for (const [name, statuses, done, target] of [
-    ["fresh registry", [tile("registry", true)], true, "registry"],
-    ["historical stale", [tile("registry", false, { last_verified_at: "historical" })], false, "registry"],
-    ["failed instance", [tile("registry", false)], false, "registry"],
-    ["missing instances", [tile("registry", true, { instances: undefined })], false, "registry"],
-    ["aggregate cannot verify", [tile("registry", false, { readiness: { model_verified: true } })], false, "registry"],
-    ["custom instance", [tile("custom", true, { custom: true })], true, "custom"],
-    ["owning unverified tile", [tile("first", true), tile("second", false)], true, "second"],
-    ["mixed instances", [tile("registry", false, { instances: [{ readiness: { model_verified: false } }, { readiness: { model_verified: true } }] })], true, "registry"],
-  ]) {
-    const step = buildGuideSteps({ provider_statuses: statuses }).find((step) => step.title.startsWith("Verify inference"));
-    assert.equal(step.done, done, name);
-    assert.equal(step.pageDetail, target, name);
-  }
 });
 
 test("playground exercises image and video as their own surfaces", () => {

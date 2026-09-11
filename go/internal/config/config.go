@@ -498,6 +498,18 @@ func applyConfig(s *Settings, payload map[string]any) {
 	} else if raw, ok := payload["categories"].(map[string]any); ok {
 		s.Endpoints = parseEndpoints(raw)
 	}
+	if raw, ok := payload["policies"]; ok {
+		encoded, err := yaml.Marshal(raw)
+		if err == nil {
+			var policies BackendPolicies
+			if yaml.Unmarshal(encoded, &policies) == nil {
+				if policies.Overrides == nil {
+					policies.Overrides = map[string]ProviderPolicy{}
+				}
+				s.Policies = policies
+			}
+		}
+	}
 	applyScalars(s, payload)
 }
 

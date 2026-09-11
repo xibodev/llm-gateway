@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"llmgw/internal/config"
+	"llmgw/internal/iam"
 	"llmgw/internal/providers"
 	"llmgw/internal/router"
 )
@@ -267,6 +268,21 @@ func serveNativeSpeech(
 		return
 	}
 	voice, _ := body["voice"].(string)
+	if principal != nil && principal.Token != "" {
+		projectPolicy, err := iam.GetProjectPolicy(principal.ProjectID)
+		if err != nil {
+			recordFailureUsage("openai.speech", reqModel, principal, 500, "policy_or_route", started)
+			writeError(w, 500, "Project policy store unavailable.")
+			return
+		}
+		// Native voices are models. Only unscoped callers may override the
+		// authorized target with the legacy OpenAI-shaped voice field.
+		if principal.RoutesOnly || len(principal.AllowedRoutes) > 0 ||
+			len(principal.AllowedModels) > 0 || len(principal.AllowedProviders) > 0 ||
+			len(projectPolicy.AllowedModels) > 0 || len(projectPolicy.AllowedProviders) > 0 {
+			voice = upstreamModel
+		}
+	}
 	if strings.TrimSpace(voice) == "" {
 		voice = upstreamModel
 	}

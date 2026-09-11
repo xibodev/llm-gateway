@@ -96,6 +96,7 @@ func NewServer() http.Handler {
 	mux.HandleFunc("GET /user/api/me", handleUserMe)
 	mux.HandleFunc("GET /user/api/usage", handleUserUsage)
 	mux.HandleFunc("GET /user/api/models", handleUserModels)
+	mux.HandleFunc("GET /user/api/provider-roster", handleUserRoster)
 	mux.HandleFunc("POST /user/api/providers/{id}/test", handleUserTestProvider)
 	mux.HandleFunc("POST /user/api/keys", handleUserCreateKey)
 	mux.HandleFunc("POST /user/api/keys/{id}/reveal", handleUserRevealKey)
@@ -114,6 +115,8 @@ func NewServer() http.Handler {
 	mux.HandleFunc("POST /user/api/copilot/login/poll", handleUserCopilotLoginPoll)
 	mux.HandleFunc("DELETE /user/api/copilot", handleUserCopilotRevoke)
 	mux.HandleFunc("GET /admin/api/state", handleState)
+	mux.HandleFunc("GET /admin/api/provider-roster", handleAdminRoster)
+	mux.HandleFunc("POST /admin/api/provider-roster/refresh", handleRefreshRoster)
 	mux.HandleFunc("POST /admin/api/playground", handleAdminPlayground)
 	mux.HandleFunc("POST /admin/api/playground/speech", handleAdminPlaygroundSpeech)
 	mux.HandleFunc("POST /admin/api/playground/transcription", handleAdminPlaygroundTranscription)
@@ -182,9 +185,6 @@ func NewServer() http.Handler {
 	mux.HandleFunc("POST /admin/api/copilot/login/start", handleCopilotLoginStart)
 	mux.HandleFunc("POST /admin/api/copilot/login/poll", handleCopilotLoginPoll)
 	mux.HandleFunc("POST /admin/api/copilot/logout", handleCopilotLogout)
-	mux.HandleFunc("GET /admin/api/provider-roster", handleAdminRoster)
-	mux.HandleFunc("POST /admin/api/provider-roster/refresh", handleRefreshRoster)
-	mux.HandleFunc("GET /user/api/provider-roster", handleUserRoster)
 
 	return aliasMiddleware(requestLogMiddleware(mux))
 }

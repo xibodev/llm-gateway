@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"reflect"
 	"strings"
 	"time"
 
@@ -24,12 +25,17 @@ type KeyCreate struct {
 }
 
 type KeyUpdate struct {
-	Status    *string
-	ExpiresAt *int64
-	Policy    *KeyPolicy
+	Status           *string
+	ExpiresAt        *int64
+	Policy           *KeyPolicy
+	Admin            bool
+	OwnerPrincipalID string
+	ExpectedPolicy   *KeyPolicy
 }
 
 var ErrAPIKeyNotRevealable = errors.New("API key was issued before encrypted key recovery was enabled")
+var ErrAPIKeyAdminManaged = errors.New("admin-managed API keys can only be changed by an administrator; owners may revoke them")
+var ErrAPIKeyConflict = errors.New("API key policy changed; reload and retry")
 
 func HasAPIKeys() (bool, error) {
 	db, err := DB()
@@ -110,14 +116,14 @@ INSERT INTO api_keys(
     allowed_models_json,allowed_providers_json,rpm,daily_requests,monthly_requests,
     daily_input_tokens,daily_output_tokens,monthly_total_tokens,daily_cost_microusd,
     monthly_cost_microusd,daily_credits_milli,monthly_credits_milli,
-    secret_ciphertext,secret_nonce
-) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+    secret_ciphertext,secret_nonce,scope_json
+) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
 		id, displayPrefix(token), sum[:], in.ProjectID, in.PrincipalID, name, "active", now,
 		nullInt(in.ExpiresAt), string(models), string(providers), in.Policy.RPM,
 		in.Policy.DailyRequests, in.Policy.MonthlyRequests, in.Policy.DailyInputTokens,
 		in.Policy.DailyOutputTokens, in.Policy.MonthlyTotalTokens, in.Policy.DailyCostMicroUSD,
 		in.Policy.MonthlyCostMicroUSD, in.Policy.DailyCreditsMilli, in.Policy.MonthlyCreditsMilli,
-		ciphertext, nonce,
+		ciphertext, nonce, keyScopeJSON(in.Policy),
 	)
 	if err != nil {
 		return IssuedKey{}, fmt.Errorf("issue API key: %w", err)
@@ -143,6 +149,7 @@ func ResolveAPIKey(token string) (*config.Principal, bool, error) {
 	}
 	var (
 		storedHash, modelsJSON, providersJSON []byte
+		scopeJSON                             string
 		keyID, keyName, keyStatus             string
 		principalID, principalKind, pStatus   string
 		projectID, projectSlug, projectStatus string
@@ -159,7 +166,7 @@ SELECT k.secret_hash,k.id,k.name,k.status,k.expires_at,k.allowed_models_json,
        k.daily_input_tokens,k.daily_output_tokens,k.monthly_total_tokens,
        k.daily_cost_microusd,k.monthly_cost_microusd,
        k.daily_credits_milli,k.monthly_credits_milli,
-       n.id,n.kind,n.status,p.id,p.slug,p.status,m.role
+       n.id,n.kind,n.status,p.id,p.slug,p.status,m.role,k.scope_json
 FROM api_keys k
 JOIN principals n ON n.id=k.principal_id
 JOIN projects p ON p.id=k.project_id
@@ -169,7 +176,7 @@ WHERE k.secret_hash=?`, sum[:]).Scan(
 		&providersJSON, &rpm, &daily, &monthly, &dailyIn, &dailyOut, &monthlyTokens,
 		&dailyCost, &monthlyCost, &dailyCredits, &monthlyCredits,
 		&principalID, &principalKind, &pStatus,
-		&projectID, &projectSlug, &projectStatus, &role,
+		&projectID, &projectSlug, &projectStatus, &role, &scopeJSON,
 	)
 	if err == sql.ErrNoRows {
 		return nil, false, nil
@@ -189,12 +196,17 @@ WHERE k.secret_hash=?`, sum[:]).Scan(
 	var allowedModels, allowedProviders []string
 	_ = json.Unmarshal(modelsJSON, &allowedModels)
 	_ = json.Unmarshal(providersJSON, &allowedProviders)
+	var scope KeyPolicy
+	if err := json.Unmarshal([]byte(scopeJSON), &scope); err != nil {
+		return nil, false, fmt.Errorf("invalid API key scope: %w", err)
+	}
 	_, _ = db.Exec("UPDATE api_keys SET last_used_at=? WHERE id=?", time.Now().Unix(), keyID)
 	return &config.Principal{
 		PrincipalID: principalID, PrincipalKind: principalKind,
 		ProjectID: projectID, Project: projectSlug, KeyID: keyID,
 		Key: keyName, Role: role, Token: token,
 		AllowedModels: allowedModels, AllowedProviders: allowedProviders,
+		AllowedRoutes: scope.AllowedRoutes, RoutesOnly: scope.RoutesOnly,
 		RPM: rpm, DailyRequests: daily, MonthlyRequests: monthly,
 		DailyInputTokens: dailyIn, DailyOutputTokens: dailyOut,
 		MonthlyTotalTokens: monthlyTokens,
@@ -215,7 +227,7 @@ SELECT k.id,k.prefix,k.project_id,p.slug,k.principal_id,n.display_name,n.kind,
        k.allowed_models_json,k.allowed_providers_json,k.rpm,k.daily_requests,k.monthly_requests,
        daily_input_tokens,daily_output_tokens,monthly_total_tokens,daily_cost_microusd,
        monthly_cost_microusd,daily_credits_milli,monthly_credits_milli,
-       CASE WHEN k.secret_ciphertext IS NOT NULL AND k.secret_nonce IS NOT NULL THEN 1 ELSE 0 END
+       CASE WHEN k.secret_ciphertext IS NOT NULL AND k.secret_nonce IS NOT NULL THEN 1 ELSE 0 END,k.scope_json
 FROM api_keys k
 JOIN projects p ON p.id=k.project_id
 JOIN principals n ON n.id=k.principal_id`
@@ -253,7 +265,7 @@ SELECT k.id,k.prefix,k.project_id,p.slug,k.principal_id,n.display_name,n.kind,
        k.monthly_requests,k.daily_input_tokens,k.daily_output_tokens,
        k.monthly_total_tokens,k.daily_cost_microusd,k.monthly_cost_microusd,
        k.daily_credits_milli,k.monthly_credits_milli,
-       CASE WHEN k.secret_ciphertext IS NOT NULL AND k.secret_nonce IS NOT NULL THEN 1 ELSE 0 END
+       CASE WHEN k.secret_ciphertext IS NOT NULL AND k.secret_nonce IS NOT NULL THEN 1 ELSE 0 END,k.scope_json
 FROM api_keys k
 JOIN projects p ON p.id=k.project_id
 JOIN principals n ON n.id=k.principal_id
@@ -278,13 +290,17 @@ func APIKeyByID(id string) (APIKey, bool, error) {
 	if err != nil {
 		return APIKey{}, false, err
 	}
+	return apiKeyByID(db, id)
+}
+
+func apiKeyByID(db interface{ QueryRow(string, ...any) *sql.Row }, id string) (APIKey, bool, error) {
 	row := db.QueryRow(`
 SELECT k.id,k.prefix,k.project_id,p.slug,k.principal_id,n.display_name,n.kind,
        k.name,k.status,k.created_at,k.expires_at,k.last_used_at,
        k.allowed_models_json,k.allowed_providers_json,k.rpm,k.daily_requests,k.monthly_requests,
        daily_input_tokens,daily_output_tokens,monthly_total_tokens,daily_cost_microusd,
        monthly_cost_microusd,daily_credits_milli,monthly_credits_milli,
-       CASE WHEN k.secret_ciphertext IS NOT NULL AND k.secret_nonce IS NOT NULL THEN 1 ELSE 0 END
+       CASE WHEN k.secret_ciphertext IS NOT NULL AND k.secret_nonce IS NOT NULL THEN 1 ELSE 0 END,k.scope_json
 FROM api_keys k
 JOIN projects p ON p.id=k.project_id
 JOIN principals n ON n.id=k.principal_id
@@ -297,13 +313,38 @@ WHERE k.id=?`, id)
 }
 
 func UpdateAPIKey(id string, update KeyUpdate) error {
-	key, ok, err := APIKeyByID(id)
+	db, err := DB()
+	if err != nil {
+		return err
+	}
+	tx, err := db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	key, ok, err := apiKeyByID(tx, id)
 	if err != nil {
 		return err
 	}
 	if !ok {
 		return fmt.Errorf("API key not found")
 	}
+	if update.OwnerPrincipalID != "" {
+		if key.PrincipalID != update.OwnerPrincipalID || update.Admin {
+			return fmt.Errorf("API key owner mismatch")
+		}
+		if key.Policy.AdminManaged && (update.Policy != nil || update.ExpiresAt != nil ||
+			(update.Status != nil && *update.Status != "revoked")) {
+			return ErrAPIKeyAdminManaged
+		}
+		if update.Policy != nil && update.Policy.AdminManaged != key.Policy.AdminManaged {
+			return ErrAPIKeyAdminManaged
+		}
+	}
+	if update.ExpectedPolicy != nil && !reflect.DeepEqual(key.Policy, *update.ExpectedPolicy) {
+		return ErrAPIKeyConflict
+	}
+	adminManaged := key.Policy.AdminManaged
 	if update.Status != nil {
 		if key.Status == "revoked" && *update.Status != "revoked" {
 			return fmt.Errorf("revoked API keys cannot change status")
@@ -324,28 +365,41 @@ func UpdateAPIKey(id string, update KeyUpdate) error {
 		}
 		key.Policy = *update.Policy
 	}
-	return saveAPIKey(id, key)
+	// Older keys remain owner-managed until an administrator first changes them.
+	key.Policy.AdminManaged = adminManaged || (update.Admin &&
+		(update.Policy != nil || update.Status != nil || update.ExpiresAt != nil))
+	if err := saveAPIKeyWith(tx, id, key); err != nil {
+		return err
+	}
+	return tx.Commit()
 }
 
 func saveAPIKey(id string, key APIKey) error {
-	models, _ := json.Marshal(key.Policy.AllowedModels)
-	providers, _ := json.Marshal(key.Policy.AllowedProviders)
 	db, err := DB()
 	if err != nil {
 		return err
 	}
+	return saveAPIKeyWith(db, id, key)
+}
+
+func saveAPIKeyWith(db interface {
+	Exec(string, ...any) (sql.Result, error)
+}, id string, key APIKey) error {
+	models, _ := json.Marshal(key.Policy.AllowedModels)
+	providers, _ := json.Marshal(key.Policy.AllowedProviders)
 	result, err := db.Exec(`
 UPDATE api_keys SET status=?,expires_at=?,allowed_models_json=?,allowed_providers_json=?,
  rpm=?,daily_requests=?,monthly_requests=?,daily_input_tokens=?,daily_output_tokens=?,
  monthly_total_tokens=?,daily_cost_microusd=?,monthly_cost_microusd=?,
- daily_credits_milli=?,monthly_credits_milli=?
- WHERE id=? AND (status != 'revoked' OR ? = 'revoked')`,
+ daily_credits_milli=?,monthly_credits_milli=?,scope_json=?
+ WHERE id=? AND (status != 'revoked' OR ? = 'revoked')
+ AND (COALESCE(json_extract(scope_json, '$.admin_managed'), 0)=0 OR ?=1)`,
 		key.Status, nullInt(key.ExpiresAt), string(models), string(providers),
 		key.Policy.RPM, key.Policy.DailyRequests, key.Policy.MonthlyRequests,
 		key.Policy.DailyInputTokens, key.Policy.DailyOutputTokens,
 		key.Policy.MonthlyTotalTokens, key.Policy.DailyCostMicroUSD,
 		key.Policy.MonthlyCostMicroUSD, key.Policy.DailyCreditsMilli,
-		key.Policy.MonthlyCreditsMilli, id, key.Status,
+		key.Policy.MonthlyCreditsMilli, keyScopeJSON(key.Policy), id, key.Status, key.Policy.AdminManaged,
 	)
 	if err != nil {
 		return err
@@ -355,7 +409,7 @@ UPDATE api_keys SET status=?,expires_at=?,allowed_models_json=?,allowed_provider
 		return err
 	}
 	if affected == 0 {
-		return fmt.Errorf("revoked API keys cannot change status")
+		return ErrAPIKeyConflict
 	}
 	return nil
 }
@@ -414,6 +468,7 @@ func scanAPIKey(row rowScanner) (APIKey, error) {
 		k                         APIKey
 		expiresAt, lastUsedAt     sql.NullInt64
 		modelsJSON, providersJSON string
+		scopeJSON                 string
 		revealable                int
 	)
 	err := row.Scan(
@@ -424,7 +479,7 @@ func scanAPIKey(row rowScanner) (APIKey, error) {
 		&k.Policy.DailyInputTokens, &k.Policy.DailyOutputTokens,
 		&k.Policy.MonthlyTotalTokens, &k.Policy.DailyCostMicroUSD,
 		&k.Policy.MonthlyCostMicroUSD, &k.Policy.DailyCreditsMilli,
-		&k.Policy.MonthlyCreditsMilli, &revealable,
+		&k.Policy.MonthlyCreditsMilli, &revealable, &scopeJSON,
 	)
 	if err != nil {
 		return APIKey{}, err
@@ -433,12 +488,23 @@ func scanAPIKey(row rowScanner) (APIKey, error) {
 	k.LastUsedAt = lastUsedAt.Int64
 	_ = json.Unmarshal([]byte(modelsJSON), &k.Policy.AllowedModels)
 	_ = json.Unmarshal([]byte(providersJSON), &k.Policy.AllowedProviders)
+	if err := json.Unmarshal([]byte(scopeJSON), &k.Policy); err != nil {
+		return APIKey{}, fmt.Errorf("invalid API key scope: %w", err)
+	}
 	k.Expired = k.IsExpired()
 	k.Revealable = revealable != 0
 	return k, nil
 }
 
 func validatePolicy(p KeyPolicy) error {
+	if p.RoutesOnly && len(p.AllowedRoutes) == 0 {
+		return fmt.Errorf("routes_only requires at least one allowed route")
+	}
+	for _, route := range p.AllowedRoutes {
+		if strings.TrimSpace(route) == "" || route != strings.TrimSpace(route) {
+			return fmt.Errorf("allowed_routes must contain non-empty route names without surrounding whitespace")
+		}
+	}
 	if p.RPM < 0 || p.DailyRequests < 0 || p.MonthlyRequests < 0 ||
 		p.DailyInputTokens < 0 || p.DailyOutputTokens < 0 ||
 		p.MonthlyTotalTokens < 0 || p.DailyCostMicroUSD < 0 ||
@@ -447,6 +513,15 @@ func validatePolicy(p KeyPolicy) error {
 		return fmt.Errorf("quota values cannot be negative")
 	}
 	return nil
+}
+
+func keyScopeJSON(p KeyPolicy) string {
+	data, _ := json.Marshal(struct {
+		AllowedRoutes []string `json:"allowed_routes,omitempty"`
+		RoutesOnly    bool     `json:"routes_only,omitempty"`
+		AdminManaged  bool     `json:"admin_managed,omitempty"`
+	}{p.AllowedRoutes, p.RoutesOnly, p.AdminManaged})
+	return string(data)
 }
 
 func randomToken() (string, error) {

@@ -49,6 +49,8 @@ type Principal struct {
 	Key                 string   `json:"key"`
 	Token               string   `json:"-"`
 	AllowedModels       []string `json:"-"`
+	AllowedRoutes       []string `json:"-"`
+	RoutesOnly          bool     `json:"-"`
 	AllowedProviders    []string `json:"-"`
 	RPM                 int      `json:"-"`
 	DailyRequests       int      `json:"-"`

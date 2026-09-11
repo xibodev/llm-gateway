@@ -1,37 +1,25 @@
-import { Bot, Box, Cloud } from "lucide-preact";
-import {
-  siAnthropic,
-  siGithubcopilot,
-  siGooglegemini,
-  siMistralai,
-  siOllama,
-  siOpenrouter,
-  type SimpleIcon,
-} from "simple-icons";
+import { providerBrandID, resolveProviderBrand } from "./provider-brand-marks";
+import "./provider-marks.css";
 
-const icons: Record<string, SimpleIcon> = {
-  github_copilot: siGithubcopilot,
-  anthropic: siAnthropic,
-  custom_anthropic: siAnthropic,
-  gemini: siGooglegemini,
-  mistral: siMistralai,
-  ollama: siOllama,
-  openrouter: siOpenrouter,
-};
+export { hasProviderMark, hasProviderBrand, providerBrandID, providerBrandForEndpoint, resolveProviderBrand } from "./provider-brand-marks";
 
-export function ProviderMark({ id, label }: { id: string; label?: string }) {
-  const normalized = id.toLowerCase();
-  const icon = icons[normalized];
-  const fallback = normalized === "openai" || normalized === "openai_codex"
-    ? <Bot size={18} strokeWidth={1.7} aria-hidden="true" />
-    : normalized === "bedrock"
-      ? <Cloud size={18} strokeWidth={1.7} aria-hidden="true" />
-      : <Box size={17} strokeWidth={1.7} aria-hidden="true" />;
+function initials(value: string): string {
+  const words = value.match(/[\p{L}\p{N}]+/gu) ?? [];
+  return (words.length > 1 ? words.slice(0, 2).map((word) => Array.from(word)[0]).join("") : Array.from(words[0] ?? "?").slice(0, 2).join("")).toUpperCase();
+}
+
+export function ProviderMark({ id, label, baseURL }: { id: string; label?: string; baseURL?: string }) {
+  const brand = resolveProviderBrand({ id, baseURL });
+  const name = label?.trim() || id;
+  const icon = brand?.icon;
+  const paths = brand?.paths ?? (icon ? [{ d: icon.path }] : undefined);
   return (
-    <span class="provider-mark" aria-label={label ?? id} style={icon ? { color: `#${icon.hex}` } : undefined}>
-      {icon
-        ? <svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d={icon.path} /></svg>
-        : fallback}
+    <span class={`provider-mark provider-mark--local${brand?.monochrome ? " provider-mark--monochrome" : ""}${brand?.paleBackground ? " provider-mark--pale" : ""}`} role="img" aria-label={name} data-provider-brand={providerBrandID(id, baseURL)}>
+      {paths
+        ? <svg viewBox={brand?.viewBox ?? "0 0 24 24"} aria-hidden="true" focusable="false" style={icon && !brand?.monochrome ? { color: `#${icon.hex}` } : undefined}>
+          {paths.map((path) => <path key={path.d} fill={path.fill ?? "currentColor"} fill-rule={path.fillRule} d={path.d} />)}
+        </svg>
+        : <span class="provider-mark__initials" aria-hidden="true">{brand?.initials ?? initials(name)}</span>}
     </span>
   );
 }
