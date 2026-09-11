@@ -82,7 +82,7 @@ jobs:
         with:
           name: provider-roster-previous-state
           path: previous/report-state.json
-          if-no-files-found: error
+          if-no-files-found: warn
           retention-days: 7
     outputs:
       has_previous: ${{ steps.baseline.outputs.found }}
@@ -155,7 +155,7 @@ jobs:
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: provider-roster-staging
-          path: reconciled/payload.json
+          path: reconciled/
           if-no-files-found: error
           retention-days: 90
       - name: Build website with roster
