@@ -113,6 +113,15 @@ func handleAdminModels(w http.ResponseWriter, r *http.Request) {
 
 var catalogModelsForPrincipal = providers.CatalogModelsForPrincipal
 
+func hasEndpointCaseFold(endpoints map[string]*config.EndpointConfig, name string) bool {
+	for ep := range endpoints {
+		if strings.EqualFold(ep, name) {
+			return true
+		}
+	}
+	return false
+}
+
 func buildModelList(principal *config.Principal) (map[string]any, error) {
 	data := []any{}
 	seen := map[string]bool{}
@@ -151,7 +160,13 @@ func buildModelList(principal *config.Principal) (map[string]any, error) {
 			if row.ID == "" {
 				continue
 			}
+			if principal != nil && principal.RoutesOnly {
+				continue
+			}
 			namespaced := providerID + "/" + row.ID
+			if hasEndpointCaseFold(s.Endpoints, namespaced) {
+				continue
+			}
 			aliasID, _ := discoveryAliasID(s, row.ID)
 			if !modelAllowed(principal, projectPolicy, namespaced, row.ID, aliasID) {
 				continue
@@ -181,6 +196,13 @@ func buildModelList(principal *config.Principal) (map[string]any, error) {
 	sort.Strings(endpointNames)
 	for _, name := range endpointNames {
 		cat := s.Endpoints[name]
+		if principal != nil && len(principal.AllowedRoutes) > 0 {
+			if !containsStr(principal.AllowedRoutes, name) {
+				continue
+			}
+		} else if principal != nil && principal.RoutesOnly && len(principal.AllowedRoutes) == 0 {
+			continue
+		}
 		if !modelAllowed(principal, projectPolicy, name) {
 			continue
 		}
@@ -231,7 +253,7 @@ func buildModelList(principal *config.Principal) (map[string]any, error) {
 	// aliased id routes via the resolver's native-name normalization. Deduped.
 	// Only chat/coding models are aliased â€” embeddings, audio (TTS/STT), and other
 	// non-chat models are kept out of Claude Code's /model picker.
-	if s.AnthropicDiscoveryAliases {
+	if s.AnthropicDiscoveryAliases && (principal == nil || !principal.RoutesOnly) {
 		candidates := router.NativeAliasCandidatesFromSnapshot(
 			modelSnapshot, s.AnthropicDiscoveryAllModels,
 		)
