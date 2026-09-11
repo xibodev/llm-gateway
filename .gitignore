@@ -23,6 +23,7 @@ deploy/state/
 .brains/
 .opencode/
 *.tmp.md
+.website-dist/
 test/docker-roster/build-context/
 test/docker-roster/test-output-*/
 
