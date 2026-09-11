@@ -150,17 +150,25 @@ jobs:
           name: provider-roster-reconciled
           path: reconciled
       - name: Validate payload size and schema
-        run: node -e "const fs=require('fs');const p=JSON.parse(fs.readFileSync('reconciled/payload.json','utf8'));if(!Array.isArray(p.entries)||p.entries.length===0)throw new Error('empty payload');if(p.entries.length>5000)throw new Error('exceeds 5000 entries');const b=Buffer.byteLength(JSON.stringify(p));if(b>4*1024*1024)throw new Error('exceeds 4 MiB: '+b);console.log(JSON.stringify({entries:p.entries.length,bytes:b}))"
+        run: |
+          node -e "const fs=require('fs');const p=JSON.parse(fs.readFileSync('reconciled/payload.json','utf8'));if(!Array.isArray(p.entries)||p.entries.length===0)throw new Error('empty payload');if(p.entries.length>5000)throw new Error('exceeds 5000 entries');const b=Buffer.byteLength(JSON.stringify(p));if(b>4*1024*1024)throw new Error('exceeds 4 MiB: '+b);console.log(JSON.stringify({entries:p.entries.length,bytes:b}))"
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: provider-roster-staging
           path: reconciled/payload.json
           if-no-files-found: error
           retention-days: 90
+      - name: Build website with roster
+        if: github.ref == 'refs/heads/main' && (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch')
+        run: |
+          node scripts/build-website.mjs
+          mkdir -p .website-dist/roster
+          cp reconciled/payload.json .website-dist/roster/payload.json
+          cp reconciled/report.json .website-dist/roster/report.json 2>/dev/null || true
       - uses: actions/upload-pages-artifact@56afc609e74202658d3ffba0e8f6dda462b719fa # v3
         if: github.ref == 'refs/heads/main' && (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch')
         with:
-          path: reconciled
+          path: .website-dist
 
   publish:
     needs: package

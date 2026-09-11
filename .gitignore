@@ -20,6 +20,12 @@ deploy/state/
 .playwright-cli/
 .playwright-mcp/
 .quality-run/
+.brains/
+.opencode/
+*.tmp.md
+.website-dist/
+test/docker-roster/build-context/
+test/docker-roster/test-output-*/
 
 # editors / OS
 .vscode/
