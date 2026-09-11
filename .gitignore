@@ -27,6 +27,7 @@ deploy/state/
 *.tmp.md
 .website-dist/
 test/uat-output/
+test/upgrade-drill/
 test/docker-roster/build-context/
 test/docker-roster/test-output-*/
 
