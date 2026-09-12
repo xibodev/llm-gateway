@@ -1,7 +1,10 @@
 package providers
 
 import (
+	"fmt"
 	"net/http"
+	"strings"
+	"time"
 
 	"llmgw/internal/config"
 	"llmgw/internal/copilotauth"
@@ -52,8 +55,18 @@ type bearerAuth struct {
 func (a bearerAuth) Prepare() (string, http.Header, error) {
 	h := http.Header{}
 	h.Set("Content-Type", "application/json")
-	if a.apiKey != "" {
-		h.Set("Authorization", "Bearer "+a.apiKey)
+	key := strings.TrimSpace(a.apiKey)
+	if strings.HasPrefix(strings.ToLower(key), "bearer ") {
+		key = strings.TrimSpace(key[7:])
+	}
+	if strings.EqualFold(key, "free") || strings.EqualFold(key, "none") {
+		key = ""
+	}
+	if key != "" {
+		h.Set("Authorization", "Bearer "+key)
+	}
+	if strings.Contains(strings.ToLower(a.base), "opencode.ai") {
+		h.Set("x-session-id", fmt.Sprintf("sess_%x", time.Now().UnixNano()))
 	}
 	return a.base, h, nil
 }

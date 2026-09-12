@@ -178,13 +178,26 @@ export function ModelCombo({ models, filter, value, onChange, label = "Model", l
         />
       </label>
       {open && suggestions.length ? <ul class="model-combo__list" role="listbox">
-        {suggestions.map((model, index) => <li key={model.id}>
-          <button class={index === active ? "is-active" : ""} type="button" role="option" aria-selected={index === active}
-            onMouseDown={(event) => { event.preventDefault(); commit(model.id); }}>
-            <strong class="technical">{model.id}</strong>
-            {model.label !== model.id ? <small>{model.label}</small> : null}
-          </button>
-        </li>)}
+        {suggestions.map((model, index) => {
+          const isFree = model.id.endsWith("-free") || model.id.includes(":free");
+          return (
+            <li key={model.id}>
+              <button
+                class={index === active ? "is-active" : ""}
+                type="button"
+                role="option"
+                aria-selected={index === active}
+                onMouseDown={(event) => { event.preventDefault(); commit(model.id); }}
+              >
+                <div style={{ display: "flex", alignItems: "center", gap: "6px", width: "100%" }}>
+                  <strong class="technical">{model.id}</strong>
+                  {isFree ? <span class="status-pill status-pill--success" style={{ fontSize: "10px", padding: "1px 5px", lineHeight: "14px" }}>Free</span> : null}
+                </div>
+                {model.label !== model.id ? <small>{model.label}</small> : null}
+              </button>
+            </li>
+          );
+        })}
         {pool.length > suggestions.length ? <li class="model-combo__more">{pool.length - suggestions.length} more — keep typing to narrow</li> : null}
       </ul> : null}
     </div>
