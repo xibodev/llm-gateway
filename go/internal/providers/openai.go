@@ -112,7 +112,11 @@ func (p OpenAIProvider) CompleteContextWithObservation(
 	defer resp.Body.Close()
 	raw, _ := io.ReadAll(resp.Body)
 	if resp.StatusCode >= 400 {
-		return nil, observation, invocationStatus(fmt.Sprintf("openai: upstream returned %d: %s", resp.StatusCode, redact(extractError(raw))), resp.StatusCode)
+		errMsg := extractError(raw)
+		if resp.StatusCode == 401 && strings.Contains(strings.ToLower(base), "opencode.ai") && !strings.HasSuffix(model, "-free") {
+			errMsg = fmt.Sprintf("OpenCode Zen free anonymous tier only supports models ending in '-free' (e.g. nemotron-3.5-lightning-free). '%s' requires an OpenCode Zen API key.", model)
+		}
+		return nil, observation, invocationStatus(fmt.Sprintf("openai: upstream returned %d: %s", resp.StatusCode, redact(errMsg)), resp.StatusCode)
 	}
 	var out map[string]any
 	if json.Unmarshal(raw, &out) != nil {
@@ -169,7 +173,11 @@ func (p OpenAIProvider) StreamContext(ctx context.Context, model string, message
 	if resp.StatusCode >= 400 {
 		raw, _ := io.ReadAll(resp.Body)
 		resp.Body.Close()
-		return nil, invocationStatus(fmt.Sprintf("openai: upstream returned %d: %s", resp.StatusCode, redact(extractError(raw))), resp.StatusCode)
+		errMsg := extractError(raw)
+		if resp.StatusCode == 401 && strings.Contains(strings.ToLower(base), "opencode.ai") && !strings.HasSuffix(model, "-free") {
+			errMsg = fmt.Sprintf("OpenCode Zen free anonymous tier only supports models ending in '-free' (e.g. nemotron-3.5-lightning-free). '%s' requires an OpenCode Zen API key.", model)
+		}
+		return nil, invocationStatus(fmt.Sprintf("openai: upstream returned %d: %s", resp.StatusCode, redact(errMsg)), resp.StatusCode)
 	}
 	return newHTTPStreamIter(resp, "openai"), nil
 }

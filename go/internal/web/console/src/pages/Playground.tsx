@@ -14,7 +14,7 @@ import {
   useModelFilter,
 } from "../components/ModelPicker";
 
-type ChatTurn = { role: "user" | "assistant"; content: string; served?: string; latency?: number };
+type ChatTurn = { role: "user" | "assistant"; content: string; served?: string; latency?: number; isError?: boolean };
 
 // modeFor picks the playground surface a model can actually be exercised on.
 // A model that only synthesizes speech must not be offered a chat composer.
@@ -42,9 +42,9 @@ function ChatThread({ turns, running, onClear }: { turns: ChatTurn[]; running: b
     <div class="chat-thread">
       <div class="chat-thread__scroll">
         {!turns.length ? <p class="muted-copy chat-thread__hint">Send a message to start. Every turn is replayed as real conversation history through the selected route.</p> : null}
-        {turns.map((turn, index) => <article class={`chat-turn chat-turn--${turn.role}`} key={index}>
-          <header><span>{turn.role === "user" ? "You" : "Assistant"}</span>{turn.served ? <small class="technical">{turn.served}{turn.latency ? ` · ${turn.latency} ms` : ""}</small> : null}</header>
-          <p>{turn.content}</p>
+        {turns.map((turn, index) => <article class={`chat-turn chat-turn--${turn.role}${turn.isError ? " chat-turn--error" : ""}`} key={index}>
+          <header><span>{turn.role === "user" ? "You" : turn.isError ? "Error" : "Assistant"}</span>{turn.served ? <small class="technical">{turn.served}{turn.latency ? ` · ${turn.latency} ms` : ""}</small> : null}</header>
+          <p class={turn.isError ? "form-error" : undefined}>{turn.content}</p>
         </article>)}
         {running ? <article class="chat-turn chat-turn--assistant chat-turn--pending"><header><span>Assistant</span></header><p><RefreshCw class="spin" size={15} /> Routing…</p></article> : null}
         <div ref={endRef} />
@@ -214,7 +214,13 @@ export function Playground({ data, mode, principalID, onPrincipalIDChange, prese
         latency: numberValue(payload.latency_ms),
       }]);
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "Playground request failed.");
+      const msg = cause instanceof Error ? cause.message : "Playground request failed.";
+      setError(msg);
+      setTurns([...history, {
+        role: "assistant",
+        content: msg,
+        isError: true,
+      }]);
     } finally { setRunning(false); }
   };
 
@@ -426,6 +432,11 @@ export function Playground({ data, mode, principalID, onPrincipalIDChange, prese
             <summary>Raw gateway response</summary>
             <pre class="technical">{JSON.stringify(result.raw_response ?? result, null, 2)}</pre>
           </details>
+        </section> : error ? <section class="surface playground-outcome playground-outcome--error">
+          <p class="eyebrow" style={{ color: "var(--color-danger, #e5484d)" }}>Request failed</p>
+          <h2>{model || "Routing error"}</h2>
+          <p class="form-error" style={{ margin: "12px 0", fontSize: "13px" }}>{error}</p>
+          <p class="form-help">The upstream provider rejected the request. Confirm credentials, model naming, or upstream quota limits.</p>
         </section> : <section class="surface playground-outcome playground-outcome--idle"><p class="eyebrow">Response</p><h2>Nothing routed yet</h2><p class="muted-copy">The served provider, latency, token usage, fallback trace and the raw gateway payload appear here after a request.</p></section>}
         </aside>
       </section>
