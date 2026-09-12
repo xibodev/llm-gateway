@@ -70,6 +70,7 @@ const marks: Record<string, ProviderBrandMark> = {
   // These are explicit textual identifiers, not architecture-kit brand assets.
   azure_openai: { initials: "AZ" }, bedrock: { initials: "AWS" },
   localai: { initials: "LA" }, litellm: { initials: "LL" }, edge_tts: { initials: "ET" },
+  opencode_zen: { initials: "ZEN" },
   custom_openai: { initials: "API" }, custom_anthropic: { initials: "API" }, custom: { initials: "API" },
 };
 
@@ -85,6 +86,8 @@ const aliases: Record<string, string> = {
   deepgram: "deepgram", "fish-audio": "fishaudio", fish_audio: "fishaudio",
   "github-models": "github", github_models: "github", "scaleway-generative-apis": "scaleway",
   scaleway: "scaleway", ovh: "ovh", "ovh-ai-endpoints": "ovh", ovh_ai_endpoints: "ovh",
+  opencode: "opencode_zen", zen: "opencode_zen", "opencode-zen": "opencode_zen",
+  opencode_zen: "opencode_zen",
 };
 
 const endpointBrands: Record<string, string> = {
@@ -100,7 +103,7 @@ const endpointBrands: Record<string, string> = {
   "api.githubcopilot.com": "github_copilot", "api.individual.githubcopilot.com": "github_copilot",
   "api.business.githubcopilot.com": "github_copilot", "api.enterprise.githubcopilot.com": "github_copilot",
   "api.deepgram.com": "deepgram", "api.fish.audio": "fishaudio", "api.scaleway.ai": "scaleway",
-  "endpoints.ai.cloud.ovh.net": "ovh",
+  "endpoints.ai.cloud.ovh.net": "ovh", "opencode.ai": "opencode_zen",
 };
 
 /** Match endpoint hosts, never display names, paths, or arbitrary suffixes. */
