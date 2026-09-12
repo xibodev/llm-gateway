@@ -82,8 +82,14 @@ export function mergeProviderRoster(builtins: JSONRecord[], roster: JSONRecord[]
         id: `roster:${id}`,
         roster_id: id,
         label: stringValue(remote.name, id),
+        protocol: isConfigured ? (stringValue(matchingInstance.protocol) || (stringValue(remote.protocol) === "unknown" ? "openai" : stringValue(remote.protocol, "openai"))) : stringValue(remote.protocol, "unknown"),
         remote_roster: true,
         configured: isConfigured,
+        status: isConfigured ? stringValue(matchingInstance.status, "configured") : "not_configured",
+        instance_status_counts: isConfigured ? { [stringValue(matchingInstance.status, "configured")]: 1 } : {},
+        model_count: isConfigured ? numberValue(matchingInstance.model_count) : 0,
+        catalog_state: isConfigured ? stringValue(matchingInstance.catalog_state, "synced") : "unknown",
+        catalog_refreshed: isConfigured ? stringValue(matchingInstance.catalog_refreshed) : "",
         instances: isConfigured ? [matchingInstance] : [],
         configured_provider_ids: isConfigured ? [stringValue(matchingInstance.id)] : [],
         roster_entries: [remote],
@@ -106,8 +112,8 @@ export function matchesDiscoveryFilter(entry: JSONRecord, filter: string): boole
   });
   switch (filter) {
     case "configured": return boolValue(entry.configured);
-    case "free": return offers.some((offer) => ["free_tier", "recurring_credit"].includes(stringValue(offer.offer)));
-    case "no-key": return offers.some((offer) => offer.auth === "none" && ["free_tier", "recurring_credit"].includes(stringValue(offer.offer)));
+    case "free": return asList(entry.categories).includes("free") || offers.some((offer) => ["free_tier", "recurring_credit"].includes(stringValue(offer.offer)));
+    case "no-key": return (asList(entry.categories).includes("no-auth") && !boolValue(entry.requires_api_key)) || offers.some((offer) => offer.auth === "none" && ["free_tier", "recurring_credit"].includes(stringValue(offer.offer)));
     case "trial": return offers.some((offer) => offer.offer === "trial");
     case "device": return asList(entry.auth_methods).includes("oauth_device");
     case "local": return shelfFor(entry) === "Local & self-hosted";

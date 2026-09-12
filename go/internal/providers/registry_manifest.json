@@ -492,6 +492,40 @@
     "risk_level": "green"
   },
   {
+    "id": "opencode_zen",
+    "aliases": [
+      "opencode",
+      "zen",
+      "opencode-zen"
+    ],
+    "label": "OpenCode Zen",
+    "description": "Free anonymous European multi-model API hosted by OpenCode with no API key or sign up required.",
+    "categories": [
+      "free",
+      "no-auth",
+      "coding"
+    ],
+    "runtime_type": "openai_compatible",
+    "protocol": "openai",
+    "availability": "available",
+    "auth_methods": [
+      "none",
+      "api_key"
+    ],
+    "connection_scope": "system_or_personal",
+    "default_provider_id": "opencode-zen",
+    "default_base_url": "https://opencode.ai/zen/v1",
+    "requires_base_url": true,
+    "requires_api_key": false,
+    "supports_api_adaptation": true,
+    "supports_model_discovery": true,
+    "onboarding_fields": [
+      "base_url"
+    ],
+    "risk_level": "green",
+    "docs_url": "https://opencode.ai/zen"
+  },
+  {
     "id": "custom_anthropic",
     "aliases": [
       "anthropic-compatible"

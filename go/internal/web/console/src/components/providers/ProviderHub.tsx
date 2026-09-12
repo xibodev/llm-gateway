@@ -468,7 +468,7 @@ export function ProviderHub({ data, mode, onChanged, onOpenDetail }: { data: JSO
           const tileConfigurationIssue = instanceCount > 1 ? "" : stringValue(entry.configuration_issue);
           return <article class="provider-card provider-card--rich provider-hub__expanded" id={`provider-expanded-${id}`} key={id} aria-label={label}>
             <header>
-              <ProviderMark id={id} label={label} />
+              {boolValue(entry.remote_roster) ? <RosterMark entry={entry} /> : <ProviderMark id={id} label={label} />}
               <div class="provider-hub__identity">
                 <h2>{label}</h2>
                 <p>{configured ? `${instanceCount} instance${instanceCount === 1 ? "" : "s"}` : isClient ? "Gateway client" : "Not configured"}{boolValue(entry.custom) ? " · Custom integration" : ""}</p>
