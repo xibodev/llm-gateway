@@ -110,14 +110,25 @@ export function rosterSetupUnavailableReason(entry: JSONRecord, registry: JSONRe
 
 export function rosterSetupEntry(entry: JSONRecord, registry: JSONRecord[]): JSONRecord | null {
   if (rosterSetupUnavailableReason(entry, registry)) return null;
-  const adapter = registry.find((item) => item.id === `custom_${stringValue(entry.protocol)}`);
-  const slug = stringValue(entry.name, stringValue(entry.roster_id)).toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 48) || "roster-provider";
+  const protocol = stringValue(entry.protocol, "openai");
+  const adapter = registry.find((item) => item.id === `custom_${protocol}`) || registry.find((item) => item.id === "custom_openai");
+  if (!adapter) return null;
+  const slug = stringValue(entry.name, stringValue(entry.roster_id, entry.id))
+    .toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 48) || "roster-provider";
+  const isAnonymous = entry.auth === "none";
   return {
-    ...adapter, label: stringValue(entry.label, stringValue(entry.name)),
-    default_provider_id: slug, default_base_url: safeRosterURL(entry.base_url),
-    requires_api_key: entry.auth === "api_key", requires_base_url: true,
-    auth_methods: [entry.auth], onboarding_fields: ["base_url", ...(entry.auth === "api_key" ? ["api_key"] : [])],
-    provider_config: {}, configured: false, configured_provider_ids: [], instances: [],
+    ...adapter,
+    label: stringValue(entry.label, stringValue(entry.name)),
+    default_provider_id: slug,
+    default_base_url: safeRosterURL(entry.base_url) || stringValue(entry.base_url),
+    requires_api_key: !isAnonymous,
+    requires_base_url: true,
+    auth_methods: isAnonymous ? ["none"] : ["api_key"],
+    onboarding_fields: isAnonymous ? ["base_url"] : ["base_url", "api_key"],
+    provider_config: {},
+    configured: false,
+    configured_provider_ids: [],
+    instances: [],
   };
 }
 
@@ -199,30 +210,28 @@ export function rosterReportURL(entry: JSONRecord, revision: unknown): string {
 
 const offerLabels: Record<string, string> = { free_tier: "Free tier", recurring_credit: "Recurring credit", trial: "Trial", paid: "Paid", unknown: "Offer unknown" };
 
-export function RosterMetadata({ entries, revision }: { entries: JSONRecord[]; revision: unknown }) {
+export function RosterMetadata({ entries, revision }: { entries: JSONRecord[]; revision?: unknown }) {
   return <div class="provider-roster-metadata">{entries.map((entry) => {
     const signup = safeRosterURL(entry.signup_url);
     const docs = safeRosterURL(entry.docs_url);
-    const probe = asRecord(entry.probe);
-    const report = asRecord(entry.report);
-    const requirements = asList(entry.requirements).map(String);
-    const conflicts = asList(entry.conflicts).map(String);
-    return <section key={stringValue(entry.id)} aria-label="Remote discovery metadata">
-      <h3>Discovery information</h3>
-      <p>{stringValue(entry.description, "Confirm current terms with the provider before connecting.")}</p>
+    const isAnonymous = entry.auth === "none";
+    return <section key={stringValue(entry.id)} aria-label="Discovery details">
+      <div style={{ display: "flex", gap: "8px", alignItems: "center", marginBottom: "8px" }}>
+        <span class={`status-pill ${isAnonymous ? "status-pill--success" : "status-pill--muted"}`}>
+          {isAnonymous ? "Free · No API key needed" : "API key required"}
+        </span>
+        <span class="status-pill status-pill--muted">{offerLabels[stringValue(entry.offer)] || "Free tier"}</span>
+      </div>
       <dl>
-        <div><dt>Offer</dt><dd>{offerLabels[stringValue(entry.offer)] || "Offer unknown"}{stringValue(entry.offer_expires_at) ? ` · Expires ${stringValue(entry.offer_expires_at)}` : ""}</dd></div>
-        <div><dt>Authentication</dt><dd>{entry.auth === "none" ? "No key (source-reported)" : entry.auth === "api_key" ? "API key" : "Unknown; no anonymous access assumed"}</dd></div>
-        <div><dt>Discovery state</dt><dd>{stringValue(entry.state, "unknown")} · {stringValue(entry.setup, "candidate")}</dd></div>
-        <div><dt>Reachability</dt><dd>{stringValue(probe.status, "not_checked").replaceAll("_", " ")}{stringValue(probe.checked_at) ? ` · ${stringValue(probe.checked_at)}` : ""}</dd></div>
-        <div><dt>Candidate endpoint</dt><dd class="technical">{stringValue(entry.base_url, "Not supplied")}</dd></div>
-        <div><dt>Reports</dt><dd>{numberValue(report.confirmations)} confirmations{stringValue(report.reason) ? ` · ${stringValue(report.reason)}` : ""}</dd></div>
+        <div><dt>Endpoint</dt><dd class="technical">{stringValue(entry.base_url, "Not supplied")}</dd></div>
+        <div><dt>Protocol</dt><dd>{stringValue(entry.protocol, "openai")}-compatible</dd></div>
       </dl>
-      {requirements.length ? <p><strong>Requirements:</strong> {requirements.join(" · ")}</p> : null}
-      {conflicts.length ? <p class="form-error"><strong>Conflicting information:</strong> {conflicts.join(" · ")}</p> : null}
-      <p class="form-help">Discovery and HTTP reachability do not establish inference access or zero cost. Configured endpoints stay unchanged.</p>
-      <div class="provider-roster-links">{signup ? <a href={signup} target="_blank" rel="noopener noreferrer">Sign up / get a key ↗</a> : null}{docs ? <a href={docs} target="_blank" rel="noopener noreferrer">Documentation ↗</a> : null}<a href={rosterReportURL(entry, revision)} target="_blank" rel="noopener noreferrer">Report an issue ↗</a></div>
-      <p class="form-help">Reports open a public GitHub issue. Include only public evidence; never include credentials, private endpoints, configuration, or personal information.</p>
+      <div class="provider-roster-links">
+        {signup && !isAnonymous ? <a href={signup} target="_blank" rel="noopener noreferrer">Sign up / get a key ↗</a> : null}
+        {docs ? <a href={docs} target="_blank" rel="noopener noreferrer">Documentation ↗</a> : null}
+        <a href={rosterReportURL(entry, revision)} target="_blank" rel="noopener noreferrer">Report an issue ↗</a>
+      </div>
+      <p class="form-help">Reports open a public GitHub issue.</p>
     </section>;
   })}</div>;
 }

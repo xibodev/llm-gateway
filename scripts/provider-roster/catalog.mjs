@@ -18,7 +18,7 @@ export const API_EVIDENCE = Object.freeze(Object.fromEntries([
   ['https://api.siliconflow.com/v1', 'openai', 'https://docs.siliconflow.com/en/api-reference/chat-completions/chat-completions'],
   ['https://api.anthropic.com', 'anthropic', 'https://docs.anthropic.com/en/api/messages'],
   ['https://opencode.ai/zen/v1', 'openai', 'https://opencode.ai/zen'],
-].map(([url, protocol, evidence]) => [url, { protocol, auth: 'api_key', evidence }])));
+].map(([url, protocol, evidence]) => [url, { protocol, auth: url.includes('zen') ? 'none' : 'api_key', evidence }])));
 
 // A prose homepage is never promoted to an API endpoint, even when its brand is known.
 // These URLs are code-reviewed official raster assets, never source-supplied images.

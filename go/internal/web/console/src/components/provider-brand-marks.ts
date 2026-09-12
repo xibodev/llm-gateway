@@ -14,6 +14,13 @@ export interface ProviderBrandMark {
   paleBackground?: boolean;
 }
 
+const deepgram: ProviderBrandMark = { paths: [{ d: "M11.203 24H1.517a.364.364 0 0 1-.258-.62l6.239-6.275a.366.366 0 0 1 .259-.108h3.52c2.723 0 5.025-2.127 5.107-4.845a5.004 5.004 0 0 0-4.999-5.148H7.613v4.646c0 .2-.164.364-.365.364H.968a.365.365 0 0 1-.363-.364V.364C.605.164.768 0 .969 0h10.416c6.684 0 12.111 5.485 12.01 12.187C23.293 18.77 17.794 24 11.202 24z", fill: "#13EF93" }] };
+const fishaudio: ProviderBrandMark = { paths: [{ d: "M23.12 12.13v.62c0 .24.19.44.44.44.24 0 .44-.2.44-.44v-.62c0-.24-.2-.44-.44-.44-.25 0-.44.2-.44.44m-1.77.37v1.74c0 .24.2.44.44.44.25 0 .44-.2.44-.44V12.5c0-.24-.19-.44-.44-.44-.24 0-.44.2-.44.44m-1.76.43v1.99q0 .09.03.17.04.08.1.14.07.07.15.1t.17.03c.24 0 .44-.19.44-.44v-1.99c0-.25-.2-.44-.44-.44q-.09 0-.17.03t-.15.1q-.06.06-.1.14-.03.08-.03.17m-1.76.35v1.97c0 .24.19.44.44.44.24 0 .44-.2.44-.44v-1.97c0-.24-.2-.44-.44-.44-.25 0-.44.2-.44.44m-1.77.32v1.65c0 .25.2.45.44.45s.44-.2.44-.45V13.6c0-.25-.2-.45-.44-.45s-.44.2-.44.45m-1.76 1.26v.3q.01.17.14.3.13.11.3.12.18-.01.31-.12.13-.13.14-.3v-.3q-.01-.17-.14-.3-.13-.11-.31-.12-.17.01-.3.12-.13.13-.14.3M0 9.38v.19c0 .24.2.44.44.44.25 0 .44-.2.44-.44v-.19c0-.25-.19-.44-.44-.44-.24 0-.44.19-.44.44m1.82.15v.81c0 .24.19.44.44.44.24 0 .44-.2.44-.44v-.81q0-.18-.13-.31t-.31-.13-.31.13-.13.31m1.81-.24v3.39q.01.17.14.3.13.11.3.12.18-.01.31-.12.13-.13.14-.3V9.29q-.01-.17-.14-.3-.13-.11-.31-.12-.17.01-.3.12-.13.13-.14.3m1.83-.35v.22c0 .24.19.44.44.44.24 0 .44-.2.44-.44v-.22q0-.18-.13-.31T5.9 8.5t-.31.13-.13.31m0 2.94v2.34c0 .25.19.44.44.44.24 0 .44-.19.44-.44v-2.34c0-.24-.2-.44-.44-.44-.25 0-.44.2-.44.44m15.89-3.32V11c0 .25.2.44.44.44.25 0 .44-.19.44-.44V8.56c0-.24-.19-.44-.44-.44-.24 0-.44.2-.44.44m-1.76-.39v3.28q.01.17.14.3.13.11.3.12.18-.01.31-.12.13-.13.14-.3V8.17c0-.25-.2-.44-.44-.44q-.09 0-.17.03t-.15.1q-.06.06-.1.14-.03.08-.03.17M17.83 8v3.9c0 .24.19.44.44.44.24 0 .44-.2.44-.44V8c0-.25-.2-.44-.44-.44-.25 0-.44.19-.44.44m-1.77.11v3.96c0 .25.2.44.44.44s.44-.19.44-.44V8.11c0-.25-.2-.44-.44-.44s-.44.19-.44.44m-1.76.27v5.03q.01.17.14.3.13.11.3.12.18-.01.31-.12.13-.13.14-.3V8.38c0-.25-.2-.44-.45-.44-.24 0-.44.19-.44.44m-1.8.46v5.75q.01.17.14.3.13.11.3.12.18-.01.31-.12.13-.13.14-.3V8.84c0-.25-.2-.44-.45-.44-.24 0-.44.19-.44.44m-1.76.76v5.52c0 .24.2.44.44.44.25 0 .44-.2.44-.44V9.6c0-.24-.19-.44-.44-.44-.24 0-.44.2-.44.44m-1.77 1.01v4.77q.01.17.14.3.13.11.3.12.18-.01.31-.12.13-.13.14-.3v-4.77q-.01-.17-.14-.3-.13-.11-.31-.12-.17.01-.3.12-.13.13-.14.3M23.12 9.6v1.22c0 .24.19.44.44.44.24 0 .44-.2.44-.44V9.6c0-.24-.2-.44-.44-.44-.25 0-.44.2-.44.44M7.21 11.32V16c0 .24.19.44.44.44.24 0 .44-.2.44-.44v-4.68q0-.18-.13-.31t-.31-.13-.31.13-.13.31", fill: "#9B90E8" }] };
+const github: ProviderBrandMark = { monochrome: true, paths: [{ d: "M12 .297c-6.63 0-12 5.373-12 12 0 5.303 3.438 9.8 8.205 11.385.6.113.82-.258.82-.577 0-.285-.01-1.04-.015-2.04-3.338.724-4.042-1.61-4.042-1.61C4.422 18.07 3.633 17.7 3.633 17.7c-1.087-.744.084-.729.084-.729 1.205.084 1.838 1.236 1.838 1.236 1.07 1.835 2.809 1.305 3.495.998.108-.776.417-1.305.76-1.605-2.665-.3-5.466-1.332-5.466-5.93 0-1.31.465-2.38 1.235-3.22-.135-.303-.54-1.523.105-3.176 0 0 1.005-.322 3.3 1.23.96-.267 1.98-.399 3-.405 1.02.006 2.04.138 3 .405 2.28-1.552 3.285-1.23 3.285-1.23.645 1.653.24 2.873.12 3.176.765.84 1.23 1.91 1.23 3.22 0 4.61-2.805 5.625-5.475 5.92.42.36.81 1.096.81 2.22 0 1.606-.015 2.896-.015 3.286 0 .315.21.69.825.57C20.565 22.092 24 17.592 24 12.297c0-6.627-5.373-12-12-12" }] };
+const scaleway: ProviderBrandMark = { paths: [{ d: "M16.605 11.11v5.72a1.77 1.77 0 01-1.54 1.69h-4a1.43 1.43 0 01-1.31-1.22 1.09 1.09 0 010-.18 1.37 1.37 0 011.37-1.36h1.74a1 1 0 001-1v-3.62a1.4 1.4 0 011.18-1.39h.17a1.37 1.37 0 011.39 1.36zm-6.46 1.74V9.26a1 1 0 011-1h1.85a1.37 1.37 0 001.37-1.37 1 1 0 000-.17 1.45 1.45 0 00-1.41-1.2h-3.96a1.81 1.81 0 00-1.58 1.66v5.7a1.37 1.37 0 001.37 1.37h.21a1.4 1.4 0 001.15-1.4zm12-4.29V20a4.53 4.53 0 01-4.15 4h-7.58a8.57 8.57 0 01-8.56-8.57V4.54A4.54 4.54 0 016.395 0h7.18a8.56 8.56 0 018.56 8.56zm-2.74 0a5.83 5.83 0 00-5.82-5.82h-7.19a1.79 1.79 0 00-1.8 1.8v10.89a5.83 5.83 0 005.82 5.8h7.44a1.79 1.79 0 001.54-1.48z", fill: "#4F0599" }] };
+const ovh: ProviderBrandMark = { paths: [{ d: "M19.881 10.095l2.563-4.45C23.434 7.389 24 9.404 24 11.555c0 2.88-1.017 5.523-2.71 7.594h-6.62l2.04-3.541h-2.696l3.176-5.513h2.691zm-2.32-5.243L9.333 19.14l.003.009H2.709C1.014 17.077 0 14.435 0 11.555c0-2.152.57-4.17 1.561-5.918L5.855 13.1 10.6 4.852h6.961z", fill: "#123F6D" }] };
+const google: ProviderBrandMark = { paths: [{ d: "M12.48 10.92v3.28h7.84c-.24 1.84-.853 3.187-1.787 4.133-1.147 1.147-2.933 2.4-6.053 2.4-4.827 0-8.6-3.893-8.6-8.72s3.773-8.72 8.6-8.72c2.6 0 4.507 1.027 5.907 2.347l2.307-2.307C18.747 1.44 16.133 0 12.48 0 5.867 0 .307 5.387.307 12s5.56 12 12.173 12c3.573 0 6.267-1.173 8.373-3.36 2.16-2.16 2.84-5.213 2.84-7.667 0-.76-.053-1.467-.173-2.053H12.48z", fill: "#4285F4" }] };
+
 // First-party geometry and ownership notices: provider-brand-notices.md.
 const openai: ProviderBrandMark = {
   monochrome: true,
@@ -59,6 +66,7 @@ const marks: Record<string, ProviderBrandMark> = {
   alibaba: simple(siAlibabacloud), replicate: simple(siReplicate), huggingface: simple(siHuggingface),
   perplexity: simple(siPerplexity), lmstudio: simple(siLmstudio), vllm: simple(siVllm),
   minimax: simple(siMinimax), moonshot: simple(siMoonshotai),
+  deepgram, fishaudio, github, scaleway, ovh, google,
   // These are explicit textual identifiers, not architecture-kit brand assets.
   azure_openai: { initials: "AZ" }, bedrock: { initials: "AWS" },
   localai: { initials: "LA" }, litellm: { initials: "LL" }, edge_tts: { initials: "ET" },
@@ -67,10 +75,16 @@ const marks: Record<string, ProviderBrandMark> = {
 
 const aliases: Record<string, string> = {
   codex: "openai_codex", google: "gemini", ai_studio: "gemini", google_ai_studio: "gemini",
+  "google-ai-studio": "gemini", google_flow: "google", "google-flow": "google",
   google_vertex: "vertex_ai", google_vertex_ai: "vertex_ai", copilot: "github_copilot",
   mistralai: "mistral", nvidia_nim: "nvidia", cloudflare_workers_ai: "cloudflare",
-  alibaba_cloud: "alibaba", dashscope: "alibaba", qwen: "alibaba", hugging_face: "huggingface",
-  lm_studio: "lmstudio", moonshotai: "moonshot", azure: "azure_openai", amazon_bedrock: "bedrock",
+  "cloudflare-workers-ai": "cloudflare", alibaba_cloud: "alibaba", dashscope: "alibaba",
+  qwen: "alibaba", "alibaba-cloud": "alibaba", "alibaba-cloud-model-studio": "alibaba",
+  hugging_face: "huggingface", "hugging-face": "huggingface", lm_studio: "lmstudio",
+  moonshotai: "moonshot", azure: "azure_openai", amazon_bedrock: "bedrock",
+  deepgram: "deepgram", "fish-audio": "fishaudio", fish_audio: "fishaudio",
+  "github-models": "github", github_models: "github", "scaleway-generative-apis": "scaleway",
+  scaleway: "scaleway", ovh: "ovh", "ovh-ai-endpoints": "ovh", ovh_ai_endpoints: "ovh",
 };
 
 const endpointBrands: Record<string, string> = {
@@ -85,6 +99,8 @@ const endpointBrands: Record<string, string> = {
   "api.moonshot.ai": "moonshot", "api.moonshot.cn": "moonshot", "ollama.com": "ollama",
   "api.githubcopilot.com": "github_copilot", "api.individual.githubcopilot.com": "github_copilot",
   "api.business.githubcopilot.com": "github_copilot", "api.enterprise.githubcopilot.com": "github_copilot",
+  "api.deepgram.com": "deepgram", "api.fish.audio": "fishaudio", "api.scaleway.ai": "scaleway",
+  "endpoints.ai.cloud.ovh.net": "ovh",
 };
 
 /** Match endpoint hosts, never display names, paths, or arbitrary suffixes. */
@@ -103,9 +119,14 @@ export function providerBrandForEndpoint(value?: string): string | undefined {
 }
 
 export function providerBrandID(id: string, baseURL?: string): string | undefined {
-  const normalized = id.trim().toLowerCase();
-  const canonical = Object.hasOwn(aliases, normalized) ? aliases[normalized] : normalized;
-  // A custom adapter describes a protocol, not the service behind that endpoint.
+  const raw = id.trim().toLowerCase();
+  const stripped = raw.startsWith("roster:") ? raw.slice(7) : raw;
+  const normalized = stripped.replace(/[-_]+/g, "_");
+  const canonical = Object.hasOwn(aliases, stripped) ? aliases[stripped] :
+    Object.hasOwn(aliases, normalized) ? aliases[normalized] :
+    Object.hasOwn(marks, stripped) ? stripped :
+    Object.hasOwn(marks, normalized) ? normalized : undefined;
+  if (!canonical) return providerBrandForEndpoint(baseURL);
   if (canonical.startsWith("custom")) return providerBrandForEndpoint(baseURL) ?? (Object.hasOwn(marks, canonical) ? canonical : undefined);
   return Object.hasOwn(marks, canonical) ? canonical : providerBrandForEndpoint(baseURL);
 }
