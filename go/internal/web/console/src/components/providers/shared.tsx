@@ -116,5 +116,5 @@ export function useProviderLifecycle(ownerID: string, onChanged: () => Promise<v
     }
   };
 
-  return { busy, result, setResult, runLifecycle };
+  return { busy, setBusy, result, setResult, runLifecycle };
 }

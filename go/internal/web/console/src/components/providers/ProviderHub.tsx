@@ -29,7 +29,7 @@ import {
   useProviderLifecycle,
 } from "./shared";
 
-export function ConnectDialog({ entry, onClose, onConfigured, mode = "create", takenIDs = [] }: { entry: JSONRecord; onClose: () => void; onConfigured: () => Promise<void>; mode?: "create" | "edit"; takenIDs?: string[] }) {
+export function ConnectDialog({ entry, onClose, onConfigured, mode = "create", takenIDs = [] }: { entry: JSONRecord; onClose: () => void; onConfigured: (message?: string) => Promise<void>; mode?: "create" | "edit"; takenIDs?: string[] }) {
   const providerConfig = asRecord(entry.provider_config);
   // POST /admin/api/providers is an upsert keyed on the id alone. An id that is
   // merely free under THIS tile can still name a provider configured elsewhere,
@@ -106,7 +106,7 @@ export function ConnectDialog({ entry, onClose, onConfigured, mode = "create", t
       credentialFile.invalidate();
       setAPIKey("");
       setSelectedFile(null);
-      await onConfigured();
+      await onConfigured(`${label} configured successfully.`);
       onClose();
     } catch (cause) {
       credentialFile.invalidate();
@@ -233,7 +233,7 @@ export function ProviderHub({ data, mode, onChanged, onOpenDetail }: { data: JSO
   const [localCandidates, setLocalCandidates] = useState<JSONRecord[]>([]);
   const owners = asList(data.principals).map(asRecord).filter((principal) => stringValue(principal.kind) === "human" && stringValue(principal.status, "active") === "active");
   const [ownerID, setOwnerID] = useState(stringValue(owners[0]?.id));
-  const { busy, result, setResult, runLifecycle } = useProviderLifecycle(ownerID, onChanged);
+  const { busy, setBusy, result, setResult, runLifecycle } = useProviderLifecycle(ownerID, onChanged);
   const registry = asList(data.provider_registry).map(asRecord);
   const statuses = asList(data.provider_statuses).map(asRecord);
   // Tile-independent: the upsert route is keyed on the provider id alone, so a
@@ -328,6 +328,27 @@ export function ProviderHub({ data, mode, onChanged, onOpenDetail }: { data: JSO
     setConnectEntry({ entry: { ...entry, provider_config: configuredProviderConfig(entry, data) }, mode: connectMode });
   };
 
+  const quickConnectAnon = async (setup: JSONRecord) => {
+    const pid = stringValue(setup.default_provider_id);
+    const burl = stringValue(setup.default_base_url);
+    const label = stringValue(setup.label, pid);
+    setBusy(`${pid}-connect`);
+    try {
+      await sendJSON<JSONRecord>("admin", "/providers", "POST", {
+        registry_id: stringValue(setup.id),
+        id: pid,
+        api_key: "",
+        base_url: burl,
+      });
+      await onChanged();
+      setResult({ title: label, success: true, detail: `${label} connected successfully without an API key.` });
+    } catch (cause) {
+      setResult({ title: label, success: false, detail: cause instanceof Error ? cause.message : "Failed to connect provider." });
+    } finally {
+      setBusy("");
+    }
+  };
+
   return (
     <div class="page-stack provider-hub" ref={shelfRef} onKeyDown={(event) => { if (event.key === "Escape" && expanded && !connectEntry && !privateKeyEntry && !oauthEntry) { event.preventDefault(); closeExpansion(); } }}>
       <PageHeading eyebrow="Provider hub" title="Providers" detail="Find a provider. Expand its name to add an account or manage an instance." actions={mode === "admin" ? <><label class="owner-select">Catalog owner<select value={ownerID} onInput={(event) => setOwnerID((event.currentTarget as HTMLSelectElement).value)}><option value="">No private owner selected</option>{owners.map((owner) => <option value={stringValue(owner.id)} key={stringValue(owner.id)}>{stringValue(owner.display_name, stringValue(owner.email, stringValue(owner.id)))}</option>)}</select></label><button class="button button--secondary" type="button" disabled={detectBusy} onClick={() => void detectLocal()}><Compass size={16} /> Detect local</button><button class="button button--primary" type="button" onClick={() => { setSearch("custom"); setFilter("all"); setExpanded("custom_openai"); }}>+ Custom</button></> : undefined} />
@@ -354,13 +375,33 @@ export function ProviderHub({ data, mode, onChanged, onOpenDetail }: { data: JSO
           if (expanded !== id) return null;
           const label = stringValue(entry.label, id);
           const remoteEntries = asList(entry.roster_entries).map(asRecord);
-          if (boolValue(entry.remote_roster)) {
+          if (boolValue(entry.remote_roster) && !boolValue(entry.configured)) {
             const setup = rosterSetupEntry(entry, registry) || rosterCandidateSetup(entry, registry);
             const isAnon = entry.auth === "none" || setup?.requires_api_key === false;
+            const pid = setup ? stringValue(setup.default_provider_id) : id;
+            const connecting = busy === `${pid}-connect`;
             return <article class="provider-card provider-hub__expanded" id={`provider-expanded-${id}`} key={id} aria-label={`${label} setup`}>
               <header><RosterMark entry={entry} /><div class="provider-hub__identity"><h2>{label}</h2><p>Remote candidate · {stringValue(entry.protocol, "unknown")} protocol</p></div><button class="icon-button" type="button" aria-label={`Close ${label} setup`} onClick={closeExpansion}><X size={18} /></button></header>
               <RosterMetadata entries={remoteEntries} revision={roster.state.revision} />
-              <footer><button class="button button--primary" type="button" disabled={!setup || mode !== "admin"} onClick={() => { if (setup && mode === "admin") setConnectEntry({ entry: setup, mode: "create" }); }}><Plug size={15} /> {isAnon ? "Connect (No Key Required)" : "Connect with API Key"}</button><p class="form-help">{!setup ? rosterSetupUnavailableReason(entry, registry) : mode === "portal" ? "An administrator must configure this candidate before you can add a private connection." : ""}</p></footer>
+              <footer>
+                <button
+                  class="button button--primary"
+                  type="button"
+                  disabled={!setup || mode !== "admin" || connecting}
+                  onClick={() => {
+                    if (!setup || mode !== "admin") return;
+                    if (isAnon) {
+                      void quickConnectAnon(setup);
+                    } else {
+                      setConnectEntry({ entry: setup, mode: "create" });
+                    }
+                  }}
+                >
+                  {connecting ? <LoaderCircle class="spin" size={15} /> : <Plug size={15} />}
+                  {connecting ? "Connecting…" : isAnon ? "Connect (No Key Required)" : "Connect with API Key"}
+                </button>
+                <p class="form-help">{!setup ? rosterSetupUnavailableReason(entry, registry) : mode === "portal" ? "An administrator must configure this candidate before you can add a private connection." : ""}</p>
+              </footer>
             </article>;
           }
           const status = tileStatus(entry);
@@ -422,7 +463,18 @@ export function ProviderHub({ data, mode, onChanged, onOpenDetail }: { data: JSO
           </article>;
         })}</div></section>;
       })}
-      {connectEntry ? <ConnectDialog entry={connectEntry.entry} mode={connectEntry.mode} takenIDs={allProviderIDs} onClose={() => setConnectEntry(null)} onConfigured={onChanged} /> : null}
+      {connectEntry ? (
+        <ConnectDialog
+          entry={connectEntry.entry}
+          mode={connectEntry.mode}
+          takenIDs={allProviderIDs}
+          onClose={() => setConnectEntry(null)}
+          onConfigured={async (msg) => {
+            await onChanged();
+            if (msg) setResult({ title: stringValue(connectEntry.entry.label, "Provider"), success: true, detail: msg });
+          }}
+        />
+      ) : null}
       {privateKeyEntry ? <PrivateAPIKeyDialog entry={privateKeyEntry.entry} providerID={privateKeyEntry.providerID} onClose={() => setPrivateKeyEntry(null)} onConfigured={onChanged} /> : null}
       {oauthEntry ? <OAuthConnectDialog entry={oauthEntry.entry} providerID={oauthEntry.providerID} data={data} mode={mode} onClose={() => setOAuthEntry(null)} onComplete={onChanged} /> : null}
     </div>
