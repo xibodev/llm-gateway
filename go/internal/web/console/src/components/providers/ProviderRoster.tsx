@@ -113,7 +113,7 @@ export function rosterSetupEntry(entry: JSONRecord, registry: JSONRecord[]): JSO
   const protocol = stringValue(entry.protocol, "openai");
   const adapter = registry.find((item) => item.id === `custom_${protocol}`) || registry.find((item) => item.id === "custom_openai");
   if (!adapter) return null;
-  const slug = stringValue(entry.name, stringValue(entry.roster_id, entry.id))
+  const slug = stringValue(entry.name, stringValue(entry.roster_id, stringValue(entry.id)))
     .toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 48) || "roster-provider";
   const isAnonymous = entry.auth === "none";
   return {
@@ -140,7 +140,7 @@ export function rosterCandidateSetup(entry: JSONRecord, registry: JSONRecord[]):
   const baseURL = safeRosterURL(entry.base_url);
   if (!baseURL) return null;
   const isAnonymous = entry.auth === "none";
-  const slug = stringValue(entry.name, stringValue(entry.roster_id, entry.id))
+  const slug = stringValue(entry.name, stringValue(entry.roster_id, stringValue(entry.id)))
     .toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 48) || "roster-provider";
   return {
     ...adapter,
