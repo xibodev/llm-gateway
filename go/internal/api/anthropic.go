@@ -115,10 +115,28 @@ func handleMessages(w http.ResponseWriter, r *http.Request) {
 
 	if req.Stream {
 		converted, kw, incompatible := translate.AnthropicRequestToOpenAI(raw)
-		if len(incompatible) > 0 {
-			recordFailureUsage("anthropic.messages", req.Model, principal, 400, "compatibility", started)
-			writeError(w, 400, "Streaming cannot preserve Anthropic fields: "+strings.Join(incompatible, ", "))
-			return
+		var critical []string
+		for _, inc := range incompatible {
+			if inc == "context_management" || strings.HasSuffix(inc, ".cache_control") ||
+				strings.HasSuffix(inc, "cache_control") {
+				continue
+			}
+			critical = append(critical, inc)
+		}
+		if len(critical) > 0 {
+			hasControlLoss := false
+			for _, c := range critical {
+				if !strings.HasPrefix(c, "messages.") {
+					hasControlLoss = true
+					break
+				}
+			}
+			if hasControlLoss {
+				recordFailureUsage("anthropic.messages", req.Model, principal, 400, "compatibility", started)
+				writeError(w, 400, "Streaming cannot preserve Anthropic fields: "+strings.Join(critical, ", "))
+				return
+			}
+			converted = translate.AnthropicMessagesToOpenAI(req.Messages, req.System)
 		}
 		msgs := make([]providers.Message, len(converted))
 		for i := range converted {
