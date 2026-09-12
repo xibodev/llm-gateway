@@ -328,22 +328,56 @@ export function ProviderHub({ data, mode, onChanged, onOpenDetail }: { data: JSO
     setConnectEntry({ entry: { ...entry, provider_config: configuredProviderConfig(entry, data) }, mode: connectMode });
   };
 
-  const quickConnectAnon = async (setup: JSONRecord) => {
+  const quickConnectAnon = async (setup: JSONRecord, candidateEntries?: JSONRecord[]) => {
     const pid = stringValue(setup.default_provider_id);
-    const burl = stringValue(setup.default_base_url);
     const label = stringValue(setup.label, pid);
     setBusy(`${pid}-connect`);
+
+    const candidateURLs = [
+      stringValue(setup.default_base_url),
+      ...(candidateEntries ?? []).map((e) => stringValue(e.base_url)),
+    ].filter(Boolean);
+    const uniqueURLs = Array.from(new Set(candidateURLs));
+
+    let workingURL = uniqueURLs[0] || "";
+    let lastError = "";
+
+    for (const url of uniqueURLs) {
+      try {
+        const pingURL = url.endsWith("/models") ? url : url.replace(/\/+$/, "") + "/models";
+        const resp = await fetch(pingURL, { method: "GET", headers: { Accept: "application/json" } });
+        if (resp.ok) {
+          workingURL = url;
+          break;
+        }
+      } catch (err) {
+        lastError = err instanceof Error ? err.message : String(err);
+      }
+    }
+
     try {
       await sendJSON<JSONRecord>("admin", "/providers", "POST", {
         registry_id: stringValue(setup.id),
         id: pid,
         api_key: "",
-        base_url: burl,
+        base_url: workingURL,
       });
+      const testRes = await sendJSON<JSONRecord>("admin", `/providers/${encodeURIComponent(pid)}/test`, "POST", {}).catch(() => null);
       await onChanged();
-      setResult({ title: label, success: true, detail: `${label} connected successfully without an API key.` });
+      const count = testRes ? numberValue(testRes.model_count) : 0;
+      setResult({
+        title: label,
+        success: true,
+        detail: count > 0
+          ? `${label} connected successfully! ${count} models discovered.`
+          : `${label} connected successfully using ${workingURL}.`,
+      });
     } catch (cause) {
-      setResult({ title: label, success: false, detail: cause instanceof Error ? cause.message : "Failed to connect provider." });
+      setResult({
+        title: label,
+        success: false,
+        detail: cause instanceof Error ? cause.message : (lastError || "Failed to connect provider."),
+      });
     } finally {
       setBusy("");
     }
@@ -391,7 +425,7 @@ export function ProviderHub({ data, mode, onChanged, onOpenDetail }: { data: JSO
                   onClick={() => {
                     if (!setup || mode !== "admin") return;
                     if (isAnon) {
-                      void quickConnectAnon(setup);
+                      void quickConnectAnon(setup, remoteEntries);
                     } else {
                       setConnectEntry({ entry: setup, mode: "create" });
                     }

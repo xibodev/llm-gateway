@@ -315,6 +315,13 @@ func providerStatusSnapshots(
 		switch strings.ToLower(strings.TrimSpace(providerConfig.Type)) {
 		case "ollama", "echo", "edge_tts":
 			credentialPresent = true
+		case "openai_compatible":
+			if strings.TrimSpace(providerConfig.APIKey) == "" {
+				credentialPresent = true
+			}
+		}
+		if reg, ok := providers.RegistryProvider(providerConfig.RegistryID); ok && !reg.RequiresAPIKey {
+			credentialPresent = true
 		}
 		status, lastCheck, lastVerify := providerStatus(credentialPresent, len(models), allChecks[providerID])
 		readiness := scopedReadiness(allChecks[providerID], checkScope, checkScope == "")
