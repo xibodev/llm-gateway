@@ -132,6 +132,32 @@ export function rosterSetupEntry(entry: JSONRecord, registry: JSONRecord[]): JSO
   };
 }
 
+export function rosterCandidateSetup(entry: JSONRecord, registry: JSONRecord[]): JSONRecord | null {
+  if (rosterUnavailable(entry)) return null;
+  const protocol = stringValue(entry.protocol, "openai");
+  const adapter = registry.find((item) => item.id === `custom_${protocol}`) || registry.find((item) => item.id === "custom_openai");
+  if (!adapter) return null;
+  const baseURL = safeRosterURL(entry.base_url);
+  if (!baseURL) return null;
+  const isAnonymous = entry.auth === "none";
+  const slug = stringValue(entry.name, stringValue(entry.roster_id, entry.id))
+    .toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 48) || "roster-provider";
+  return {
+    ...adapter,
+    label: stringValue(entry.label, stringValue(entry.name)),
+    default_provider_id: slug,
+    default_base_url: baseURL,
+    requires_api_key: !isAnonymous,
+    requires_base_url: true,
+    auth_methods: isAnonymous ? ["none"] : ["api_key"],
+    onboarding_fields: isAnonymous ? ["base_url"] : ["base_url", "api_key"],
+    provider_config: {},
+    configured: false,
+    configured_provider_ids: [],
+    instances: [],
+  };
+}
+
 export function useProviderRoster(mode: ConsoleMode) {
   const [state, setState] = useState<JSONRecord>({});
   const [busy, setBusy] = useState(true);
@@ -195,7 +221,22 @@ export function RosterMark({ entry }: { entry: JSONRecord }) {
   const baseURL = stringValue(entry.base_url, stringValue(entry.default_base_url));
   const local = <ProviderMark id={id} label={stringValue(entry.label, stringValue(entry.name))} baseURL={baseURL} />;
   if (hasProviderMark(id, baseURL)) return local;
-  return source && failed !== source ? <span class="provider-mark" aria-hidden="true"><img src={source} alt="" width="24" height="24" onError={() => setFailed(source)} /></span> : local;
+  if (source && failed !== source) {
+    return <span class="provider-mark" aria-hidden="true"><img src={source} alt="" width="24" height="24" onError={() => setFailed(source)} /></span>;
+  }
+  const signup = safeRosterURL(entry.signup_url);
+  const base = safeRosterURL(entry.base_url);
+  const domain = (() => {
+    try {
+      const u = new URL(signup || base || "");
+      return u.hostname;
+    } catch { return ""; }
+  })();
+  if (domain && failed !== domain) {
+    const faviconURL = `https://www.google.com/s2/favicons?domain=${domain}&sz=64`;
+    return <span class="provider-mark" aria-hidden="true"><img src={faviconURL} alt="" width="24" height="24" onError={() => setFailed(domain)} /></span>;
+  }
+  return local;
 }
 
 export function rosterReportURL(entry: JSONRecord, revision: unknown): string {
@@ -211,27 +252,39 @@ export function rosterReportURL(entry: JSONRecord, revision: unknown): string {
 const offerLabels: Record<string, string> = { free_tier: "Free tier", recurring_credit: "Recurring credit", trial: "Trial", paid: "Paid", unknown: "Offer unknown" };
 
 export function RosterMetadata({ entries, revision }: { entries: JSONRecord[]; revision?: unknown }) {
-  return <div class="provider-roster-metadata">{entries.map((entry) => {
-    const signup = safeRosterURL(entry.signup_url);
-    const docs = safeRosterURL(entry.docs_url);
-    const isAnonymous = entry.auth === "none";
-    return <section key={stringValue(entry.id)} aria-label="Discovery details">
-      <div style={{ display: "flex", gap: "8px", alignItems: "center", marginBottom: "8px" }}>
-        <span class={`status-pill ${isAnonymous ? "status-pill--success" : "status-pill--muted"}`}>
-          {isAnonymous ? "Free · No API key needed" : "API key required"}
-        </span>
-        <span class="status-pill status-pill--muted">{offerLabels[stringValue(entry.offer)] || "Free tier"}</span>
-      </div>
-      <dl>
-        <div><dt>Endpoint</dt><dd class="technical">{stringValue(entry.base_url, "Not supplied")}</dd></div>
-        <div><dt>Protocol</dt><dd>{stringValue(entry.protocol, "openai")}-compatible</dd></div>
-      </dl>
-      <div class="provider-roster-links">
-        {signup && !isAnonymous ? <a href={signup} target="_blank" rel="noopener noreferrer">Sign up / get a key ↗</a> : null}
-        {docs ? <a href={docs} target="_blank" rel="noopener noreferrer">Documentation ↗</a> : null}
-        <a href={rosterReportURL(entry, revision)} target="_blank" rel="noopener noreferrer">Report an issue ↗</a>
-      </div>
-      <p class="form-help">Reports open a public GitHub issue.</p>
-    </section>;
-  })}</div>;
+  const primary = entries[0];
+  if (!primary) return null;
+  const isAnonymous = entries.some((e) => e.auth === "none");
+  const signup = safeRosterURL(primary.signup_url);
+  const docs = safeRosterURL(primary.docs_url);
+  const endpoints = Array.from(new Set(entries.map((e) => stringValue(e.base_url)).filter(Boolean)));
+  return (
+    <div class="provider-roster-metadata">
+      <section key={stringValue(primary.id)} aria-label="Discovery details">
+        <div style={{ display: "flex", gap: "8px", alignItems: "center", marginBottom: "8px" }}>
+          <span class={`status-pill ${isAnonymous ? "status-pill--success" : "status-pill--muted"}`}>
+            {isAnonymous ? "Free · No API key needed" : "API key required"}
+          </span>
+          <span class="status-pill status-pill--muted">{offerLabels[stringValue(primary.offer)] || "Free tier"}</span>
+        </div>
+        <dl>
+          <div>
+            <dt>{endpoints.length > 1 ? "Endpoints" : "Endpoint"}</dt>
+            <dd class="technical">
+              {endpoints.length > 1
+                ? endpoints.map((ep) => <div key={ep}><code>{ep}</code></div>)
+                : <code>{endpoints[0] || "Not supplied"}</code>}
+            </dd>
+          </div>
+          <div><dt>Protocol</dt><dd>{stringValue(primary.protocol, "openai")}-compatible</dd></div>
+        </dl>
+        <div class="provider-roster-links">
+          {signup && !isAnonymous ? <a href={signup} target="_blank" rel="noopener noreferrer">Sign up / get a key ↗</a> : null}
+          {docs ? <a href={docs} target="_blank" rel="noopener noreferrer">Documentation ↗</a> : null}
+          <a href={rosterReportURL(primary, revision)} target="_blank" rel="noopener noreferrer">Report an issue ↗</a>
+        </div>
+        <p class="form-help">Reports open a public GitHub issue.</p>
+      </section>
+    </div>
+  );
 }

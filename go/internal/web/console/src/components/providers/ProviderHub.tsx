@@ -16,7 +16,7 @@ import { ProviderMark } from "../ProviderMark";
 import { EmptyState, PageHeading } from "../PageState";
 import { useDialogFocus } from "../useDialogFocus";
 import { OAuthConnectDialog } from "./OAuthConnectDialog";
-import { discoveryFilters, matchesDiscoveryFilter, mergeProviderRoster, providerShelves, RosterMark, RosterMetadata, RosterStatus, rosterSetupEntry, rosterSetupUnavailableReason, safeRosterURL, shelfFor, useProviderRoster } from "./ProviderRoster";
+import { discoveryFilters, matchesDiscoveryFilter, mergeProviderRoster, providerShelves, RosterMark, RosterMetadata, RosterStatus, rosterCandidateSetup, rosterSetupEntry, rosterSetupUnavailableReason, safeRosterURL, shelfFor, useProviderRoster } from "./ProviderRoster";
 import "./provider-hub.css";
 import {
   type ActionResult,
@@ -355,11 +355,12 @@ export function ProviderHub({ data, mode, onChanged, onOpenDetail }: { data: JSO
           const label = stringValue(entry.label, id);
           const remoteEntries = asList(entry.roster_entries).map(asRecord);
           if (boolValue(entry.remote_roster)) {
-            const setup = rosterSetupEntry(entry, registry);
+            const setup = rosterSetupEntry(entry, registry) || rosterCandidateSetup(entry, registry);
+            const isAnon = entry.auth === "none" || setup?.requires_api_key === false;
             return <article class="provider-card provider-hub__expanded" id={`provider-expanded-${id}`} key={id} aria-label={`${label} setup`}>
               <header><RosterMark entry={entry} /><div class="provider-hub__identity"><h2>{label}</h2><p>Remote candidate · {stringValue(entry.protocol, "unknown")} protocol</p></div><button class="icon-button" type="button" aria-label={`Close ${label} setup`} onClick={closeExpansion}><X size={18} /></button></header>
               <RosterMetadata entries={remoteEntries} revision={roster.state.revision} />
-              <footer><button class="button button--primary" type="button" disabled={!setup || mode !== "admin"} onClick={() => { if (setup && mode === "admin") setConnectEntry({ entry: setup, mode: "create" }); }}><Plug size={15} /> {entry.auth === "none" ? "Connect (No Key Required)" : "Connect with API Key"}</button><p class="form-help">{!setup ? rosterSetupUnavailableReason(entry, registry) : mode === "portal" ? "An administrator must configure this candidate before you can add a private connection." : ""}</p></footer>
+              <footer><button class="button button--primary" type="button" disabled={!setup || mode !== "admin"} onClick={() => { if (setup && mode === "admin") setConnectEntry({ entry: setup, mode: "create" }); }}><Plug size={15} /> {isAnon ? "Connect (No Key Required)" : "Connect with API Key"}</button><p class="form-help">{!setup ? rosterSetupUnavailableReason(entry, registry) : mode === "portal" ? "An administrator must configure this candidate before you can add a private connection." : ""}</p></footer>
             </article>;
           }
           const status = tileStatus(entry);
