@@ -51,6 +51,7 @@ export function mergeProviderRoster(builtins: JSONRecord[], roster: JSONRecord[]
   const merged: (JSONRecord & { roster_entries: JSONRecord[] })[] = builtins.map((entry) => ({ ...entry, roster_entries: [] }));
   const candidates: JSONRecord[] = [];
   const seen = new Set<string>();
+  const allInstances = builtins.flatMap((entry) => asList(entry.instances).map(asRecord));
   for (const remote of roster) {
     const id = stringValue(remote.id);
     if (!id) continue;
@@ -66,12 +67,29 @@ export function mergeProviderRoster(builtins: JSONRecord[], roster: JSONRecord[]
       return endpoint && base ? endpoint === base && (!protocol || protocol === stringValue(entry.protocol))
         : !endpoint && id === stringValue(entry.id);
     });
-    if (builtin && !rosterUnavailable(remote)) builtin.roster_entries.push(remote);
-    else candidates.push({
-      ...remote, id: `roster:${id}`, roster_id: id, label: stringValue(remote.name, id),
-      remote_roster: true, configured: false, roster_entries: [remote],
-      auth_methods: [stringValue(remote.auth, "unknown")],
-    });
+    if (builtin && !rosterUnavailable(remote)) {
+      builtin.roster_entries.push(remote);
+    } else {
+      const slug = stringValue(remote.name, id).toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 48);
+      const matchingInstance = allInstances.find((inst) => {
+        const instEndpoint = endpointIdentity(inst.base_url);
+        const instID = stringValue(inst.id).toLowerCase();
+        return (endpoint && instEndpoint && endpoint === instEndpoint) || instID === slug || instID === id.toLowerCase();
+      });
+      const isConfigured = !!matchingInstance;
+      candidates.push({
+        ...remote,
+        id: `roster:${id}`,
+        roster_id: id,
+        label: stringValue(remote.name, id),
+        remote_roster: true,
+        configured: isConfigured,
+        instances: isConfigured ? [matchingInstance] : [],
+        configured_provider_ids: isConfigured ? [stringValue(matchingInstance.id)] : [],
+        roster_entries: [remote],
+        auth_methods: [stringValue(remote.auth, "unknown")],
+      });
+    }
   }
   return [...merged, ...candidates];
 }
