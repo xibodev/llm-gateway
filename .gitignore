@@ -17,6 +17,7 @@ test/uat/.env.uat
 deploy/state/
 .gateway-state/
 *.exe
+*.exe~
 
 # tooling / agent scratch
 .playwright-cli/
