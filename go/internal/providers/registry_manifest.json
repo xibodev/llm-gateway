@@ -526,6 +526,39 @@
     "docs_url": "https://opencode.ai/zen"
   },
   {
+    "id": "kilo_code",
+    "aliases": [
+      "kilo",
+      "kilo-code"
+    ],
+    "label": "Kilo Code",
+    "description": "Free anonymous multi-model API with no API key or sign up required. Includes kilo-auto/free and popular open-source models.",
+    "categories": [
+      "free",
+      "no-auth",
+      "coding"
+    ],
+    "runtime_type": "openai_compatible",
+    "protocol": "openai",
+    "availability": "available",
+    "auth_methods": [
+      "none",
+      "api_key"
+    ],
+    "connection_scope": "system_or_personal",
+    "default_provider_id": "kilo-code",
+    "default_base_url": "https://api.kilo.ai/v1",
+    "requires_base_url": true,
+    "requires_api_key": false,
+    "supports_api_adaptation": true,
+    "supports_model_discovery": true,
+    "onboarding_fields": [
+      "base_url"
+    ],
+    "risk_level": "green",
+    "docs_url": "https://kilo.ai"
+  },
+  {
     "id": "custom_anthropic",
     "aliases": [
       "anthropic-compatible"

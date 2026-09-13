@@ -202,7 +202,12 @@ func AnthropicRequestToOpenAI(payload map[string]any) ([]map[string]any, map[str
 				isError, hasIsError := block["is_error"]
 				if role != "user" || !idOK || !textOK || (hasIsError && isError != false) {
 					incompatible = append(incompatible, bp)
+				}
+				if role != "user" || !idOK || id == "" {
 					continue
+				}
+				if text == "" {
+					text = toolResultContentToText(block["content"])
 				}
 				if len(parts) > 0 {
 					messages = append(messages, map[string]any{"role": "user", "content": parts})
@@ -380,6 +385,16 @@ func toolResultContentToText(content any) string {
 				}
 			} else if s, ok := asStr(block); ok {
 				parts = append(parts, s)
+			}
+		}
+		return strings.Join(parts, "\n")
+	case []map[string]any:
+		var parts []string
+		for _, bm := range c {
+			if bm["type"] == "text" {
+				if t, ok := asStr(bm["text"]); ok {
+					parts = append(parts, t)
+				}
 			}
 		}
 		return strings.Join(parts, "\n")

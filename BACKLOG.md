@@ -83,6 +83,13 @@ The operator runs the host CLIs with process-scoped temporary environment or an
 ephemeral config directory. The final gate instructions must include exact setup,
 test, inspection, and cleanup commands; they must not persist or print secrets.
 
+## Known Caveats & Planned Polish
+
+- **Console Route Rename:** Renaming a route in the Web Console currently acts as an upsert under the new key, leaving the original route in place. Needs atomic rename or prompt to delete the former route name.
+- **Provider Edit UI API Adaptation Toggle:** Expose `force_api_support` as a toggle checkbox in the Web Console "Edit configuration" dialog so operators can enable auto-routing for Responses-only models (e.g. GPT-5.5, GPT-5.6 Sol/Luna) without manual config edits.
+- **Anonymous Provider Verify Selection:** Verification probes on providers without configured API keys must automatically pick free-tier models (`-free`, `:free`) rather than naive alphabetical first rows.
+- **Candidate Roster Tile Details Routing:** Clicking details on remote roster candidates should navigate to the configured instance if already connected, or render an in-depth candidate view rather than falling through to unknown integration.
+
 ## Deferred efforts
 
 | Effort | Re-entry trigger |

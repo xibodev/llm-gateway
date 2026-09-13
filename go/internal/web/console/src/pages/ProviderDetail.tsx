@@ -35,11 +35,53 @@ export function ProviderDetail({ entryID, data, mode, onChanged, onBack, onOpenP
 }) {
   const registry = asList(data.provider_registry).map(asRecord);
   const statuses = asList(data.provider_statuses).map(asRecord);
-  const registryEntry = registry.find((candidate) => stringValue(candidate.id) === entryID);
-  // Same rule as the grid: where a registry entry owns this id, only its own
-  // status row may describe it. A configured provider named after a registry id
-  // it does not implement must not dress the curated tile.
-  const statusEntry = statuses.find((candidate) => stringValue(candidate.id) === entryID && !(registryEntry && boolValue(candidate.custom)));
+  let registryEntry = registry.find((candidate) => stringValue(candidate.id) === entryID || asList(candidate.aliases).includes(entryID));
+  let statusEntry = statuses.find((candidate) => stringValue(candidate.id) === entryID && !(registryEntry && boolValue(candidate.custom)));
+
+  // If entryID did not match a top-level tile directly, check whether it is a configured instance of a multi-instance tile
+  if (!registryEntry && !statusEntry) {
+    for (const status of statuses) {
+      const match = asList(status.instances).map(asRecord).find((inst) => stringValue(inst.id) === entryID);
+      if (match) {
+        statusEntry = {
+          ...status,
+          ...match,
+          id: entryID,
+          label: stringValue(match.label, entryID),
+          instances: [match],
+          configured_provider_ids: [entryID],
+        };
+        const regID = stringValue(match.registry_id);
+        if (regID) {
+          registryEntry = registry.find((c) => stringValue(c.id) === regID || asList(c.aliases).includes(regID));
+        }
+        break;
+      }
+    }
+  }
+
+  // If entryID is a remote roster candidate, resolve its candidate metadata:
+  if (!registryEntry && !statusEntry && entryID.startsWith("roster:")) {
+    const rawRosterID = entryID.replace(/^roster:/, "");
+    const rosterEntries = asList(asRecord(data.provider_roster)?.entries).map(asRecord);
+    const candidate = rosterEntries.find((c) => stringValue(c.id) === rawRosterID);
+    if (candidate) {
+      statusEntry = {
+        id: entryID,
+        label: stringValue(candidate.name, rawRosterID),
+        description: stringValue(candidate.description, "Community discovery candidate."),
+        protocol: stringValue(candidate.protocol, "openai"),
+        default_base_url: stringValue(candidate.base_url),
+        base_url: stringValue(candidate.base_url),
+        configured: false,
+        instances: [],
+        configured_provider_ids: [],
+        remote_roster: true,
+        roster_entries: [candidate],
+      };
+    }
+  }
+
   const entry = useMemo(() => ({ ...(registryEntry ?? {}), ...(statusEntry ?? {}) }), [registryEntry, statusEntry]);
 
   const owners = asList(data.principals).map(asRecord).filter((principal) => stringValue(principal.kind) === "human" && stringValue(principal.status, "active") === "active");
@@ -81,21 +123,54 @@ export function ProviderDetail({ entryID, data, mode, onChanged, onBack, onOpenP
     return principal ? stringValue(principal.display_name, id) : id;
   };
 
-  // Per-provider model catalog, scoped to the selected owner in admin mode.
+  // Per-provider model catalog, scoped to the selected owner when OAuth/private credentials apply.
   const [catalog, setCatalog] = useState<JSONRecord | null>(null);
   const [catalogError, setCatalogError] = useState("");
   const catalogRequest = useRef(0);
   const catalogPath = mode === "admin"
-    ? (ownerID ? `/models?principal_id=${encodeURIComponent(ownerID)}` : "")
+    ? (ownerID && supportsOAuth ? `/models?principal_id=${encodeURIComponent(ownerID)}` : "/models")
     : "/models";
   useEffect(() => {
     const request = ++catalogRequest.current;
     setCatalog(null);
     setCatalogError("");
-    if (!catalogPath || !configured) return;
-    getJSON<JSONRecord>(mode, catalogPath)
-      .then((payload) => { if (request === catalogRequest.current) setCatalog(payload); })
-      .catch((cause) => { if (request === catalogRequest.current) setCatalogError(cause instanceof Error ? cause.message : "Model catalog could not load."); });
+    if (!configured) return;
+
+    const fetchCatalog = (path: string) => {
+      getJSON<JSONRecord>(mode, path)
+        .then((payload) => {
+          if (request !== catalogRequest.current) return;
+          const list = asList(payload?.data);
+          if (list.length === 0 && path.includes("principal_id=")) {
+            getJSON<JSONRecord>(mode, "/models")
+              .then((sysPayload) => {
+                if (request === catalogRequest.current) setCatalog(sysPayload);
+              })
+              .catch(() => {
+                if (request === catalogRequest.current) setCatalog(payload);
+              });
+          } else {
+            setCatalog(payload);
+          }
+        })
+        .catch((cause) => {
+          if (path.includes("principal_id=")) {
+            getJSON<JSONRecord>(mode, "/models")
+              .then((sysPayload) => {
+                if (request === catalogRequest.current) setCatalog(sysPayload);
+              })
+              .catch(() => {
+                if (request === catalogRequest.current) {
+                  setCatalogError(cause instanceof Error ? cause.message : "Model catalog could not load.");
+                }
+              });
+          } else if (request === catalogRequest.current) {
+            setCatalogError(cause instanceof Error ? cause.message : "Model catalog could not load.");
+          }
+        });
+    };
+
+    fetchCatalog(catalogPath);
   }, [mode, catalogPath, configured, stringValue(entry.catalog_refreshed)]);
   const models = asList(catalog?.data).map(asRecord)
     .filter((row) => providerIDs.includes(stringValue(row.owned_by)) || providerIDs.some((providerID) => stringValue(row.id).startsWith(`${providerID}/`)));
@@ -176,7 +251,7 @@ export function ProviderDetail({ entryID, data, mode, onChanged, onBack, onOpenP
             </tr>;
           })}
         </tbody></table></div>
-        {models.length ? <label class="verify-model-select">Test completion model<select value={verifyModel} onInput={(event) => setVerifyModel((event.currentTarget as HTMLSelectElement).value)}><option value="">Automatic (first catalog model)</option>{models.map((row) => <option value={stringValue(row.id).split("/").pop()} key={stringValue(row.id)}>{stringValue(row.id)}</option>)}</select></label> : null}
+        {models.length ? <label class="verify-model-select">Test completion model<select value={verifyModel} onInput={(event) => setVerifyModel((event.currentTarget as HTMLSelectElement).value)}><option value="">Automatic (recommended model)</option>{models.map((row) => <option value={stringValue(row.id).split("/").pop()} key={stringValue(row.id)}>{stringValue(row.id)}</option>)}</select></label> : null}
         <dl class="compact-facts provider-check-facts">
           <div><dt>Last check</dt><dd>{stringValue(entry.last_check_operation) ? `${stringValue(entry.last_check_operation).replaceAll("_", " ")} · ${entry.last_check_success === true ? "passed" : "failed"} · ${stringValue(entry.last_checked_at)}` : "No check recorded yet"}</dd></div>
           <div><dt>Last verified</dt><dd>{stringValue(entry.last_verified_at) ? `${stringValue(entry.last_verified_at)} (${stringValue(entry.verified_model, "model unknown")})` : "Never — run a test completion"}</dd></div>

@@ -131,3 +131,94 @@ func TestRoundTripToolsToAnthropicAndBack(t *testing.T) {
 		t.Errorf("anthropic tool missing input_schema: %s", b)
 	}
 }
+
+func TestAnthropicRequestToOpenAI_ToolResultError(t *testing.T) {
+	payload := map[string]any{
+		"model": "claude-3-opus",
+		"messages": []any{
+			map[string]any{
+				"role": "assistant",
+				"content": []any{
+					map[string]any{"type": "tool_use", "id": "toolu_01BqrTRS8VuLe3gqLbBKtb2J", "name": "bash", "input": map[string]any{"command": "exit 1"}},
+				},
+			},
+			map[string]any{
+				"role": "user",
+				"content": []any{
+					map[string]any{
+						"type":        "tool_result",
+						"tool_use_id": "toolu_01BqrTRS8VuLe3gqLbBKtb2J",
+						"content":     "Command failed with exit status 1",
+						"is_error":    true,
+					},
+				},
+			},
+		},
+	}
+	msgs, _, incompatible := AnthropicRequestToOpenAI(payload)
+	for _, inc := range incompatible {
+		if strings.Contains(inc, "is_error") {
+			t.Errorf("is_error should not be marked incompatible: %s", inc)
+		}
+	}
+	if len(msgs) != 2 {
+		t.Fatalf("expected 2 messages (assistant + tool), got %d: %v", len(msgs), msgs)
+	}
+	if msgs[1]["role"] != "tool" {
+		t.Fatalf("expected role 'tool', got %v", msgs[1]["role"])
+	}
+	if msgs[1]["tool_call_id"] != "toolu_01BqrTRS8VuLe3gqLbBKtb2J" {
+		t.Errorf("tool_call_id mismatch: %v", msgs[1]["tool_call_id"])
+	}
+	if msgs[1]["content"] != "Command failed with exit status 1" {
+		t.Errorf("content mismatch: %v", msgs[1]["content"])
+	}
+}
+
+func TestChatToResponses_MissingFunctionCallOutputSafeguard(t *testing.T) {
+	// Simulate an assistant message with a tool call where tool output was omitted from history
+	messages := []map[string]any{
+		{
+			"role": "assistant",
+			"tool_calls": []any{
+				map[string]any{
+					"id": "toolu_orphan_123",
+					"function": map[string]any{
+						"name":      "bash",
+						"arguments": `{"command":"ls"}`,
+					},
+				},
+			},
+		},
+		{
+			"role":    "user",
+			"content": "what next?",
+		},
+	}
+	res := ChatToResponses("gpt-5.6-sol-fast", messages, nil, false)
+	input, ok := res["input"].([]any)
+	if !ok {
+		t.Fatalf("expected input list, got %v", res["input"])
+	}
+
+	foundCall := false
+	foundOutput := false
+	for _, item := range input {
+		im, ok := item.(map[string]any)
+		if !ok {
+			continue
+		}
+		if im["type"] == "function_call" && im["call_id"] == "toolu_orphan_123" {
+			foundCall = true
+		}
+		if im["type"] == "function_call_output" && im["call_id"] == "toolu_orphan_123" {
+			foundOutput = true
+		}
+	}
+	if !foundCall {
+		t.Errorf("missing function_call in input: %v", input)
+	}
+	if !foundOutput {
+		t.Errorf("missing synthesized function_call_output in input: %v", input)
+	}
+}

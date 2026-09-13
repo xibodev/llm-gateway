@@ -712,6 +712,54 @@ func providerCheckDetail(success bool, failureCode string) string {
 	}
 }
 
+func selectVerificationModel(rows []providers.ModelInfo, pCfg *config.ProviderConfig) string {
+	if len(rows) == 0 {
+		return ""
+	}
+	isAnonymous := pCfg == nil || pCfg.APIKey == "" || strings.EqualFold(pCfg.APIKey, "none") || strings.EqualFold(pCfg.APIKey, "free")
+
+	// If anonymous / free tier, prioritize free-tier models first
+	if isAnonymous {
+		for _, r := range rows {
+			id := strings.ToLower(r.ID)
+			if strings.Contains(id, "nemotron") && strings.Contains(id, "free") {
+				return r.ID
+			}
+		}
+		for _, r := range rows {
+			id := strings.ToLower(r.ID)
+			if strings.Contains(id, "auto/free") || strings.Contains(id, "mimo") {
+				return r.ID
+			}
+		}
+		for _, r := range rows {
+			id := strings.ToLower(r.ID)
+			if strings.HasSuffix(id, "-free") || strings.HasSuffix(id, ":free") || strings.HasSuffix(id, "/free") {
+				return r.ID
+			}
+		}
+		for _, r := range rows {
+			id := strings.ToLower(r.ID)
+			if strings.Contains(id, "free") {
+				return r.ID
+			}
+		}
+	}
+
+	// Prefer fast / lightweight standard models
+	preferredPatterns := []string{"flash", "mini", "8b", "turbo", "small", "haiku"}
+	for _, pattern := range preferredPatterns {
+		for _, r := range rows {
+			id := strings.ToLower(r.ID)
+			if strings.Contains(id, pattern) {
+				return r.ID
+			}
+		}
+	}
+
+	return rows[0].ID
+}
+
 // runProviderVerify executes a real, minimal inference request against the
 // provider — the only operation that proves end-to-end that requests work.
 func runProviderVerify(providerID, model string, principal *config.Principal) map[string]any {
@@ -817,7 +865,7 @@ func runProviderVerify(providerID, model string, principal *config.Principal) ma
 				"model_unavailable",
 			)
 		}
-		model = rows[0].ID
+		model = selectVerificationModel(rows, config.Get().Providers[providerID])
 	}
 	if catalogRefreshed {
 		provider, err = providers.GetProviderForPrincipal(providerID, principal)

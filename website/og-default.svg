@@ -1,0 +1,25 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="630" viewBox="0 0 1200 630" role="img" aria-labelledby="title description">
+  <title id="title">llm-gateway</title>
+  <desc id="description">Exact routing and explicit failover in a self-hosted single Go binary.</desc>
+  <rect width="1200" height="630" fill="#090A0F"/>
+  <path d="M0 104H1200M0 526H1200" stroke="#F59E0B" stroke-opacity=".16"/>
+  <path d="M944 0V630M1036 0V630M1128 0V630" stroke="#FFFFFF" stroke-opacity=".05"/>
+  <g transform="translate(72 118) scale(1.6)">
+    <path d="M16 50 L42 50" fill="none" stroke="#FFFFFF" stroke-width="5" stroke-linecap="round"/>
+    <circle cx="16" cy="50" r="3.5" fill="#FFFFFF"/>
+    <polygon points="42,32 58,50 42,68" fill="#F59E0B"/>
+    <path d="M54 44 L66 32 L84 32" fill="none" stroke="#F59E0B" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round"/>
+    <path d="M58 50 L84 50" fill="none" stroke="#F59E0B" stroke-width="4.5" stroke-linecap="round"/>
+    <path d="M54 56 L66 68 L84 68" fill="none" stroke="#F59E0B" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round"/>
+    <circle cx="84" cy="32" r="3.5" fill="#FFFFFF"/>
+    <circle cx="84" cy="50" r="3.5" fill="#FFFFFF"/>
+    <circle cx="84" cy="68" r="3.5" fill="#FFFFFF"/>
+  </g>
+  <text x="242" y="219" fill="#FFFFFF" font-family="Arial, Helvetica, sans-serif" font-size="92" font-weight="700" letter-spacing="-4">llmgw</text>
+  <text x="248" y="260" fill="#AEB3BD" font-family="Arial, Helvetica, sans-serif" font-size="22" font-weight="600" letter-spacing="1">llm-gateway</text>
+  <text x="80" y="390" fill="#FFFFFF" font-family="Arial, Helvetica, sans-serif" font-size="58" font-weight="700" letter-spacing="-2">Exact routing.</text>
+  <text x="80" y="458" fill="#F59E0B" font-family="Arial, Helvetica, sans-serif" font-size="58" font-weight="700" letter-spacing="-2">Explicit failover.</text>
+  <text x="82" y="548" fill="#D7DAE0" font-family="Arial, Helvetica, sans-serif" font-size="27">Self-hosted. Single Go binary.</text>
+  <circle cx="1118" cy="548" r="7" fill="#FFFFFF"/>
+  <path d="M982 548H1118" stroke="#F59E0B" stroke-width="5" stroke-linecap="round"/>
+</svg>

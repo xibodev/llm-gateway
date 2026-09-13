@@ -50,7 +50,8 @@ LABEL org.opencontainers.image.version=$VERSION \
 
 ENV LLMGW_HOST=0.0.0.0 \
     LLMGW_PORT=8787 \
-    LLMGW_STATE_DIR=/state
+    LLMGW_STATE_DIR=/state \
+    LLMGW_PROVIDER_ROSTER_URL=https://xibodev.github.io/llm-gateway/roster/payload.json
 
 COPY --from=builder /out/llmgw /llmgw
 COPY --chown=65532:65532 --from=builder /out/state /state

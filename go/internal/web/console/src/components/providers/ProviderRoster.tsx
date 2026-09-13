@@ -79,7 +79,7 @@ export function mergeProviderRoster(builtins: JSONRecord[], roster: JSONRecord[]
       const isConfigured = !!matchingInstance;
       candidates.push({
         ...remote,
-        id: `roster:${id}`,
+        id: isConfigured && matchingInstance ? stringValue(matchingInstance.id) : `roster:${id}`,
         roster_id: id,
         label: stringValue(remote.name, id),
         protocol: isConfigured ? (stringValue(matchingInstance.protocol) || (stringValue(remote.protocol) === "unknown" ? "openai" : stringValue(remote.protocol, "openai"))) : stringValue(remote.protocol, "unknown"),
@@ -135,10 +135,11 @@ export function rosterSetupUnavailableReason(entry: JSONRecord, registry: JSONRe
 export function rosterSetupEntry(entry: JSONRecord, registry: JSONRecord[]): JSONRecord | null {
   if (rosterSetupUnavailableReason(entry, registry)) return null;
   const protocol = stringValue(entry.protocol, "openai");
-  const adapter = registry.find((item) => item.id === `custom_${protocol}`) || registry.find((item) => item.id === "custom_openai");
-  if (!adapter) return null;
   const slug = stringValue(entry.name, stringValue(entry.roster_id, stringValue(entry.id)))
     .toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 48) || "roster-provider";
+  const curated = registry.find((item) => stringValue(item.id) === slug.replace(/-/g, "_") || asList(item.aliases).includes(slug));
+  const adapter = curated || registry.find((item) => item.id === `custom_${protocol}`) || registry.find((item) => item.id === "custom_openai");
+  if (!adapter) return null;
   const isAnonymous = entry.auth === "none";
   return {
     ...adapter,
@@ -159,13 +160,14 @@ export function rosterSetupEntry(entry: JSONRecord, registry: JSONRecord[]): JSO
 export function rosterCandidateSetup(entry: JSONRecord, registry: JSONRecord[]): JSONRecord | null {
   if (rosterUnavailable(entry)) return null;
   const protocol = stringValue(entry.protocol, "openai");
-  const adapter = registry.find((item) => item.id === `custom_${protocol}`) || registry.find((item) => item.id === "custom_openai");
-  if (!adapter) return null;
   const baseURL = safeRosterURL(entry.base_url);
   if (!baseURL) return null;
-  const isAnonymous = entry.auth === "none";
   const slug = stringValue(entry.name, stringValue(entry.roster_id, stringValue(entry.id)))
     .toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 48) || "roster-provider";
+  const curated = registry.find((item) => stringValue(item.id) === slug.replace(/-/g, "_") || asList(item.aliases).includes(slug));
+  const adapter = curated || registry.find((item) => item.id === `custom_${protocol}`) || registry.find((item) => item.id === "custom_openai");
+  if (!adapter) return null;
+  const isAnonymous = entry.auth === "none";
   return {
     ...adapter,
     label: stringValue(entry.label, stringValue(entry.name)),

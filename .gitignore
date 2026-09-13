@@ -40,3 +40,11 @@ Thumbs.db
 
 # Local frontend installation; generated dist is intentionally committed for Go embedding.
 go/internal/web/console/node_modules/
+
+# local modular staging
+go.work
+go.work.sum
+Dockerfile.modular
+SESSION-HANDOFF.md
+libs/
+app/
