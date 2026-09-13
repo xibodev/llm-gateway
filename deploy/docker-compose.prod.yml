@@ -26,7 +26,7 @@ services:
       LLMGW_GITHUB_COPILOT_CACHE_DIR: /state/cache
       # Discovery-only updates; registered providers and credentials are never reconciled.
       LLMGW_PROVIDER_ROSTER_AUTO_REFRESH: ${LLMGW_PROVIDER_ROSTER_AUTO_REFRESH:-true}
-      LLMGW_PROVIDER_ROSTER_URL: ${LLMGW_PROVIDER_ROSTER_URL:-}
+      LLMGW_PROVIDER_ROSTER_URL: ${LLMGW_PROVIDER_ROSTER_URL:-https://xibodev.github.io/llm-gateway/roster/payload.json}
       LLMGW_PROVIDER_ROSTER_PUBLIC_KEY: ${LLMGW_PROVIDER_ROSTER_PUBLIC_KEY:-}
       LLMGW_LOG_REQUESTS: ${LLMGW_LOG_REQUESTS:-0}
       LLMGW_LOG_REQUEST_BODIES: ${LLMGW_LOG_REQUEST_BODIES:-0}

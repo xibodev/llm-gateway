@@ -2,6 +2,7 @@ package providers
 
 import (
 	"fmt"
+	"os"
 	"strings"
 	"sync"
 
@@ -116,7 +117,11 @@ func instantiate(
 		bp.principal = principal
 		return bp, nil
 	case "github_copilot":
-		return OpenAIProvider{auth: copilotAuth{providerID: providerID, principal: principal}, Timeout: s.GithubCopilotTimeoutSeconds, forceAdapt: cfg.ForceApiSupport, providerID: providerID, principal: principal}, nil
+		forceAdapt := true
+		if cfg != nil && !cfg.ForceApiSupport && os.Getenv("LLMGW_DISABLE_COPILOT_API_ADAPTATION") == "1" {
+			forceAdapt = false
+		}
+		return OpenAIProvider{auth: copilotAuth{providerID: providerID, principal: principal}, Timeout: s.GithubCopilotTimeoutSeconds, forceAdapt: forceAdapt, providerID: providerID, principal: principal}, nil
 	case "ollama":
 		base := cfg.BaseURL
 		if base == "" {
@@ -378,7 +383,10 @@ func ProviderCredentialAuthorized(
 	_, _, found, err := iam.ResolveProviderOAuthCredentialSecretWithObservation(
 		principal, providerID,
 	)
-	return found, err
+	if err != nil {
+		return false, nil
+	}
+	return found, nil
 }
 
 // ListProviderModels returns a fresh catalog for one provider ([] on any failure).

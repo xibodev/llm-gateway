@@ -42,6 +42,7 @@ is `endpoints`.
 | LocalAI | OpenAI-compatible | Optional API key | System or personal | Audio capabilities may be inferred from model names. |
 | Edge TTS | Native speech | None by default | System | Unofficial public Edge read-aloud endpoint/token; may change. |
 | OpenCode Zen | OpenAI-compatible | None by default | System or personal | Free anonymous multi-model European inference endpoint. |
+| Kilo Code | OpenAI-compatible | None by default | System or personal | Free anonymous multi-model inference endpoint with auto/free routing. |
 | Custom OpenAI-compatible | OpenAI-compatible | Optional bearer key | System or personal | Requires a base URL; actual feature support depends on the upstream. |
 | Custom Anthropic-compatible | Native Messages | API key | System or personal | Requires a Messages-compatible base URL. |
 

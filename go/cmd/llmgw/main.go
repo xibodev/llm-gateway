@@ -101,6 +101,12 @@ func serve() {
 	if err := operations.RecoverInterruptedRestore(); err != nil {
 		log.Fatal(err)
 	}
+
+	const defaultRosterURL = "https://xibodev.github.io/llm-gateway/roster/payload.json"
+	if os.Getenv("LLMGW_PROVIDER_ROSTER_URL") == "" && os.Getenv("LLMGW_PROVIDER_ROSTER_DISABLE") == "" {
+		_ = os.Setenv("LLMGW_PROVIDER_ROSTER_URL", defaultRosterURL)
+	}
+
 	config.Load()
 	if migrated, err := iam.Initialize(); err != nil {
 		log.Fatalf("initialize IAM control plane: %v", err)

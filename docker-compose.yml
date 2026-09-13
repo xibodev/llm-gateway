@@ -34,6 +34,7 @@ services:
       LLMGW_RETENTION_AUDIT_DAYS: ${LLMGW_RETENTION_AUDIT_DAYS:-365}
       LLMGW_RETENTION_DELIVERED_OUTBOX_DAYS: ${LLMGW_RETENTION_DELIVERED_OUTBOX_DAYS:-400}
       LLMGW_BACKUP_KEEP: ${LLMGW_BACKUP_KEEP:-7}
+      LLMGW_PROVIDER_ROSTER_URL: ${LLMGW_PROVIDER_ROSTER_URL:-https://xibodev.github.io/llm-gateway/roster/payload.json}
     volumes:
       - ./config.local.yaml:/config/llmgw.config.yaml:ro
       - llmgw-state:/state
