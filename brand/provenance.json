@@ -1,0 +1,24 @@
+{
+  "product": "llm-gateway",
+  "visualWordmark": "llmgw",
+  "mark": "Optical Rail Splitter",
+  "origin": "Original project artwork authored from the approved geometry documented in BRAND.md.",
+  "thirdPartyAssets": [],
+  "fonts": "System font stacks only; no font files are bundled or fetched.",
+  "sourceAssets": [
+    "logos/mark.svg",
+    "logos/mark-inverse.svg",
+    "logos/lockup.svg",
+    "logos/lockup-inverse.svg",
+    "logos/wordmark.svg",
+    "logos/wordmark-inverse.svg",
+    "logos/mono-black.svg",
+    "logos/mono-white.svg",
+    "icons/favicon.svg",
+    "icons/app-icon.svg",
+    "icons/icon-192.svg",
+    "icons/icon-512.svg",
+    "og/og-default.svg"
+  ],
+  "license": "See LICENSES.md and the repository LICENSE and NOTICE files."
+}

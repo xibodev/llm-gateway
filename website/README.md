@@ -5,6 +5,15 @@ Static HTML, CSS, JSON, SVG and JavaScript for
 production Node runtime. Repository guides under `docs/` own product facts;
 keep their website summaries in sync.
 
+## Brand Assets
+
+The formal product and repository name is `llm-gateway`; the compact header
+wordmark is `llmgw`. Approved source artwork and usage guidance live in
+[`brand/`](../brand/). The website consumes `favicon.svg` for browser and
+manifest icons, `logo-mark.svg` for header marks, and `og-default.svg` for the
+homepage social preview. These assets use only embedded SVG geometry and system
+font stacks; do not add CDN, remote image, or external font dependencies.
+
 ## Installation Content
 
 [`docs/QUICKSTART.md`](../docs/QUICKSTART.md) is the canonical installation guide;
@@ -61,8 +70,9 @@ and no page-level horizontal overflow. Code blocks and tables scroll locally.
 
 ## Publication Gate
 
-The build copies only publishable static files into `.website-dist`, excluding
-this README and DESIGN.md. Do not commit generated output or QA screenshots.
+The build copies only publishable top-level static files into `.website-dist`,
+including the website SVG assets and excluding this README and DESIGN.md. Do not
+commit generated output or QA screenshots.
 Remove build output with `node scripts/build-website.mjs --clean` after validation.
 `.github/workflows/pages.yml` checks pull requests and permits artifact upload
 and deployment only on `main` push or main-targeted manual dispatch. Deployment

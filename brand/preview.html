@@ -1,0 +1,77 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>llm-gateway brand kit preview</title>
+  <link rel="icon" href="icons/favicon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="tokens.css">
+  <style>
+    * { box-sizing: border-box; }
+    body { margin: 0; background: #f5f2ea; color: var(--llmgw-color-carbon-obsidian); font: 16px/1.55 var(--llmgw-font-sans); }
+    main { width: min(1120px, calc(100% - 32px)); margin: 0 auto; padding: 56px 0 80px; }
+    h1, h2, p { margin-top: 0; }
+    h1 { max-width: 12ch; margin-bottom: 20px; font-size: clamp(2.7rem, 8vw, 6rem); line-height: .95; letter-spacing: -.04em; }
+    h2 { margin-bottom: 18px; font-size: 1rem; letter-spacing: .03em; text-transform: uppercase; }
+    .intro { max-width: 64ch; margin-bottom: 48px; color: #4b4b50; }
+    .panel { padding: clamp(28px, 6vw, 72px); border: 1px solid #d8d3c7; background: #fff; }
+    .panel + .panel, .grid { margin-top: 24px; }
+    .dark { border-color: #090a0f; background: var(--llmgw-color-carbon-obsidian); color: white; }
+    .lockup { display: block; width: min(520px, 100%); }
+    .statement { max-width: 16ch; margin: 48px 0 0; font-size: clamp(2rem, 5vw, 4.6rem); font-weight: 800; line-height: 1; letter-spacing: -.04em; }
+    .statement span { color: var(--llmgw-color-laser-amber); }
+    .grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 24px; }
+    .marks { display: flex; flex-wrap: wrap; align-items: center; gap: 28px; }
+    .mark { width: 120px; height: 120px; }
+    .small { width: 32px; height: 32px; }
+    .swatches { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; }
+    .swatch { min-height: 144px; padding: 18px; border: 1px solid #d8d3c7; font: 700 .76rem/1.5 var(--llmgw-font-mono); }
+    .swatch strong, .swatch span { display: block; }
+    .carbon { background: #090a0f; color: white; }
+    .laser { background: #f59e0b; color: #090a0f; }
+    .accessible { background: #b45309; color: white; }
+    .white { background: #fff; color: #090a0f; }
+    .caption { margin: 18px 0 0; color: inherit; font: .8rem/1.5 var(--llmgw-font-mono); }
+    @media (max-width: 700px) { .grid, .swatches { grid-template-columns: 1fr; } main { padding-top: 32px; } }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>Exact routes, made visible.</h1>
+    <p class="intro">The llm-gateway identity pairs the compact <strong>llmgw</strong> wordmark with the Optical Rail Splitter: one input, an explicit split, and three known outputs.</p>
+
+    <section class="panel dark" aria-labelledby="dark-title">
+      <h2 id="dark-title">Primary dark treatment</h2>
+      <img class="lockup" src="logos/lockup-inverse.svg" alt="llmgw">
+      <p class="statement">Exact routing.<br><span>Explicit failover.</span></p>
+      <p class="caption">Self-hosted. Single Go binary.</p>
+    </section>
+
+    <div class="grid">
+      <section class="panel" aria-labelledby="light-title">
+        <h2 id="light-title">Light treatment</h2>
+        <img class="lockup" src="logos/lockup.svg" alt="llmgw">
+        <p class="caption">Accessible Dark Amber carries required detail on light surfaces.</p>
+      </section>
+      <section class="panel dark" aria-labelledby="mark-title">
+        <h2 id="mark-title">Mark and icon</h2>
+        <div class="marks">
+          <img class="mark" src="logos/mark-inverse.svg" alt="Optical Rail Splitter">
+          <img class="mark" src="icons/app-icon.svg" alt="llm-gateway app icon">
+          <img class="small" src="icons/favicon.svg" alt="llm-gateway favicon">
+        </div>
+      </section>
+    </div>
+
+    <section class="panel" style="margin-top:24px" aria-labelledby="color-title">
+      <h2 id="color-title">Core color</h2>
+      <div class="swatches">
+        <div class="swatch carbon"><strong>Carbon Obsidian</strong><span>#090A0F</span></div>
+        <div class="swatch laser"><strong>Laser Amber</strong><span>#F59E0B</span></div>
+        <div class="swatch accessible"><strong>Accessible Dark Amber</strong><span>#B45309</span></div>
+        <div class="swatch white"><strong>Signal White</strong><span>#FFFFFF</span></div>
+      </div>
+    </section>
+  </main>
+</body>
+</html>

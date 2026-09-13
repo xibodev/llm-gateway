@@ -4,8 +4,11 @@
 
 The site is a routing-switchboard field guide: requests enter one private
 gateway, traverse an explicit route, and exit through a known provider. It takes
-the crisp slate, indigo, terminal, and compact-card language of the gflow-cli
-reference and expands it for a larger product and documentation surface.
+the crisp slate, terminal, and compact-card language of the existing site and
+uses the approved Optical Rail Splitter and amber route signal.
+
+The formal product and repository name is `llm-gateway`; the compact visual
+wordmark in headers and lockups is `llmgw`.
 
 ## Tokens
 
@@ -14,8 +17,9 @@ reference and expands it for a larger product and documentation surface.
 - Ink: `#111827`
 - Muted ink: `#526175`
 - Hairline: `#dce2eb`
-- Route indigo: `#4f46e5`
-- Deep route: `#252a6a`
+- Carbon Obsidian: `#090a0f`
+- Laser Amber on Carbon Obsidian: `#f59e0b`
+- Accessible Dark Amber on light surfaces: `#b45309`
 - Failover orange: `#d85e16`
 - Success green: `#087f5b`
 - Code field: `#101827`
@@ -28,11 +32,13 @@ labels.
 
 ## Components
 
-- Junction-mark wordmark: authored inline SVG and matching favicon.
+- Optical Rail Splitter: local SVG mark and matching dark-tile favicon. Header
+  links expose the formal `llm-gateway` accessible name.
 - Header: solid panel, thin divider, full desktop navigation, real mobile menu.
 - Routing board: labelled endpoint and provider nodes connected by directional
   rails. Orange communicates a failed hop, green a served hop, with text labels
   so color is never the only signal.
+- Failure orange and success green are semantic colors, not brand colors.
 - Code blocks: dark field, filename/intent label, optional copy button.
 - Cards: thin border and restrained radius; no nested card stacks.
 - Tables: semantic tables with local horizontal scrolling on narrow screens.

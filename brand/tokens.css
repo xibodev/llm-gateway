@@ -1,0 +1,8 @@
+:root {
+  --llmgw-color-carbon-obsidian: #090a0f;
+  --llmgw-color-laser-amber: #f59e0b;
+  --llmgw-color-accessible-dark-amber: #b45309;
+  --llmgw-color-signal-white: #ffffff;
+  --llmgw-font-sans: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  --llmgw-font-mono: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
+}
