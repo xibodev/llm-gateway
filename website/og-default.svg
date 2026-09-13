@@ -1,11 +1,45 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="1200" height="630" viewBox="0 0 1200 630" role="img" aria-labelledby="title description">
   <title id="title">llm-gateway</title>
   <desc id="description">Exact routing and explicit failover in a self-hosted single Go binary.</desc>
+  <defs>
+    <path id="g-A" d="M1 7V2L2 1H4L5 2V7H4V5H2V7ZM2 4H4V2H2Z"/>
+    <path id="g-B" d="M1 1H4L5 2V4L4.5 4.5 5 5V6L4 7H1ZM2 2V4H4V2ZM2 5V6H4V5Z"/>
+    <path id="g-C" d="M5 1H2L1 2V6L2 7H5V6H2V2H5Z"/>
+    <path id="g-D" d="M1 1H4L5 2V6L4 7H1ZM2 2V6H4V2Z"/>
+    <path id="g-E" d="M1 1H5V2H2V4H4.5V5H2V6H5V7H1Z"/>
+    <path id="g-F" d="M1 1H5V2H2V4H4.5V5H2V7H1Z"/>
+    <path id="g-G" d="M5 1H2L1 2V6L2 7H5V4H3V5H4V6H2V2H5Z"/>
+    <path id="g-H" d="M1 1H2V4H4V1H5V7H4V5H2V7H1Z"/>
+    <path id="g-I" d="M1 1H5V2H3.5V6H5V7H1V6H2.5V2H1Z"/>
+    <path id="g-L" d="M1 1H2V6H5V7H1Z"/>
+    <path id="g-M" d="M1 7V1H2L3 3 4 1H5V7H4V3L3 5 2 3V7Z"/>
+    <path id="g-N" d="M1 7V1H2L4 5V1H5V7H4L2 3V7Z"/>
+    <path id="g-O" d="M2 1H4L5 2V6L4 7H2L1 6V2ZM2 2V6H4V2Z"/>
+    <path id="g-P" d="M1 7V1H4L5 2V4L4 5H2V7ZM2 2V4H4V2Z"/>
+    <path id="g-R" d="M1 7V1H4L5 2V4L4 5 5 7H4L3 5H2V7ZM2 2V4H4V2Z"/>
+    <path id="g-S" d="M5 1H2L1 2V4L2 5H4V6H1V7H4L5 6V4L4 3H2V2H5Z"/>
+    <path id="g-T" d="M1 1H5V2H3.5V7H2.5V2H1Z"/>
+    <path id="g-U" d="M1 1H2V6H4V1H5V6L4 7H2L1 6Z"/>
+    <path id="g-V" d="M1 1H2V5L3 7 4 5V1H5V5L3.5 7H2.5L1 5Z"/>
+    <path id="g-W" d="M1 1H2V5L2.5 4 3 6 3.5 4 4 5V1H5V7H4L3.5 6 3 7 2.5 6 2 7H1Z"/>
+    <path id="g-X" d="M1 1H2L3 3 4 1H5L3.5 4 5 7H4L3 5 2 7H1L2.5 4Z"/>
+    <path id="g-Y" d="M1 1H2L3 3 4 1H5L3.5 4V7H2.5V4Z"/>
+    <path id="g-a" d="M5 7V4Q5 3 4 3H2Q1 3 1 4M5 5H2Q1 5 1 6T2 7H4Q5 7 5 6" fill="none" stroke="currentColor" stroke-width=".8" stroke-linecap="round" stroke-linejoin="round"/>
+    <path id="g-e" d="M1 5H5V4Q5 3 4 3H2Q1 3 1 4V6Q1 7 2 7H5" fill="none" stroke="currentColor" stroke-width=".8" stroke-linecap="round" stroke-linejoin="round"/>
+    <path id="g-g" d="M5 3V7Q5 8 4 8H2M5 4Q4.5 3 3.5 3H2Q1 3 1 4V6Q1 7 2 7H3.5Q4.5 7 5 6" fill="none" stroke="currentColor" stroke-width=".8" stroke-linecap="round" stroke-linejoin="round"/>
+    <path id="g-l" d="M2 0V6Q2 7 3 7H4" fill="none" stroke="currentColor" stroke-width=".8" stroke-linecap="round" stroke-linejoin="round"/>
+    <path id="g-m" d="M0 7V3M0 4Q1 3 2 3Q3 3 3 4V7M3 4Q4 3 5 3Q6 3 6 4V7" fill="none" stroke="currentColor" stroke-width=".8" stroke-linecap="round" stroke-linejoin="round"/>
+    <path id="g-t" d="M3 1V6Q3 7 4 7H5M1 3H5" fill="none" stroke="currentColor" stroke-width=".8" stroke-linecap="round" stroke-linejoin="round"/>
+    <path id="g-w" d="M0 3L1.25 7 3 4.5 4.75 7 6 3" fill="none" stroke="currentColor" stroke-width=".8" stroke-linecap="round" stroke-linejoin="round"/>
+    <path id="g-y" d="M0 3L2 7M4 3L2 7 1 9" fill="none" stroke="currentColor" stroke-width=".8" stroke-linecap="round" stroke-linejoin="round"/>
+    <path id="g-dot" d="M2.5 6H3.5V7H2.5Z"/>
+    <path id="g-hyphen" d="M1.5 4H4.5V5H1.5Z"/>
+  </defs>
   <rect width="1200" height="630" fill="#090A0F"/>
   <path d="M0 104H1200M0 526H1200" stroke="#F59E0B" stroke-opacity=".16"/>
   <path d="M944 0V630M1036 0V630M1128 0V630" stroke="#FFFFFF" stroke-opacity=".05"/>
   <g transform="translate(72 118) scale(1.6)">
-    <path d="M16 50 L42 50" fill="none" stroke="#FFFFFF" stroke-width="5" stroke-linecap="round"/>
+    <line x1="16" y1="50" x2="42" y2="50" stroke="#FFFFFF" stroke-width="5" stroke-linecap="round"/>
     <circle cx="16" cy="50" r="3.5" fill="#FFFFFF"/>
     <polygon points="42,32 58,50 42,68" fill="#F59E0B"/>
     <path d="M54 44 L66 32 L84 32" fill="none" stroke="#F59E0B" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round"/>
@@ -15,11 +49,26 @@
     <circle cx="84" cy="50" r="3.5" fill="#FFFFFF"/>
     <circle cx="84" cy="68" r="3.5" fill="#FFFFFF"/>
   </g>
-  <text x="242" y="219" fill="#FFFFFF" font-family="Arial, Helvetica, sans-serif" font-size="92" font-weight="700" letter-spacing="-4">llmgw</text>
-  <text x="248" y="260" fill="#AEB3BD" font-family="Arial, Helvetica, sans-serif" font-size="22" font-weight="600" letter-spacing="1">llm-gateway</text>
-  <text x="80" y="390" fill="#FFFFFF" font-family="Arial, Helvetica, sans-serif" font-size="58" font-weight="700" letter-spacing="-2">Exact routing.</text>
-  <text x="80" y="458" fill="#F59E0B" font-family="Arial, Helvetica, sans-serif" font-size="58" font-weight="700" letter-spacing="-2">Explicit failover.</text>
-  <text x="82" y="548" fill="#D7DAE0" font-family="Arial, Helvetica, sans-serif" font-size="27">Self-hosted. Single Go binary.</text>
+  <g transform="translate(242 132) scale(12)" color="#FFFFFF" aria-label="llmgw">
+    <use href="#g-l"/><use href="#g-l" x="6"/><use href="#g-m" x="12"/><use href="#g-g" x="20"/><use href="#g-w" x="27"/>
+  </g>
+  <g transform="translate(248 238) scale(3)" color="#AEB3BD" fill="#AEB3BD" aria-label="llm-gateway">
+    <use href="#g-l"/><use href="#g-l" x="6"/><use href="#g-m" x="12"/><use href="#g-hyphen" x="20"/><use href="#g-g" x="26"/><use href="#g-a" x="33"/><use href="#g-t" x="40"/><use href="#g-e" x="47"/><use href="#g-w" x="54"/><use href="#g-a" x="62"/><use href="#g-y" x="69"/>
+  </g>
+  <g transform="translate(80 322) scale(8)" fill="#FFFFFF">
+    <use href="#g-E"/><use href="#g-X" x="6"/><use href="#g-A" x="12"/><use href="#g-C" x="18"/><use href="#g-T" x="24"/>
+    <use href="#g-R" x="36"/><use href="#g-O" x="42"/><use href="#g-U" x="48"/><use href="#g-T" x="54"/><use href="#g-I" x="60"/><use href="#g-N" x="66"/><use href="#g-G" x="72"/><use href="#g-dot" x="78"/>
+  </g>
+  <g transform="translate(80 394) scale(8)" fill="#F59E0B">
+    <use href="#g-E"/><use href="#g-X" x="6"/><use href="#g-P" x="12"/><use href="#g-L" x="18"/><use href="#g-I" x="24"/><use href="#g-C" x="30"/><use href="#g-I" x="36"/><use href="#g-T" x="42"/>
+    <use href="#g-F" x="54"/><use href="#g-A" x="60"/><use href="#g-I" x="66"/><use href="#g-L" x="72"/><use href="#g-O" x="78"/><use href="#g-V" x="84"/><use href="#g-E" x="90"/><use href="#g-R" x="96"/><use href="#g-dot" x="102"/>
+  </g>
+  <g transform="translate(82 518) scale(3.5)" fill="#D7DAE0">
+    <use href="#g-S"/><use href="#g-E" x="6"/><use href="#g-L" x="12"/><use href="#g-F" x="18"/><use href="#g-hyphen" x="24"/><use href="#g-H" x="30"/><use href="#g-O" x="36"/><use href="#g-S" x="42"/><use href="#g-T" x="48"/><use href="#g-E" x="54"/><use href="#g-D" x="60"/><use href="#g-dot" x="66"/>
+    <use href="#g-S" x="78"/><use href="#g-I" x="84"/><use href="#g-N" x="90"/><use href="#g-G" x="96"/><use href="#g-L" x="102"/><use href="#g-E" x="108"/>
+    <use href="#g-G" x="120"/><use href="#g-O" x="126"/>
+    <use href="#g-B" x="138"/><use href="#g-I" x="144"/><use href="#g-N" x="150"/><use href="#g-A" x="156"/><use href="#g-R" x="162"/><use href="#g-Y" x="168"/><use href="#g-dot" x="174"/>
+  </g>
   <circle cx="1118" cy="548" r="7" fill="#FFFFFF"/>
   <path d="M982 548H1118" stroke="#F59E0B" stroke-width="5" stroke-linecap="round"/>
 </svg>
