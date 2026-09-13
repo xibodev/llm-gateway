@@ -64,6 +64,34 @@ func ChatToResponses(model string, messages []map[string]any, kw map[string]any,
 		}
 	}
 
+	// Ensure every function_call item in input has a matching function_call_output.
+	// If a client conversation history lost or omitted a tool output, OpenAI /responses
+	// rejects the entire request with a 400 error.
+	callOutputs := make(map[string]bool)
+	for _, item := range input {
+		if im, ok := item.(map[string]any); ok {
+			if im["type"] == "function_call_output" {
+				if cid, ok := im["call_id"].(string); ok && cid != "" {
+					callOutputs[cid] = true
+				}
+			}
+		}
+	}
+	for _, item := range input {
+		if im, ok := item.(map[string]any); ok {
+			if im["type"] == "function_call" {
+				if cid, ok := im["call_id"].(string); ok && cid != "" && !callOutputs[cid] {
+					input = append(input, map[string]any{
+						"type":    "function_call_output",
+						"call_id": cid,
+						"output":  "",
+					})
+					callOutputs[cid] = true
+				}
+			}
+		}
+	}
+
 	payload["input"] = input
 	if len(instructions) > 0 {
 		payload["instructions"] = strings.Join(instructions, "\n\n")
