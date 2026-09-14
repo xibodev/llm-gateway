@@ -4,7 +4,7 @@ import { extname, join, resolve, sep } from "node:path";
 
 const root = resolve(import.meta.dirname, "../.website-dist");
 const base = "/llm-gateway/";
-const types = { ".html": "text/html", ".css": "text/css", ".js": "text/javascript", ".json": "application/json", ".svg": "image/svg+xml", ".webmanifest": "application/manifest+json", ".xml": "application/xml", ".txt": "text/plain" };
+const types = { ".html": "text/html", ".css": "text/css", ".js": "text/javascript", ".json": "application/json", ".png": "image/png", ".svg": "image/svg+xml", ".webmanifest": "application/manifest+json", ".xml": "application/xml", ".txt": "text/plain" };
 const server = createServer((request, response) => {
   const pathname = new URL(request.url, "http://localhost").pathname;
   if (pathname === base.slice(0, -1)) {

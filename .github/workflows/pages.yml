@@ -5,17 +5,22 @@ on:
     branches: [main]
     paths:
       - website/**
+      - brand/**
       - docs/**
+      - go/internal/providers/registry_manifest.json
       - README.md
       - CONTRIBUTING.md
       - SECURITY.md
       - scripts/check-docs.mjs
       - scripts/build-website.mjs
+      - scripts/render-brand-assets.mjs
       - .github/workflows/pages.yml
   pull_request:
     paths:
       - website/**
+      - brand/**
       - docs/**
+      - go/internal/providers/registry_manifest.json
       - README.md
       - CONTRIBUTING.md
       - SECURITY.md
@@ -45,6 +50,10 @@ jobs:
       - name: Validate and build static site
         run: |
           node --check website/site.js
+          node --check scripts/check-docs.mjs
+          node --check scripts/build-website.mjs
+          node --check scripts/render-brand-assets.mjs
+          node scripts/render-brand-assets.mjs --check
           node scripts/build-website.mjs
 
       - uses: actions/upload-pages-artifact@56afc609e74202658d3ffba0e8f6dda462b719fa # v3

@@ -8,7 +8,7 @@
   <link rel="stylesheet" href="tokens.css">
   <style>
     * { box-sizing: border-box; }
-    body { margin: 0; background: #f5f2ea; color: var(--llmgw-color-carbon-obsidian); font: 16px/1.55 var(--llmgw-font-sans); }
+    body { margin: 0; background: #f5f2ea; color: var(--llmgw-color-detail-ink); font: 16px/1.55 var(--llmgw-font-sans); }
     main { width: min(1120px, calc(100% - 32px)); margin: 0 auto; padding: 56px 0 80px; }
     h1, h2, p { margin-top: 0; }
     h1 { max-width: 12ch; margin-bottom: 20px; font-size: clamp(2.7rem, 8vw, 6rem); line-height: .95; letter-spacing: -.04em; }
@@ -16,7 +16,7 @@
     .intro { max-width: 64ch; margin-bottom: 48px; color: #4b4b50; }
     .panel { padding: clamp(28px, 6vw, 72px); border: 1px solid #d8d3c7; background: #fff; }
     .panel + .panel, .grid { margin-top: 24px; }
-    .dark { border-color: #090a0f; background: var(--llmgw-color-carbon-obsidian); color: white; }
+    .dark { border-color: var(--llmgw-color-carbon-obsidian); background: var(--llmgw-color-carbon-obsidian); color: white; }
     .lockup { display: block; width: min(520px, 100%); }
     .statement { max-width: 16ch; margin: 48px 0 0; font-size: clamp(2rem, 5vw, 4.6rem); font-weight: 800; line-height: 1; letter-spacing: -.04em; }
     .statement span { color: var(--llmgw-color-laser-amber); }
@@ -24,14 +24,16 @@
     .marks { display: flex; flex-wrap: wrap; align-items: center; gap: 28px; }
     .mark { width: 120px; height: 120px; }
     .small { width: 32px; height: 32px; }
-    .swatches { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; }
+    .swatches { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 12px; }
     .swatch { min-height: 144px; padding: 18px; border: 1px solid #d8d3c7; font: 700 .76rem/1.5 var(--llmgw-font-mono); }
     .swatch strong, .swatch span { display: block; }
-    .carbon { background: #090a0f; color: white; }
-    .laser { background: #f59e0b; color: #090a0f; }
-    .accessible { background: #b45309; color: white; }
-    .white { background: #fff; color: #090a0f; }
+    .carbon { background: var(--llmgw-color-carbon-obsidian); color: white; }
+    .detail { background: var(--llmgw-color-detail-ink); color: white; }
+    .laser { background: var(--llmgw-color-laser-amber); color: var(--llmgw-color-carbon-obsidian); }
+    .accessible { background: var(--llmgw-color-accessible-dark-amber); color: white; }
+    .white { background: var(--llmgw-color-signal-white); color: var(--llmgw-color-detail-ink); }
     .caption { margin: 18px 0 0; color: inherit; font: .8rem/1.5 var(--llmgw-font-mono); }
+    .og { display: block; width: 100%; height: auto; border: 1px solid var(--llmgw-color-carbon-obsidian); }
     @media (max-width: 700px) { .grid, .swatches { grid-template-columns: 1fr; } main { padding-top: 32px; } }
   </style>
 </head>
@@ -51,7 +53,7 @@
       <section class="panel" aria-labelledby="light-title">
         <h2 id="light-title">Light treatment</h2>
         <img class="lockup" src="logos/lockup.svg" alt="llmgw">
-        <p class="caption">Accessible Dark Amber carries required detail on light surfaces.</p>
+        <p class="caption">Detail Ink carries the rails, terminals, and wordmark; Accessible Dark Amber carries the splitter on light surfaces.</p>
       </section>
       <section class="panel dark" aria-labelledby="mark-title">
         <h2 id="mark-title">Mark and icon</h2>
@@ -64,13 +66,20 @@
     </div>
 
     <section class="panel" style="margin-top:24px" aria-labelledby="color-title">
-      <h2 id="color-title">Core color</h2>
+      <h2 id="color-title">Core colors</h2>
       <div class="swatches">
         <div class="swatch carbon"><strong>Carbon Obsidian</strong><span>#090A0F</span></div>
+        <div class="swatch detail"><strong>Detail Ink</strong><span>#111827</span></div>
         <div class="swatch laser"><strong>Laser Amber</strong><span>#F59E0B</span></div>
         <div class="swatch accessible"><strong>Accessible Dark Amber</strong><span>#B45309</span></div>
         <div class="swatch white"><strong>Signal White</strong><span>#FFFFFF</span></div>
       </div>
+    </section>
+
+    <section class="panel" style="margin-top:24px" aria-labelledby="og-title">
+      <h2 id="og-title">Default social preview</h2>
+      <img class="og" src="og/og-default.png" width="1200" height="630" alt="llmgw: Exact routing. Explicit failover.">
+      <p class="caption">Deterministic 1200x630 PNG projected from the local SVG master.</p>
     </section>
   </main>
 </body>
