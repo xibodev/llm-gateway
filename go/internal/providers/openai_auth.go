@@ -1,6 +1,7 @@
 package providers
 
 import (
+	"errors"
 	"fmt"
 	"net/http"
 	"strings"
@@ -42,6 +43,23 @@ func prepareOpenAIAuth(
 	}
 	baseURL, headers, err := auth.Prepare()
 	return baseURL, headers, nil, err
+}
+
+func copilotInvocationError(err error) error {
+	if err == nil || IsInvocation(err) || IsConfig(err) {
+		return err
+	}
+	message := "github_copilot: " + err.Error()
+	var authErr *copilotauth.AuthError
+	if errors.As(err, &authErr) {
+		if authErr.Transport {
+			return retryableInvocation(message)
+		}
+		if authErr.StatusCode != 0 {
+			return failoverInvocationStatus(message, authErr.StatusCode)
+		}
+	}
+	return invocation(message)
 }
 
 // bearerAuth is a static base URL + optional Bearer key: openai_compatible,
@@ -102,7 +120,7 @@ func (a copilotAuth) PrepareObserved() (
 	}
 	s, observation, err := a.session(false)
 	if err != nil {
-		return "", nil, observation, invocation("github_copilot: " + err.Error())
+		return "", nil, observation, copilotInvocationError(err)
 	}
 	cfg := config.Get()
 	h := http.Header{}
@@ -121,7 +139,7 @@ func (copilotAuth) CanRefresh() bool { return true }
 
 func (a copilotAuth) Refresh() error {
 	_, _, err := a.session(true)
-	return err
+	return copilotInvocationError(err)
 }
 
 func (a copilotAuth) session(
@@ -142,7 +160,7 @@ func (a copilotAuth) session(
 	}
 	session, err := copilotauth.GetSessionForOAuth(oauth, force)
 	if err != nil {
-		return nil, observation, invocation("github_copilot: " + err.Error())
+		return nil, observation, copilotInvocationError(err)
 	}
 	return session, observation, nil
 }

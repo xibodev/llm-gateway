@@ -52,6 +52,7 @@ var (
 type AuthError struct {
 	Msg        string
 	StatusCode int
+	Transport  bool
 }
 
 func (e *AuthError) Error() string { return e.Msg }
@@ -190,7 +191,9 @@ func exchangeOAuthForSession(oauthToken string) (*Session, error) {
 	req.Header.Set("Authorization", "token "+oauthToken)
 	resp, err := httpClient().Do(req)
 	if err != nil {
-		return nil, newAuthError(0, "Copilot session-token transport error: "+err.Error())
+		authErr := newAuthError(0, "Copilot session-token transport error: "+err.Error())
+		authErr.Transport = true
+		return nil, authErr
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode == 401 {

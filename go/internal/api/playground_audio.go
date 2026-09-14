@@ -2,6 +2,7 @@ package api
 
 import (
 	"bytes"
+	"context"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
@@ -111,7 +112,7 @@ func handleAdminPlaygroundSpeech(w http.ResponseWriter, r *http.Request) {
 
 	started := time.Now()
 	audio, format, contentType, upstreamStatus, err := playgroundSpeechAudio(
-		providerID, voice, body.Input, speed, principal,
+		r.Context(), providerID, voice, body.Input, speed, principal,
 	)
 	latency := time.Since(started).Milliseconds()
 	if err != nil {
@@ -151,15 +152,21 @@ func handleAdminPlaygroundSpeech(w http.ResponseWriter, r *http.Request) {
 }
 
 func playgroundSpeechAudio(
+	ctx context.Context,
 	providerID, model, input string, speed float64,
 	principal *config.Principal,
 ) ([]byte, string, string, int, error) {
 	if synthesizer, native := providers.SpeechSynthesizerForPrincipal(
 		providerID, principal,
 	); native {
-		audio, format, err := synthesizer.Synthesize(
-			model, input, speedToRate(speed),
-		)
+		var audio []byte
+		var format string
+		var err error
+		if contextual, ok := synthesizer.(providers.ContextSpeechSynthesizer); ok {
+			audio, format, err = contextual.SynthesizeContext(ctx, model, input, speedToRate(speed))
+		} else {
+			audio, format, err = synthesizer.Synthesize(model, input, speedToRate(speed))
+		}
 		return audio, format, "audio/mpeg", 0, err
 	}
 	base, headers, ok := providers.ProviderHTTPTarget(providerID, principal)
@@ -175,7 +182,8 @@ func playgroundSpeechAudio(
 	if err != nil {
 		return nil, "", "", 0, err
 	}
-	request, err := http.NewRequest(
+	request, err := http.NewRequestWithContext(
+		ctx,
 		http.MethodPost,
 		strings.TrimRight(base, "/")+"/audio/speech",
 		bytes.NewReader(payload),
@@ -244,7 +252,7 @@ func handleAdminPlaygroundTranscription(w http.ResponseWriter, r *http.Request) 
 		writeError(w, http.StatusInternalServerError, "could not build the upstream request")
 		return
 	}
-	request, err := http.NewRequest(http.MethodPost, base+"/audio/transcriptions", body)
+	request, err := http.NewRequestWithContext(r.Context(), http.MethodPost, base+"/audio/transcriptions", body)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "could not build the upstream request")
 		return
@@ -369,7 +377,14 @@ func handleAdminPlaygroundImage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	started := time.Now()
-	images, usage, err := generator.GenerateImages(model, body.Prompt, 1)
+	var images []providers.GeneratedImage
+	var usage map[string]any
+	var err error
+	if contextual, ok := generator.(providers.ContextImageGenerator); ok {
+		images, usage, err = contextual.GenerateImagesContext(r.Context(), model, body.Prompt, 1)
+	} else {
+		images, usage, err = generator.GenerateImages(model, body.Prompt, 1)
+	}
 	latency := time.Since(started).Milliseconds()
 	if err != nil {
 		_ = iam.RecordAudit(iam.AuditEvent{ActorPrincipalID: principal.PrincipalID, Action: "playground.image", TargetType: "project", TargetID: project.ID, Result: "failure", Detail: map[string]any{"model": body.Model}})
@@ -422,7 +437,18 @@ func handleAdminPlaygroundVideo(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if operation := strings.TrimSpace(body.Operation); operation != "" {
-		job, err := generator.PollVideo(operation)
+		operation, status, message = resolveVideoOperation(operation, providerID, model)
+		if status != 0 {
+			writeError(w, status, message)
+			return
+		}
+		var job providers.VideoJob
+		var err error
+		if contextual, ok := generator.(providers.ContextVideoGenerator); ok {
+			job, err = contextual.PollVideoContext(r.Context(), operation)
+		} else {
+			job, err = generator.PollVideo(operation)
+		}
 		if err != nil {
 			writeUpstreamError(w, err)
 			return
@@ -435,7 +461,13 @@ func handleAdminPlaygroundVideo(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	started := time.Now()
-	job, err := generator.StartVideo(model, body.Prompt, body.Parameters)
+	var job providers.VideoJob
+	var err error
+	if contextual, ok := generator.(providers.ContextVideoGenerator); ok {
+		job, err = contextual.StartVideoContext(r.Context(), model, body.Prompt, body.Parameters)
+	} else {
+		job, err = generator.StartVideo(model, body.Prompt, body.Parameters)
+	}
 	if err != nil {
 		writeUpstreamError(w, err)
 		return

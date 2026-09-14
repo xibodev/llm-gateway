@@ -460,6 +460,17 @@ func TestExplicitCodexRefreshDoesNotRecreateRevokedConnection(t *testing.T) {
 	}
 }
 
+func TestCodexRefreshInvocationErrorPreservesRetryClassification(t *testing.T) {
+	transport := codexRefreshInvocationError(&codexauth.AuthError{Operation: "OAuth token", Code: "transport"})
+	if !InvocationRetryable(transport) {
+		t.Fatal("Codex transport error should be retryable")
+	}
+	rejected := codexRefreshInvocationError(&codexauth.RefreshError{StatusCode: http.StatusUnauthorized, Code: "invalid_grant"})
+	if InvocationRetryable(rejected) || !InvocationFailoverEligible(rejected) || UpstreamStatus(rejected) != http.StatusUnauthorized {
+		t.Fatalf("Codex credential rejection retry=%v failover=%v status=%d", InvocationRetryable(rejected), InvocationFailoverEligible(rejected), UpstreamStatus(rejected))
+	}
+}
+
 func setupCodexProviderTest(t *testing.T) {
 	t.Helper()
 	t.Setenv("LLMGW_STATE_DIR", t.TempDir())

@@ -313,7 +313,7 @@ func handleState(w http.ResponseWriter, r *http.Request) {
 		"endpoints":                    cats,
 		"policies": map[string]any{
 			"defaults":  s.Policies.Defaults,
-			"overrides": s.Policies.Overrides,
+			"overrides": s.Policies.ConfiguredOverrides(),
 		},
 		"savings": router.Totals(false),
 		"copilot": map[string]any{"enabled": copilotEnabled(), "auth": copilotauth.AuthStatus()},

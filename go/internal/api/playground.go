@@ -127,9 +127,12 @@ func executePlayground(w http.ResponseWriter, r *http.Request, body playgroundBo
 		return
 	}
 	request := chatRequest{Model: body.Model, Messages: body.Messages, Temperature: body.Temperature, MaxTokens: body.MaxTokens, ReasoningEffort: body.ReasoningEffort}
-	response, served, trace, err := router.ExecuteCompleteWithTrace(targets, providerMessages(body.Messages), body.Model, principal, chatKwargs(&request))
+	response, served, trace, err := router.ExecuteCompleteWithTraceContext(r.Context(), targets, providerMessages(body.Messages), body.Model, principal, chatKwargs(&request))
 	latency := time.Since(started).Milliseconds()
 	if err != nil {
+		if r.Context().Err() != nil {
+			return
+		}
 		router.RecordUsage(router.UsageRecord{
 			Endpoint: "playground.chat", RequestedModel: body.Model, Project: project.Slug, Key: "playground",
 			ProjectID: project.ID, PrincipalID: principal.PrincipalID, StatusCode: upstreamErrorStatus(err), LatencyMS: latency, ErrorCode: "upstream",

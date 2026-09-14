@@ -31,7 +31,7 @@ export function ProviderDetail({ entryID, data, mode, onChanged, onBack, onOpenP
   mode: ConsoleMode;
   onChanged: () => Promise<void>;
   onBack: () => void;
-  onOpenPlayground?: (modelID: string) => void;
+  onOpenPlayground?: (modelID: string, ownerID: string) => void;
 }) {
   const registry = asList(data.provider_registry).map(asRecord);
   const statuses = asList(data.provider_statuses).map(asRecord);
@@ -262,7 +262,7 @@ export function ProviderDetail({ entryID, data, mode, onChanged, onBack, onOpenP
         <div class="section-heading"><div><p class="eyebrow">Catalog</p><h2>Models from this provider</h2></div><span>{matchedModels.length === models.length ? `${models.length} model${models.length === 1 ? "" : "s"}` : `${matchedModels.length} of ${models.length} models`}</span></div>
         {models.length > defaultPageSize ? <label class="search-field catalog-search"><Search size={17} /><span class="sr-only">Search this provider's models</span><input value={modelSearch} onInput={(event) => setModelSearch((event.currentTarget as HTMLInputElement).value)} placeholder="Filter by model id or name" /></label> : null}
         {mode === "admin" && !ownerID ? <EmptyState title="Select a catalog owner" detail="Model catalogs are scoped to a human principal. Pick one above, or create one on the Access page." /> : catalogError ? <EmptyState title="Model catalog is unavailable" detail={catalogError} /> : catalog === null ? <p class="muted-copy">Loading model catalog…</p> : models.length === 0 ? <EmptyState title="No models synced yet" detail="Run Sync to refresh this provider's catalog, then models appear here and in route building." /> : <div class="table-wrap"><table><thead><tr><th>Model</th><th>Capabilities</th><th>Supported surfaces</th><th>Try</th></tr></thead><tbody>
-          {pagedModels.map((row) => <tr key={stringValue(row.id)}><td><strong class="technical">{stringValue(row.id)}</strong>{stringValue(row.display_name) ? <small class="table-subtitle">{stringValue(row.display_name)}</small> : null}</td><td>{Object.keys(asRecord(row.capabilities)).join(" · ") || "Not supplied"}</td><td class="technical">{asList(row.supported_surfaces ?? row.supported_endpoints).map(String).join(" · ") || "Catalog did not declare"}</td><td>{onOpenPlayground ? <button class="button button--secondary" type="button" title="Open the playground with this model already selected" onClick={() => onOpenPlayground(stringValue(row.id))}><Play size={14} /> Playground</button> : null}</td></tr>)}
+          {pagedModels.map((row) => <tr key={stringValue(row.id)}><td><strong class="technical">{stringValue(row.id)}</strong>{stringValue(row.display_name) ? <small class="table-subtitle">{stringValue(row.display_name)}</small> : null}</td><td>{Object.keys(asRecord(row.capabilities)).join(" · ") || "Not supplied"}</td><td class="technical">{asList(row.supported_surfaces ?? row.supported_endpoints).map(String).join(" · ") || "Catalog did not declare"}</td><td>{onOpenPlayground ? <button class="button button--secondary" type="button" title="Open the playground with this model already selected" onClick={() => onOpenPlayground(stringValue(row.id), ownerID)}><Play size={14} /> Playground</button> : null}</td></tr>)}
         </tbody></table><Pager total={matchedModels.length} page={modelPage} pageSize={defaultPageSize} onPage={setModelPage} /></div>}
       </section> : null}
       {configured ? <section class="surface">

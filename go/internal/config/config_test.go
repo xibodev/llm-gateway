@@ -269,13 +269,62 @@ policies:
 `)
 	if settings.Policies.Defaults.RetryMaxAttempts != 3 ||
 		settings.Policies.Defaults.CircuitCooldownSeconds != 45 ||
-		settings.Policies.Overrides["copilot"].CircuitFailureThreshold != 2 {
+		settings.Policies.Overrides["copilot"].CircuitFailureThreshold != 2 ||
+		settings.Policies.Overrides["copilot"].RetryInitialBackoffSeconds != 0.25 ||
+		settings.Policies.Overrides["copilot"].RetryBackoffMultiplier != 1.5 {
 		t.Fatalf("policies did not load: %+v", settings.Policies)
 	}
 	reloaded := parseSettingsForTest(t, serialiseSettingsForTest(t, settings))
 	if reloaded.Policies.Defaults.RetryInitialBackoffSeconds != 0.25 ||
 		reloaded.Policies.Overrides["copilot"].RetryMaxAttempts != 1 {
 		t.Fatalf("policies did not round-trip: %+v", reloaded.Policies)
+	}
+}
+
+func TestPartialProviderPoliciesInheritDefaultsAndPreserveExplicitZero(t *testing.T) {
+	settings := parseSettingsForTest(t, `
+policies:
+  defaults:
+    retry_max_attempts: 3
+  overrides:
+    inherited:
+      circuit_failure_threshold: 2
+    disabled:
+      retry_max_attempts: 0
+      circuit_failure_threshold: 0
+`)
+	if settings.Policies.Defaults.RetryInitialBackoffSeconds != 0.5 ||
+		settings.Policies.Defaults.RetryMaxBackoffSeconds != 8 ||
+		settings.Policies.Overrides["inherited"].RetryMaxAttempts != 3 ||
+		settings.Policies.Overrides["inherited"].RetryInitialBackoffSeconds != 0.5 ||
+		settings.Policies.Overrides["disabled"].RetryMaxAttempts != 0 ||
+		settings.Policies.Overrides["disabled"].CircuitFailureThreshold != 0 {
+		t.Fatalf("partial policy inheritance=%+v", settings.Policies)
+	}
+	serialized := serialiseSettingsForTest(t, settings)
+	var payload map[string]any
+	if err := yaml.Unmarshal([]byte(serialized), &payload); err != nil {
+		t.Fatal(err)
+	}
+	policies := payload["policies"].(map[string]any)
+	overrides := policies["overrides"].(map[string]any)
+	inherited := overrides["inherited"].(map[string]any)
+	if len(inherited) != 1 || inherited["circuit_failure_threshold"] == nil {
+		t.Fatalf("save materialized inherited policy fields: %+v", inherited)
+	}
+	defaults := policies["defaults"].(map[string]any)
+	defaults["retry_initial_backoff_seconds"] = 1.25
+	encoded, err := yaml.Marshal(payload)
+	if err != nil {
+		t.Fatal(err)
+	}
+	reloaded := parseSettingsForTest(t, string(encoded))
+	if reloaded.Policies.Overrides["inherited"].RetryInitialBackoffSeconds != 1.25 {
+		t.Fatalf("saved sparse override stopped inheriting new default: %+v", reloaded.Policies)
+	}
+	configured := settings.Policies.ConfiguredOverrides()["inherited"].(map[string]any)
+	if len(configured) != 1 || configured["circuit_failure_threshold"] == nil {
+		t.Fatalf("configured override exposed inherited fields: %+v", configured)
 	}
 }
 

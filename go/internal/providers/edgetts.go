@@ -13,6 +13,7 @@ package providers
 // upstream service changes, without rebuilding the gateway.
 
 import (
+	"context"
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/binary"
@@ -55,6 +56,10 @@ var (
 type SpeechSynthesizer interface {
 	Synthesize(voice, text, rate string) ([]byte, string, error)
 	DefaultVoice() string
+}
+
+type ContextSpeechSynthesizer interface {
+	SynthesizeContext(context.Context, string, string, string) ([]byte, string, error)
 }
 
 // EdgeTTSProvider synthesizes speech through the Edge read-aloud service.
@@ -198,6 +203,10 @@ func (p EdgeTTSProvider) ListModels() []ModelInfo {
 // Synthesize renders text with the given voice and prosody rate (e.g. "+0%"),
 // returning MP3 audio bytes and the served output format.
 func (p EdgeTTSProvider) Synthesize(voice, text, rate string) ([]byte, string, error) {
+	return p.SynthesizeContext(context.Background(), voice, text, rate)
+}
+
+func (p EdgeTTSProvider) SynthesizeContext(ctx context.Context, voice, text, rate string) ([]byte, string, error) {
 	voice = strings.TrimSpace(voice)
 	if voice == "" {
 		voice = p.voice
@@ -211,7 +220,10 @@ func (p EdgeTTSProvider) Synthesize(voice, text, rate string) ([]byte, string, e
 	}
 	var audio []byte
 	for _, chunk := range edgeTTSSplit(edgeTTSEscapeXML(cleaned), edgeTTSMaxMessageSize) {
-		part, err := p.synthesizeChunk(voice, chunk, rate)
+		if err := ctx.Err(); err != nil {
+			return nil, "", err
+		}
+		part, err := p.synthesizeChunk(ctx, voice, chunk, rate)
 		if err != nil {
 			return nil, "", err
 		}
@@ -223,12 +235,21 @@ func (p EdgeTTSProvider) Synthesize(voice, text, rate string) ([]byte, string, e
 	return audio, edgeTTSOutputFormat, nil
 }
 
-func (p EdgeTTSProvider) synthesizeChunk(voice, escapedText, rate string) ([]byte, error) {
+func (p EdgeTTSProvider) synthesizeChunk(ctx context.Context, voice, escapedText, rate string) ([]byte, error) {
 	connection, err := p.dial()
 	if err != nil {
 		return nil, err
 	}
 	defer connection.Close()
+	done := make(chan struct{})
+	go func() {
+		select {
+		case <-ctx.Done():
+			_ = connection.Close()
+		case <-done:
+		}
+	}()
+	defer close(done)
 
 	timestamp := time.Now().UTC().Format("Mon Jan 02 2006 15:04:05 GMT+0000 (Coordinated Universal Time)")
 	speechConfig := "X-Timestamp:" + timestamp + "\r\n" +
@@ -238,7 +259,7 @@ func (p EdgeTTSProvider) synthesizeChunk(voice, escapedText, rate string) ([]byt
 		`"sentenceBoundaryEnabled":"false","wordBoundaryEnabled":"true"},` +
 		`"outputFormat":"` + edgeTTSOutputFormat + `"}}}}`
 	if err := connection.WriteMessage(websocket.TextMessage, []byte(speechConfig)); err != nil {
-		return nil, &InvocationError{Msg: "edge_tts: speech.config write failed: " + err.Error()}
+		return nil, retryableInvocation("edge_tts: speech.config write failed: " + err.Error())
 	}
 
 	ssml := "<speak version='1.0' xmlns='http://www.w3.org/2001/10/synthesis' xml:lang='en-US'>" +
@@ -250,18 +271,18 @@ func (p EdgeTTSProvider) synthesizeChunk(voice, escapedText, rate string) ([]byt
 		"X-Timestamp:" + timestamp + "Z\r\n" +
 		"Path:ssml\r\n\r\n" + ssml
 	if err := connection.WriteMessage(websocket.TextMessage, []byte(ssmlMessage)); err != nil {
-		return nil, &InvocationError{Msg: "edge_tts: ssml write failed: " + err.Error()}
+		return nil, retryableInvocation("edge_tts: ssml write failed: " + err.Error())
 	}
 
 	var audio []byte
 	deadline := time.Now().Add(p.timeout)
 	for {
 		if err := connection.SetReadDeadline(deadline); err != nil {
-			return nil, &InvocationError{Msg: "edge_tts: " + err.Error()}
+			return nil, retryableInvocation("edge_tts: " + err.Error())
 		}
 		messageType, data, err := connection.ReadMessage()
 		if err != nil {
-			return nil, &InvocationError{Msg: "edge_tts: read failed: " + err.Error()}
+			return nil, retryableInvocation("edge_tts: read failed: " + err.Error())
 		}
 		switch messageType {
 		case websocket.TextMessage:
@@ -328,7 +349,7 @@ func (p EdgeTTSProvider) dial() (*websocket.Conn, error) {
 		if status != 0 {
 			return nil, invocationStatus(fmt.Sprintf("edge_tts: websocket handshake failed (status %d)", status), status)
 		}
-		return nil, invocation("edge_tts: websocket transport failed")
+		return nil, retryableInvocation("edge_tts: websocket transport failed")
 	}
 	return connection, nil
 }

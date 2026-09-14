@@ -71,10 +71,12 @@ are present, `endpoints` wins and the maps are not merged.
 
 ### Provider resilience
 
-The released configuration loader does **not** apply the YAML `policies` block.
-Although administration saves can serialize fields such as `retry_max_attempts`,
-hand-editing those fields does not configure retry or circuit behavior on restart.
-Do not rely on persisted resilience overrides. Circuit state is process-local.
+The configuration loader applies the YAML `policies` block at startup. Defaults
+apply to every provider unless an exact provider ID has an entry under
+`policies.overrides`. Administration saves persist these values without exposing
+credentials. Supported fields include `retry_max_attempts`, retry backoff values,
+`circuit_failure_threshold`, and `circuit_cooldown_seconds`. Circuit counters and
+cooldown state remain process-local and reset on restart.
 
 Use the supported provider and endpoint fields in the
 [released example configuration](../llmgw.config.example.yaml). Endpoint failover
@@ -143,11 +145,12 @@ are not age-pruned.
 
 ## Persistence and console saves
 
-The administration console writes providers, endpoints, savings configuration,
-and the Codex client ID. It also serializes provider policies, but the released
-loader does not reapply them (see [Provider resilience](#provider-resilience)). Environment-only secrets are not
-written to YAML. Prefer environment variables for other process settings so an
-administration save cannot turn a runtime secret into file content.
+The administration console writes providers, endpoints, provider policies,
+savings configuration, and the Codex client ID. The loader reapplies those
+values at startup (see [Provider resilience](#provider-resilience)).
+Environment-only secrets are not written to YAML. Prefer environment variables
+for other process settings so an administration save cannot turn a runtime
+secret into file content.
 
 Provider keys entered in the administration UI create an encrypted authoritative
 connection when credential encryption is configured. The current compatibility
@@ -158,7 +161,7 @@ directory and its backups accordingly.
 
 | Path | Purpose |
 | --- | --- |
-| `config.yaml` | Provider instances, endpoints, and operational configuration. Serialized resilience policies are not loaded by the released binary. Real runtime config is private and must not be committed. |
+| `config.yaml` | Provider instances, endpoints, resilience policies, and operational configuration. Real runtime config is private and must not be committed. |
 | `gateway.db` | IAM, hashed/recoverable keys, encrypted connections, usage, quotas, audit, alerts, and outbox. |
 | `catalog.json` | Regenerable provider/model catalog with schema versioning. |
 | `telemetry.db` | Interesting failover-chain events. |

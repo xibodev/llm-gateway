@@ -12,6 +12,8 @@ import (
 	"llmgw/internal/router"
 )
 
+const videoOperationHandlePrefix = "llmgw.video.v1."
+
 // Image and video generation reuse the gateway's normal routing, key policy and
 // usage accounting. Google reports image cost as modality-tagged tokens, so no
 // separate cost model is needed; video is long-running and therefore exposed as
@@ -29,6 +31,70 @@ type videoRequest struct {
 	Prompt     string         `json:"prompt"`
 	Parameters map[string]any `json:"parameters"`
 	Operation  string         `json:"operation"`
+}
+
+func validateVideoOperation(operation, model string) (int, string) {
+	if strings.HasPrefix(operation, "http://") || strings.HasPrefix(operation, "https://") {
+		return http.StatusBadRequest, "operation must not be a full URL"
+	}
+	opModel := ""
+	const marker = "models/"
+	if idx := strings.Index(operation, marker); idx >= 0 {
+		rest := operation[idx+len(marker):]
+		if end := strings.Index(rest, "/operations/"); end >= 0 {
+			opModel = rest[:end]
+		}
+	}
+	if opModel == "" {
+		return http.StatusBadRequest, "could not derive model from operation"
+	}
+	if opModel != model {
+		return http.StatusForbidden, "operation does not belong to authorized model"
+	}
+	return 0, ""
+}
+
+type videoOperationHandle struct {
+	Provider  string `json:"provider"`
+	Model     string `json:"model"`
+	Operation string `json:"operation"`
+}
+
+func encodeVideoOperation(provider, model, operation string) string {
+	raw, _ := json.Marshal(videoOperationHandle{Provider: provider, Model: model, Operation: operation})
+	return videoOperationHandlePrefix + base64.RawURLEncoding.EncodeToString(raw)
+}
+
+func decodeVideoOperation(value string) (videoOperationHandle, bool) {
+	if !strings.HasPrefix(value, videoOperationHandlePrefix) {
+		return videoOperationHandle{}, false
+	}
+	raw, err := base64.RawURLEncoding.DecodeString(strings.TrimPrefix(value, videoOperationHandlePrefix))
+	if err != nil {
+		return videoOperationHandle{}, false
+	}
+	var handle videoOperationHandle
+	if json.Unmarshal(raw, &handle) != nil || strings.TrimSpace(handle.Provider) == "" || strings.TrimSpace(handle.Model) == "" || strings.TrimSpace(handle.Operation) == "" {
+		return videoOperationHandle{}, false
+	}
+	return handle, true
+}
+
+func resolveVideoOperation(value, provider, model string) (string, int, string) {
+	if strings.HasPrefix(value, videoOperationHandlePrefix) {
+		handle, ok := decodeVideoOperation(value)
+		if !ok {
+			return "", http.StatusBadRequest, "operation handle is invalid"
+		}
+		if handle.Provider != provider || handle.Model != model {
+			return "", http.StatusForbidden, "operation does not belong to authorized provider and model"
+		}
+		value = handle.Operation
+	}
+	if status, message := validateVideoOperation(value, model); status != 0 {
+		return "", status, message
+	}
+	return value, 0, ""
 }
 
 // resolveMediaTarget maps a requested model to one provider/model pair under
@@ -94,7 +160,14 @@ func handleImageGenerations(w http.ResponseWriter, r *http.Request) {
 	if count <= 0 {
 		count = 1
 	}
-	images, usage, err := generator.GenerateImages(upstreamModel, body.Prompt, count)
+	var images []providers.GeneratedImage
+	var usage map[string]any
+	var err error
+	if contextual, ok := generator.(providers.ContextImageGenerator); ok {
+		images, usage, err = contextual.GenerateImagesContext(r.Context(), upstreamModel, body.Prompt, count)
+	} else {
+		images, usage, err = generator.GenerateImages(upstreamModel, body.Prompt, count)
+	}
 	latency := time.Since(started).Milliseconds()
 	if err != nil {
 		recordFailureUsage("openai.images", body.Model, principal, upstreamErrorStatus(err), "upstream", started)
@@ -150,30 +223,19 @@ func handleVideoGenerations(w http.ResponseWriter, r *http.Request) {
 
 	// A request carrying an operation is a poll, not a new generation.
 	if operation := strings.TrimSpace(body.Operation); operation != "" {
-		if strings.HasPrefix(operation, "http://") || strings.HasPrefix(operation, "https://") {
-			recordFailureUsage("openai.videos", body.Model, principal, 400, "invalid_operation", started)
-			writeError(w, 400, "operation must not be a full URL")
+		operation, status, message = resolveVideoOperation(operation, providerID, upstreamModel)
+		if status != 0 {
+			recordFailureUsage("openai.videos", body.Model, principal, status, "invalid_operation", started)
+			writeError(w, status, message)
 			return
 		}
-		opModel := ""
-		const marker = "models/"
-		if idx := strings.Index(operation, marker); idx >= 0 {
-			rest := operation[idx+len(marker):]
-			if end := strings.Index(rest, "/operations/"); end >= 0 {
-				opModel = rest[:end]
-			}
+		var job providers.VideoJob
+		var err error
+		if contextual, ok := generator.(providers.ContextVideoGenerator); ok {
+			job, err = contextual.PollVideoContext(r.Context(), operation)
+		} else {
+			job, err = generator.PollVideo(operation)
 		}
-		if opModel == "" {
-			recordFailureUsage("openai.videos", body.Model, principal, 400, "invalid_operation", started)
-			writeError(w, 400, "could not derive model from operation")
-			return
-		}
-		if opModel != upstreamModel {
-			recordFailureUsage("openai.videos", body.Model, principal, 403, "operation_model_forbidden", started)
-			writeError(w, 403, "operation does not belong to authorized model")
-			return
-		}
-		job, err := generator.PollVideo(operation)
 		if err != nil {
 			writeUpstreamError(w, err)
 			return
@@ -187,7 +249,13 @@ func handleVideoGenerations(w http.ResponseWriter, r *http.Request) {
 		writeError(w, 400, "'prompt' is required to start a generation, or pass 'operation' to poll one")
 		return
 	}
-	job, err := generator.StartVideo(upstreamModel, body.Prompt, body.Parameters)
+	var job providers.VideoJob
+	var err error
+	if contextual, ok := generator.(providers.ContextVideoGenerator); ok {
+		job, err = contextual.StartVideoContext(r.Context(), upstreamModel, body.Prompt, body.Parameters)
+	} else {
+		job, err = generator.StartVideo(upstreamModel, body.Prompt, body.Parameters)
+	}
 	if err != nil {
 		recordFailureUsage("openai.videos", body.Model, principal, upstreamErrorStatus(err), "upstream", started)
 		writeUpstreamError(w, err)
@@ -204,7 +272,7 @@ func handleVideoGenerations(w http.ResponseWriter, r *http.Request) {
 
 func videoJobPayload(providerID, model string, job providers.VideoJob) map[string]any {
 	payload := map[string]any{
-		"operation": job.Operation,
+		"operation": encodeVideoOperation(providerID, model, job.Operation),
 		"status":    map[bool]string{true: "completed", false: "running"}[job.Done],
 		"provider":  providerID,
 		"model":     model,

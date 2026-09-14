@@ -101,8 +101,21 @@ func (c *ProviderConfig) TimeoutOr(fallback float64) float64 { return c.timeoutO
 
 // BackendPolicies is shared defaults + per-provider overrides.
 type BackendPolicies struct {
-	Defaults  ProviderPolicy            `yaml:"defaults" json:"defaults"`
-	Overrides map[string]ProviderPolicy `yaml:"overrides" json:"overrides"`
+	Defaults       ProviderPolicy            `yaml:"defaults" json:"defaults"`
+	Overrides      map[string]ProviderPolicy `yaml:"overrides" json:"overrides"`
+	OverrideFields map[string]map[string]any `yaml:"-" json:"-"`
+}
+
+func (p BackendPolicies) ConfiguredOverrides() map[string]any {
+	configured := map[string]any{}
+	for providerID, policy := range p.Overrides {
+		if fields, ok := p.OverrideFields[providerID]; ok {
+			configured[providerID] = cloneStringAnyMap(fields)
+		} else {
+			configured[providerID] = policy
+		}
+	}
+	return configured
 }
 
 // SavingsConfig controls the usage/cost ledger.
@@ -172,7 +185,8 @@ func Defaults() *Settings {
 				RetryMaxAttempts: 2, RetryInitialBackoffSeconds: 0.5, RetryMaxBackoffSeconds: 8.0,
 				RetryBackoffMultiplier: 2.0, CircuitFailureThreshold: 4, CircuitCooldownSeconds: 30.0,
 			},
-			Overrides: map[string]ProviderPolicy{},
+			Overrides:      map[string]ProviderPolicy{},
+			OverrideFields: map[string]map[string]any{},
 		},
 		Savings:                        SavingsConfig{Enabled: false, PriceCatalog: map[string]map[string]float64{}},
 		OpenAICompatibleBaseURL:        "https://api.openai.com/v1",
@@ -498,19 +512,54 @@ func applyConfig(s *Settings, payload map[string]any) {
 	} else if raw, ok := payload["categories"].(map[string]any); ok {
 		s.Endpoints = parseEndpoints(raw)
 	}
-	if raw, ok := payload["policies"]; ok {
-		encoded, err := yaml.Marshal(raw)
-		if err == nil {
-			var policies BackendPolicies
-			if yaml.Unmarshal(encoded, &policies) == nil {
-				if policies.Overrides == nil {
-					policies.Overrides = map[string]ProviderPolicy{}
+	if raw, ok := payload["policies"].(map[string]any); ok {
+		defaults := s.Policies.Defaults
+		if values, ok := raw["defaults"].(map[string]any); ok {
+			defaults = mergeProviderPolicy(defaults, values)
+		}
+		overrides := map[string]ProviderPolicy{}
+		overrideFields := map[string]map[string]any{}
+		if values, ok := raw["overrides"].(map[string]any); ok {
+			for providerID, value := range values {
+				if fields, ok := value.(map[string]any); ok {
+					overrides[providerID] = mergeProviderPolicy(defaults, fields)
+					overrideFields[providerID] = cloneStringAnyMap(fields)
 				}
-				s.Policies = policies
 			}
 		}
+		s.Policies = BackendPolicies{Defaults: defaults, Overrides: overrides, OverrideFields: overrideFields}
 	}
 	applyScalars(s, payload)
+}
+
+func cloneStringAnyMap(source map[string]any) map[string]any {
+	cloned := make(map[string]any, len(source))
+	for key, value := range source {
+		cloned[key] = value
+	}
+	return cloned
+}
+
+func mergeProviderPolicy(base ProviderPolicy, fields map[string]any) ProviderPolicy {
+	if value, ok := toFloat(fields["retry_max_attempts"]); ok {
+		base.RetryMaxAttempts = int(value)
+	}
+	if value, ok := toFloat(fields["retry_initial_backoff_seconds"]); ok {
+		base.RetryInitialBackoffSeconds = value
+	}
+	if value, ok := toFloat(fields["retry_max_backoff_seconds"]); ok {
+		base.RetryMaxBackoffSeconds = value
+	}
+	if value, ok := toFloat(fields["retry_backoff_multiplier"]); ok {
+		base.RetryBackoffMultiplier = value
+	}
+	if value, ok := toFloat(fields["circuit_failure_threshold"]); ok {
+		base.CircuitFailureThreshold = int(value)
+	}
+	if value, ok := toFloat(fields["circuit_cooldown_seconds"]); ok {
+		base.CircuitCooldownSeconds = value
+	}
+	return base
 }
 
 func parseEndpoints(raw map[string]any) map[string]*EndpointConfig {
@@ -671,8 +720,11 @@ func configPayload(s *Settings) map[string]any {
 	payload := map[string]any{
 		"providers": providers,
 		"endpoints": endpoints,
-		"policies":  s.Policies,
-		"savings":   s.Savings,
+		"policies": map[string]any{
+			"defaults":  s.Policies.Defaults,
+			"overrides": s.Policies.ConfiguredOverrides(),
+		},
+		"savings": s.Savings,
 	}
 	if s.OpenAICodexClientID != "" {
 		payload["openai_codex_client_id"] = s.OpenAICodexClientID

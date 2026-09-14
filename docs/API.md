@@ -56,6 +56,8 @@ There is no `/v1/completions` route.
 
 The request `model` is an exact `provider/model`, named endpoint, or advertised
 bare alias. Response model fields identify what actually served the request.
+Catalog inclusion proves caller-scoped routing eligibility, not fresh provider
+discovery, current inference health, or the caller's upstream entitlement.
 
 `GET /v1/models` returns only configured rows eligible under the caller's
 credential and policy. It is not a global list of every model a provider sells.

@@ -388,6 +388,10 @@ func ExecuteCompleteWithTrace(targets []Target, messages []providers.Message, re
 	return executeCompleteWithTrace(context.Background(), targets, messages, requested, principal, kw)
 }
 
+func ExecuteCompleteWithTraceContext(ctx context.Context, targets []Target, messages []providers.Message, requested string, principal *config.Principal, kw providers.Kwargs) (map[string]any, *Target, []AttemptTrace, error) {
+	return executeCompleteWithTrace(ctx, targets, messages, requested, principal, kw)
+}
+
 // ExecuteResponses preserves the caller's Responses API intent when a target
 // supports it natively, falling back through an explicit loss-checked Chat
 // adapter only for Chat-only providers.
@@ -553,7 +557,7 @@ func ExecuteAnthropicMessagesContext(
 				lastStatus = providers.UpstreamStatus(err)
 			}
 			attempts = append(attempts, attempt{Provider: target.Provider, Model: target.Model, Error: truncate(err.Error()), Throttled: providers.IsThrottle(err)})
-			if providers.IsInvocation(err) && !providers.AnthropicMessagesRetryable(err) {
+			if providers.IsInvocation(err) && !providers.InvocationFailoverEligible(err) {
 				recordChain(requested, attempts, nil, principal)
 				return nil, nil, &AllTargetsFailed{Msg: err.Error(), Status: providers.UpstreamStatus(err)}
 			}

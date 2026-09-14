@@ -5,7 +5,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
 	"net/http"
 	"strings"
 
@@ -90,37 +89,52 @@ func (p OpenAIProvider) CompleteContextWithObservation(
 
 	resp, err := do(base, headers)
 	if err != nil {
-		return nil, observation, invocation("openai: upstream transport error: " + err.Error())
+		return nil, observation, retryableInvocation("openai: upstream transport error: " + err.Error())
 	}
 	if resp.StatusCode == 401 && p.auth.CanRefresh() {
 		resp.Body.Close()
 		if ctx.Err() != nil {
 			return nil, observation, invocation("openai: request canceled: " + ctx.Err().Error())
 		}
-		if rerr := p.auth.Refresh(); rerr == nil {
-			if ctx.Err() != nil {
-				return nil, observation, invocation("openai: request canceled: " + ctx.Err().Error())
-			}
-			if base, headers, observation, err = prepareOpenAIAuth(p.auth); err == nil {
-				applyVisionHeader(headers, messages)
-				if resp, err = do(base, headers); err != nil {
-					return nil, observation, invocation("openai: upstream transport error on retry: " + err.Error())
-				}
-			}
+		if refreshErr := p.auth.Refresh(); refreshErr != nil {
+			return nil, observation, refreshErr
+		}
+		if ctx.Err() != nil {
+			return nil, observation, invocation("openai: request canceled: " + ctx.Err().Error())
+		}
+		if base, headers, observation, err = prepareOpenAIAuth(p.auth); err != nil {
+			return nil, observation, err
+		}
+		applyVisionHeader(headers, messages)
+		if resp, err = do(base, headers); err != nil {
+			return nil, observation, retryableInvocation("openai: upstream transport error on retry: " + err.Error())
 		}
 	}
 	defer resp.Body.Close()
-	raw, _ := io.ReadAll(resp.Body)
+	raw, readErr := readInvocationResponseBody(resp, "openai")
+	if readErr != nil {
+		return nil, observation, readErr
+	}
 	if resp.StatusCode >= 400 {
 		errMsg := extractError(raw)
 		if resp.StatusCode == 401 && strings.Contains(strings.ToLower(base), "opencode.ai") && !strings.HasSuffix(model, "-free") {
 			errMsg = fmt.Sprintf("OpenCode Zen free anonymous tier only supports models ending in '-free' (e.g. nemotron-3.5-lightning-free). '%s' requires an OpenCode Zen API key.", model)
 		}
+		if p.auth.CanRefresh() && (resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden) {
+			return nil, observation, failoverInvocationStatus(fmt.Sprintf("openai: upstream returned %d: %s", resp.StatusCode, redact(errMsg)), resp.StatusCode)
+		}
 		return nil, observation, invocationStatus(fmt.Sprintf("openai: upstream returned %d: %s", resp.StatusCode, redact(errMsg)), resp.StatusCode)
 	}
 	var out map[string]any
-	if json.Unmarshal(raw, &out) != nil {
-		return nil, observation, invocation("openai: invalid JSON in upstream response")
+	if json.Unmarshal(raw, &out) != nil || len(out) == 0 {
+		return nil, observation, circuitFailureInvocation("openai: invalid JSON in upstream response")
+	}
+	choices, ok := out["choices"].([]any)
+	if !ok || len(choices) == 0 {
+		return nil, observation, circuitFailureInvocation("openai: invalid chat response payload")
+	}
+	if _, ok := choices[0].(map[string]any); !ok {
+		return nil, observation, circuitFailureInvocation("openai: invalid chat response payload")
 	}
 	return out, observation, nil
 }
@@ -154,28 +168,36 @@ func (p OpenAIProvider) StreamContext(ctx context.Context, model string, message
 
 	resp, err := do(base, headers)
 	if err != nil {
-		return nil, invocation("openai: streaming transport error: " + err.Error())
+		return nil, retryableInvocation("openai: streaming transport error: " + err.Error())
 	}
 	if resp.StatusCode == 401 && p.auth.CanRefresh() {
 		resp.Body.Close()
-		if rerr := p.auth.Refresh(); rerr == nil {
-			if ctx.Err() != nil {
-				return nil, ctx.Err()
-			}
-			if base, headers, err = p.auth.Prepare(); err == nil {
-				applyVisionHeader(headers, messages)
-				if resp, err = do(base, headers); err != nil {
-					return nil, invocation("openai: streaming transport error on retry: " + err.Error())
-				}
-			}
+		if refreshErr := p.auth.Refresh(); refreshErr != nil {
+			return nil, refreshErr
+		}
+		if ctx.Err() != nil {
+			return nil, ctx.Err()
+		}
+		if base, headers, err = p.auth.Prepare(); err != nil {
+			return nil, err
+		}
+		applyVisionHeader(headers, messages)
+		if resp, err = do(base, headers); err != nil {
+			return nil, retryableInvocation("openai: streaming transport error on retry: " + err.Error())
 		}
 	}
 	if resp.StatusCode >= 400 {
-		raw, _ := io.ReadAll(resp.Body)
+		raw, readErr := readInvocationResponseBody(resp, "openai")
 		resp.Body.Close()
+		if readErr != nil {
+			return nil, readErr
+		}
 		errMsg := extractError(raw)
 		if resp.StatusCode == 401 && strings.Contains(strings.ToLower(base), "opencode.ai") && !strings.HasSuffix(model, "-free") {
 			errMsg = fmt.Sprintf("OpenCode Zen free anonymous tier only supports models ending in '-free' (e.g. nemotron-3.5-lightning-free). '%s' requires an OpenCode Zen API key.", model)
+		}
+		if p.auth.CanRefresh() && (resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden) {
+			return nil, failoverInvocationStatus(fmt.Sprintf("openai: upstream returned %d: %s", resp.StatusCode, redact(errMsg)), resp.StatusCode)
 		}
 		return nil, invocationStatus(fmt.Sprintf("openai: upstream returned %d: %s", resp.StatusCode, redact(errMsg)), resp.StatusCode)
 	}
@@ -598,43 +620,58 @@ func (p OpenAIProvider) callResponsesPayloadContext(
 
 	resp, err := post(base, headers)
 	if err != nil {
-		return nil, observation, invocation("openai: responses transport error: " + err.Error())
+		return nil, observation, retryableInvocation("openai: responses transport error: " + err.Error())
 	}
 	if resp.StatusCode == 401 && p.auth.CanRefresh() {
 		resp.Body.Close()
 		if ctx.Err() != nil {
 			return nil, observation, invocation("openai: responses request canceled: " + ctx.Err().Error())
 		}
-		if rerr := p.auth.Refresh(); rerr == nil {
-			if ctx.Err() != nil {
-				return nil, observation, invocation("openai: responses request canceled: " + ctx.Err().Error())
-			}
-			if base, headers, observation, err = prepareOpenAIAuth(p.auth); err == nil {
-				headers.Set("Accept", "application/json")
-				applyResponsesVisionHeader(headers, payload)
-				if resp, err = post(base, headers); err != nil {
-					return nil, observation, invocation("openai: responses transport error on retry: " + err.Error())
-				}
-			}
+		if refreshErr := p.auth.Refresh(); refreshErr != nil {
+			return nil, observation, refreshErr
+		}
+		if ctx.Err() != nil {
+			return nil, observation, invocation("openai: responses request canceled: " + ctx.Err().Error())
+		}
+		if base, headers, observation, err = prepareOpenAIAuth(p.auth); err != nil {
+			return nil, observation, err
+		}
+		headers.Set("Accept", "application/json")
+		applyResponsesVisionHeader(headers, payload)
+		if resp, err = post(base, headers); err != nil {
+			return nil, observation, retryableInvocation("openai: responses transport error on retry: " + err.Error())
 		}
 	}
-	raw, _ := io.ReadAll(resp.Body)
+	raw, readErr := readInvocationResponseBody(resp, "openai: responses")
 	resp.Body.Close()
+	if readErr != nil {
+		return nil, observation, readErr
+	}
 	if allowUnsupportedParameterRetry &&
 		resp.StatusCode == http.StatusBadRequest &&
 		stripRejectedParams(payload, raw) && ctx.Err() == nil {
 		if resp2, e := post(base, headers); e == nil {
-			raw, _ = io.ReadAll(resp2.Body)
+			raw, readErr = readInvocationResponseBody(resp2, "openai: responses")
 			resp2.Body.Close()
+			if readErr != nil {
+				return nil, observation, readErr
+			}
 			resp = resp2
 		}
 	}
 	if resp.StatusCode >= 400 {
-		return nil, observation, invocationStatus(fmt.Sprintf("openai: responses endpoint returned %d: %s", resp.StatusCode, redact(extractError(raw))), resp.StatusCode)
+		message := fmt.Sprintf("openai: responses endpoint returned %d: %s", resp.StatusCode, redact(extractError(raw)))
+		if p.auth.CanRefresh() && (resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden) {
+			return nil, observation, failoverInvocationStatus(message, resp.StatusCode)
+		}
+		return nil, observation, invocationStatus(message, resp.StatusCode)
 	}
 	var out map[string]any
-	if json.Unmarshal(raw, &out) != nil {
-		return nil, observation, invocation("openai: invalid JSON in responses payload")
+	if json.Unmarshal(raw, &out) != nil || len(out) == 0 {
+		return nil, observation, circuitFailureInvocation("openai: invalid JSON in responses payload")
+	}
+	if _, ok := out["output"].([]any); !ok {
+		return nil, observation, circuitFailureInvocation("openai: invalid Responses payload")
 	}
 	return out, observation, nil
 }
@@ -662,31 +699,42 @@ func (p OpenAIProvider) streamResponsesPayloadContext(
 	}
 	response, err := post(base, headers)
 	if err != nil {
-		return nil, observation, invocation(
+		return nil, observation, retryableInvocation(
 			"openai: responses streaming transport error: " + err.Error(),
 		)
 	}
 	if response.StatusCode == http.StatusUnauthorized && p.auth.CanRefresh() {
 		response.Body.Close()
-		if refreshErr := p.auth.Refresh(); refreshErr == nil {
-			if ctx.Err() != nil {
-				return nil, observation, ctx.Err()
-			}
-			if base, headers, observation, err = prepareOpenAIAuth(p.auth); err == nil {
-				headers.Set("Accept", "text/event-stream")
-				applyResponsesVisionHeader(headers, payload)
-				response, err = post(base, headers)
-			}
+		if refreshErr := p.auth.Refresh(); refreshErr != nil {
+			return nil, observation, refreshErr
 		}
+		if ctx.Err() != nil {
+			return nil, observation, ctx.Err()
+		}
+		if base, headers, observation, err = prepareOpenAIAuth(p.auth); err != nil {
+			return nil, observation, err
+		}
+		headers.Set("Accept", "text/event-stream")
+		applyResponsesVisionHeader(headers, payload)
+		response, err = post(base, headers)
 		if err != nil {
-			return nil, observation, invocation(
+			return nil, observation, retryableInvocation(
 				"openai: responses streaming retry failed: " + err.Error(),
 			)
 		}
 	}
 	if response.StatusCode >= 400 {
-		raw, _ := io.ReadAll(response.Body)
+		raw, readErr := readInvocationResponseBody(response, "openai: responses")
 		response.Body.Close()
+		if readErr != nil {
+			return nil, observation, readErr
+		}
+		if p.auth.CanRefresh() && (response.StatusCode == http.StatusUnauthorized || response.StatusCode == http.StatusForbidden) {
+			return nil, observation, failoverInvocationStatus(
+				fmt.Sprintf("openai: responses endpoint returned %d: %s", response.StatusCode, redact(extractError(raw))),
+				response.StatusCode,
+			)
+		}
 		return nil, observation, invocationStatus(
 			fmt.Sprintf(
 				"openai: responses endpoint returned %d: %s",

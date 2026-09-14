@@ -208,7 +208,7 @@ func TestVideoStartAndPollAcrossBothResponseShapes(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if job.Operation != "operations/abc123" || job.Done {
+			if job.Operation != "models/veo-3.0-generate-001/operations/abc123" || job.Done {
 				t.Fatalf("start job = %+v", job)
 			}
 			// sampleCount is defaulted so the request is valid without callers

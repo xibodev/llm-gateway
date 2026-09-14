@@ -8,6 +8,20 @@ import (
 	"testing"
 )
 
+type partialErrorReader struct {
+	delivered bool
+}
+
+func (reader *partialErrorReader) Read(buffer []byte) (int, error) {
+	if reader.delivered {
+		return 0, io.ErrUnexpectedEOF
+	}
+	reader.delivered = true
+	return copy(buffer, []byte(`{"partial":`)), nil
+}
+
+func (reader *partialErrorReader) Close() error { return nil }
+
 func TestSSERecordReaderParsesLogicalEvents(t *testing.T) {
 	stream := strings.Join([]string{
 		": comment\r",
@@ -103,4 +117,63 @@ func TestHTTPStreamIterReturnsCompleteRecordsAndParserErrors(t *testing.T) {
 	if !errors.As(iter.Err(), &sizeErr) {
 		t.Fatalf("error = %#v", iter.Err())
 	}
+}
+
+func TestInvocationResponseBodyReadFailureClassification(t *testing.T) {
+	for _, testCase := range []struct {
+		name      string
+		status    int
+		wantError bool
+	}{
+		{name: "successful response", status: http.StatusOK, wantError: true},
+		{name: "error response", status: http.StatusBadRequest},
+	} {
+		t.Run(testCase.name, func(t *testing.T) {
+			response := &http.Response{StatusCode: testCase.status, Body: &partialErrorReader{}}
+			raw, err := readInvocationResponseBody(response, "test")
+			if testCase.wantError {
+				if err == nil || !InvocationRetryable(err) {
+					t.Fatalf("error=%v retryable=%v", err, InvocationRetryable(err))
+				}
+				return
+			}
+			if err != nil || len(raw) != 0 {
+				t.Fatalf("raw=%q error=%v", raw, err)
+			}
+		})
+	}
+}
+
+func TestInvocationResponseBodySizeLimit(t *testing.T) {
+	for _, testCase := range []struct {
+		name      string
+		status    int
+		wantError bool
+	}{
+		{name: "successful response", status: http.StatusOK, wantError: true},
+		{name: "error response", status: http.StatusBadRequest},
+	} {
+		t.Run(testCase.name, func(t *testing.T) {
+			body := io.NopCloser(io.LimitReader(zeroReader{}, inferenceMaxResponseBytes+1))
+			raw, err := readInvocationResponseBody(&http.Response{StatusCode: testCase.status, Body: body}, "test")
+			if testCase.wantError {
+				if err == nil || !InvocationCircuitFailure(err) || InvocationRetryable(err) {
+					t.Fatalf("error=%v circuit=%v retry=%v", err, InvocationCircuitFailure(err), InvocationRetryable(err))
+				}
+				return
+			}
+			if err != nil || len(raw) != 0 {
+				t.Fatalf("raw=%d error=%v", len(raw), err)
+			}
+		})
+	}
+}
+
+type zeroReader struct{}
+
+func (zeroReader) Read(buffer []byte) (int, error) {
+	for index := range buffer {
+		buffer[index] = 0
+	}
+	return len(buffer), nil
 }

@@ -2,6 +2,7 @@ package api
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -149,7 +150,7 @@ func handleTranscriptions(w http.ResponseWriter, r *http.Request) {
 	}
 	_ = mw.Close()
 
-	req, _ := http.NewRequest("POST", base+"/audio/transcriptions", &buf)
+	req, _ := http.NewRequestWithContext(r.Context(), "POST", base+"/audio/transcriptions", &buf)
 	copyAuthHeaders(req, headers, true)
 	req.Header.Set("Content-Type", mw.FormDataContentType())
 	resp, err := audioClient.Do(req)
@@ -195,7 +196,7 @@ func handleSpeech(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if synthesizer, native := providers.SpeechSynthesizerForPrincipal(provider, principal); native {
-		serveNativeSpeech(w, body, synthesizer, provider, upstreamModel, principal, started, reqModel)
+		serveNativeSpeech(r.Context(), w, body, synthesizer, provider, upstreamModel, principal, started, reqModel)
 		return
 	}
 	base, headers, okp := providers.ProviderHTTPTarget(provider, principal)
@@ -206,7 +207,7 @@ func handleSpeech(w http.ResponseWriter, r *http.Request) {
 	}
 	body["model"] = upstreamModel
 	payload, _ := json.Marshal(body)
-	req, _ := http.NewRequest("POST", base+"/audio/speech", bytes.NewReader(payload))
+	req, _ := http.NewRequestWithContext(r.Context(), "POST", base+"/audio/speech", bytes.NewReader(payload))
 	copyAuthHeaders(req, headers, false)
 	req.Header.Set("Content-Type", "application/json")
 	resp, err := audioClient.Do(req)
@@ -253,7 +254,7 @@ func speedToRate(speed float64) string {
 // serveNativeSpeech renders TTS through a provider that synthesizes audio
 // in-process (e.g. edge_tts) instead of proxying an OpenAI-compatible HTTP API.
 func serveNativeSpeech(
-	w http.ResponseWriter, body map[string]any, synthesizer providers.SpeechSynthesizer,
+	ctx context.Context, w http.ResponseWriter, body map[string]any, synthesizer providers.SpeechSynthesizer,
 	provider, upstreamModel string, principal *config.Principal, started time.Time, reqModel string,
 ) {
 	input, _ := body["input"].(string)
@@ -293,7 +294,13 @@ func serveNativeSpeech(
 	if raw, ok := body["speed"].(float64); ok {
 		speed = raw
 	}
-	audio, _, err := synthesizer.Synthesize(voice, input, speedToRate(speed))
+	var audio []byte
+	var err error
+	if contextual, ok := synthesizer.(providers.ContextSpeechSynthesizer); ok {
+		audio, _, err = contextual.SynthesizeContext(ctx, voice, input, speedToRate(speed))
+	} else {
+		audio, _, err = synthesizer.Synthesize(voice, input, speedToRate(speed))
+	}
 	if err != nil {
 		recordFailureUsage("openai.speech", reqModel, principal, 502, "upstream", started)
 		writeUpstreamError(w, err)

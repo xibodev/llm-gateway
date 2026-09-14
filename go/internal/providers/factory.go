@@ -1,6 +1,7 @@
 package providers
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"strings"
@@ -206,9 +207,15 @@ func GetProviderForPrincipal(
 }
 
 // AsSpeechSynthesizer reports whether a provider can synthesize speech
-// natively, unwrapping resilience decorators to reach the concrete provider.
+// natively. Resilience decorators implement the capability and enforce policy.
 func AsSpeechSynthesizer(provider Provider) (SpeechSynthesizer, bool) {
 	for provider != nil {
+		if resilient, ok := provider.(*ResilientProvider); ok {
+			if _, supported := AsSpeechSynthesizer(resilient.inner); !supported {
+				return nil, false
+			}
+			return resilient, true
+		}
 		if synthesizer, ok := provider.(SpeechSynthesizer); ok {
 			return synthesizer, true
 		}
@@ -346,12 +353,25 @@ func newVertexProvider(
 			providerID, project, credential.ProjectID(),
 		)}
 	}
-	token, err := gcpauth.AccessToken(credential, gcpauth.CloudPlatformScope)
-	if err != nil {
-		return nil, &ConfigError{Msg: fmt.Sprintf("provider '%s': %v", providerID, err)}
+	tokenSource := func() (string, error) {
+		token, tokenErr := gcpauth.AccessToken(credential, gcpauth.CloudPlatformScope)
+		if tokenErr != nil {
+			var exchangeErr *gcpauth.TokenError
+			if errors.As(tokenErr, &exchangeErr) {
+				message := fmt.Sprintf("provider '%s': service account token refresh failed", providerID)
+				if exchangeErr.StatusCode != 0 {
+					return "", failoverInvocationStatus(message, exchangeErr.StatusCode)
+				}
+				if exchangeErr.Code == "transport" {
+					return "", retryableInvocation(message)
+				}
+			}
+			return "", invocation(fmt.Sprintf("provider '%s': service account token refresh failed", providerID))
+		}
+		return token, nil
 	}
-	return NewVertexAIWithAccessToken(
-		cfg.BaseURL, token, project, cfg.Location, cfg.TimeoutOr(120),
+	return NewVertexAIWithTokenSource(
+		cfg.BaseURL, project, cfg.Location, cfg.TimeoutOr(120), tokenSource,
 	), nil
 }
 
