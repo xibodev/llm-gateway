@@ -1,4 +1,4 @@
-import { copyFileSync, mkdirSync, readdirSync, rmSync, statSync } from "node:fs";
+import { copyFileSync, mkdirSync, rmSync } from "node:fs";
 import { resolve, join } from "node:path";
 
 const root = resolve(import.meta.dirname, "..");
@@ -14,8 +14,34 @@ if (args[0] === "--clean") {
   process.exit(0);
 }
 await import("./check-docs.mjs");
-const extensions = /\.(?:html|css|js|json|svg|webmanifest|xml|txt)$/;
-const files = readdirSync(source).filter(name => extensions.test(name) && statSync(join(source, name)).isFile());
+const files = [
+  "404.html",
+  "api.html",
+  "clients.html",
+  "concepts.html",
+  "configuration.html",
+  "docs.html",
+  "favicon.svg",
+  "governance.html",
+  "icon-192.svg",
+  "icon-512.svg",
+  "index.html",
+  "limitations.html",
+  "logo-mark.svg",
+  "og-default.png",
+  "og-default.svg",
+  "operations.html",
+  "providers.html",
+  "quickstart.html",
+  "robots.txt",
+  "search.json",
+  "security.html",
+  "site.js",
+  "site.webmanifest",
+  "sitemap.xml",
+  "styles.css",
+  "upgrading.html",
+];
 // Only this generated directory is replaced; source and private notes stay out.
 rmSync(output, { recursive: true, force: true });
 mkdirSync(output);
