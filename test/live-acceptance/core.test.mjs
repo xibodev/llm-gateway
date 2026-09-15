@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   buildRoutePlans,
+  chatCompletionPassed,
   classifications,
   classifyObservation,
   classifyPairedObservation,
@@ -12,6 +13,18 @@ import {
   schema,
   selectHealthyModels,
 } from "./core.mjs";
+
+test("chat evidence requires text from the expected served model", () => {
+  const result = (content, model = "model") => ({
+    status: 200,
+    json: { model, choices: [{ message: { content } }] },
+  });
+  assert.equal(chatCompletionPassed(result("ok"), "model"), true);
+  assert.equal(chatCompletionPassed(result(""), "model"), false);
+  assert.equal(chatCompletionPassed(result(null), "model"), false);
+  assert.equal(chatCompletionPassed(result("ok", "other"), "model"), false);
+  assert.equal(chatCompletionPassed({ ...result("ok"), status: 502 }, "model"), false);
+});
 
 test("free model selection is provider-specific", () => {
   assert.equal(isFreeModel("opencode-zen", "deepseek-v4-flash-free"), true);

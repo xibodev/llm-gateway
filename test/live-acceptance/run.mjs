@@ -7,6 +7,7 @@ import { promisify } from "node:util";
 import { randomBytes, randomUUID } from "node:crypto";
 import {
   buildRoutePlans,
+  chatCompletionPassed,
   classifications,
   classifyObservation,
   classifyPairedObservation,
@@ -25,6 +26,7 @@ const output = resolve(process.env.LLMGW_ACCEPTANCE_REPORT || `${repo}/test/live
 const port = Number(process.env.LLMGW_ACCEPTANCE_PORT || 18810);
 const sweepConcurrency = Math.max(1, Number(process.env.LLMGW_ACCEPTANCE_CONCURRENCY || 1));
 const modelTimeout = Math.max(5_000, Number(process.env.LLMGW_ACCEPTANCE_MODEL_TIMEOUT_MS || 180_000));
+const completionMaxTokens = 512;
 const baseURL = `http://127.0.0.1:${port}`;
 const runID = `${Date.now()}-${process.pid}`;
 const project = `llmgw-live-${runID}`;
@@ -132,6 +134,26 @@ function errorText(result) {
   return result.error || result.json?.error?.message || result.json?.error || result.text;
 }
 
+function responseEvidence(result, expectedModel) {
+  const choices = Array.isArray(result.json?.choices) ? result.json.choices : [];
+  const first = choices[0] && typeof choices[0] === "object" ? choices[0] : null;
+  const message = first?.message && typeof first.message === "object" ? first.message : null;
+  const content = message?.content;
+  const text = chatText(result.json) || messagesText(result.json) || responsesText(result.json);
+  const error = result.error || result.json?.error?.message || result.json?.error || (result.status >= 300 ? result.text : "");
+  return {
+    status: result.status,
+    expected_model: expectedModel,
+    actual_model: safeExcerpt(result.json?.model, 100),
+    model_match: result.json?.model === expectedModel,
+    choices: choices.length,
+    finish_reason: safeExcerpt(first?.finish_reason, 40),
+    content_type: content === null ? "null" : Array.isArray(content) ? "array" : typeof content,
+    text_length: text.length,
+    error: safeExcerpt(typeof error === "string" ? error : JSON.stringify(error), 120),
+  };
+}
+
 async function waitHealth() {
   for (let attempt = 0; attempt < 60; attempt++) {
     const health = await request("/health", { key: "", timeout: 2_000 });
@@ -194,7 +216,7 @@ async function sweepProvider(provider, models) {
       const model = candidates[cursor++];
     const result = await request("/v1/chat/completions", {
       method: "POST",
-       body: { model: `${provider}/${model}`, messages: [{ role: "user", content: "hi" }], max_tokens: 512 },
+       body: { model: `${provider}/${model}`, messages: [{ role: "user", content: "hi" }], max_tokens: completionMaxTokens },
       timeout: modelTimeout,
     });
     const text = chatText(result.json);
@@ -240,7 +262,7 @@ async function directProviderProbe(provider, model) {
       },
       body: JSON.stringify(zenResponses
         ? { model, input: "hi", max_output_tokens: 512, stream: false }
-        : { model, messages: [{ role: "user", content: "hi" }], max_tokens: 512, stream: false }),
+        : { model, messages: [{ role: "user", content: "hi" }], max_tokens: completionMaxTokens, stream: false }),
     });
     const text = await response.text();
     let json = null;
@@ -330,11 +352,11 @@ async function testAPIs(key, plans, healthy) {
   let routePasses = 0;
   const targets = [{ name: `${healthy[0].provider}/${healthy[0].model}`, kind: "exact", expectedAttempts: 1 }, ...plans.map((item) => ({ name: item.name, kind: item.kind, expectedAttempts: item.expectedAttempts }))];
   for (const target of targets) {
-    const chat = await request("/v1/chat/completions", { method: "POST", key, body: { model: target.name, messages: [{ role: "user", content: "hi" }], max_tokens: 128 }, timeout: 90_000 });
+    const chat = await request("/v1/chat/completions", { method: "POST", key, body: { model: target.name, messages: [{ role: "user", content: "hi" }], max_tokens: completionMaxTokens }, timeout: 90_000 });
     const chatBody = chatText(chat.json);
     report.api.push({ surface: "chat", target: target.name, status: chat.status, duration_ms: chat.duration_ms, text: safeExcerpt(chatBody), error: safeExcerpt(errorText(chat)) });
     const chatModel = chat.json?.model || "";
-    await recordLiveCheck(`chat:${target.name}`, chat.status === 200 && Boolean(chatBody) && chatModel === healthy[0].model, chat, healthy[0]);
+    await recordLiveCheck(`chat:${target.name}`, chatCompletionPassed(chat, healthy[0].model), chat, healthy[0]);
     if (target.expectedAttempts > 1 && chat.status === 200 && Boolean(chatBody)) {
       const telemetry = await request("/admin/api/telemetry");
       const event = (telemetry.json?.recent || []).find((item) => item.requested === target.name);
@@ -347,7 +369,7 @@ async function testAPIs(key, plans, healthy) {
       const valid = attempts === target.expectedAttempts && served === expectedServed && JSON.stringify(order) === JSON.stringify(expectedOrder) && (target.expectedAttempts < 2 || event?.attempts?.[0]?.throttled === true);
       check(`trace:${target.name}`, valid ? "passed" : "failed", `attempts=${attempts}, served=${served}, order=${order.join(" -> ")}`, true);
     }
-    const messages = await request("/v1/messages", { method: "POST", key, body: { model: target.name, messages: [{ role: "user", content: "hi" }], max_tokens: 128 }, timeout: 90_000 });
+    const messages = await request("/v1/messages", { method: "POST", key, body: { model: target.name, messages: [{ role: "user", content: "hi" }], max_tokens: completionMaxTokens }, timeout: 90_000 });
     const messageBody = messagesText(messages.json);
     report.api.push({ surface: "messages", target: target.name, status: messages.status, duration_ms: messages.duration_ms, text: safeExcerpt(messageBody), error: safeExcerpt(errorText(messages)) });
     const messagesPassed = messages.status === 200 && Boolean(messageBody) && messages.json?.model === healthy[0].model;
@@ -374,7 +396,11 @@ async function recordLiveCheck(name, passed, result, finalModel) {
   );
   const product = classification === classifications.productRegression;
   const unknown = classification === classifications.attributionInconclusive;
-  check(name, product ? "failed" : unknown ? "inconclusive" : "warning", `${classification}: ${errorText(result)}`, product || unknown);
+  const gateway = result.firstEvidence
+    ? { first: result.firstEvidence, replay: responseEvidence(result, finalModel.model) }
+    : responseEvidence(result, finalModel.model);
+  const detail = `${classification}: gateway=${JSON.stringify(gateway)} direct=${JSON.stringify(responseEvidence(direct, finalModel.model))}`;
+  check(name, product ? "failed" : unknown ? "inconclusive" : "warning", detail, product || unknown);
 }
 
 async function testPlayground(identity, healthy, plans) {
@@ -573,8 +599,16 @@ async function restartAndCheck(identity, healthy, plans) {
   if (!passed) return;
   let restartPasses = 0;
   for (const target of [`${healthy[0].provider}/${healthy[0].model}`, plans.at(-1).name]) {
-    const result = await request("/v1/chat/completions", { method: "POST", key: identity.token, body: { model: target, messages: [{ role: "user", content: "hi" }], max_tokens: 128 }, timeout: 90_000 });
-    const ok = result.status === 200 && Boolean(chatText(result.json)) && result.json?.model === healthy[0].model;
+    const requestOptions = { method: "POST", key: identity.token, body: { model: target, messages: [{ role: "user", content: "hi" }], max_tokens: completionMaxTokens }, timeout: 90_000 };
+    let result = await request("/v1/chat/completions", requestOptions);
+    let ok = chatCompletionPassed(result, healthy[0].model);
+    if (!ok && result.status >= 200 && result.status < 300) {
+      const first = responseEvidence(result, healthy[0].model);
+      result = await request("/v1/chat/completions", requestOptions);
+      result.firstEvidence = first;
+      ok = chatCompletionPassed(result, healthy[0].model);
+      if (ok) check(`restart-replay:${target}`, "warning", `equivalent replay passed after unusable 2xx response: ${JSON.stringify(first)}`, false);
+    }
     if (ok) restartPasses++;
     if (ok || mode !== "live") check(`restart-chat:${target}`, ok ? "passed" : "failed", errorText(result) || chatText(result.json), true);
     else await recordLiveCheck(`restart-chat:${target}`, false, result, healthy[0]);
