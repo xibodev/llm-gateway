@@ -35,6 +35,8 @@ services:
       LLMGW_RETENTION_DELIVERED_OUTBOX_DAYS: ${LLMGW_RETENTION_DELIVERED_OUTBOX_DAYS:-400}
       LLMGW_BACKUP_KEEP: ${LLMGW_BACKUP_KEEP:-7}
       LLMGW_PROVIDER_ROSTER_URL: ${LLMGW_PROVIDER_ROSTER_URL:-https://xibodev.github.io/llm-gateway/roster/payload.json}
+      LLMGW_PROVIDER_ROSTER_AUTO_REFRESH: ${LLMGW_PROVIDER_ROSTER_AUTO_REFRESH:-true}
+      LLMGW_ANONYMOUS_PROVIDER_AUTOMATION: ${LLMGW_ANONYMOUS_PROVIDER_AUTOMATION:-false}
     volumes:
       - ./config.local.yaml:/config/llmgw.config.yaml:ro
       - llmgw-state:/state

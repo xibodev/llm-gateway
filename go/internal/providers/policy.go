@@ -69,8 +69,8 @@ func (r *ResilientProvider) checkCircuit() error {
 	defer c.mu.Unlock()
 	if !c.openUntil.IsZero() && time.Now().Before(c.openUntil) {
 		remaining := time.Until(c.openUntil).Seconds()
-		return invocation(r.name + ": circuit breaker open for another " +
-			formatSeconds(remaining) + "s")
+		return invocationStatus(r.name+": circuit breaker open for another "+
+			formatSeconds(remaining)+"s", 503)
 	}
 	if !c.openUntil.IsZero() && !time.Now().Before(c.openUntil) {
 		c.openUntil = time.Time{}
@@ -161,6 +161,14 @@ func (r *ResilientProvider) CompleteContextWithObservation(
 			return nil, observation, err
 		}
 		lastErr = err
+		if !InvocationRetryable(err) {
+			if InvocationCircuitFailure(err) {
+				r.recordFailure()
+			} else {
+				r.recordSuccess()
+			}
+			return nil, observation, err
+		}
 		if attempt < attempts {
 			if waitErr := waitForRetry(ctx, time.Duration(r.nextBackoff(attempt)*float64(time.Second))); waitErr != nil {
 				return nil, observation, waitErr
@@ -205,6 +213,14 @@ func (r *ResilientProvider) CompleteResponsesContext(
 			return nil, observation, err
 		}
 		lastErr = err
+		if !InvocationRetryable(err) {
+			if InvocationCircuitFailure(err) {
+				r.recordFailure()
+			} else {
+				r.recordSuccess()
+			}
+			return nil, observation, err
+		}
 		if attempt < attempts {
 			if waitErr := waitForRetry(ctx, time.Duration(r.nextBackoff(attempt)*float64(time.Second))); waitErr != nil {
 				return nil, observation, waitErr
@@ -255,6 +271,14 @@ func (r *ResilientProvider) StreamResponsesContext(
 			return nil, observation, err
 		}
 		lastErr = err
+		if !InvocationRetryable(err) {
+			if InvocationCircuitFailure(err) {
+				r.recordFailure()
+			} else {
+				r.recordSuccess()
+			}
+			return nil, observation, err
+		}
 		if attempt < attempts {
 			if waitErr := waitForRetry(ctx, time.Duration(r.nextBackoff(attempt)*float64(time.Second))); waitErr != nil {
 				return nil, observation, waitErr
@@ -296,6 +320,14 @@ func (r *ResilientProvider) StreamContext(ctx context.Context, model string, mes
 			return nil, err
 		}
 		lastErr = err
+		if !InvocationRetryable(err) {
+			if InvocationCircuitFailure(err) {
+				r.recordFailure()
+			} else {
+				r.recordSuccess()
+			}
+			return nil, err
+		}
 		if attempt < attempts {
 			if waitErr := waitForRetry(ctx, time.Duration(r.nextBackoff(attempt)*float64(time.Second))); waitErr != nil {
 				return nil, waitErr
@@ -306,6 +338,160 @@ func (r *ResilientProvider) StreamContext(ctx context.Context, model string, mes
 		return nil, err
 	}
 	return nil, lastErr
+}
+
+func (r *ResilientProvider) DefaultVoice() string {
+	if synthesizer, ok := AsSpeechSynthesizer(r.inner); ok {
+		return synthesizer.DefaultVoice()
+	}
+	return ""
+}
+
+func (r *ResilientProvider) Synthesize(voice, text, rate string) ([]byte, string, error) {
+	return r.SynthesizeContext(context.Background(), voice, text, rate)
+}
+
+func (r *ResilientProvider) SynthesizeContext(ctx context.Context, voice, text, rate string) ([]byte, string, error) {
+	synthesizer, ok := AsSpeechSynthesizer(r.inner)
+	if !ok {
+		return nil, "", &ConfigError{Msg: "provider does not support speech synthesis"}
+	}
+	if err := r.checkCircuit(); err != nil {
+		return nil, "", err
+	}
+	for attempt, attempts := 1, max1(r.policy.RetryMaxAttempts); ; attempt++ {
+		var audio []byte
+		var format string
+		var err error
+		if contextual, ok := synthesizer.(ContextSpeechSynthesizer); ok {
+			audio, format, err = contextual.SynthesizeContext(ctx, voice, text, rate)
+		} else {
+			audio, format, err = synthesizer.Synthesize(voice, text, rate)
+		}
+		if ctx.Err() != nil {
+			return nil, "", ctx.Err()
+		}
+		if err == nil {
+			r.recordSuccess()
+			return audio, format, nil
+		}
+		if !r.retryNativeInvocation(err, attempt, attempts) {
+			return nil, "", err
+		}
+		if waitErr := waitForRetry(ctx, time.Duration(r.nextBackoff(attempt)*float64(time.Second))); waitErr != nil {
+			return nil, "", waitErr
+		}
+	}
+}
+
+func (r *ResilientProvider) GenerateImages(model, prompt string, count int) ([]GeneratedImage, map[string]any, error) {
+	return r.GenerateImagesContext(context.Background(), model, prompt, count)
+}
+
+func (r *ResilientProvider) GenerateImagesContext(ctx context.Context, model, prompt string, count int) ([]GeneratedImage, map[string]any, error) {
+	generator, ok := AsImageGenerator(r.inner)
+	if !ok {
+		return nil, nil, &ConfigError{Msg: "provider does not support image generation"}
+	}
+	if err := r.checkCircuit(); err != nil {
+		return nil, nil, err
+	}
+	var images []GeneratedImage
+	var usage map[string]any
+	var err error
+	if contextual, ok := generator.(ContextImageGenerator); ok {
+		images, usage, err = contextual.GenerateImagesContext(ctx, model, prompt, count)
+	} else {
+		images, usage, err = generator.GenerateImages(model, prompt, count)
+	}
+	if err == nil {
+		r.recordSuccess()
+	} else {
+		r.recordInvocationOutcome(err)
+	}
+	return images, usage, err
+}
+
+func (r *ResilientProvider) StartVideo(model, prompt string, parameters map[string]any) (VideoJob, error) {
+	return r.StartVideoContext(context.Background(), model, prompt, parameters)
+}
+
+func (r *ResilientProvider) StartVideoContext(ctx context.Context, model, prompt string, parameters map[string]any) (VideoJob, error) {
+	generator, ok := AsVideoGenerator(r.inner)
+	if !ok {
+		return VideoJob{}, &ConfigError{Msg: "provider does not support video generation"}
+	}
+	if err := r.checkCircuit(); err != nil {
+		return VideoJob{}, err
+	}
+	var job VideoJob
+	var err error
+	if contextual, ok := generator.(ContextVideoGenerator); ok {
+		job, err = contextual.StartVideoContext(ctx, model, prompt, parameters)
+	} else {
+		job, err = generator.StartVideo(model, prompt, parameters)
+	}
+	if ctx.Err() != nil {
+		return VideoJob{}, ctx.Err()
+	}
+	if err == nil {
+		r.recordSuccess()
+	} else {
+		r.recordInvocationOutcome(err)
+	}
+	return job, err
+}
+
+func (r *ResilientProvider) PollVideo(operation string) (VideoJob, error) {
+	return r.PollVideoContext(context.Background(), operation)
+}
+
+func (r *ResilientProvider) PollVideoContext(ctx context.Context, operation string) (VideoJob, error) {
+	generator, ok := AsVideoGenerator(r.inner)
+	if !ok {
+		return VideoJob{}, &ConfigError{Msg: "provider does not support video generation"}
+	}
+	if err := r.checkCircuit(); err != nil {
+		return VideoJob{}, err
+	}
+	for attempt, attempts := 1, max1(r.policy.RetryMaxAttempts); ; attempt++ {
+		var job VideoJob
+		var err error
+		if contextual, ok := generator.(ContextVideoGenerator); ok {
+			job, err = contextual.PollVideoContext(ctx, operation)
+		} else {
+			job, err = generator.PollVideo(operation)
+		}
+		if ctx.Err() != nil {
+			return VideoJob{}, ctx.Err()
+		}
+		if err == nil {
+			r.recordSuccess()
+			return job, nil
+		}
+		if !r.retryNativeInvocation(err, attempt, attempts) {
+			return VideoJob{}, err
+		}
+		if waitErr := waitForRetry(ctx, time.Duration(r.nextBackoff(attempt)*float64(time.Second))); waitErr != nil {
+			return VideoJob{}, waitErr
+		}
+	}
+}
+
+func (r *ResilientProvider) retryNativeInvocation(err error, attempt, attempts int) bool {
+	if !InvocationRetryable(err) || attempt >= attempts {
+		r.recordInvocationOutcome(err)
+		return false
+	}
+	return true
+}
+
+func (r *ResilientProvider) recordInvocationOutcome(err error) {
+	if InvocationCircuitFailure(err) {
+		r.recordFailure()
+	} else if IsInvocation(err) {
+		r.recordSuccess()
+	}
 }
 
 func max1(n int) int {

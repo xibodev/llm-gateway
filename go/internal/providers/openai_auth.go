@@ -1,11 +1,14 @@
 package providers
 
 import (
+	"crypto/rand"
+	"encoding/hex"
+	"errors"
 	"fmt"
 	"net/http"
 	"strings"
-	"time"
 
+	"llmgw/internal/buildinfo"
 	"llmgw/internal/config"
 	"llmgw/internal/copilotauth"
 	"llmgw/internal/iam"
@@ -44,29 +47,101 @@ func prepareOpenAIAuth(
 	return baseURL, headers, nil, err
 }
 
+func copilotInvocationError(err error) error {
+	if err == nil || IsInvocation(err) || IsConfig(err) {
+		return err
+	}
+	message := "github_copilot: " + err.Error()
+	var authErr *copilotauth.AuthError
+	if errors.As(err, &authErr) {
+		if authErr.Transport {
+			return retryableInvocation(message)
+		}
+		if authErr.StatusCode != 0 {
+			return failoverInvocationStatus(message, authErr.StatusCode)
+		}
+	}
+	return invocation(message)
+}
+
 // bearerAuth is a static base URL + optional Bearer key: openai_compatible,
 // bedrock (token), litellm, localai, and any keyless local server.
 type bearerAuth struct {
-	base        string
-	apiKey      string
-	observation *iam.ProviderAccountObservation
+	base            string
+	apiKey          string
+	observation     *iam.ProviderAccountObservation
+	opencode        bool
+	opencodeProject string
 }
 
-func (a bearerAuth) Prepare() (string, http.Header, error) {
-	h := http.Header{}
-	h.Set("Content-Type", "application/json")
-	key := strings.TrimSpace(a.apiKey)
+func normalizeBearerKey(value string) string {
+	key := strings.TrimSpace(value)
 	if strings.HasPrefix(strings.ToLower(key), "bearer ") {
 		key = strings.TrimSpace(key[7:])
 	}
 	if strings.EqualFold(key, "free") || strings.EqualFold(key, "none") {
 		key = ""
 	}
+	return key
+}
+
+func AnonymousAPIKey(value string) bool {
+	key := normalizeBearerKey(value)
+	return key == "" || strings.EqualFold(key, "public")
+}
+
+func openCodeCorrelationID(prefix string) (string, error) {
+	var raw [16]byte
+	if _, err := rand.Read(raw[:]); err != nil {
+		return "", err
+	}
+	return prefix + "_" + hex.EncodeToString(raw[:]), nil
+}
+
+func newBearerAuth(
+	base, apiKey string, observation *iam.ProviderAccountObservation, opencode bool,
+) (bearerAuth, error) {
+	auth := bearerAuth{
+		base: strings.TrimRight(base, "/"), apiKey: apiKey,
+		observation: observation, opencode: opencode,
+	}
+	if !opencode {
+		return auth, nil
+	}
+	var err error
+	if auth.opencodeProject, err = openCodeCorrelationID("prj"); err != nil {
+		return bearerAuth{}, err
+	}
+	return auth, nil
+}
+
+func (a bearerAuth) Prepare() (string, http.Header, error) {
+	h := http.Header{}
+	h.Set("Content-Type", "application/json")
+	key := normalizeBearerKey(a.apiKey)
+	if a.opencode {
+		if a.opencodeProject == "" {
+			return "", nil, errors.New("OpenCode request identity is unavailable")
+		}
+		sessionID, err := openCodeCorrelationID("ses")
+		if err != nil {
+			return "", nil, fmt.Errorf("create OpenCode session identity: %w", err)
+		}
+		requestID, err := openCodeCorrelationID("msg")
+		if err != nil {
+			return "", nil, fmt.Errorf("create OpenCode request identity: %w", err)
+		}
+		if key == "" {
+			key = "public"
+		}
+		h.Set("x-opencode-project", a.opencodeProject)
+		h.Set("x-opencode-session", sessionID)
+		h.Set("x-opencode-request", requestID)
+		h.Set("x-opencode-client", "llmgw")
+		h.Set("User-Agent", "llm-gateway/"+buildinfo.Version)
+	}
 	if key != "" {
 		h.Set("Authorization", "Bearer "+key)
-	}
-	if strings.Contains(strings.ToLower(a.base), "opencode.ai") {
-		h.Set("x-session-id", fmt.Sprintf("sess_%x", time.Now().UnixNano()))
 	}
 	return a.base, h, nil
 }
@@ -102,7 +177,7 @@ func (a copilotAuth) PrepareObserved() (
 	}
 	s, observation, err := a.session(false)
 	if err != nil {
-		return "", nil, observation, invocation("github_copilot: " + err.Error())
+		return "", nil, observation, copilotInvocationError(err)
 	}
 	cfg := config.Get()
 	h := http.Header{}
@@ -121,7 +196,7 @@ func (copilotAuth) CanRefresh() bool { return true }
 
 func (a copilotAuth) Refresh() error {
 	_, _, err := a.session(true)
-	return err
+	return copilotInvocationError(err)
 }
 
 func (a copilotAuth) session(
@@ -142,7 +217,7 @@ func (a copilotAuth) session(
 	}
 	session, err := copilotauth.GetSessionForOAuth(oauth, force)
 	if err != nil {
-		return nil, observation, invocation("github_copilot: " + err.Error())
+		return nil, observation, copilotInvocationError(err)
 	}
 	return session, observation, nil
 }

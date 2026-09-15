@@ -64,6 +64,13 @@ test("unknown candidates remain discoverable without a protocol compatibility cl
   assert.equal(ui.rosterSetupEntry(merged[0], registry), null);
 });
 
+test("an exact built-in endpoint absorbs unknown roster protocol without changing setup", () => {
+  const merged = ui.mergeProviderRoster([builtin], [{ ...candidate, protocol: "unknown" }]);
+  assert.equal(merged.length, 1);
+  assert.equal(merged[0].roster_entries.length, 1);
+  assert.deepEqual(merged[0].provider_config, builtin.provider_config);
+});
+
 test("setup blocks anonymous Anthropic while retaining supported key/no-key adapters", () => {
   assert.equal(ui.rosterSetupEntry({ ...candidate, protocol: "anthropic", auth: "none" }, registry), null);
   assert.match(ui.rosterSetupUnavailableReason({ ...candidate, protocol: "anthropic", auth: "none" }, registry), /Anthropic adapter requires an API key/);

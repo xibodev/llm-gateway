@@ -54,6 +54,16 @@ export function App() {
   const [adminSignInRequired, setAdminSignInRequired] = useState(false);
   const [staticAdminKeyActive, setStaticAdminKeyActive] = useState(() => isAdmin && hasStaticAdminKey());
   const [catalogPrincipalID, setCatalogPrincipalID] = useState("");
+  const [appliedPlaygroundOwner, setAppliedPlaygroundOwner] = useState("");
+  const playgroundRoute = useMemo(() => {
+    const params = new URLSearchParams(page === "playground" ? route.detail : "");
+    const structured = params.has("model") && params.has("provider");
+    return {
+      model: structured ? params.get("model") ?? "" : route.detail,
+      provider: structured ? params.get("provider") ?? "" : "",
+      owner: structured ? params.get("owner") ?? "" : "",
+    };
+  }, [page, route.detail]);
 
   const load = async (showLoading = true) => {
     if (showLoading) setLoading(true);
@@ -96,6 +106,11 @@ export function App() {
     setCatalogPrincipalID((current) => ownerIDs.includes(current) ? current : (ownerIDs[0] ?? ""));
   }, [data, isAdmin]);
   useEffect(() => {
+    if (!isAdmin || !playgroundRoute.owner || appliedPlaygroundOwner === route.detail) return;
+    setCatalogPrincipalID(playgroundRoute.owner);
+    setAppliedPlaygroundOwner(route.detail);
+  }, [isAdmin, playgroundRoute.owner, route.detail, appliedPlaygroundOwner]);
+  useEffect(() => {
     const syncHash = () => setRoute(routeFromHash(mode));
     window.addEventListener("hashchange", syncHash);
     return () => window.removeEventListener("hashchange", syncHash);
@@ -128,7 +143,11 @@ export function App() {
       case "providers": content = <Providers data={data} mode={mode} detail={route.detail} onChanged={refresh} onNavigate={navigate} />; break;
       case "routes": content = <Routes data={data} mode={mode} detail={route.detail} onChanged={refresh} onNavigate={navigate} />; break;
       case "models": content = <ModelsEndpoints data={data} mode={mode} principalID={catalogPrincipalID} onPrincipalIDChange={setCatalogPrincipalID} />; break;
-      case "playground": content = <Playground data={data} mode={mode} principalID={catalogPrincipalID} onPrincipalIDChange={setCatalogPrincipalID} preset={route.detail} onPresetConsumed={() => setRoute({ page: "playground", detail: route.detail })} onBack={route.detail ? () => navigate("providers", route.detail.split("/")[0]) : undefined} />; break;
+      case "playground": {
+        const initialOwner = playgroundRoute.owner && appliedPlaygroundOwner !== route.detail ? playgroundRoute.owner : catalogPrincipalID;
+        content = <Playground data={data} mode={mode} principalID={initialOwner} onPrincipalIDChange={setCatalogPrincipalID} preset={playgroundRoute.model} onPresetConsumed={() => setRoute({ page: "playground", detail: route.detail })} onBack={playgroundRoute.provider ? () => navigate("providers", playgroundRoute.provider) : undefined} />;
+        break;
+      }
       case "keys": {
         const params = new URLSearchParams(route.detail);
         const ownerID = params.get("owner") || undefined;

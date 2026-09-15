@@ -9,6 +9,8 @@ import (
 	"time"
 )
 
+const inferenceMaxResponseBytes = 64 << 20
+
 // httpStreamIter returns complete SSE data payloads and surfaces parser or
 // mid-stream transport errors via Err.
 type httpStreamIter struct {
@@ -59,6 +61,26 @@ func decodeJSON(r io.Reader) (map[string]any, error) {
 		return nil, err
 	}
 	return out, nil
+}
+
+// readInvocationResponseBody distinguishes a truncated successful response from
+// a malformed complete payload. An incomplete error body is discarded so a
+// credential fragment cut before its recognizable suffix cannot reach logs.
+func readInvocationResponseBody(response *http.Response, prefix string) ([]byte, error) {
+	raw, err := io.ReadAll(io.LimitReader(response.Body, inferenceMaxResponseBytes+1))
+	if len(raw) > inferenceMaxResponseBytes {
+		if response.StatusCode >= http.StatusBadRequest {
+			return nil, nil
+		}
+		return nil, circuitFailureInvocation(prefix + ": response body exceeded the size limit")
+	}
+	if err != nil && response.StatusCode < http.StatusBadRequest {
+		return nil, retryableInvocation(prefix + ": response body transport error: " + err.Error())
+	}
+	if err != nil {
+		return nil, nil
+	}
+	return raw, nil
 }
 
 // extractError pulls a human error message out of a JSON error body, falling

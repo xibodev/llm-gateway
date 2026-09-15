@@ -143,10 +143,13 @@ func (p OllamaProvider) Complete(model string, messages []Message, kw Kwargs) (m
 	body, _ := json.Marshal(payload)
 	resp, err := httpClient(p.Timeout).Post(p.chatURL(), "application/json", bytes.NewReader(body))
 	if err != nil {
-		return nil, invocation("ollama: request failed: " + err.Error())
+		return nil, retryableInvocation("ollama: request failed: " + err.Error())
 	}
 	defer resp.Body.Close()
-	raw, _ := io.ReadAll(resp.Body)
+	raw, readErr := readInvocationResponseBody(resp, "ollama")
+	if readErr != nil {
+		return nil, readErr
+	}
 	if resp.StatusCode >= 400 {
 		return nil, invocationStatus(
 			fmt.Sprintf("ollama: request failed (%d): %s", resp.StatusCode, extractError(raw)),
@@ -155,16 +158,16 @@ func (p OllamaProvider) Complete(model string, messages []Message, kw Kwargs) (m
 	}
 	var data map[string]any
 	if json.Unmarshal(raw, &data) != nil {
-		return nil, invocation("ollama: invalid response payload")
+		return nil, circuitFailureInvocation("ollama: invalid response payload")
 	}
 	message, ok := data["message"].(map[string]any)
 	if !ok {
-		return nil, invocation("ollama: invalid response payload")
+		return nil, circuitFailureInvocation("ollama: invalid response payload")
 	}
 	content, _ := message["content"].(string)
 	toolCalls := ollamaMapToolCalls(message["tool_calls"])
 	if content == "" && toolCalls == nil {
-		return nil, invocation("ollama: returned an empty response")
+		return nil, circuitFailureInvocation("ollama: returned an empty response")
 	}
 	outMsg := map[string]any{"role": "assistant", "content": content}
 	finish := "stop"
@@ -237,7 +240,7 @@ func (it *ollamaStreamIter) Next() (string, bool) {
 		if err != nil {
 			it.done = true
 			if err != io.EOF {
-				it.err = invocation("ollama: streaming transport error: " + err.Error())
+				it.err = retryableInvocation("ollama: streaming transport error: " + err.Error())
 			} else if !it.emitted {
 				it.err = invocation("ollama: returned an empty response")
 			}
@@ -267,10 +270,10 @@ func (p OllamaProvider) Stream(model string, messages []Message, kw Kwargs) (Str
 	body, _ := json.Marshal(payload)
 	resp, err := httpClient(p.Timeout).Post(p.chatURL(), "application/json", bytes.NewReader(body))
 	if err != nil {
-		return nil, invocation("ollama: streaming request failed: " + err.Error())
+		return nil, retryableInvocation("ollama: streaming request failed: " + err.Error())
 	}
 	if resp.StatusCode >= 400 {
-		raw, _ := io.ReadAll(resp.Body)
+		raw, _ := readInvocationResponseBody(resp, "ollama")
 		resp.Body.Close()
 		return nil, invocationStatus(
 			fmt.Sprintf("ollama: request failed (%d): %s", resp.StatusCode, extractError(raw)),

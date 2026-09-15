@@ -134,10 +134,11 @@ export function getJSON<T>(mode: ConsoleMode, path: string): Promise<T> {
   return requestJSON<T>(mode, path);
 }
 
-export function sendJSON<T>(mode: ConsoleMode, path: string, method: "POST" | "DELETE", body?: unknown): Promise<T> {
+export function sendJSON<T>(mode: ConsoleMode, path: string, method: "POST" | "DELETE", body?: unknown, signal?: AbortSignal): Promise<T> {
   return requestJSON<T>(mode, path, {
     method,
     body: body === undefined ? undefined : JSON.stringify(body),
+    signal,
   });
 }
 

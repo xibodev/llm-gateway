@@ -631,6 +631,14 @@ tbody tr:last-child td { border-bottom: 0; }
 :root[data-theme="dark"] .route-chain li { border-color: #2c323a; background: #1c2026; color: #c3cad2; }
 :root[data-theme="dark"] .route-test-form label { color: #9aa4b1; }
 .policy-editor { display: flex; flex-direction: column; gap: 14px; max-width: 860px; }
+.provider-automation { display: grid; gap: 14px; }
+.provider-automation__form { display: grid; grid-template-columns: minmax(240px, 420px) auto; align-items: end; gap: 12px; }
+.provider-automation__form label { display: grid; gap: 6px; color: #55606c; font-size: 0.74rem; font-weight: 650; }
+.provider-automation__form select { min-height: 42px; padding: 9px 10px; border: 1px solid #cfd7e0; border-radius: 5px; background: #fff; color: #2e3945; }
+.provider-automation__form .form-help, .provider-automation__form .form-error { grid-column: 1 / -1; }
+:root[data-theme="dark"] .provider-automation__form label { color: #9aa4b1; }
+:root[data-theme="dark"] .provider-automation__form select { border-color: #46515e; background: #1d242c; color: #e7ebef; }
+@media (max-width: 640px) { .provider-automation__form { grid-template-columns: 1fr; } .provider-automation__form select { min-height: 44px; } }
 .policy-editor label { display: flex; flex-direction: column; gap: 6px; color: #55606c; font-size: 0.74rem; font-weight: 650; }
 .policy-editor label small { color: #7b8490; font-weight: 400; font-size: 0.68rem; }
 .policy-editor__grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 14px; }

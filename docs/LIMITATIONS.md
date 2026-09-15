@@ -24,8 +24,8 @@ from implying behavior the implementation does not provide.
 - Streaming can fail over only before the first response byte.
 - Embeddings, audio, image, and video select one eligible target.
 - Provider circuit state is process-local.
-- The released loader does not apply YAML retry/circuit `policies`; do not rely
-  on serialized overrides surviving restart. See [configuration](CONFIGURATION.md#provider-resilience).
+- YAML retry/circuit `policies` load at startup, but circuit counters and
+  cooldown state are process-local and reset on restart.
 
 ## Provider behavior
 

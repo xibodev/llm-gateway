@@ -265,7 +265,7 @@ jobs:
           fi
 
   image-publish:
-    name: publish image
+    name: publish candidate image
     if: github.event_name == 'push' && github.ref_type == 'tag'
     needs: [validate, ci, binaries, release-stage]
     runs-on: ubuntu-latest
@@ -274,6 +274,8 @@ jobs:
       packages: write
       attestations: write
       id-token: write
+    outputs:
+      digest: ${{ steps.confirm.outputs.digest }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
@@ -290,49 +292,30 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Check immutable version image
+      - name: Check resumable candidate image
         id: existing
         env:
-          VERSION: ${{ needs.validate.outputs.version }}
           COMMIT: ${{ needs.validate.outputs.commit }}
           DRAFT_EXISTS: ${{ needs.validate.outputs.release_exists }}
         run: |
           set -euo pipefail
-          image="ghcr.io/${GITHUB_REPOSITORY}:$VERSION"
+          image="ghcr.io/${GITHUB_REPOSITORY}:candidate-$COMMIT"
           inspect_error=$(mktemp)
           if manifest=$(docker buildx imagetools inspect "$image" --format '{{json .Manifest}}' 2>"$inspect_error"); then
             test "$DRAFT_EXISTS" = "true" || {
-              echo "version image exists without a resumable draft release" >&2
-              exit 1
-            }
-            printf '%s' "$manifest" | jq -e '
-              ([.manifests[] | select(.platform.os == "linux") | .platform.architecture] | sort) == ["amd64", "arm64"] and
-              ([.manifests[] | select(.annotations["vnd.docker.reference.type"] == "attestation-manifest")] | length) >= 2
-            ' >/dev/null || {
-              echo "existing version image is incomplete" >&2
-              exit 1
-            }
-            images=$(docker buildx imagetools inspect "$image" --format '{{json .Image}}')
-            printf '%s' "$images" | jq -e --arg version "$VERSION" --arg commit "$COMMIT" '
-              [. | to_entries[] | select(.key == "linux/amd64" or .key == "linux/arm64")] as $images |
-              ($images | length) == 2 and
-              all($images[]; .value.config.Labels["org.opencontainers.image.version"] == $version and
-                             .value.config.Labels["org.opencontainers.image.revision"] == $commit)
-            ' >/dev/null || {
-              echo "existing version image does not match this release commit" >&2
+              echo "candidate image exists without a resumable draft release" >&2
               exit 1
             }
             echo "exists=true" >> "$GITHUB_OUTPUT"
             echo "digest=$(printf '%s' "$manifest" | jq -r .digest)" >> "$GITHUB_OUTPUT"
-          elif grep -Eqi 'not found|manifest unknown|name unknown' "$inspect_error"; then
+          elif grep -Eqi 'manifest unknown|name unknown|(^|: )not found$' "$inspect_error"; then
             echo "exists=false" >> "$GITHUB_OUTPUT"
           else
             cat "$inspect_error" >&2
-            echo "registry inspection failed; refusing to overwrite a version tag" >&2
             exit 1
           fi
 
-      - name: Build and publish image
+      - name: Build and publish candidate image
         id: image
         if: steps.existing.outputs.exists != 'true'
         uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
@@ -341,7 +324,7 @@ jobs:
           file: go/Dockerfile
           platforms: linux/amd64,linux/arm64
           push: true
-          tags: ghcr.io/${{ github.repository }}:${{ needs.validate.outputs.version }}
+          tags: ghcr.io/${{ github.repository }}:candidate-${{ needs.validate.outputs.commit }}
           labels: |
             org.opencontainers.image.version=${{ needs.validate.outputs.version }}
             org.opencontainers.image.revision=${{ needs.validate.outputs.commit }}
@@ -355,32 +338,38 @@ jobs:
             BUILD_TIME=${{ needs.validate.outputs.build_time }}
             SOURCE_DATE_EPOCH=${{ needs.validate.outputs.source_date_epoch }}
 
-      - name: Attest image provenance
-        uses: actions/attest-build-provenance@43d14bc2b83dec42d39ecae14e916627a18bb661 # v3
-        with:
-          subject-name: ghcr.io/${{ github.repository }}
-          subject-digest: ${{ steps.image.outputs.digest || steps.existing.outputs.digest }}
-          push-to-registry: true
-
-      - name: Confirm immutable version image
+      - name: Select candidate digest
+        id: confirm
         env:
           EXISTING_DIGEST: ${{ steps.existing.outputs.digest }}
           BUILT_DIGEST: ${{ steps.image.outputs.digest }}
         run: |
+          set -euo pipefail
           digest="${BUILT_DIGEST:-$EXISTING_DIGEST}"
-          test -n "$digest"
-          echo "immutable version image: $digest"
+          [[ "$digest" =~ ^sha256:[0-9a-f]{64}$ ]]
+          echo "digest=$digest" >> "$GITHUB_OUTPUT"
 
-      - name: Validate published image manifests
+      - name: Validate candidate image
         env:
+          DIGEST: ${{ steps.confirm.outputs.digest }}
           VERSION: ${{ needs.validate.outputs.version }}
           COMMIT: ${{ needs.validate.outputs.commit }}
         run: |
           set -euo pipefail
-          image="ghcr.io/${GITHUB_REPOSITORY}:$VERSION"
+          image="ghcr.io/${GITHUB_REPOSITORY}@$DIGEST"
           manifest=$(docker buildx imagetools inspect "$image" --format '{{json .Manifest}}')
-          printf '%s' "$manifest" | jq -e '
-            ([.manifests[] | select(.platform.os == "linux") | .platform.architecture] | sort) == ["amd64", "arm64"]
+          printf '%s' "$manifest" | jq -e --arg digest "$DIGEST" '
+            .digest == $digest and
+            ([.manifests[] |
+              select((.annotations["vnd.docker.reference.type"] // "") != "attestation-manifest") |
+              {os: .platform.os, architecture: .platform.architecture}] | sort_by(.architecture)) ==
+            [{os:"linux",architecture:"amd64"},{os:"linux",architecture:"arm64"}] and
+            ([.manifests[] |
+              select(.annotations["vnd.docker.reference.type"] == "attestation-manifest") |
+              .annotations["vnd.docker.reference.digest"]] | sort) ==
+            ([.manifests[] |
+              select((.annotations["vnd.docker.reference.type"] // "") != "attestation-manifest") |
+              .digest] | sort)
           ' >/dev/null
           images=$(docker buildx imagetools inspect "$image" --format '{{json .Image}}')
           printf '%s' "$images" | jq -e --arg version "$VERSION" --arg commit "$COMMIT" '
@@ -392,7 +381,7 @@ jobs:
           mapfile -t attestations < <(printf '%s' "$manifest" | jq -r '.manifests[] | select(.annotations["vnd.docker.reference.type"] == "attestation-manifest") | .digest')
           test "${#attestations[@]}" -eq 2
           for attestation in "${attestations[@]}"; do
-            raw=$(docker buildx imagetools inspect "ghcr.io/${GITHUB_REPOSITORY}@${attestation}" --raw)
+            raw=$(docker buildx imagetools inspect "ghcr.io/${GITHUB_REPOSITORY}@$attestation" --raw)
             printf '%s' "$raw" | jq -e '
               [.layers[].annotations["in-toto.io/predicate-type"]] as $types |
               ($types | index("https://spdx.dev/Document")) != null and
@@ -400,10 +389,71 @@ jobs:
             ' >/dev/null
           done
 
+      - name: Attest candidate image provenance
+        uses: actions/attest-build-provenance@43d14bc2b83dec42d39ecae14e916627a18bb661 # v3
+        with:
+          subject-name: ghcr.io/${{ github.repository }}
+          subject-digest: ${{ steps.confirm.outputs.digest }}
+          push-to-registry: true
+
+  live-acceptance:
+    name: live release acceptance
+    if: github.event_name == 'push' && github.ref_type == 'tag'
+    needs: [validate, image-publish]
+    uses: ./.github/workflows/live-acceptance.yml
+    with:
+      enforce: true
+      allow_inconclusive: ${{ vars.LLMGW_ALLOW_INCONCLUSIVE_RELEASE == 'true' }}
+      override_reason: ${{ vars.LLMGW_INCONCLUSIVE_RELEASE_REASON }}
+      candidate_image: ghcr.io/${{ github.repository }}@${{ needs.image-publish.outputs.digest }}
+
+  image-promote:
+    name: promote accepted image
+    if: github.event_name == 'push' && github.ref_type == 'tag'
+    needs: [validate, image-publish, live-acceptance]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
+        with:
+          version: v0.36.1
+
+      - uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Promote tested digest to immutable version tag
+        env:
+          DIGEST: ${{ needs.image-publish.outputs.digest }}
+          VERSION: ${{ needs.validate.outputs.version }}
+        run: |
+          set -euo pipefail
+          source="ghcr.io/${GITHUB_REPOSITORY}@$DIGEST"
+          target="ghcr.io/${GITHUB_REPOSITORY}:$VERSION"
+          inspect_error=$(mktemp)
+          trap 'rm -f "$inspect_error"' EXIT
+          if existing=$(docker buildx imagetools inspect "$target" --format '{{json .Manifest}}' 2>"$inspect_error"); then
+            test "$(printf '%s' "$existing" | jq -r .digest)" = "$DIGEST" || {
+              echo "immutable version tag already points at another digest" >&2
+              exit 1
+            }
+          elif grep -Eqi 'manifest unknown|name unknown|(^|: )not found$' "$inspect_error"; then
+            docker buildx imagetools create --tag "$target" "$source"
+          else
+            cat "$inspect_error" >&2
+            echo "registry inspection failed; refusing to create or overwrite the immutable version tag" >&2
+            exit 1
+          fi
+          test "$(docker buildx imagetools inspect "$target" --format '{{json .Manifest}}' | jq -r .digest)" = "$DIGEST"
+
   release-publish:
     name: publish GitHub release
     if: github.event_name == 'push' && github.ref_type == 'tag'
-    needs: [validate, image-publish, release-stage]
+    needs: [validate, image-publish, image-promote, release-stage, live-acceptance]
     runs-on: ubuntu-latest
     permissions:
       contents: write

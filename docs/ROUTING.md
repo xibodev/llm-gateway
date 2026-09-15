@@ -48,9 +48,9 @@ Streaming has a hard boundary: a request can move to the next target only before
 the first response byte. Once output starts, a later failure is surfaced to the
 client; the gateway does not replay partial output through another model.
 
-Native Anthropic Messages uses retryable invocation status to decide whether to
-advance. It does not hide non-retryable client/request errors by trying another
-model.
+Native Anthropic Messages advances past retryable upstream statuses and
+statusless provider failures such as malformed responses. It does not hide
+definitive client/request HTTP errors by trying another model.
 
 ## Single-target surfaces
 
@@ -66,13 +66,16 @@ selected for these surfaces.
 
 ## Retries and circuit state
 
-Provider retry policy is separate from endpoint failover. The released loader
-does not apply YAML `policies` settings, even when an administration save writes
-them. Do not depend on retry/circuit overrides surviving restart; see the
-[configuration boundary](CONFIGURATION.md#provider-resilience).
+Provider retry policy is separate from endpoint failover. YAML `policies`
+defaults and exact provider overrides load at startup; circuit counters and
+cooldowns remain process-local. See the
+[configuration reference](CONFIGURATION.md#provider-resilience).
 
 Retries happen inside one provider target. Endpoint failover moves between
-targets. Circuit state is process-local and resets on restart.
+targets. Retryable transport failures, 408, 429, and transient 500/502/503/504
+responses can repeat; malformed responses, local credential-state failures, and
+definitive upstream 4xx responses do not repeat against the same target. Circuit
+state is process-local and resets on restart.
 
 ## Policy and credentials
 

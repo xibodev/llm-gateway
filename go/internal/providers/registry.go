@@ -34,6 +34,7 @@ type RegistryEntry struct {
 	RequiresAPIKey         bool     `json:"requires_api_key,omitempty"`
 	SupportsAPIAdaptation  bool     `json:"supports_api_adaptation,omitempty"`
 	SupportsModelDiscovery bool     `json:"supports_model_discovery,omitempty"`
+	AnonymousAutomation    bool     `json:"anonymous_automation,omitempty"`
 	InferAudioCapabilities bool     `json:"infer_audio_capabilities,omitempty"`
 	OnboardingFields       []string `json:"onboarding_fields,omitempty"`
 	AuthAdapter            string   `json:"auth_adapter,omitempty"`

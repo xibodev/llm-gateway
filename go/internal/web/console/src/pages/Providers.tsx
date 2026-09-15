@@ -11,7 +11,7 @@ export function Providers({ data, mode, detail, onChanged, onNavigate }: {
   onNavigate: (page: "providers" | "playground", detail?: string) => void;
 }) {
   if (detail) {
-    return <ProviderDetail entryID={detail} data={data} mode={mode} onChanged={onChanged} onBack={() => onNavigate("providers")} onOpenPlayground={(modelID) => onNavigate("playground", modelID)} />;
+    return <ProviderDetail entryID={detail} data={data} mode={mode} onChanged={onChanged} onBack={() => onNavigate("providers")} onOpenPlayground={(modelID, ownerID) => onNavigate("playground", new URLSearchParams({ model: modelID, provider: detail, owner: ownerID }).toString())} />;
   }
   return <ProviderHub data={data} mode={mode} onChanged={onChanged} onOpenDetail={(entryID) => onNavigate("providers", entryID)} />;
 }

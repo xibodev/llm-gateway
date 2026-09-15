@@ -277,7 +277,7 @@ func TestAzureCompletionsPostToTheOpenAIV1Route(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		gotPath = r.URL.Path
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]any{"id": "chatcmpl-1", "choices": []any{}})
+		json.NewEncoder(w).Encode(map[string]any{"id": "chatcmpl-1", "choices": []any{map[string]any{"message": map[string]any{"content": "ok"}}}})
 	}))
 	defer server.Close()
 

@@ -14,7 +14,7 @@ import {
   useModelFilter,
 } from "../components/ModelPicker";
 
-type ChatTurn = { role: "user" | "assistant"; content: string; served?: string; latency?: number; isError?: boolean };
+type ChatTurn = { role: "user" | "assistant"; content: string; served?: string; latency?: number };
 
 // modeFor picks the playground surface a model can actually be exercised on.
 // A model that only synthesizes speech must not be offered a chat composer.
@@ -42,9 +42,9 @@ function ChatThread({ turns, running, onClear }: { turns: ChatTurn[]; running: b
     <div class="chat-thread">
       <div class="chat-thread__scroll">
         {!turns.length ? <p class="muted-copy chat-thread__hint">Send a message to start. Every turn is replayed as real conversation history through the selected route.</p> : null}
-        {turns.map((turn, index) => <article class={`chat-turn chat-turn--${turn.role}${turn.isError ? " chat-turn--error" : ""}`} key={index}>
-          <header><span>{turn.role === "user" ? "You" : turn.isError ? "Error" : "Assistant"}</span>{turn.served ? <small class="technical">{turn.served}{turn.latency ? ` · ${turn.latency} ms` : ""}</small> : null}</header>
-          <p class={turn.isError ? "form-error" : undefined}>{turn.content}</p>
+        {turns.map((turn, index) => <article class={`chat-turn chat-turn--${turn.role}`} key={index}>
+          <header><span>{turn.role === "user" ? "You" : "Assistant"}</span>{turn.served ? <small class="technical">{turn.served}{turn.latency ? ` · ${turn.latency} ms` : ""}</small> : null}</header>
+          <p>{turn.content}</p>
         </article>)}
         {running ? <article class="chat-turn chat-turn--assistant chat-turn--pending"><header><span>Assistant</span></header><p><RefreshCw class="spin" size={15} /> Routing…</p></article> : null}
         <div ref={endRef} />
@@ -84,6 +84,7 @@ export function Playground({ data, mode, principalID, onPrincipalIDChange, prese
   }, [mode, principalID, humans]);
 
   const [catalog, setCatalog] = useState<JSONRecord | null>(null);
+  const [catalogSource, setCatalogSource] = useState("");
   const [catalogError, setCatalogError] = useState("");
   const [projectID, setProjectID] = useState("");
   const [model, setModel] = useState("");
@@ -108,6 +109,10 @@ export function Playground({ data, mode, principalID, onPrincipalIDChange, prese
   const [running, setRunning] = useState(false);
   const fileRef = useRef<HTMLInputElement | null>(null);
   const catalogRequest = useRef(0);
+  const executionRequest = useRef(0);
+  const executionPending = useRef(false);
+  const executionAbort = useRef<AbortController | null>(null);
+  const appliedPreset = useRef("");
 
   const catalogPath = useMemo(() => {
     if (!projectID || !scopedPrincipalID) return "";
@@ -117,11 +122,14 @@ export function Playground({ data, mode, principalID, onPrincipalIDChange, prese
   }, [mode, projectID, scopedPrincipalID]);
   const loadCatalog = async () => {
     const request = ++catalogRequest.current;
-    if (!catalogPath) { setCatalogError(""); return; }
+    if (!catalogPath) { setCatalogError(""); setCatalogSource(""); return; }
     try {
       setCatalogError("");
       const payload = await getJSON<JSONRecord>(mode, catalogPath);
-      if (request === catalogRequest.current) setCatalog(payload);
+      if (request === catalogRequest.current) {
+        setCatalog(payload);
+        setCatalogSource(catalogPath);
+      }
     } catch (cause) {
       if (request === catalogRequest.current) setCatalogError(cause instanceof Error ? cause.message : "Model catalog could not load.");
     }
@@ -129,30 +137,51 @@ export function Playground({ data, mode, principalID, onPrincipalIDChange, prese
   useEffect(() => {
     setProjectID((current) => eligibleProjects.some((project) => stringValue(project.id) === current) ? current : stringValue(eligibleProjects[0]?.id));
   }, [eligibleProjects, scopedPrincipalID]);
-  useEffect(() => { setCatalog(null); void loadCatalog(); }, [catalogPath]);
+  useEffect(() => { setCatalog(null); setCatalogSource(""); void loadCatalog(); }, [catalogPath]);
 
-  const models = useMemo(() => catalogModels(catalog), [catalog]);
+  const models = useMemo(() => catalogSource === catalogPath ? catalogModels(catalog) : [], [catalog, catalogSource, catalogPath]);
   const visible = useMemo(() => filterModels(models, filter), [models, filter]);
   // A model handed over from a provider page wins over any default selection.
   useEffect(() => {
-    if (!preset || !models.length) return;
+    if (!preset) {
+      appliedPreset.current = "";
+      return;
+    }
+    const presetScope = `${scopedPrincipalID}|${projectID}|${preset}`;
+    if (appliedPreset.current === presetScope || !models.length) return;
     if (models.some((row) => row.id === preset)) {
+      appliedPreset.current = presetScope;
       setModel(preset);
       setSettingsOpen(false);
       onPresetConsumed?.();
+    } else {
+      setModel("");
     }
-  }, [preset, models]);
+  }, [preset, models, projectID, scopedPrincipalID]);
   useEffect(() => {
-    if (preset) return;
+    const presetScope = `${scopedPrincipalID}|${projectID}|${preset}`;
+    if (preset && appliedPreset.current !== presetScope) return;
     setModel((current) => visible.some((row) => row.id === current) ? current : (visible[0]?.id ?? ""));
   }, [visible, preset]);
   const selected = models.find((row) => row.id === model);
   const surface = modeFor(selected);
   useEffect(() => {
+    executionAbort.current?.abort();
+    executionAbort.current = null;
+    executionRequest.current += 1;
+    executionPending.current = false;
+    setTurns([]); setRunning(false);
     setResult(null); setError(""); setAudioURL(""); setTranscript("");
     setImageURL(""); setVideoURL(""); setVideoStatus("");
     videoPoll.current += 1;
-  }, [model]);
+  }, [model, projectID, scopedPrincipalID]);
+  useEffect(() => () => {
+    executionAbort.current?.abort();
+    executionAbort.current = null;
+    executionRequest.current += 1;
+    executionPending.current = false;
+    videoPoll.current += 1;
+  }, []);
 
   // Voice catalogs are locale-keyed; without this a 321-voice list is unusable.
   const locales = useMemo(() => {
@@ -186,21 +215,28 @@ export function Playground({ data, mode, principalID, onPrincipalIDChange, prese
   // dropped keystroke would silently send the previous draft.
   const sendChat = async (event: Event, override?: string) => {
     event.preventDefault();
+    if (executionPending.current) return;
     if (!requireScope()) return;
     const text = (override ?? draft).trim();
     if (!text) { setError("Enter a message."); return; }
     const history: ChatTurn[] = [...turns, { role: "user", content: text }];
+    const request = ++executionRequest.current;
+    const controller = new AbortController();
+    executionAbort.current = controller;
+    executionPending.current = true;
     setTurns(history);
     setDraft("");
     setRunning(true);
     setError("");
+    setResult(null);
     try {
       const body: JSONRecord = {
         project_id: projectID, model,
         messages: history.map((turn) => ({ role: turn.role, content: turn.content })),
       };
       if (mode === "admin") body.principal_id = principalID;
-      const payload = await sendJSON<JSONRecord>(mode, "/playground", "POST", body);
+      const payload = await sendJSON<JSONRecord>(mode, "/playground", "POST", body, controller.signal);
+      if (request !== executionRequest.current) return;
       setResult(payload);
       const raw = asRecord(payload.raw_response);
       const choice = asRecord(asList(raw.choices)[0]);
@@ -214,42 +250,67 @@ export function Playground({ data, mode, principalID, onPrincipalIDChange, prese
         latency: numberValue(payload.latency_ms),
       }]);
     } catch (cause) {
-      const msg = cause instanceof Error ? cause.message : "Playground request failed.";
-      setError(msg);
-      setTurns([...history, {
-        role: "assistant",
-        content: msg,
-        isError: true,
-      }]);
-    } finally { setRunning(false); }
+      if (request !== executionRequest.current) return;
+      setResult(null);
+      setTurns(turns);
+      setDraft((current) => current || text);
+      setError(cause instanceof Error ? cause.message : "Playground request failed.");
+    } finally {
+      if (request === executionRequest.current) {
+        executionAbort.current = null;
+        executionPending.current = false;
+        setRunning(false);
+      }
+    }
   };
 
   const runSpeech = async (event: Event) => {
     event.preventDefault();
+    if (executionPending.current) return;
     if (!requireScope()) return;
     if (!speechText.trim()) { setError("Enter text to synthesize."); return; }
+    const request = ++executionRequest.current;
+    const controller = new AbortController();
+    executionAbort.current = controller;
+    executionPending.current = true;
     setRunning(true);
     setError("");
+    setResult(null);
     setAudioURL("");
     try {
       const body: JSONRecord = { project_id: projectID, model, input: speechText.trim(), speed: Number(speechSpeed) || 1 };
       if (mode === "admin") body.principal_id = principalID;
-      const payload = await sendJSON<JSONRecord>(mode, "/playground/speech", "POST", body);
+      const payload = await sendJSON<JSONRecord>(mode, "/playground/speech", "POST", body, controller.signal);
+      if (request !== executionRequest.current) return;
       setResult(payload);
       const base64 = stringValue(payload.audio_base64);
       if (base64) setAudioURL(`data:${stringValue(payload.content_type, "audio/mpeg")};base64,${base64}`);
     } catch (cause) {
+      if (request !== executionRequest.current) return;
+      setResult(null);
       setError(cause instanceof Error ? cause.message : "Speech request failed.");
-    } finally { setRunning(false); }
+    } finally {
+      if (request === executionRequest.current) {
+        executionAbort.current = null;
+        executionPending.current = false;
+        setRunning(false);
+      }
+    }
   };
 
   const runTranscription = async (event: Event) => {
     event.preventDefault();
+    if (executionPending.current) return;
     if (!requireScope()) return;
     const file = fileRef.current?.files?.[0];
     if (!file) { setError("Choose an audio file to transcribe."); return; }
+    const request = ++executionRequest.current;
+    const controller = new AbortController();
+    executionAbort.current = controller;
+    executionPending.current = true;
     setRunning(true);
     setError("");
+    setResult(null);
     setTranscript("");
     try {
       const form = new FormData();
@@ -257,43 +318,71 @@ export function Playground({ data, mode, principalID, onPrincipalIDChange, prese
       form.set("model", model);
       form.set("file", file);
       if (mode === "admin") form.set("principal_id", principalID);
-      const payload = await requestJSON<JSONRecord>(mode, "/playground/transcription", { method: "POST", body: form });
+      const payload = await requestJSON<JSONRecord>(mode, "/playground/transcription", { method: "POST", body: form, signal: controller.signal });
+      if (request !== executionRequest.current) return;
       setResult(payload);
       setTranscript(stringValue(payload.text, "(the provider returned no text)"));
     } catch (cause) {
+      if (request !== executionRequest.current) return;
+      setResult(null);
       setError(cause instanceof Error ? cause.message : "Transcription request failed.");
-    } finally { setRunning(false); }
+    } finally {
+      if (request === executionRequest.current) {
+        executionAbort.current = null;
+        executionPending.current = false;
+        setRunning(false);
+      }
+    }
   };
 
   const runImage = async (event: Event) => {
     event.preventDefault();
+    if (executionPending.current) return;
     if (!requireScope()) return;
     if (!mediaPrompt.trim()) { setError("Describe the image you want."); return; }
-    setRunning(true); setError(""); setImageURL("");
+    const request = ++executionRequest.current;
+    const controller = new AbortController();
+    executionAbort.current = controller;
+    executionPending.current = true;
+    setRunning(true); setError(""); setResult(null); setImageURL("");
     try {
       const body: JSONRecord = { project_id: projectID, model, prompt: mediaPrompt.trim() };
       if (mode === "admin") body.principal_id = principalID;
-      const payload = await sendJSON<JSONRecord>(mode, "/playground/image", "POST", body);
+      const payload = await sendJSON<JSONRecord>(mode, "/playground/image", "POST", body, controller.signal);
+      if (request !== executionRequest.current) return;
       setResult(payload);
       const base64 = stringValue(payload.image_base64);
       if (base64) setImageURL(`data:${stringValue(payload.content_type, "image/png")};base64,${base64}`);
     } catch (cause) {
+      if (request !== executionRequest.current) return;
+      setResult(null);
       setError(cause instanceof Error ? cause.message : "Image request failed.");
-    } finally { setRunning(false); }
+    } finally {
+      if (request === executionRequest.current) {
+        executionAbort.current = null;
+        executionPending.current = false;
+        setRunning(false);
+      }
+    }
   };
 
   // Video generation runs for minutes, so the console starts the job and polls
   // the operation rather than holding a request open.
   const runVideo = async (event: Event) => {
     event.preventDefault();
+    if (executionPending.current) return;
     if (!requireScope()) return;
     if (!mediaPrompt.trim()) { setError("Describe the video you want."); return; }
     const attempt = ++videoPoll.current;
-    setRunning(true); setError(""); setVideoURL(""); setVideoStatus("Starting the generation\u2026");
+    const controller = new AbortController();
+    executionAbort.current = controller;
+    executionPending.current = true;
+    setRunning(true); setError(""); setResult(null); setVideoURL(""); setVideoStatus("Starting the generation\u2026");
     try {
       const body: JSONRecord = { project_id: projectID, model, prompt: mediaPrompt.trim() };
       if (mode === "admin") body.principal_id = principalID;
-      const started = await sendJSON<JSONRecord>(mode, "/playground/video", "POST", body);
+      const started = await sendJSON<JSONRecord>(mode, "/playground/video", "POST", body, controller.signal);
+      if (attempt !== videoPoll.current) return;
       setResult(started);
       const operation = stringValue(started.operation);
       if (!operation) throw new Error("The provider did not return an operation to poll.");
@@ -304,7 +393,8 @@ export function Playground({ data, mode, principalID, onPrincipalIDChange, prese
         if (attempt !== videoPoll.current) return;
         const pollBody: JSONRecord = { project_id: projectID, model, operation };
         if (mode === "admin") pollBody.principal_id = principalID;
-        const payload = await sendJSON<JSONRecord>(mode, "/playground/video", "POST", pollBody);
+        const payload = await sendJSON<JSONRecord>(mode, "/playground/video", "POST", pollBody, controller.signal);
+        if (attempt !== videoPoll.current) return;
         setResult(payload);
         if (stringValue(payload.status) === "completed") {
           const base64 = stringValue(payload.video_base64);
@@ -319,10 +409,16 @@ export function Playground({ data, mode, principalID, onPrincipalIDChange, prese
       }
       setVideoStatus("Still generating after 20 minutes \u2014 the job may have stalled upstream.");
     } catch (cause) {
+      if (attempt !== videoPoll.current) return;
+      setResult(null);
       setError(cause instanceof Error ? cause.message : "Video request failed.");
       setVideoStatus("");
     } finally {
-      if (attempt === videoPoll.current) setRunning(false);
+      if (attempt === videoPoll.current) {
+        executionAbort.current = null;
+        executionPending.current = false;
+        setRunning(false);
+      }
     }
   };
 
@@ -370,7 +466,7 @@ export function Playground({ data, mode, principalID, onPrincipalIDChange, prese
       <section class="playground-work">
         <div class="playground-stage">
         {surface === "chat" ? <>
-          <ChatThread turns={turns} running={running} onClear={() => { setTurns([]); setResult(null); }} />
+          <ChatThread turns={turns} running={running} onClear={() => { executionAbort.current?.abort(); executionAbort.current = null; executionRequest.current += 1; executionPending.current = false; setRunning(false); setTurns([]); setResult(null); setError(""); }} />
           <form class="chat-composer surface" onSubmit={sendChat}>
             <textarea
               value={draft}
@@ -420,7 +516,11 @@ export function Playground({ data, mode, principalID, onPrincipalIDChange, prese
         </div>
 
         <aside class="playground-panel">
-        {result ? <section class="surface playground-outcome">
+        {error ? <section class="surface playground-outcome playground-outcome--error">
+          <p class="eyebrow" style={{ color: "var(--color-danger, #e5484d)" }}>Request failed</p>
+          <h2>{model || "Routing error"}</h2>
+          <p class="form-help">Catalog discovery does not guarantee current inference availability. Review the error, route access, credentials, and provider status.</p>
+        </section> : result ? <section class="surface playground-outcome">
           <div class="section-heading"><div><p class="eyebrow">Routed result</p><h2>{stringValue(served.provider)} / {stringValue(served.model)}</h2></div><span class="technical">{numberValue(result.latency_ms)} ms</span></div>
           <dl class="compact-facts">
             <div><dt>Input tokens</dt><dd>{numberValue(usage.prompt_tokens, numberValue(usage.input_tokens))}</dd></div>
@@ -432,11 +532,6 @@ export function Playground({ data, mode, principalID, onPrincipalIDChange, prese
             <summary>Raw gateway response</summary>
             <pre class="technical">{JSON.stringify(result.raw_response ?? result, null, 2)}</pre>
           </details>
-        </section> : error ? <section class="surface playground-outcome playground-outcome--error">
-          <p class="eyebrow" style={{ color: "var(--color-danger, #e5484d)" }}>Request failed</p>
-          <h2>{model || "Routing error"}</h2>
-          <p class="form-error" style={{ margin: "12px 0", fontSize: "13px" }}>{error}</p>
-          <p class="form-help">The upstream provider rejected the request. Confirm credentials, model naming, or upstream quota limits.</p>
         </section> : <section class="surface playground-outcome playground-outcome--idle"><p class="eyebrow">Response</p><h2>Nothing routed yet</h2><p class="muted-copy">The served provider, latency, token usage, fallback trace and the raw gateway payload appear here after a request.</p></section>}
         </aside>
       </section>

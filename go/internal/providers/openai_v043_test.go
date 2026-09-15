@@ -3,6 +3,7 @@ package providers
 import (
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"llmgw/internal/config"
@@ -89,6 +90,78 @@ func TestV043OpenAIRetryPreservesVisionHeaders(t *testing.T) {
 			}
 			if requests != 2 {
 				t.Fatalf("requests=%d", requests)
+			}
+		})
+	}
+}
+
+func TestV043OpenAIRejectsStructurallyInvalidSuccessPayloads(t *testing.T) {
+	for name, testCase := range map[string]struct {
+		body      string
+		responses bool
+	}{
+		"chat null":       {body: "null"},
+		"chat empty":      {body: `{}`},
+		"responses null":  {body: "null", responses: true},
+		"responses empty": {body: `{}`, responses: true},
+	} {
+		t.Run(name, func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				_, _ = w.Write([]byte(testCase.body))
+			}))
+			defer server.Close()
+			provider := OpenAIProvider{auth: bearerAuth{base: server.URL}, Timeout: 2}
+			var err error
+			if testCase.responses {
+				_, _, err = provider.callResponsesPayloadWithObservation(map[string]any{"input": "hi"})
+			} else {
+				_, err = provider.Complete("model", []Message{{"role": "user", "content": "hi"}}, nil)
+			}
+			if err == nil || !InvocationCircuitFailure(err) || InvocationRetryable(err) {
+				t.Fatalf("error=%v circuit=%v retry=%v", err, InvocationCircuitFailure(err), InvocationRetryable(err))
+			}
+		})
+	}
+}
+
+func TestOpenAIRejectsHTTP200SoftError(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(`{"error":{"message":"service temporarily overloaded"}}`))
+	}))
+	defer server.Close()
+	_, err := (OpenAIProvider{auth: bearerAuth{base: server.URL}, Timeout: 2}).Complete(
+		"model", []Message{{"role": "user", "content": "hi"}}, nil,
+	)
+	if err == nil || !InvocationRetryable(err) || !strings.Contains(err.Error(), "soft error") {
+		t.Fatalf("error=%v retryable=%v", err, InvocationRetryable(err))
+	}
+}
+
+func TestV043RefreshedOAuthRejectionRemainsFailoverEligible(t *testing.T) {
+	for name, invoke := range map[string]func(OpenAIProvider) error{
+		"chat": func(provider OpenAIProvider) error {
+			_, err := provider.Complete("model", []Message{{"role": "user", "content": "hi"}}, nil)
+			return err
+		},
+		"responses": func(provider OpenAIProvider) error {
+			_, _, err := provider.callResponsesPayloadWithObservation(map[string]any{"input": "hi"})
+			return err
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			requests := 0
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				requests++
+				w.WriteHeader(http.StatusUnauthorized)
+				_, _ = w.Write([]byte(`{"error":{"message":"rejected"}}`))
+			}))
+			defer server.Close()
+			err := invoke(OpenAIProvider{auth: v043RefreshAuth{base: server.URL}, Timeout: 2})
+			if err == nil || InvocationRetryable(err) || !InvocationFailoverEligible(err) || UpstreamStatus(err) != http.StatusUnauthorized {
+				t.Fatalf("error=%v retry=%v failover=%v status=%d", err, InvocationRetryable(err), InvocationFailoverEligible(err), UpstreamStatus(err))
+			}
+			if requests != 2 {
+				t.Fatalf("requests=%d want=2", requests)
 			}
 		})
 	}

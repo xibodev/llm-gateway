@@ -7,9 +7,11 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"encoding/pem"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync/atomic"
 	"testing"
 
 	"llmgw/internal/config"
@@ -108,8 +110,11 @@ func TestVertexUsesStoredServiceAccountConnection(t *testing.T) {
 	if !ok {
 		t.Fatalf("provider type=%T", provider)
 	}
-	if vertex.bearerToken != "ya29.stored-path" {
-		t.Fatalf("bearerToken=%q, want the token minted from the stored key", vertex.bearerToken)
+	if vertex.bearerTokenFor == nil {
+		t.Fatal("stored service account did not retain a refreshable token source")
+	}
+	if token, err := vertex.currentBearerToken(); err != nil || token != "ya29.stored-path" {
+		t.Fatalf("bearer token=%q error=%v", token, err)
 	}
 	if vertex.apiKey != "" {
 		t.Fatalf("apiKey=%q, want empty so no x-goog-api-key is sent", vertex.apiKey)
@@ -174,10 +179,60 @@ func TestVertexSystemConnectionServesAPIKeyCallers(t *testing.T) {
 	if !ok {
 		t.Fatalf("provider type=%T", provider)
 	}
-	if vertex.bearerToken != "ya29.stored-path" {
-		t.Fatalf("bearerToken=%q, want the token minted from the system key", vertex.bearerToken)
+	if vertex.bearerTokenFor == nil {
+		t.Fatal("system service account did not retain a refreshable token source")
+	}
+	if token, err := vertex.currentBearerToken(); err != nil || token != "ya29.stored-path" {
+		t.Fatalf("bearer token=%q error=%v", token, err)
 	}
 	if vertex.apiKey != "" {
 		t.Fatalf("apiKey=%q, want empty", vertex.apiKey)
+	}
+}
+
+func TestVertexCachedProviderRefreshesServiceAccountToken(t *testing.T) {
+	setupVertexIAM(t)
+	var exchanges atomic.Int32
+	tokenServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		index := exchanges.Add(1)
+		_, _ = fmt.Fprintf(w, `{"access_token":"token-%d","expires_in":3600}`, index)
+	}))
+	defer tokenServer.Close()
+	modelServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		token := strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ")
+		_, _ = w.Write([]byte(`{"candidates":[{"content":{"parts":[{"text":"` + token + `"}]}}]}`))
+	}))
+	defer modelServer.Close()
+	config.Update(func(s *config.Settings) {
+		s.Providers["vertex_ai"].BaseURL = modelServer.URL + "/v1"
+	})
+	human, _ := iam.CreatePrincipal("human", "authentik:vertex-refresh", "", "Owner")
+	if _, err := iam.PutProviderConnection(iam.ProviderConnectionCreate{
+		PrincipalID: human.ID, ProviderID: "vertex_ai", Name: "personal",
+		Kind: gcpauth.CredentialKind, Secret: serviceAccountFixture(t, tokenServer.URL),
+		Source: iam.ConnectionSourceUser, MakeDefault: true,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	provider, err := GetProviderForPrincipal("vertex_ai", &config.Principal{PrincipalID: human.ID, PrincipalKind: human.Kind})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for index, want := range []string{"token-1", "token-2"} {
+		if index == 1 {
+			gcpauth.ResetCache()
+		}
+		response, err := provider.Complete("gemini-test", []Message{{"role": "user", "content": "hi"}}, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		choices := response["choices"].([]any)
+		message := choices[0].(map[string]any)["message"].(map[string]any)
+		if message["content"] != want {
+			t.Fatalf("request %d token=%q want=%q", index+1, message["content"], want)
+		}
+	}
+	if exchanges.Load() != 2 {
+		t.Fatalf("token exchanges=%d want=2", exchanges.Load())
 	}
 }

@@ -534,6 +534,21 @@ func SystemProviderConnectionExists(providerID string) (bool, error) {
 	return found && connection.Status == "active", err
 }
 
+// ActiveProviderConnectionExists reports whether any principal still owns an
+// active credential for a provider ID. Automation must not reuse such an ID for
+// a different endpoint or registry identity.
+func ActiveProviderConnectionExists(providerID string) (bool, error) {
+	db, err := DB()
+	if err != nil {
+		return false, err
+	}
+	var count int
+	err = db.QueryRow(`
+SELECT COUNT(*) FROM provider_connections
+WHERE provider_id=? AND status='active'`, strings.TrimSpace(providerID)).Scan(&count)
+	return count > 0, err
+}
+
 func RevokeSystemProviderConnection(providerID string) error {
 	principal, ok, err := PrincipalBySubject(systemPrincipalSubject)
 	if err != nil {

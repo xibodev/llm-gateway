@@ -18,7 +18,19 @@ export const API_EVIDENCE = Object.freeze(Object.fromEntries([
   ['https://api.siliconflow.com/v1', 'openai', 'https://docs.siliconflow.com/en/api-reference/chat-completions/chat-completions'],
   ['https://api.anthropic.com', 'anthropic', 'https://docs.anthropic.com/en/api/messages'],
   ['https://opencode.ai/zen/v1', 'openai', 'https://opencode.ai/zen'],
-].map(([url, protocol, evidence]) => [url, { protocol, auth: url.includes('zen') ? 'none' : 'api_key', evidence }])));
+  ['https://api.kilo.ai/api/gateway', 'openai', 'https://kilo.ai/docs/advanced-usage/api', 'none'],
+  ['https://api.llm7.io/v1', 'openai', 'https://llm7.io', 'none'],
+  ['https://oai.endpoints.kepler.ai.cloud.ovh.net/v1', 'openai', 'https://endpoints.ai.cloud.ovh.net', 'none'],
+  ['https://text.pollinations.ai', 'openai', 'https://pollinations.ai', 'none'],
+].map(([url, protocol, evidence, auth]) => [url, { protocol, auth: auth ?? (url.includes('zen') ? 'none' : 'api_key'), evidence }])));
+
+export const MODEL_CATALOG_PROBES = Object.freeze({
+  'https://opencode.ai/zen/v1': 'https://opencode.ai/zen/v1/models',
+  'https://api.kilo.ai/api/gateway': 'https://api.kilo.ai/api/gateway/models',
+  'https://api.llm7.io/v1': 'https://api.llm7.io/v1/models',
+  'https://oai.endpoints.kepler.ai.cloud.ovh.net/v1': 'https://oai.endpoints.kepler.ai.cloud.ovh.net/v1/models',
+  'https://text.pollinations.ai': 'https://text.pollinations.ai/models',
+});
 
 // A prose homepage is never promoted to an API endpoint, even when its brand is known.
 // These URLs are code-reviewed official raster assets, never source-supplied images.

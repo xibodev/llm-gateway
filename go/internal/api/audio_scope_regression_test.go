@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"net/http/httptest"
 	"testing"
 	"time"
@@ -58,7 +59,7 @@ func TestNativeSpeechPinsScopedVoice(t *testing.T) {
 			for _, voice := range []string{"voice-b", "default", "", "voice-a"} {
 				synth := &scopeSpeechSynthesizer{}
 				rec := httptest.NewRecorder()
-				serveNativeSpeech(rec, map[string]any{"input": "hello", "voice": voice}, synth, provider, model, &p, time.Now(), "speech")
+				serveNativeSpeech(context.Background(), rec, map[string]any{"input": "hello", "voice": voice}, synth, provider, model, &p, time.Now(), "speech")
 				want := tc.want
 				if tc.name == "unscoped compatibility" {
 					switch voice {
@@ -80,7 +81,7 @@ func TestNativeSpeechAdminVoiceCompatibility(t *testing.T) {
 	resetState(t)
 	synth := &scopeSpeechSynthesizer{}
 	rec := httptest.NewRecorder()
-	serveNativeSpeech(rec, map[string]any{"input": "hello", "voice": "voice-b"}, synth,
+	serveNativeSpeech(context.Background(), rec, map[string]any{"input": "hello", "voice": "voice-b"}, synth,
 		"edge", "voice-a", &config.Principal{}, time.Now(), "edge/voice-a")
 	if rec.Code != 200 || synth.voice != "voice-b" {
 		t.Fatalf("status=%d voice=%q", rec.Code, synth.voice)

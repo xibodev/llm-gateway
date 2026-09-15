@@ -1,6 +1,7 @@
 package providers
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"strings"
@@ -55,7 +56,8 @@ func instantiate(
 		}
 		return NewEdgeTTS(cfg.BaseURL, token, cfg.DefaultVoice, cfg.TimeoutOr(60)), nil
 	case "openai_compatible", "openai", "litellm":
-		if EffectiveRegistryID(providerID, cfg.RegistryID, cfg.Type) == "openai_codex" {
+		registryID := EffectiveRegistryID(providerID, cfg.RegistryID, cfg.Type)
+		if registryID == "openai_codex" {
 			if principal == nil || strings.TrimSpace(principal.PrincipalID) == "" {
 				return nil, &ConfigError{Msg: "openai_codex: a human principal private connection is required"}
 			}
@@ -76,9 +78,17 @@ func instantiate(
 		if base == "" {
 			base = s.OpenAICompatibleBaseURL
 		}
-		return OpenAIProvider{auth: bearerAuth{
-			base: strings.TrimRight(base, "/"), apiKey: apiKey, observation: observation,
-		}, Timeout: timeout, forceAdapt: cfg.ForceApiSupport, providerID: providerID, principal: principal}, nil
+		registryEntry, _ := RegistryProviderByID(registryID)
+		anonymous := registryEntry.AnonymousAutomation && AnonymousAPIKey(apiKey)
+		auth, authErr := newBearerAuth(base, apiKey, observation, registryID == "opencode_zen")
+		if authErr != nil {
+			return nil, &ConfigError{Msg: fmt.Sprintf("provider '%s': initialize request identity: %v", providerID, authErr)}
+		}
+		return OpenAIProvider{
+			auth: auth, Timeout: timeout, forceAdapt: cfg.ForceApiSupport,
+			providerID: providerID, principal: principal, registryID: registryID,
+			anonymous: anonymous,
+		}, nil
 	case "azure_openai":
 		// Normalised, not merely checked for emptiness: the catalog derives the
 		// deployments route from scheme+host alone while inference appends to
@@ -206,9 +216,15 @@ func GetProviderForPrincipal(
 }
 
 // AsSpeechSynthesizer reports whether a provider can synthesize speech
-// natively, unwrapping resilience decorators to reach the concrete provider.
+// natively. Resilience decorators implement the capability and enforce policy.
 func AsSpeechSynthesizer(provider Provider) (SpeechSynthesizer, bool) {
 	for provider != nil {
+		if resilient, ok := provider.(*ResilientProvider); ok {
+			if _, supported := AsSpeechSynthesizer(resilient.inner); !supported {
+				return nil, false
+			}
+			return resilient, true
+		}
 		if synthesizer, ok := provider.(SpeechSynthesizer); ok {
 			return synthesizer, true
 		}
@@ -346,12 +362,25 @@ func newVertexProvider(
 			providerID, project, credential.ProjectID(),
 		)}
 	}
-	token, err := gcpauth.AccessToken(credential, gcpauth.CloudPlatformScope)
-	if err != nil {
-		return nil, &ConfigError{Msg: fmt.Sprintf("provider '%s': %v", providerID, err)}
+	tokenSource := func() (string, error) {
+		token, tokenErr := gcpauth.AccessToken(credential, gcpauth.CloudPlatformScope)
+		if tokenErr != nil {
+			var exchangeErr *gcpauth.TokenError
+			if errors.As(tokenErr, &exchangeErr) {
+				message := fmt.Sprintf("provider '%s': service account token refresh failed", providerID)
+				if exchangeErr.StatusCode != 0 {
+					return "", failoverInvocationStatus(message, exchangeErr.StatusCode)
+				}
+				if exchangeErr.Code == "transport" {
+					return "", retryableInvocation(message)
+				}
+			}
+			return "", invocation(fmt.Sprintf("provider '%s': service account token refresh failed", providerID))
+		}
+		return token, nil
 	}
-	return NewVertexAIWithAccessToken(
-		cfg.BaseURL, token, project, cfg.Location, cfg.TimeoutOr(120),
+	return NewVertexAIWithTokenSource(
+		cfg.BaseURL, project, cfg.Location, cfg.TimeoutOr(120), tokenSource,
 	), nil
 }
 

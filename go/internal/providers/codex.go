@@ -23,6 +23,26 @@ type codexAuth struct {
 	clientID       string
 }
 
+func codexRefreshInvocationError(err error) error {
+	if err == nil || IsInvocation(err) || IsConfig(err) {
+		return err
+	}
+	var refreshError *codexauth.RefreshError
+	if errors.As(err, &refreshError) && refreshError.StatusCode != 0 {
+		return failoverInvocationStatus("openai_codex: refresh failed", refreshError.StatusCode)
+	}
+	var authError *codexauth.AuthError
+	if errors.As(err, &authError) {
+		if authError.StatusCode != 0 {
+			return failoverInvocationStatus("openai_codex: refresh failed", authError.StatusCode)
+		}
+		if authError.Code == "transport" {
+			return retryableInvocation("openai_codex: refresh failed")
+		}
+	}
+	return invocation("openai_codex: refresh failed")
+}
+
 type codexRefreshLock struct {
 	mu   sync.Mutex
 	refs int
@@ -139,7 +159,7 @@ func (a codexAuth) refreshConnection(initial iam.OAuthTokenEnvelope, initialConn
 				ForgetCatalogForPrincipal(a.providerID, a.principalID)
 			}
 		}
-		return invocation("openai_codex: refresh failed")
+		return codexRefreshInvocationError(err)
 	}
 	if codexAccountMismatch(expectedAccountID, tokens.AccountID) {
 		return invocation("openai_codex: account changed during refresh")

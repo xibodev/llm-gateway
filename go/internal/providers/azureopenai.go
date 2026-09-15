@@ -96,10 +96,13 @@ func (p AzureOpenAIProvider) CompleteWithObservation(
 	req.Header = p.headers()
 	resp, err := httpClient(p.Timeout).Do(req)
 	if err != nil {
-		return nil, p.observation, invocation("azure_openai: upstream transport error: " + err.Error())
+		return nil, p.observation, retryableInvocation("azure_openai: upstream transport error: " + err.Error())
 	}
 	defer resp.Body.Close()
-	raw, _ := io.ReadAll(resp.Body)
+	raw, readErr := readInvocationResponseBody(resp, "azure_openai")
+	if readErr != nil {
+		return nil, p.observation, readErr
+	}
 	if resp.StatusCode >= 400 {
 		return nil, p.observation, invocationStatus(
 			fmt.Sprintf("azure_openai: upstream returned %d: %s", resp.StatusCode, redact(extractError(raw))),
@@ -113,8 +116,15 @@ func (p AzureOpenAIProvider) CompleteWithObservation(
 	// version-stamped id, not the deployment name that was requested, and
 	// nothing here rewrites it.
 	var out map[string]any
-	if json.Unmarshal(raw, &out) != nil {
-		return nil, p.observation, invocation("azure_openai: invalid JSON in upstream response")
+	if json.Unmarshal(raw, &out) != nil || len(out) == 0 {
+		return nil, p.observation, circuitFailureInvocation("azure_openai: invalid JSON in upstream response")
+	}
+	choices, ok := out["choices"].([]any)
+	if !ok || len(choices) == 0 {
+		return nil, p.observation, circuitFailureInvocation("azure_openai: invalid chat response payload")
+	}
+	if _, ok := choices[0].(map[string]any); !ok {
+		return nil, p.observation, circuitFailureInvocation("azure_openai: invalid chat response payload")
 	}
 	return out, p.observation, nil
 }
@@ -129,10 +139,10 @@ func (p AzureOpenAIProvider) Stream(model string, messages []Message, kw Kwargs)
 	req.Header = p.headers()
 	resp, err := httpClient(p.Timeout).Do(req)
 	if err != nil {
-		return nil, invocation("azure_openai: streaming transport error: " + err.Error())
+		return nil, retryableInvocation("azure_openai: streaming transport error: " + err.Error())
 	}
 	if resp.StatusCode >= 400 {
-		raw, _ := io.ReadAll(resp.Body)
+		raw, _ := readInvocationResponseBody(resp, "azure_openai")
 		resp.Body.Close()
 		return nil, invocationStatus(
 			fmt.Sprintf("azure_openai: upstream returned %d: %s", resp.StatusCode, redact(extractError(raw))),

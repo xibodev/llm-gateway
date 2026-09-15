@@ -296,6 +296,8 @@ func TestAnthropicTokenCountAuthPrecedenceAndNativeFailures(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Setenv("LLMGW_STATE_DIR", t.TempDir())
+			old := *config.Get()
+			t.Cleanup(func() { config.Update(func(s *config.Settings) { *s = old }) })
 			var calls atomic.Int32
 			upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 				calls.Add(1)
@@ -305,6 +307,8 @@ func TestAnthropicTokenCountAuthPrecedenceAndNativeFailures(t *testing.T) {
 			defer upstream.Close()
 			config.Update(func(s *config.Settings) {
 				s.APIKey = "gateway-token"
+				s.APIKeys = nil
+				s.AllowUnauthenticatedAPI = false
 				s.Providers = map[string]*config.ProviderConfig{"native": {Type: "anthropic", BaseURL: upstream.URL}}
 				s.Policies.Defaults.RetryMaxAttempts = 3
 			})
@@ -629,6 +633,106 @@ func TestAnthropicMessagesFailoverEligibility(t *testing.T) {
 			router.ResetTelemetryState()
 			router.ResetSavingsState()
 		})
+	}
+}
+
+func TestAnthropicMessagesAdvancesPastOpenCircuit(t *testing.T) {
+	t.Setenv("LLMGW_STATE_DIR", t.TempDir())
+	oldAPIKey := config.Get().APIKey
+	oldProviders, oldEndpoints, oldPolicies := config.Get().Providers, config.Get().Endpoints, config.Get().Policies
+	var first, second atomic.Int32
+	bad := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/v1/messages" {
+			first.Add(1)
+			http.Error(w, "temporary", http.StatusServiceUnavailable)
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"data": []any{}})
+	}))
+	defer bad.Close()
+	good := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/v1/messages" {
+			second.Add(1)
+			writeJSON(w, http.StatusOK, map[string]any{"id": "ok", "type": "message", "content": []any{}, "usage": map[string]any{}})
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"data": []any{}})
+	}))
+	defer good.Close()
+	config.Update(func(s *config.Settings) {
+		s.APIKey = "gateway-token"
+		s.Providers = map[string]*config.ProviderConfig{"bad": {Type: "anthropic", BaseURL: bad.URL}, "good": {Type: "anthropic", BaseURL: good.URL}}
+		s.Endpoints = map[string]*config.EndpointConfig{"route": {Failover: []config.EndpointMember{{Provider: "bad", Model: "a"}, {Provider: "good", Model: "b"}}}}
+		s.Policies.Defaults = config.ProviderPolicy{RetryMaxAttempts: 1, CircuitFailureThreshold: 1, CircuitCooldownSeconds: 60}
+	})
+	providers.ResetProviders()
+	providers.ResetCircuit("bad")
+	t.Cleanup(func() {
+		providers.ResetProviders()
+		providers.ResetCircuit("bad")
+		iam.ResetForTests()
+		router.ResetTelemetryState()
+		router.ResetSavingsState()
+		config.Update(func(s *config.Settings) {
+			s.APIKey = oldAPIKey
+			s.Providers, s.Endpoints, s.Policies = oldProviders, oldEndpoints, oldPolicies
+		})
+	})
+	payload := map[string]any{"model": "route", "max_tokens": 1, "messages": []any{map[string]any{"role": "user", "content": "hi"}}}
+	for attempt := range 2 {
+		response := anthropicFixtureRequest(t, payload)
+		if response.Code != http.StatusOK {
+			t.Fatalf("attempt=%d status=%d body=%s", attempt+1, response.Code, response.Body.String())
+		}
+	}
+	if first.Load() != 1 || second.Load() != 2 {
+		t.Fatalf("upstream calls=%d/%d want=1/2", first.Load(), second.Load())
+	}
+}
+
+func TestAnthropicMessagesAdvancesPastMalformedResponseWithoutRetry(t *testing.T) {
+	t.Setenv("LLMGW_STATE_DIR", t.TempDir())
+	oldAPIKey := config.Get().APIKey
+	oldProviders, oldEndpoints, oldPolicies := config.Get().Providers, config.Get().Endpoints, config.Get().Policies
+	var first, second atomic.Int32
+	bad := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/v1/messages" {
+			first.Add(1)
+			_, _ = w.Write([]byte(`{"id":`))
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"data": []any{}})
+	}))
+	defer bad.Close()
+	good := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/v1/messages" {
+			second.Add(1)
+			writeJSON(w, http.StatusOK, map[string]any{"id": "ok", "type": "message", "content": []any{}, "usage": map[string]any{}})
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"data": []any{}})
+	}))
+	defer good.Close()
+	config.Update(func(s *config.Settings) {
+		s.APIKey = "gateway-token"
+		s.Providers = map[string]*config.ProviderConfig{"bad": {Type: "anthropic", BaseURL: bad.URL}, "good": {Type: "anthropic", BaseURL: good.URL}}
+		s.Endpoints = map[string]*config.EndpointConfig{"route": {Failover: []config.EndpointMember{{Provider: "bad", Model: "a"}, {Provider: "good", Model: "b"}}}}
+		s.Policies.Defaults = config.ProviderPolicy{RetryMaxAttempts: 3}
+	})
+	providers.ResetProviders()
+	t.Cleanup(func() {
+		providers.ResetProviders()
+		iam.ResetForTests()
+		router.ResetTelemetryState()
+		router.ResetSavingsState()
+		config.Update(func(s *config.Settings) {
+			s.APIKey = oldAPIKey
+			s.Providers, s.Endpoints, s.Policies = oldProviders, oldEndpoints, oldPolicies
+		})
+	})
+	response := anthropicFixtureRequest(t, map[string]any{"model": "route", "max_tokens": 1, "messages": []any{map[string]any{"role": "user", "content": "hi"}}})
+	if response.Code != http.StatusOK || first.Load() != 1 || second.Load() != 1 {
+		t.Fatalf("status=%d calls=%d/%d body=%s", response.Code, first.Load(), second.Load(), response.Body.String())
 	}
 }
 

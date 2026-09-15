@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
-	"io"
 	"net/http"
 	"strings"
 
@@ -102,10 +101,13 @@ func (p AnthropicNativeProvider) Complete(model string, messages []Message, kw K
 	req.Header = p.headers()
 	resp, err := httpClient(p.timeout()).Do(req)
 	if err != nil {
-		return nil, invocation("anthropic: upstream transport error: " + err.Error())
+		return nil, retryableInvocation("anthropic: upstream transport error: " + err.Error())
 	}
 	defer resp.Body.Close()
-	raw, _ := io.ReadAll(resp.Body)
+	raw, readErr := readInvocationResponseBody(resp, "anthropic")
+	if readErr != nil {
+		return nil, readErr
+	}
 	if resp.StatusCode >= 400 {
 		return nil, invocationStatus(
 			fmt.Sprintf("anthropic: upstream returned %d: %s", resp.StatusCode, extractError(raw)),
@@ -113,8 +115,11 @@ func (p AnthropicNativeProvider) Complete(model string, messages []Message, kw K
 		)
 	}
 	var anthropicResp map[string]any
-	if json.Unmarshal(raw, &anthropicResp) != nil {
-		return nil, invocation("anthropic: invalid JSON in upstream response")
+	if json.Unmarshal(raw, &anthropicResp) != nil || len(anthropicResp) == 0 {
+		return nil, circuitFailureInvocation("anthropic: invalid JSON in upstream response")
+	}
+	if _, ok := anthropicResp["content"].([]any); !ok {
+		return nil, circuitFailureInvocation("anthropic: invalid Messages response payload")
 	}
 	return translate.AnthropicResponseToOpenAI(anthropicResp, model), nil
 }
@@ -146,18 +151,24 @@ func (p AnthropicNativeProvider) CompleteAnthropicMessages(model string, payload
 	req.Header = p.headers()
 	resp, err := httpClient(p.timeout()).Do(req)
 	if err != nil {
-		return nil, invocation("anthropic: upstream transport error: " + err.Error())
+		return nil, retryableInvocation("anthropic: upstream transport error: " + err.Error())
 	}
 	defer resp.Body.Close()
-	raw, _ := io.ReadAll(resp.Body)
+	raw, readErr := readInvocationResponseBody(resp, "anthropic")
+	if readErr != nil {
+		return nil, readErr
+	}
 	if resp.StatusCode >= 400 {
 		return nil, invocationStatus(fmt.Sprintf("anthropic: upstream returned %d: %s", resp.StatusCode, extractError(raw)), resp.StatusCode)
 	}
 	var result map[string]any
 	decoder := json.NewDecoder(bytes.NewReader(raw))
 	decoder.UseNumber()
-	if decoder.Decode(&result) != nil {
-		return nil, invocation("anthropic: invalid JSON in upstream response")
+	if decoder.Decode(&result) != nil || len(result) == 0 {
+		return nil, circuitFailureInvocation("anthropic: invalid JSON in upstream response")
+	}
+	if _, ok := result["content"].([]any); !ok {
+		return nil, circuitFailureInvocation("anthropic: invalid Messages response payload")
 	}
 	return result, nil
 }
@@ -184,10 +195,13 @@ func (p AnthropicNativeProvider) CountAnthropicTokens(model string, payload map[
 	}
 	resp, err := httpClient(p.timeout()).Do(req)
 	if err != nil {
-		return "", invocation("anthropic: token-count transport error: " + err.Error())
+		return "", retryableInvocation("anthropic: token-count transport error: " + err.Error())
 	}
 	defer resp.Body.Close()
-	raw, _ := io.ReadAll(resp.Body)
+	raw, readErr := readInvocationResponseBody(resp, "anthropic: token count")
+	if readErr != nil {
+		return "", readErr
+	}
 	if resp.StatusCode >= 400 {
 		return "", invocationStatus(fmt.Sprintf("anthropic: token count returned %d: %s", resp.StatusCode, extractError(raw)), resp.StatusCode)
 	}
@@ -197,7 +211,7 @@ func (p AnthropicNativeProvider) CountAnthropicTokens(model string, payload map[
 	decoder := json.NewDecoder(bytes.NewReader(raw))
 	decoder.UseNumber()
 	if decoder.Decode(&result) != nil || !nonnegativeInteger(result.InputTokens.String()) {
-		return "", ErrInvalidAnthropicTokenCount
+		return "", fmt.Errorf("%w: %w", ErrInvalidAnthropicTokenCount, circuitFailureInvocation("anthropic: invalid token-count response"))
 	}
 	return result.InputTokens, nil
 }
@@ -233,10 +247,10 @@ func (p AnthropicNativeProvider) Stream(model string, messages []Message, kw Kwa
 	req.Header = p.headers()
 	resp, err := httpClient(p.timeout()).Do(req)
 	if err != nil {
-		return nil, invocation("anthropic: streaming transport error: " + err.Error())
+		return nil, retryableInvocation("anthropic: streaming transport error: " + err.Error())
 	}
 	if resp.StatusCode >= 400 {
-		raw, _ := io.ReadAll(resp.Body)
+		raw, _ := readInvocationResponseBody(resp, "anthropic")
 		resp.Body.Close()
 		return nil, invocationStatus(
 			fmt.Sprintf("anthropic: upstream returned %d: %s", resp.StatusCode, extractError(raw)),

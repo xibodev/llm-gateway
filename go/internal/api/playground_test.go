@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -113,7 +114,21 @@ func TestOwnerPlaygroundUsesRealRouteAndRecordsKeylessProjectUsage(t *testing.T)
 func TestPlaygroundRejectsOtherPrincipalAndExplainsStreamingLimit(t *testing.T) {
 	t.Setenv("LLMGW_STATE_DIR", t.TempDir())
 	iam.ResetForTests()
-	t.Cleanup(iam.ResetForTests)
+	providers.ResetProviders()
+	router.ResetSavingsState()
+	router.ResetTelemetryState()
+	oldProviders, oldEndpoints := config.Get().Providers, config.Get().Endpoints
+	oldSSO, oldSecret, oldAuto := config.Get().SSOEnabled, config.Get().SSOSharedSecret, config.Get().SSOAutoProvision
+	t.Cleanup(func() {
+		iam.ResetForTests()
+		providers.ResetProviders()
+		router.ResetSavingsState()
+		router.ResetTelemetryState()
+		config.Update(func(s *config.Settings) {
+			s.Providers, s.Endpoints = oldProviders, oldEndpoints
+			s.SSOEnabled, s.SSOSharedSecret, s.SSOAutoProvision = oldSSO, oldSecret, oldAuto
+		})
+	})
 	config.Update(func(s *config.Settings) {
 		s.SSOEnabled, s.SSOSharedSecret, s.SSOAutoProvision = true, "proxy-secret", true
 		s.Providers = map[string]*config.ProviderConfig{"echo": {Type: "echo"}}
@@ -138,6 +153,80 @@ func TestPlaygroundRejectsOtherPrincipalAndExplainsStreamingLimit(t *testing.T) 
 	message, _ := errorPayload["message"].(string)
 	if status != http.StatusBadRequest || !strings.Contains(strings.ToLower(message), "streaming") {
 		t.Fatalf("streaming limitation status=%d response=%+v", status, limited)
+	}
+}
+
+func TestPlaygroundPreservesDefinitiveUpstreamErrorWithoutRetry(t *testing.T) {
+	var calls atomic.Int32
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/models" {
+			writeJSON(w, http.StatusOK, map[string]any{"data": []any{map[string]any{"id": "unavailable"}}})
+			return
+		}
+		calls.Add(1)
+		writeJSON(w, http.StatusBadRequest, map[string]any{"error": map[string]any{"message": "Model is unavailable."}})
+	}))
+	defer upstream.Close()
+
+	t.Setenv("LLMGW_STATE_DIR", t.TempDir())
+	iam.ResetForTests()
+	providers.ResetProviders()
+	providers.ResetCircuit("zen")
+	router.ResetSavingsState()
+	router.ResetTelemetryState()
+	t.Cleanup(func() {
+		iam.ResetForTests()
+		providers.ResetProviders()
+		providers.ResetCircuit("zen")
+		router.ResetSavingsState()
+		router.ResetTelemetryState()
+	})
+	oldProviders, oldEndpoints := config.Get().Providers, config.Get().Endpoints
+	oldSSO, oldSecret, oldAuto := config.Get().SSOEnabled, config.Get().SSOSharedSecret, config.Get().SSOAutoProvision
+	oldPolicies := config.Get().Policies
+	t.Cleanup(func() {
+		config.Update(func(s *config.Settings) {
+			s.Providers, s.Endpoints = oldProviders, oldEndpoints
+			s.SSOEnabled, s.SSOSharedSecret, s.SSOAutoProvision = oldSSO, oldSecret, oldAuto
+			s.Policies = oldPolicies
+		})
+	})
+	config.Update(func(s *config.Settings) {
+		s.SSOEnabled, s.SSOSharedSecret, s.SSOAutoProvision = true, "proxy-secret", true
+		s.Providers = map[string]*config.ProviderConfig{"zen": {Type: "openai_compatible", BaseURL: upstream.URL, APIKey: "fixture"}}
+		s.Endpoints = map[string]*config.EndpointConfig{}
+		s.Policies.Defaults.RetryMaxAttempts = 3
+		s.Policies.Defaults.RetryInitialBackoffSeconds = 0.001
+	})
+	if _, err := iam.Initialize(); err != nil {
+		t.Fatal(err)
+	}
+	owner, err := iam.EnsurePrincipalBySubject("human", "authentik:unavailable-owner", "", "Unavailable Owner")
+	if err != nil {
+		t.Fatal(err)
+	}
+	project, err := iam.CreateProject("unavailable-project", "Unavailable Project")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := iam.SetMembership(project.ID, owner.ID, "owner"); err != nil {
+		t.Fatal(err)
+	}
+
+	server := httptest.NewServer(NewServer())
+	defer server.Close()
+	status, response := ssoConnectionRequest(t, server.URL, "unavailable-owner", http.MethodPost, "/user/api/playground", map[string]any{
+		"project_id": project.ID,
+		"model":      "zen/unavailable",
+		"messages":   []map[string]any{{"role": "user", "content": "hi"}},
+	})
+	errorPayload, _ := response["error"].(map[string]any)
+	message, _ := errorPayload["message"].(string)
+	if status != http.StatusBadRequest || !strings.Contains(message, "Model is unavailable") {
+		t.Fatalf("status=%d response=%+v", status, response)
+	}
+	if calls.Load() != 1 {
+		t.Fatalf("upstream inference calls=%d want=1", calls.Load())
 	}
 }
 

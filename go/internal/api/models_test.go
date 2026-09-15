@@ -432,7 +432,7 @@ func TestEndpointRowsAreOwnedByEndpoint(t *testing.T) {
 // directly, which emits only the canonical key.
 func TestAdminCatalogRowsCarryBothSurfaceKeys(t *testing.T) {
 	rows := catalogRowsWithLegacySurfaces([]providers.ModelInfo{
-		{ID: "gpt-5.5", Label: "GPT-5.5", SupportedSurfaces: []string{"/responses"}},
+		{ID: "gpt-5.5", Label: "GPT-5.5", Free: true, SupportedSurfaces: []string{"/responses"}},
 		{ID: "bare-model"},
 	})
 	if len(rows) != 2 {
@@ -440,6 +440,9 @@ func TestAdminCatalogRowsCarryBothSurfaceKeys(t *testing.T) {
 	}
 	if rows[0]["id"] != "gpt-5.5" || rows[0]["label"] != "GPT-5.5" {
 		t.Fatalf("row lost its canonical fields: %+v", rows[0])
+	}
+	if rows[0]["free"] != true {
+		t.Fatalf("row lost its free marker: %+v", rows[0])
 	}
 	surfaces, _ := rows[0]["supported_surfaces"].([]any)
 	if len(surfaces) != 1 || surfaces[0] != "/responses" {

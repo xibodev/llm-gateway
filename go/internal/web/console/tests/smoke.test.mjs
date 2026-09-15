@@ -221,7 +221,7 @@ test("admin model catalogs stay scoped to the selected principal", () => {
   assert.match(models, /Catalog owner/);
   assert.match(app, /catalogPrincipalID/);
   assert.match(app, /<ModelsEndpoints.*principalID=\{catalogPrincipalID\}/);
-  assert.match(app, /<Playground.*principalID=\{catalogPrincipalID\}/);
+  assert.match(app, /<Playground.*principalID=\{initialOwner\}/);
 });
 
 test("access page manages principals, projects, and memberships over the IAM API", () => {
@@ -391,6 +391,17 @@ test("settings editor covers every writable project policy field", () => {
   assert.doesNotMatch(settings, /grouped here rather than mixed into provider and routing workflows/);
 });
 
+test("provider automation is admin-only, inherited, explicit, and non-destructive", () => {
+  const settings = readFileSync(resolve(root, "src/pages/Settings.tsx"), "utf8");
+  assert.match(settings, /mode === "admin" \? <AnonymousProviderAutomation/);
+  assert.match(settings, /\/settings\/anonymous-provider-automation/);
+  assert.match(settings, /Use deployment default/);
+  assert.match(settings, /value="on">On/);
+  assert.match(settings, /value="off">Off/);
+  assert.match(settings, /Existing provider configuration was not removed/);
+  assert.match(settings, /never creates credentials, changes routes, or replaces an existing provider/);
+});
+
 test("audit history copy reflects bounded retention", () => {
   const settings = readFileSync(resolve(root, "src/pages/Settings.tsx"), "utf8");
   assert.match(settings, /retained audit history/);
@@ -491,10 +502,39 @@ test("playground is a chat surface with multi-turn history", () => {
   assert.match(playground, /chat-composer/);
   assert.match(playground, /Enter to send, Shift\+Enter/);
   assert.match(playground, /event.key !== "Enter" \|\| event.shiftKey/);
+  assert.match(playground, /event\.preventDefault\(\);\s*if \(executionPending\.current\) return;/);
   assert.match(playground, /sendChat\(event, \(event.currentTarget as HTMLTextAreaElement\).value\)/);
   assert.match(playground, /messages: history.map/);
   assert.match(playground, /Clear conversation/);
   assert.match(playground, /Raw gateway response/);
+});
+
+test("playground keeps failed requests out of conversation history", () => {
+  const playground = readFileSync(resolve(root, "src/pages/Playground.tsx"), "utf8");
+  assert.doesNotMatch(playground, /isError\?: boolean/);
+  assert.doesNotMatch(playground, /setTurns\(\[\.\.\.history, \{\s*role: "assistant",\s*content: msg/s);
+  assert.match(playground, /setTurns\(turns\);\s*setDraft\(\(current\) => current \|\| text\);\s*setError\(cause instanceof Error/);
+  assert.match(playground, /const executionRequest = useRef\(0\)/);
+  assert.match(playground, /const executionPending = useRef\(false\)/);
+  assert.match(playground, /const executionAbort = useRef<AbortController \| null>\(null\)/);
+  assert.match(playground, /\[model, projectID, scopedPrincipalID\]/);
+  assert.match(playground, /onClear=\{\(\) => \{ executionAbort\.current\?\.abort\(\); executionAbort\.current = null; executionRequest\.current \+= 1;/);
+  assert.match(playground, /setResult\(null\);\s*setError\(cause instanceof Error/);
+  assert.match(playground, /Catalog discovery does not guarantee current inference availability/);
+});
+
+test("playground invalidates stale presets and video polls", () => {
+  const playground = readFileSync(resolve(root, "src/pages/Playground.tsx"), "utf8");
+  assert.match(playground, /const appliedPreset = useRef\(""\)/);
+  assert.match(playground, /catalogSource === catalogPath \? catalogModels\(catalog\) : \[\]/);
+  assert.match(playground, /if \(!preset\) \{\s*appliedPreset\.current = "";/);
+  assert.match(playground, /const presetScope = `\$\{scopedPrincipalID\}\|\$\{projectID\}\|\$\{preset\}`/);
+  assert.match(playground, /if \(appliedPreset\.current === presetScope \|\| !models\.length\) return;/);
+  assert.match(playground, /if \(models\.some\(\(row\) => row\.id === preset\)\) \{\s*appliedPreset\.current = presetScope;/);
+  assert.match(playground, /if \(preset && appliedPreset\.current !== presetScope\) return;/);
+  assert.ok((playground.match(/if \(executionPending\.current\) return;/g) ?? []).length >= 5);
+  assert.match(playground, /const payload = await sendJSON<JSONRecord>\(mode, "\/playground\/video", "POST", pollBody, controller\.signal\);\s*if \(attempt !== videoPoll\.current\) return;/);
+  assert.match(playground, /useEffect\(\(\) => \(\) => \{\s*executionAbort\.current\?\.abort\(\);\s*executionAbort\.current = null;\s*executionRequest\.current \+= 1;\s*executionPending\.current = false;\s*videoPoll\.current \+= 1;/);
 });
 
 test("playground switches surface by model capability", () => {
@@ -530,6 +570,8 @@ test("model selection is a type-ahead, not a list of hundreds", () => {
   assert.match(picker, /Type to search models/);
   assert.match(picker, /event.key === "ArrowDown"/);
   assert.match(playground, /<ModelCombo models=\{voiceModels\}/);
+	assert.match(picker, /free: row\.free === true/);
+	assert.match(picker, /const isFree = model\.free/);
 });
 
 test("provider models hand off to the playground and back", () => {
@@ -537,9 +579,13 @@ test("provider models hand off to the playground and back", () => {
   const providers = readFileSync(resolve(root, "src/pages/Providers.tsx"), "utf8");
   const playground = readFileSync(resolve(root, "src/pages/Playground.tsx"), "utf8");
   const app = readFileSync(resolve(root, "src/App.tsx"), "utf8");
-  assert.match(detail, /onOpenPlayground\(stringValue\(row.id\)\)/);
-  assert.match(providers, /onNavigate\("playground", modelID\)/);
-  assert.match(app, /preset=\{route.detail\}/);
+  assert.match(detail, /onOpenPlayground\(stringValue\(row.id\), ownerID\)/);
+  assert.match(providers, /new URLSearchParams\(\{ model: modelID, provider: detail, owner: ownerID \}\)/);
+  assert.match(app, /const playgroundRoute = useMemo/);
+  assert.match(app, /model: structured \? params\.get\("model"\)/);
+  assert.match(app, /const initialOwner = playgroundRoute\.owner && appliedPlaygroundOwner !== route\.detail \? playgroundRoute\.owner : catalogPrincipalID/);
+  assert.match(app, /principalID=\{initialOwner\}/);
+  assert.match(app, /navigate\("providers", playgroundRoute\.provider\)/);
   assert.match(playground, /Back to provider/);
 });
 

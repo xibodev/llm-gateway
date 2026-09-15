@@ -10,6 +10,7 @@ export type CatalogModel = {
   label: string;
   capabilities: string[];
   surfaces: string[];
+  free: boolean;
   isCategory: boolean;
 };
 
@@ -74,6 +75,7 @@ export function catalogModels(payload: JSONRecord | null): CatalogModel[] {
       label: stringValue(row.display_name, id),
       capabilities: capabilitiesFor(row),
       surfaces: asList(row.supported_surfaces ?? row.supported_endpoints).map(String),
+      free: row.free === true,
       // Routing-chain pseudo-model rows report owned_by "endpoint" on the wire.
       isCategory: owner === "endpoint",
     };
@@ -179,7 +181,7 @@ export function ModelCombo({ models, filter, value, onChange, label = "Model", l
       </label>
       {open && suggestions.length ? <ul class="model-combo__list" role="listbox">
         {suggestions.map((model, index) => {
-          const isFree = model.id.endsWith("-free") || model.id.includes(":free");
+          const isFree = model.free;
           return (
             <li key={model.id}>
               <button

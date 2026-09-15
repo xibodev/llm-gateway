@@ -123,9 +123,45 @@ func TestAnthropicNativeMessagesPreservesOpaquePayloadAndResponse(t *testing.T) 
 	}
 }
 
+func TestAnthropicNativeMessagesRejectsStructurallyInvalidSuccessPayloads(t *testing.T) {
+	for _, body := range []string{"null", `{}`} {
+		t.Run(body, func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				_, _ = w.Write([]byte(body))
+			}))
+			defer server.Close()
+			_, err := (AnthropicNativeProvider{BaseURL: server.URL}).CompleteAnthropicMessages("model", map[string]any{"messages": []any{}})
+			if err == nil || !InvocationCircuitFailure(err) || InvocationRetryable(err) {
+				t.Fatalf("error=%v circuit=%v retry=%v", err, InvocationCircuitFailure(err), InvocationRetryable(err))
+			}
+		})
+	}
+}
+
 type messagesTestProvider struct {
 	calls int
 	err   error
+}
+
+type tokenCounterTestProvider struct {
+	calls int
+	err   error
+}
+
+func (p *tokenCounterTestProvider) Complete(string, []Message, Kwargs) (map[string]any, error) {
+	return nil, nil
+}
+func (p *tokenCounterTestProvider) Stream(string, []Message, Kwargs) (StreamIter, error) {
+	return nil, nil
+}
+func (p *tokenCounterTestProvider) ListModels() []ModelInfo { return nil }
+func (p *tokenCounterTestProvider) IsStub() bool            { return false }
+func (p *tokenCounterTestProvider) CountAnthropicTokens(string, map[string]any, string, []string) (json.Number, error) {
+	p.calls++
+	if p.err != nil {
+		return "", p.err
+	}
+	return json.Number("1"), nil
 }
 
 func (p *messagesTestProvider) Complete(string, []Message, Kwargs) (map[string]any, error) {
@@ -145,7 +181,11 @@ func (p *messagesTestProvider) CompleteAnthropicMessages(string, map[string]any)
 func TestResilientProviderAnthropicMessagesRetryEligibility(t *testing.T) {
 	for _, status := range []int{0, 408, 429, 500, 502, 503, 504, 400, 401, 403, 404} {
 		t.Run(strconv.Itoa(status), func(t *testing.T) {
-			inner := &messagesTestProvider{err: invocationStatus("failure", status)}
+			err := invocationStatus("failure", status)
+			if status == 0 {
+				err = retryableInvocation("transport failure")
+			}
+			inner := &messagesTestProvider{err: err}
 			wrapped := &ResilientProvider{inner: inner, name: "messages-" + strconv.Itoa(status), policy: config.ProviderPolicy{RetryMaxAttempts: 2}}
 			if !SupportsAnthropicMessages(wrapped) {
 				t.Fatal("wrapped native capability hidden")
@@ -165,5 +205,45 @@ func TestResilientProviderAnthropicMessagesRetryEligibility(t *testing.T) {
 	_, _ = wrapped.CompleteAnthropicMessages("model", map[string]any{})
 	if inner.calls != 1 {
 		t.Fatalf("compatibility calls=%d", inner.calls)
+	}
+}
+
+func TestResilientProviderAnthropicMessagesDefinitiveFailureBreaksCircuitStreak(t *testing.T) {
+	name := t.Name()
+	ResetCircuit(name)
+	t.Cleanup(func() { ResetCircuit(name) })
+	inner := &messagesTestProvider{err: invocationStatus("temporary", http.StatusServiceUnavailable)}
+	wrapped := &ResilientProvider{inner: inner, name: name, policy: config.ProviderPolicy{
+		RetryMaxAttempts: 1, CircuitFailureThreshold: 2, CircuitCooldownSeconds: 60,
+	}}
+	_, _ = wrapped.CompleteAnthropicMessages("model", map[string]any{})
+	inner.err = invocationStatus("bad request", http.StatusBadRequest)
+	_, _ = wrapped.CompleteAnthropicMessages("model", map[string]any{})
+	inner.err = invocationStatus("temporary", http.StatusServiceUnavailable)
+	_, _ = wrapped.CompleteAnthropicMessages("model", map[string]any{})
+	inner.err = nil
+	_, err := wrapped.CompleteAnthropicMessages("model", map[string]any{})
+	if err != nil || inner.calls != 4 {
+		t.Fatalf("error=%v calls=%d want=4", err, inner.calls)
+	}
+}
+
+func TestResilientProviderAnthropicTokenCountDefinitiveFailureBreaksCircuitStreak(t *testing.T) {
+	name := t.Name()
+	ResetCircuit(name)
+	t.Cleanup(func() { ResetCircuit(name) })
+	inner := &tokenCounterTestProvider{err: invocationStatus("temporary", http.StatusServiceUnavailable)}
+	wrapped := &ResilientProvider{inner: inner, name: name, policy: config.ProviderPolicy{
+		RetryMaxAttempts: 1, CircuitFailureThreshold: 2, CircuitCooldownSeconds: 60,
+	}}
+	_, _ = wrapped.CountAnthropicTokens("model", map[string]any{}, "", nil)
+	inner.err = invocationStatus("bad request", http.StatusBadRequest)
+	_, _ = wrapped.CountAnthropicTokens("model", map[string]any{}, "", nil)
+	inner.err = invocationStatus("temporary", http.StatusServiceUnavailable)
+	_, _ = wrapped.CountAnthropicTokens("model", map[string]any{}, "", nil)
+	inner.err = nil
+	_, err := wrapped.CountAnthropicTokens("model", map[string]any{}, "", nil)
+	if err != nil || inner.calls != 4 {
+		t.Fatalf("error=%v calls=%d want=4", err, inner.calls)
 	}
 }

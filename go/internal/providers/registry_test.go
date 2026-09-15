@@ -30,8 +30,20 @@ func TestProviderRegistryIsUniqueAndRunnable(t *testing.T) {
 			}
 		}
 	}
-	if len(seen) != 21 {
-		t.Fatalf("embedded registry has %d entries, want 21", len(seen))
+	if len(seen) != 24 {
+		t.Fatalf("embedded registry has %d entries, want 24", len(seen))
+	}
+}
+
+func TestAnonymousAutomationRegistryIsExplicitAndSafe(t *testing.T) {
+	want := map[string]bool{
+		"opencode_zen": true, "kilo_code": true, "llm7": true,
+		"ovh_ai_endpoints": true, "pollinations": true,
+	}
+	for _, entry := range ProviderRegistry() {
+		if entry.AnonymousAutomation != want[entry.ID] {
+			t.Fatalf("anonymous automation eligibility for %q=%v", entry.ID, entry.AnonymousAutomation)
+		}
 	}
 }
 

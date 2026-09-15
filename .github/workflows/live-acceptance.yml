@@ -1,0 +1,176 @@
+name: live acceptance
+
+on:
+  schedule:
+    - cron: "23 4 * * *"
+  workflow_dispatch:
+    inputs:
+      enforce:
+        description: Fail unless live evidence passes; dependency-only warnings remain nonblocking
+        type: boolean
+        default: false
+      allow_inconclusive:
+        description: Explicitly allow promotion when every anonymous provider is unavailable
+        type: boolean
+        default: false
+      candidate_image:
+        description: Optional immutable candidate image to pull instead of building the checkout
+        type: string
+        default: ""
+      override_reason:
+        description: Required reason when allow_inconclusive is true
+        type: string
+        default: ""
+  workflow_call:
+    inputs:
+      enforce:
+        type: boolean
+        required: false
+        default: false
+      allow_inconclusive:
+        type: boolean
+        required: false
+        default: false
+      candidate_image:
+        type: string
+        required: false
+        default: ""
+      override_reason:
+        type: string
+        required: false
+        default: ""
+
+permissions:
+  contents: read
+  packages: read
+
+concurrency:
+  group: live-acceptance-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  live:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: "22.23.2"
+          cache: npm
+          cache-dependency-path: test/live-acceptance/package-lock.json
+
+      - name: Initialize failure report
+        env:
+          LLMGW_ACCEPTANCE_MODE: live
+          LLMGW_ACCEPTANCE_REPORT: ${{ github.workspace }}/test/live-acceptance/report.json
+        run: node test/live-acceptance/bootstrap-report.mjs
+
+      - name: Install pinned harness and browser
+        working-directory: test/live-acceptance
+        run: |
+          npm ci --ignore-scripts --no-audit --no-fund
+          npx playwright install --with-deps chromium
+
+      - name: Verify pinned Claude CLI
+        run: |
+          CLAUDE_BIN=$(node test/live-acceptance/claude-bin.mjs)
+          "$CLAUDE_BIN" --version
+          echo "LLMGW_CLAUDE_BIN=$CLAUDE_BIN" >> "$GITHUB_ENV"
+
+      - name: Run clean-state live acceptance
+        id: acceptance
+        continue-on-error: true
+        env:
+          LLMGW_ACCEPTANCE_MODE: live
+          LLMGW_ACCEPTANCE_IMAGE: ${{ inputs.candidate_image }}
+          LLMGW_ACCEPTANCE_REPORT: ${{ github.workspace }}/test/live-acceptance/report.json
+          LLMGW_ACCEPTANCE_PORT: "18810"
+          LLMGW_ACCEPTANCE_EXPECT_COMMIT: ${{ github.sha }}
+        run: node test/live-acceptance/run.mjs
+
+      - name: Enforce release policy
+        if: always()
+        env:
+          ENFORCE: ${{ inputs.enforce }}
+          ALLOW_INCONCLUSIVE: ${{ inputs.allow_inconclusive }}
+          OVERRIDE_REASON: ${{ inputs.override_reason }}
+          ACCEPTANCE_OUTCOME: ${{ steps.acceptance.outcome }}
+          EXPECTED_COMMIT: ${{ github.sha }}
+          EXPECTED_IMAGE: ${{ inputs.candidate_image }}
+        run: |
+          set -euo pipefail
+          report=test/live-acceptance/report.json
+          test -f "$report"
+          policy_file=$(mktemp)
+          trap 'rm -f "$policy_file"' EXIT
+          node test/live-acceptance/policy.mjs "$report" > "$policy_file" || true
+          jq -e '
+            . as $policy |
+            (["fail", "inconclusive", "pass_with_warnings", "pass"] | index($policy.verdict)) != null and
+            ($policy.release_blocking | type) == "boolean" and
+            (($policy.override_eligible // false) | type) == "boolean"
+          ' "$policy_file" >/dev/null
+          jq --slurpfile policy "$policy_file" '.policy = $policy[0]' "$report" > "$report.tmp"
+          mv "$report.tmp" "$report"
+          if [ -n "$EXPECTED_IMAGE" ]; then
+            expected_digest="${EXPECTED_IMAGE##*@}"
+            test "$expected_digest" != "$EXPECTED_IMAGE"
+            [[ "$expected_digest" =~ ^sha256:[0-9a-f]{64}$ ]]
+            jq -e --arg commit "$EXPECTED_COMMIT" --arg image "$EXPECTED_IMAGE" --arg digest "$expected_digest" '
+              .execution.commit == $commit and .execution.candidate_image == $image and
+              .execution.candidate_digest == $digest and .execution.candidate_revision == $commit
+            ' "$report" >/dev/null
+          else
+            jq -e --arg commit "$EXPECTED_COMMIT" '
+              .execution.commit == $commit and ((.execution.candidate_image // "") == "") and
+              ((.execution.candidate_digest // "") == "") and ((.execution.candidate_revision // "") == "")
+            ' "$report" >/dev/null
+          fi
+          verdict=$(jq -r '.policy.verdict' "$report")
+          blocking=$(jq -r '.policy.release_blocking' "$report")
+          override_eligible=$(jq -r '.policy.override_eligible // false' "$report")
+          if [ "$blocking" = true ]; then
+            jq '.policy' "$report"
+            exit 1
+          fi
+          if [ "$ENFORCE" = true ] && [ "$ACCEPTANCE_OUTCOME" != success ]; then
+            echo "acceptance runner did not exit cleanly" >&2
+            exit 1
+          fi
+          if [ "$ENFORCE" = true ] && [ "$verdict" = inconclusive ]; then
+            if [ "$ALLOW_INCONCLUSIVE" != true ] || [ "$override_eligible" != true ]; then
+              echo "live evidence is inconclusive and is not explicitly overrideable" >&2
+              exit 1
+            fi
+            if [ -z "${OVERRIDE_REASON//[[:space:]]/}" ]; then
+              echo "an explicit non-whitespace override reason is required" >&2
+              exit 1
+            fi
+            jq --arg actor "$GITHUB_ACTOR" --arg reason "$OVERRIDE_REASON" '.override = {applied:true, actor:$actor, reason:$reason}' "$report" > "$report.tmp"
+            mv "$report.tmp" "$report"
+          fi
+
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: always()
+        with:
+          name: live-acceptance-${{ github.sha }}
+          path: test/live-acceptance/report.json
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Summarize evidence
+        if: always()
+        run: |
+          test -f test/live-acceptance/report.json
+          jq -r '
+            "### Live acceptance\n\n" +
+            "- Verdict: `" + .policy.verdict + "`\n" +
+            "- Release blocking: `" + (.policy.release_blocking|tostring) + "`\n" +
+            "- Free models observed: `" + ((.model_sweep|length)|tostring) + "`\n" +
+            "- Passing models: `" + (([.model_sweep[] | select(.classification == "PASS")]|length)|tostring) + "`\n" +
+            "- Required checks failed: `" + (([.checks[] | select(.required and .status == "failed")]|length)|tostring) + "`"
+          ' test/live-acceptance/report.json >> "$GITHUB_STEP_SUMMARY"

@@ -43,6 +43,9 @@ is `endpoints`.
 | Edge TTS | Native speech | None by default | System | Unofficial public Edge read-aloud endpoint/token; may change. |
 | OpenCode Zen | OpenAI-compatible | None by default | System or personal | Free anonymous multi-model European inference endpoint. |
 | Kilo Code | OpenAI-compatible | None by default | System or personal | Free anonymous multi-model inference endpoint with auto/free routing. |
+| LLM7.io | OpenAI-compatible | None by default | System or personal | Anonymous turbo-tier chat models. |
+| OVH AI Endpoints | OpenAI-compatible | None by default | System or personal | Anonymous per-IP inference tier; availability is rate-limited. |
+| Pollinations.ai | OpenAI-compatible | None by default | System or personal | Anonymous text inference with provider-specific discovery paths. |
 | Custom OpenAI-compatible | OpenAI-compatible | Optional bearer key | System or personal | Requires a base URL; actual feature support depends on the upstream. |
 | Custom Anthropic-compatible | Native Messages | API key | System or personal | Requires a Messages-compatible base URL. |
 
@@ -100,6 +103,26 @@ The console can probe common loopback and `host.docker.internal` addresses for
 Ollama, LocalAI, LM Studio, vLLM, Jan, text-generation web UI, and llama.cpp.
 Detection only reports candidates; the operator chooses what to add. Silent
 auto-add requires `LLMGW_AUTODISCOVER_LOCAL=1`.
+
+## Anonymous provider automation
+
+`LLMGW_ANONYMOUS_PROVIDER_AUTOMATION=true` opts a deployment into connecting
+the reviewed remote no-key providers. An administrator can override that
+default from **Settings → Automatic anonymous providers** or return to the
+deployment default.
+
+Automation is deliberately narrower than the community roster. Eligibility is
+compiled into the curated registry and currently covers OpenCode Zen, Kilo
+Code, LLM7.io, OVH AI Endpoints, and Pollinations.ai. Each provider has a
+reviewed catalog shape, free-model discriminator, request path, and preferred
+verification model. A roster claim alone cannot enroll a provider.
+
+On startup and then at most once every 24 hours per provider, the worker adds a
+missing default instance, refreshes its filtered free catalog, sends one minimal
+completion, and records the result. It never creates credentials, changes
+routes, overwrites an existing provider ID, re-enables a disabled provider, or
+deletes configuration when turned off. Customized or credentialed instances are
+left unmanaged; rate limits and outages are recorded without removing them.
 
 ## Lifecycle evidence
 

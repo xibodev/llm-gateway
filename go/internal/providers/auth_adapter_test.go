@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"llmgw/internal/config"
+	"llmgw/internal/copilotauth"
 	"llmgw/internal/iam"
 )
 
@@ -110,3 +111,14 @@ var _ ImportProviderAuthAdapter = fixtureProviderAuthAdapter{}
 var _ RefreshableProviderAuthAdapter = githubCopilotAuthAdapter{}
 var _ DeviceProviderAuthAdapter = githubCopilotAuthAdapter{}
 var _ = iam.OAuthTokenEnvelope{}
+
+func TestCopilotInvocationErrorPreservesRetryClassification(t *testing.T) {
+	transport := copilotInvocationError(&copilotauth.AuthError{Msg: "transport", Transport: true})
+	if !InvocationRetryable(transport) {
+		t.Fatal("Copilot transport error should be retryable")
+	}
+	rejected := copilotInvocationError(&copilotauth.AuthError{Msg: "rejected", StatusCode: 401})
+	if InvocationRetryable(rejected) || !InvocationFailoverEligible(rejected) || UpstreamStatus(rejected) != 401 {
+		t.Fatalf("Copilot rejection retry=%v failover=%v status=%d", InvocationRetryable(rejected), InvocationFailoverEligible(rejected), UpstreamStatus(rejected))
+	}
+}

@@ -60,11 +60,12 @@ type GoogleAIProvider struct {
 	// bearerToken carries a minted OAuth2 access token. When set it replaces
 	// the x-goog-api-key header: service-account auth is a Bearer credential,
 	// and Vertex rejects a request that presents both.
-	bearerToken string
-	baseURL     string // ai_studio only
-	project     string // vertex only
-	location    string // vertex only
-	timeout     time.Duration
+	bearerToken    string
+	bearerTokenFor func() (string, error)
+	baseURL        string // ai_studio only
+	project        string // vertex only
+	location       string // vertex only
+	timeout        time.Duration
 }
 
 // NewAIStudio builds the generativelanguage.googleapis.com provider.
@@ -106,6 +107,15 @@ func NewVertexAIWithAccessToken(
 	return provider
 }
 
+func NewVertexAIWithTokenSource(
+	baseURL, project, location string, timeoutSeconds float64,
+	tokenSource func() (string, error),
+) GoogleAIProvider {
+	provider := NewVertexAI(baseURL, "", project, location, timeoutSeconds)
+	provider.bearerTokenFor = tokenSource
+	return provider
+}
+
 func googleTimeout(seconds float64) time.Duration {
 	if seconds <= 0 {
 		return 120 * time.Second
@@ -114,6 +124,17 @@ func googleTimeout(seconds float64) time.Duration {
 }
 
 func (p GoogleAIProvider) IsStub() bool { return false }
+
+func (p GoogleAIProvider) currentBearerToken() (string, error) {
+	if p.bearerTokenFor != nil {
+		token, err := p.bearerTokenFor()
+		if err != nil {
+			return "", err
+		}
+		return strings.TrimSpace(token), nil
+	}
+	return strings.TrimSpace(p.bearerToken), nil
+}
 
 // vertexHost applies the one region rule every Vertex endpoint in this file
 // shares: the global endpoint has no region prefix in the host, regional ones
@@ -167,22 +188,32 @@ func (p GoogleAIProvider) doContext(ctx context.Context, method, url string, bod
 		return nil, 0, err
 	}
 	request.Header.Set("Content-Type", "application/json")
+	bearerToken, err := p.currentBearerToken()
+	if err != nil {
+		return nil, 0, err
+	}
 	switch {
-	case p.bearerToken != "":
-		request.Header.Set("Authorization", "Bearer "+p.bearerToken)
+	case bearerToken != "":
+		request.Header.Set("Authorization", "Bearer "+bearerToken)
 	case p.apiKey != "":
 		request.Header.Set("x-goog-api-key", p.apiKey)
 	}
 	response, err := (&http.Client{Timeout: p.timeout}).Do(request)
 	if err != nil {
-		return nil, 0, &InvocationError{Msg: p.label() + ": " + err.Error()}
+		return nil, 0, retryableInvocation(p.label() + ": " + err.Error())
 	}
 	defer response.Body.Close()
-	raw, _ := io.ReadAll(response.Body)
+	raw, readErr := readInvocationResponseBody(response, p.label())
+	if readErr != nil {
+		return nil, response.StatusCode, readErr
+	}
 	var decoded map[string]any
-	_ = json.Unmarshal(raw, &decoded)
+	decodeErr := json.Unmarshal(raw, &decoded)
 	if response.StatusCode >= 400 {
 		return decoded, response.StatusCode, p.upstreamError(decoded, raw, response.StatusCode)
+	}
+	if decodeErr != nil || len(decoded) == 0 {
+		return nil, response.StatusCode, circuitFailureInvocation(p.label() + ": invalid JSON in upstream response")
 	}
 	return decoded, response.StatusCode, nil
 }
@@ -400,8 +431,16 @@ type ImageGenerator interface {
 	GenerateImages(model, prompt string, count int) ([]GeneratedImage, map[string]any, error)
 }
 
+type ContextImageGenerator interface {
+	GenerateImagesContext(context.Context, string, string, int) ([]GeneratedImage, map[string]any, error)
+}
+
 // GenerateImages asks an image-capable Gemini model for inline image bytes.
 func (p GoogleAIProvider) GenerateImages(model, prompt string, count int) ([]GeneratedImage, map[string]any, error) {
+	return p.GenerateImagesContext(context.Background(), model, prompt, count)
+}
+
+func (p GoogleAIProvider) GenerateImagesContext(ctx context.Context, model, prompt string, count int) ([]GeneratedImage, map[string]any, error) {
 	if strings.TrimSpace(prompt) == "" {
 		return nil, nil, &InvocationError{Msg: p.label() + ": a prompt is required"}
 	}
@@ -411,7 +450,7 @@ func (p GoogleAIProvider) GenerateImages(model, prompt string, count int) ([]Gen
 	}
 	messages := []Message{{"role": "user", "content": prompt}}
 	body := googleContentRequest(messages, Kwargs{}, []string{"TEXT", "IMAGE"})
-	decoded, _, err := p.do(http.MethodPost, url, body)
+	decoded, _, err := p.doContext(ctx, http.MethodPost, url, body)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -458,10 +497,19 @@ type VideoGenerator interface {
 	PollVideo(operation string) (VideoJob, error)
 }
 
+type ContextVideoGenerator interface {
+	StartVideoContext(context.Context, string, string, map[string]any) (VideoJob, error)
+	PollVideoContext(context.Context, string) (VideoJob, error)
+}
+
 // StartVideo begins a Veo generation and returns its operation name.
 // storageUri is deliberately optional: without it the service returns inline
 // bytes, which keeps the gateway free of a Cloud Storage dependency.
 func (p GoogleAIProvider) StartVideo(model, prompt string, parameters map[string]any) (VideoJob, error) {
+	return p.StartVideoContext(context.Background(), model, prompt, parameters)
+}
+
+func (p GoogleAIProvider) StartVideoContext(ctx context.Context, model, prompt string, parameters map[string]any) (VideoJob, error) {
 	if strings.TrimSpace(prompt) == "" {
 		return VideoJob{}, &InvocationError{Msg: p.label() + ": a prompt is required"}
 	}
@@ -479,7 +527,7 @@ func (p GoogleAIProvider) StartVideo(model, prompt string, parameters map[string
 		"instances":  []any{map[string]any{"prompt": prompt}},
 		"parameters": parameters,
 	}
-	decoded, _, err := p.do(http.MethodPost, url, body)
+	decoded, _, err := p.doContext(ctx, http.MethodPost, url, body)
 	if err != nil {
 		return VideoJob{}, err
 	}
@@ -487,11 +535,18 @@ func (p GoogleAIProvider) StartVideo(model, prompt string, parameters map[string
 	if name == "" {
 		return VideoJob{}, &InvocationError{Msg: p.label() + ": the service did not return an operation name"}
 	}
+	if p.surface == SurfaceAIStudio && strings.HasPrefix(name, "operations/") {
+		name = "models/" + strings.TrimPrefix(strings.TrimSpace(model), "models/") + "/" + name
+	}
 	return VideoJob{Operation: name}, nil
 }
 
 // PollVideo checks a long-running operation and extracts the finished video.
 func (p GoogleAIProvider) PollVideo(operation string) (VideoJob, error) {
+	return p.PollVideoContext(context.Background(), operation)
+}
+
+func (p GoogleAIProvider) PollVideoContext(ctx context.Context, operation string) (VideoJob, error) {
 	operation = strings.TrimSpace(operation)
 	if operation == "" {
 		return VideoJob{}, &InvocationError{Msg: p.label() + ": an operation name is required"}
@@ -511,14 +566,14 @@ func (p GoogleAIProvider) PollVideo(operation string) (VideoJob, error) {
 		if err != nil {
 			return VideoJob{}, err
 		}
-		decoded, _, err = p.do(http.MethodPost, url, map[string]any{"operationName": operation})
+		decoded, _, err = p.doContext(ctx, http.MethodPost, url, map[string]any{"operationName": operation})
 	} else {
 		var url string
 		url, err = p.operationURL(operation)
 		if err != nil {
 			return VideoJob{}, err
 		}
-		decoded, _, err = p.do(http.MethodGet, url, nil)
+		decoded, _, err = p.doContext(ctx, http.MethodGet, url, nil)
 	}
 	if err != nil {
 		return VideoJob{}, err
@@ -555,10 +610,15 @@ func vertexOperationModel(operation string) string {
 
 func (p GoogleAIProvider) operationURL(operation string) (string, error) {
 	if strings.HasPrefix(operation, "http://") || strings.HasPrefix(operation, "https://") {
-		return operation, nil
+		return "", &ConfigError{Msg: p.label() + ": operation must not be a full URL"}
 	}
 	if p.surface == SurfaceAIStudio {
-		return p.baseURL + "/" + strings.TrimPrefix(operation, "/"), nil
+		const marker = "/operations/"
+		index := strings.Index(operation, marker)
+		if index < 0 {
+			return "", &ConfigError{Msg: p.label() + ": operation is missing its model binding"}
+		}
+		return p.baseURL + "/operations/" + strings.TrimPrefix(operation[index+len(marker):], "/"), nil
 	}
 	base := p.baseURL
 	if base == "" {
@@ -664,7 +724,15 @@ func (p GoogleAIProvider) ListModelsWithError() (
 		// API. Expected OAuth2 access token."), so a key-only instance cannot
 		// have a real catalog and must say so rather than advertise one it did
 		// not measure.
-		if strings.TrimSpace(p.bearerToken) == "" {
+		bearerToken, err := p.currentBearerToken()
+		if err != nil {
+			code, detail := "catalog_authentication_failed", "Provider credential refresh failed for catalog access."
+			if InvocationRetryable(err) {
+				code, detail = "catalog_transport_error", "Provider credential refresh could not reach the token service."
+			}
+			return nil, nil, catalogError(code, detail, UpstreamStatus(err))
+		}
+		if bearerToken == "" {
 			return nil, nil, catalogError(
 				"catalog_not_discoverable",
 				"Vertex AI model discovery requires a service account credential; "+
@@ -719,8 +787,16 @@ func (p GoogleAIProvider) discoverModels(endpoint, field string) (map[string]any
 	if err != nil {
 		return nil, catalogError("catalog_transport_error", "Provider catalog request could not be created.", 0)
 	}
-	if p.bearerToken != "" {
-		req.Header.Set("Authorization", "Bearer "+p.bearerToken)
+	bearerToken, tokenErr := p.currentBearerToken()
+	if tokenErr != nil {
+		code, detail := "catalog_authentication_failed", "Provider credential refresh failed for catalog access."
+		if InvocationRetryable(tokenErr) {
+			code, detail = "catalog_transport_error", "Provider credential refresh could not reach the token service."
+		}
+		return nil, catalogError(code, detail, UpstreamStatus(tokenErr))
+	}
+	if bearerToken != "" {
+		req.Header.Set("Authorization", "Bearer "+bearerToken)
 	} else if p.apiKey != "" {
 		req.Header.Set("x-goog-api-key", p.apiKey)
 	}
@@ -1033,10 +1109,16 @@ func vertexModelCapability(id string) (map[string]any, []string) {
 	return nil, nil
 }
 
-// AsImageGenerator and AsVideoGenerator unwrap resilience decorators to reach
-// the concrete provider, mirroring AsSpeechSynthesizer.
+// Resilience decorators implement these interfaces directly so the capability
+// lookup preserves retry and circuit policy instead of bypassing it.
 func AsImageGenerator(provider Provider) (ImageGenerator, bool) {
 	for provider != nil {
+		if resilient, ok := provider.(*ResilientProvider); ok {
+			if _, supported := AsImageGenerator(resilient.inner); !supported {
+				return nil, false
+			}
+			return resilient, true
+		}
 		if generator, ok := provider.(ImageGenerator); ok {
 			return generator, true
 		}
@@ -1051,6 +1133,12 @@ func AsImageGenerator(provider Provider) (ImageGenerator, bool) {
 
 func AsVideoGenerator(provider Provider) (VideoGenerator, bool) {
 	for provider != nil {
+		if resilient, ok := provider.(*ResilientProvider); ok {
+			if _, supported := AsVideoGenerator(resilient.inner); !supported {
+				return nil, false
+			}
+			return resilient, true
+		}
 		if generator, ok := provider.(VideoGenerator); ok {
 			return generator, true
 		}

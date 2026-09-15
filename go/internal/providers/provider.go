@@ -33,6 +33,7 @@ type ModelInfo struct {
 	ID           string         `json:"id"`
 	Vendor       string         `json:"vendor,omitempty"`
 	Label        string         `json:"label,omitempty"`
+	Free         bool           `json:"free,omitempty"`
 	Capabilities map[string]any `json:"capabilities,omitempty"`
 	// SupportedSurfaces are the HTTP surfaces a model can be called through
 	// (e.g. "/v1/chat/completions", "/v1/messages") — distinct from an
@@ -172,18 +173,53 @@ func SupportsAnthropicMessages(provider Provider) bool {
 	return false
 }
 
-// AnthropicMessagesRetryable selects the failures safe to repeat: transport
-// errors (status 0), 408, 429, and transient 500/502/503/504 responses.
-func AnthropicMessagesRetryable(err error) bool {
-	if !IsInvocation(err) {
+// InvocationRetryable selects the upstream failures safe to repeat: explicitly
+// retryable statusless failures, 408, 429, and transient 500/502/503/504 responses.
+func InvocationRetryable(err error) bool {
+	var invocationError *InvocationError
+	if !asError(err, &invocationError) {
 		return false
 	}
-	switch UpstreamStatus(err) {
-	case 0, 408, 429, 500, 502, 503, 504:
+	if invocationError.Status == 0 {
+		return invocationError.Retryable
+	}
+	switch invocationError.Status {
+	case 408, 429, 500, 502, 503, 504:
 		return true
 	default:
 		return false
 	}
+}
+
+// InvocationFailoverEligible selects provider failures that an ordered endpoint
+// may move past. A statusless invocation can identify a broken response or local
+// provider state that should not repeat against the same target, but it must not
+// block a different target from serving the request.
+func InvocationFailoverEligible(err error) bool {
+	var invocationError *InvocationError
+	if !asError(err, &invocationError) {
+		return false
+	}
+	if invocationError.FailoverEligible || invocationError.Status == 0 {
+		return true
+	}
+	return InvocationRetryable(invocationError)
+}
+
+// InvocationCircuitFailure reports whether an invocation represents upstream
+// instability that should advance the provider circuit. Definitive request or
+// credential rejections reset the transient streak instead.
+func InvocationCircuitFailure(err error) bool {
+	var invocationError *InvocationError
+	if !asError(err, &invocationError) {
+		return false
+	}
+	return invocationError.CircuitFailure || InvocationRetryable(invocationError)
+}
+
+// AnthropicMessagesRetryable is kept as the native Messages retry policy.
+func AnthropicMessagesRetryable(err error) bool {
+	return InvocationRetryable(err)
 }
 
 // AnthropicTokenCounter is an optional native Anthropic count_tokens surface.
@@ -229,9 +265,21 @@ func (r *ResilientProvider) CountAnthropicTokens(model string, payload map[strin
 			r.recordSuccess()
 			return result, nil
 		}
+		if errors.Is(err, ErrInvalidAnthropicTokenCount) {
+			if InvocationCircuitFailure(err) {
+				r.recordFailure()
+			}
+			return "", err
+		}
 		if !AnthropicMessagesRetryable(err) || attempt >= attempts {
 			if AnthropicMessagesRetryable(err) {
 				r.recordFailure()
+			} else if IsInvocation(err) {
+				if InvocationCircuitFailure(err) {
+					r.recordFailure()
+				} else {
+					r.recordSuccess()
+				}
 			}
 			return "", err
 		}
@@ -253,6 +301,13 @@ func (r *ResilientProvider) CompleteAnthropicMessages(model string, payload map[
 			return result, nil
 		}
 		if errors.Is(err, ErrAnthropicMessagesUnsupported) || !AnthropicMessagesRetryable(err) {
+			if IsInvocation(err) {
+				if InvocationCircuitFailure(err) {
+					r.recordFailure()
+				} else {
+					r.recordSuccess()
+				}
+			}
 			return nil, err
 		}
 		if attempt >= attempts {
@@ -429,12 +484,16 @@ func listModelsWithError(
 	return nil, nil, catalogError("catalog_unavailable", "Provider catalog is unavailable.", 0)
 }
 
-// InvocationError is an upstream call failure. It triggers retry + failover.
+// InvocationError is an upstream call failure. Status and Retryable determine
+// same-target retries; routing may still use it to advance an eligible chain.
 // Status carries the upstream HTTP status (0 if none) so the gateway can pass
 // the real status through instead of masking it as a generic 502.
 type InvocationError struct {
-	Msg    string
-	Status int
+	Msg              string
+	Status           int
+	Retryable        bool
+	FailoverEligible bool
+	CircuitFailure   bool
 }
 
 func (e *InvocationError) Error() string {
@@ -450,6 +509,18 @@ func (e *ConfigError) Error() string {
 }
 
 func invocation(format string) error { return &InvocationError{Msg: format} }
+
+func retryableInvocation(message string) error {
+	return &InvocationError{Msg: message, Retryable: true, CircuitFailure: true}
+}
+
+func circuitFailureInvocation(message string) error {
+	return &InvocationError{Msg: message, CircuitFailure: true}
+}
+
+func failoverInvocationStatus(message string, status int) error {
+	return &InvocationError{Msg: message, Status: status, FailoverEligible: true}
+}
 
 // invocationStatus is invocation() that also records the upstream HTTP status.
 func invocationStatus(msg string, status int) error {
