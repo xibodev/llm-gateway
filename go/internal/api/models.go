@@ -178,6 +178,9 @@ func buildModelList(principal *config.Principal) (map[string]any, error) {
 			seen[namespaced] = true
 			capabilities, surfaces := modelPresentationMetadata(providerID, row)
 			entry := map[string]any{"id": namespaced, "object": "model", "owned_by": providerID}
+			if row.Free {
+				entry["free"] = true
+			}
 			if row.Label != "" {
 				entry["display_name"] = row.Label
 			}

@@ -8,6 +8,7 @@ package config
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -220,11 +221,74 @@ func Get() *Settings {
 	return current
 }
 
+// Provider returns an isolated provider snapshot for background workers that
+// must not retain the live configuration map after the lock is released.
+func Provider(id string) (*ProviderConfig, bool) {
+	mu.RLock()
+	defer mu.RUnlock()
+	provider := current.Providers[id]
+	if provider == nil {
+		return nil, false
+	}
+	copy := *provider
+	return &copy, true
+}
+
 // Update applies fn under the write lock.
 func Update(fn func(*Settings)) {
 	mu.Lock()
 	defer mu.Unlock()
 	fn(current)
+}
+
+// AddProviderIfMissing persists one provider without overwriting an instance
+// another administrator or automation run created concurrently.
+func AddProviderIfMissing(id string, provider *ProviderConfig) (bool, error) {
+	mu.Lock()
+	defer mu.Unlock()
+	if provider == nil {
+		return false, fmt.Errorf("provider is required")
+	}
+	if current.Providers[id] != nil {
+		return false, nil
+	}
+	payload := readYAML(ConfigFilePath())
+	if payload == nil {
+		if _, err := os.Stat(ConfigFilePath()); err == nil {
+			return false, fmt.Errorf("existing configuration could not be parsed")
+		} else if !os.IsNotExist(err) {
+			return false, err
+		}
+		payload = map[string]any{}
+	}
+	providersPayload, providersPresent := payload["providers"].(map[string]any)
+	if payload["providers"] != nil && !providersPresent {
+		return false, fmt.Errorf("existing providers configuration has an invalid shape")
+	}
+	if providersPayload == nil {
+		providersPayload = map[string]any{}
+	}
+	if _, exists := providersPayload[id]; exists {
+		return false, nil
+	}
+	nextProviders := make(map[string]any, len(providersPayload)+1)
+	for key, value := range providersPayload {
+		nextProviders[key] = value
+	}
+	nextProviders[id] = providerConfigPayload(provider)
+	payload["providers"] = nextProviders
+	if err := writeConfigPayload(payload); err != nil {
+		return false, err
+	}
+	next := *current
+	next.Providers = make(map[string]*ProviderConfig, len(current.Providers)+1)
+	for key, value := range current.Providers {
+		next.Providers[key] = value
+	}
+	copy := *provider
+	next.Providers[id] = &copy
+	current = &next
+	return true, nil
 }
 
 // ---- paths -------------------------------------------------------------- //
@@ -677,35 +741,7 @@ func toFloat(v any) (float64, bool) {
 func configPayload(s *Settings) map[string]any {
 	providers := map[string]any{}
 	for pid, pc := range s.Providers {
-		entry := map[string]any{"type": pc.Type}
-		if pc.RegistryID != "" {
-			entry["registry_id"] = pc.RegistryID
-		}
-		if pc.BaseURL != "" {
-			entry["base_url"] = pc.BaseURL
-		}
-		if pc.Region != "" {
-			entry["region"] = pc.Region
-		}
-		if pc.DefaultVoice != "" {
-			entry["default_voice"] = pc.DefaultVoice
-		}
-		if pc.Project != "" {
-			entry["project"] = pc.Project
-		}
-		if pc.Location != "" {
-			entry["location"] = pc.Location
-		}
-		if pc.Disabled {
-			entry["disabled"] = true
-		}
-		if pc.Timeout != nil {
-			entry["timeout"] = *pc.Timeout
-		}
-		if pc.ForceApiSupport {
-			entry["force_api_support"] = true
-		}
-		providers[pid] = entry
+		providers[pid] = providerConfigPayload(pc)
 	}
 	// Always write the canonical endpoints: key so a save quietly migrates a
 	// config file that was still on the pre-rename categories: key.
@@ -734,18 +770,73 @@ func configPayload(s *Settings) map[string]any {
 
 // Save persists providers + endpoints + policies + savings (never keys).
 func Save() error {
-	mu.RLock()
+	mu.Lock()
+	defer mu.Unlock()
 	payload := configPayload(current)
-	mu.RUnlock()
-	_ = os.MkdirAll(StateDir(), 0o755)
+	return writeConfigPayload(payload)
+}
+
+func providerConfigPayload(pc *ProviderConfig) map[string]any {
+	entry := map[string]any{"type": pc.Type}
+	if pc.RegistryID != "" {
+		entry["registry_id"] = pc.RegistryID
+	}
+	if pc.BaseURL != "" {
+		entry["base_url"] = pc.BaseURL
+	}
+	if pc.Region != "" {
+		entry["region"] = pc.Region
+	}
+	if pc.DefaultVoice != "" {
+		entry["default_voice"] = pc.DefaultVoice
+	}
+	if pc.Project != "" {
+		entry["project"] = pc.Project
+	}
+	if pc.Location != "" {
+		entry["location"] = pc.Location
+	}
+	if pc.Disabled {
+		entry["disabled"] = true
+	}
+	if pc.Timeout != nil {
+		entry["timeout"] = *pc.Timeout
+	}
+	if pc.ForceApiSupport {
+		entry["force_api_support"] = true
+	}
+	return entry
+}
+
+func writeConfigPayload(payload map[string]any) error {
+	if err := os.MkdirAll(StateDir(), 0o700); err != nil {
+		return err
+	}
 	b, err := yaml.Marshal(payload)
 	if err != nil {
 		return err
 	}
 	path := ConfigFilePath()
-	tmp := path + ".tmp"
-	if err := os.WriteFile(tmp, b, 0o644); err != nil {
+	tmp, err := os.CreateTemp(filepath.Dir(path), ".config-*.tmp")
+	if err != nil {
 		return err
 	}
-	return os.Rename(tmp, path)
+	tmpPath := tmp.Name()
+	defer os.Remove(tmpPath)
+	if err := tmp.Chmod(0o600); err != nil {
+		_ = tmp.Close()
+		return err
+	}
+	if _, err := tmp.Write(b); err != nil {
+		_ = tmp.Close()
+		return err
+	}
+	if err := tmp.Sync(); err != nil {
+		_ = tmp.Close()
+		return err
+	}
+	if err := tmp.Close(); err != nil {
+		return err
+	}
+	return os.Rename(tmpPath, path)
 }

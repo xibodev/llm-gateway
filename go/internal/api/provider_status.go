@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"fmt"
 	"sort"
 	"strings"
@@ -28,7 +29,10 @@ type configuredProviderSnapshot struct {
 }
 
 // Check history proves one model in one credential scope, never entitlement to
-// all discovered models. The freshness window matches the catalog's one hour.
+// all discovered models. Verification freshness remains deliberately short;
+// daily automation is historical evidence, not an all-day health guarantee.
+const providerVerificationFreshness = time.Hour
+
 func scopedReadiness(checks []iam.ProviderCheck, scope string, aggregate bool) map[string]any {
 	source := "gateway"
 	if aggregate {
@@ -57,7 +61,7 @@ func scopedReadiness(checks []iam.ProviderCheck, scope string, aggregate bool) m
 	if verify == nil {
 		return result
 	}
-	stale := time.Since(time.Unix(verify.CheckedAt, 0)) > time.Hour
+	stale := time.Since(time.Unix(verify.CheckedAt, 0)) > providerVerificationFreshness
 	result["verification_stale"] = stale
 	switch {
 	case !verify.Success:
@@ -521,7 +525,7 @@ func providerSnapshotRow(row map[string]any, lastCheck, lastVerify *iam.Provider
 		if lastVerify.ScopeKey != "" {
 			row["last_verification_source_scope"] = "principal"
 		}
-		row["last_verification_stale"] = time.Since(time.Unix(lastVerify.CheckedAt, 0)) > time.Hour
+		row["last_verification_stale"] = time.Since(time.Unix(lastVerify.CheckedAt, 0)) > providerVerificationFreshness
 		row["last_verified_at"] = time.Unix(lastVerify.CheckedAt, 0).UTC().Format(time.RFC3339)
 		row["verified_model"] = lastVerify.Model
 	}
@@ -553,7 +557,7 @@ func runProviderProbe(providerID, operation string, principal *config.Principal)
 	checkGeneration, checkGenerationErr := iam.ProviderCheckGeneration(
 		providerID, checkScope,
 	)
-	if _, configured := config.Get().Providers[providerID]; !configured {
+	if _, configured := config.Provider(providerID); !configured {
 		return map[string]any{
 			"provider_id": providerID, "operation": operation, "success": false,
 			"status": "failed", "details": "Provider was removed before the check started.",
@@ -587,7 +591,7 @@ func runProviderProbe(providerID, operation string, principal *config.Principal)
 	}
 	success := catalogErr == nil && len(rows) > 0
 	details := "Catalog listing succeeded and the provider returned models. This confirms endpoint reachability and credential acceptance for the catalog API only — run a test completion to verify inference."
-	if cfg := config.Get().Providers[providerID]; cfg != nil &&
+	if cfg, ok := config.Provider(providerID); ok &&
 		providers.EffectiveRegistryID(providerID, cfg.RegistryID, cfg.Type) == "vertex_ai" &&
 		catalogErr == nil && len(rows) > 0 {
 		details = "Vertex listed this location's publisher models. That route refuses API keys, so a successful listing confirms an accepted OAuth credential and a usable project/location — but the catalog is region-wide, not an entitlement check, so it does not confirm access to any individual model. Run a test completion for that."
@@ -763,12 +767,19 @@ func selectVerificationModel(rows []providers.ModelInfo, pCfg *config.ProviderCo
 // runProviderVerify executes a real, minimal inference request against the
 // provider — the only operation that proves end-to-end that requests work.
 func runProviderVerify(providerID, model string, principal *config.Principal) map[string]any {
+	return runProviderVerifyWithContext(context.Background(), providerID, model, principal, false)
+}
+
+func runProviderVerifyWithContext(
+	ctx context.Context, providerID, model string,
+	principal *config.Principal, requireAcknowledgement bool,
+) map[string]any {
 	started := time.Now()
 	checkScope := providerCheckScope(principal)
 	checkGeneration, checkGenerationErr := iam.ProviderCheckGeneration(
 		providerID, checkScope,
 	)
-	if _, configured := config.Get().Providers[providerID]; !configured {
+	if _, configured := config.Provider(providerID); !configured {
 		return map[string]any{
 			"provider_id": providerID, "operation": "verify", "success": false,
 			"status": "failed", "details": "Provider was removed before verification started.",
@@ -865,7 +876,8 @@ func runProviderVerify(providerID, model string, principal *config.Principal) ma
 				"model_unavailable",
 			)
 		}
-		model = selectVerificationModel(rows, config.Get().Providers[providerID])
+		providerConfig, _ := config.Provider(providerID)
+		model = selectVerificationModel(rows, providerConfig)
 	}
 	if catalogRefreshed {
 		provider, err = providers.GetProviderForPrincipal(providerID, principal)
@@ -880,14 +892,20 @@ func runProviderVerify(providerID, model string, principal *config.Principal) ma
 	messages := []providers.Message{{"role": "user", "content": "Reply with the single word: ok"}}
 	preCompletionObservation := verificationObservation
 	verifyKw := providers.Kwargs{"max_tokens": 16}
-	if providerConfig := config.Get().Providers[providerID]; providerConfig != nil {
-		switch providerConfig.Type {
-		case "ai_studio", "vertex_ai":
+	if providerConfig, ok := config.Provider(providerID); ok {
+		registryID := providers.EffectiveRegistryID(providerID, providerConfig.RegistryID, providerConfig.Type)
+		registry, _ := providers.RegistryProviderByID(registryID)
+		if registry.AnonymousAutomation {
 			verifyKw["max_tokens"] = 512
+		} else {
+			switch providerConfig.Type {
+			case "ai_studio", "vertex_ai":
+				verifyKw["max_tokens"] = 512
+			}
 		}
 	}
-	response, completionObservation, err := providers.CompleteProviderWithObservation(
-		provider, model, messages, verifyKw,
+	response, completionObservation, err := providers.CompleteProviderContextWithObservation(
+		ctx, provider, model, messages, verifyKw,
 	)
 	if completionObservation != nil {
 		verificationObservation = completionObservation
@@ -900,6 +918,12 @@ func runProviderVerify(providerID, model string, principal *config.Principal) ma
 	if err != nil {
 		return fail(
 			fmt.Sprintf("Test completion against %q failed: %v", model, err),
+			"verification_failed",
+		)
+	}
+	if !verificationReplyOK(response, requireAcknowledgement) {
+		return fail(
+			fmt.Sprintf("Test completion against %q did not return the expected acknowledgement.", model),
 			"verification_failed",
 		)
 	}
@@ -931,4 +955,41 @@ func runProviderVerify(providerID, model string, principal *config.Principal) ma
 		"checked_at": time.Now().UTC().Format(time.RFC3339), "latency_ms": latency,
 		"usage": map[string]any{"input_tokens": inputTokens, "output_tokens": outputTokens},
 	}
+}
+
+func verificationReplyOK(response map[string]any, requireAcknowledgement bool) bool {
+	choices, _ := response["choices"].([]any)
+	if len(choices) == 0 {
+		return false
+	}
+	choice, _ := choices[0].(map[string]any)
+	message, _ := choice["message"].(map[string]any)
+	content := messageText(message["content"])
+	if strings.TrimSpace(content) == "" {
+		return false
+	}
+	if !requireAcknowledgement {
+		return true
+	}
+	content = strings.Trim(strings.TrimSpace(content), " .,!?:;`*\"'")
+	return strings.EqualFold(content, "ok")
+}
+
+func messageText(value any) string {
+	if text, ok := value.(string); ok {
+		return text
+	}
+	parts, _ := value.([]any)
+	var text strings.Builder
+	for _, raw := range parts {
+		part, _ := raw.(map[string]any)
+		partType, _ := part["type"].(string)
+		if partType != "text" && partType != "output_text" {
+			continue
+		}
+		if value, _ := part["text"].(string); value != "" {
+			text.WriteString(value)
+		}
+	}
+	return text.String()
 }

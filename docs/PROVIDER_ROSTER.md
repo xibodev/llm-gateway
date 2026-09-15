@@ -203,7 +203,7 @@ accounts, bots, restore epochs, tombstones, API failure limits, and tampering.
 
 | Variable | Meaning |
 | --- | --- |
-| `LLMGW_PROVIDER_ROSTER_URL` | Operator-configured feed URL; no default URL until publishing is configured. |
+| `LLMGW_PROVIDER_ROSTER_URL` | Discovery feed URL; `serve` defaults to the official community feed unless `LLMGW_PROVIDER_ROSTER_DISABLE` is set. |
 | `LLMGW_PROVIDER_ROSTER_PUBLIC_KEY` | Optional base64 of a 32-byte Ed25519 public key. When set, the feed must be a signed envelope. When absent, the feed is consumed as plain HTTPS JSON. |
 | `LLMGW_PROVIDER_ROSTER_KEY_ID` | Expected envelope key ID; defaults to `staging`. Only used when `PUBLIC_KEY` is set. |
 | `LLMGW_PROVIDER_ROSTER_AUTO_REFRESH` | Boolean, defaults to `true`; only refreshes when URL is configured. |

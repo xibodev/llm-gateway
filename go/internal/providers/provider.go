@@ -33,6 +33,7 @@ type ModelInfo struct {
 	ID           string         `json:"id"`
 	Vendor       string         `json:"vendor,omitempty"`
 	Label        string         `json:"label,omitempty"`
+	Free         bool           `json:"free,omitempty"`
 	Capabilities map[string]any `json:"capabilities,omitempty"`
 	// SupportedSurfaces are the HTTP surfaces a model can be called through
 	// (e.g. "/v1/chat/completions", "/v1/messages") — distinct from an

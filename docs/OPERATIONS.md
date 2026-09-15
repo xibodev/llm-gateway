@@ -97,6 +97,20 @@ Both report semantic version, source commit, and commit-derived RFC3339 build
 time. `/health` proves process liveness, not provider readiness or database
 freshness. Run provider **Test completion** to prove inference.
 
+### Anonymous provider checks
+
+When `LLMGW_ANONYMOUS_PROVIDER_AUTOMATION=true`, the gateway connects only the
+curated no-key profiles and runs one catalog refresh plus one minimal free-model
+completion per provider at startup, subject to a durable 24-hour claim. The
+claim survives restarts, so repeatedly restarting the service does not hammer
+public endpoints. Admin Settings may override the environment default.
+
+Turning automation off is non-destructive: existing providers, routes, catalog
+history, and checks remain. Disable an individual provider to suppress it
+without allowing automation to create a replacement. Inspect **Providers** for
+the latest catalog and verification status; public rate limits can produce a
+legitimate failed check without indicating gateway failure.
+
 ## Request logs
 
 Request logging is off by default. `LLMGW_LOG_REQUESTS=1` records metadata for

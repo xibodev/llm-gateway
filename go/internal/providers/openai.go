@@ -24,11 +24,14 @@ import (
 // supported OpenAI-family endpoint (e.g. /responses for gpt-5.5), decided from
 // the persisted /models catalog. Off by default — adaptation is never native.
 type OpenAIProvider struct {
-	auth       OpenAIAuth
-	Timeout    float64
-	forceAdapt bool
-	providerID string
-	principal  *config.Principal
+	auth        OpenAIAuth
+	Timeout     float64
+	forceAdapt  bool
+	providerID  string
+	principal   *config.Principal
+	registryID  string
+	anonymous   bool
+	metadataURL string
 }
 
 func (OpenAIProvider) IsStub() bool { return false }
@@ -66,6 +69,9 @@ func (p OpenAIProvider) CompleteContextWithObservation(
 	ctx context.Context, model string, messages []Message, kw Kwargs,
 ) (map[string]any, *iam.ProviderAccountObservation, error) {
 	kw = withOpenAIOutputLimit(kw)
+	if p.zenUsesResponses(model) {
+		return p.completeViaResponsesContextWithObservation(ctx, model, messages, kw)
+	}
 	if p.adaptEnabled(kw) {
 		plan := p.planAdapt(model)
 		if plan.endpoint == "responses" {
@@ -82,7 +88,7 @@ func (p OpenAIProvider) CompleteContextWithObservation(
 	applyVisionHeader(headers, messages)
 	body, _ := json.Marshal(buildOpenAIPayload(model, messages, false, kw))
 	do := func(b string, h http.Header) (*http.Response, error) {
-		req, _ := http.NewRequestWithContext(ctx, "POST", b+"/chat/completions", bytes.NewReader(body))
+		req, _ := http.NewRequestWithContext(ctx, "POST", p.chatURL(b), bytes.NewReader(body))
 		req.Header = h
 		return httpClient(p.Timeout).Do(req)
 	}
@@ -117,8 +123,8 @@ func (p OpenAIProvider) CompleteContextWithObservation(
 	}
 	if resp.StatusCode >= 400 {
 		errMsg := extractError(raw)
-		if resp.StatusCode == 401 && strings.Contains(strings.ToLower(base), "opencode.ai") && !strings.HasSuffix(model, "-free") {
-			errMsg = fmt.Sprintf("OpenCode Zen free anonymous tier only supports models ending in '-free' (e.g. nemotron-3.5-lightning-free). '%s' requires an OpenCode Zen API key.", model)
+		if resp.StatusCode == 401 && p.isAnonymousZen() {
+			errMsg = fmt.Sprintf("OpenCode Zen model %q is not available through the current anonymous catalog; configure an OpenCode Zen API key for paid models.", model)
 		}
 		if p.auth.CanRefresh() && (resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden) {
 			return nil, observation, failoverInvocationStatus(fmt.Sprintf("openai: upstream returned %d: %s", resp.StatusCode, redact(errMsg)), resp.StatusCode)
@@ -128,6 +134,9 @@ func (p OpenAIProvider) CompleteContextWithObservation(
 	var out map[string]any
 	if json.Unmarshal(raw, &out) != nil || len(out) == 0 {
 		return nil, observation, circuitFailureInvocation("openai: invalid JSON in upstream response")
+	}
+	if upstreamError := openAISoftError(out); upstreamError != "" {
+		return nil, observation, retryableInvocation("openai: upstream returned a soft error: " + redact(upstreamError))
 	}
 	choices, ok := out["choices"].([]any)
 	if !ok || len(choices) == 0 {
@@ -139,12 +148,31 @@ func (p OpenAIProvider) CompleteContextWithObservation(
 	return out, observation, nil
 }
 
+func openAISoftError(response map[string]any) string {
+	raw, exists := response["error"]
+	if !exists || raw == nil {
+		return ""
+	}
+	if message, ok := raw.(string); ok {
+		return strings.TrimSpace(message)
+	}
+	if details, ok := raw.(map[string]any); ok {
+		if message, ok := details["message"].(string); ok {
+			return strings.TrimSpace(message)
+		}
+	}
+	return "upstream error"
+}
+
 func (p OpenAIProvider) Stream(model string, messages []Message, kw Kwargs) (StreamIter, error) {
 	return p.StreamContext(context.Background(), model, messages, kw)
 }
 
 func (p OpenAIProvider) StreamContext(ctx context.Context, model string, messages []Message, kw Kwargs) (StreamIter, error) {
 	kw = withOpenAIOutputLimit(kw)
+	if p.zenUsesResponses(model) {
+		return p.streamViaResponsesContext(ctx, model, messages, kw)
+	}
 	if p.adaptEnabled(kw) {
 		plan := p.planAdapt(model)
 		if plan.endpoint == "responses" {
@@ -161,7 +189,7 @@ func (p OpenAIProvider) StreamContext(ctx context.Context, model string, message
 	applyVisionHeader(headers, messages)
 	body, _ := json.Marshal(buildOpenAIPayload(model, messages, true, kw))
 	do := func(b string, h http.Header) (*http.Response, error) {
-		req, _ := http.NewRequestWithContext(ctx, "POST", b+"/chat/completions", bytes.NewReader(body))
+		req, _ := http.NewRequestWithContext(ctx, "POST", p.chatURL(b), bytes.NewReader(body))
 		req.Header = h
 		return httpClient(p.Timeout).Do(req)
 	}
@@ -193,8 +221,8 @@ func (p OpenAIProvider) StreamContext(ctx context.Context, model string, message
 			return nil, readErr
 		}
 		errMsg := extractError(raw)
-		if resp.StatusCode == 401 && strings.Contains(strings.ToLower(base), "opencode.ai") && !strings.HasSuffix(model, "-free") {
-			errMsg = fmt.Sprintf("OpenCode Zen free anonymous tier only supports models ending in '-free' (e.g. nemotron-3.5-lightning-free). '%s' requires an OpenCode Zen API key.", model)
+		if resp.StatusCode == 401 && p.isAnonymousZen() {
+			errMsg = fmt.Sprintf("OpenCode Zen model %q is not available through the current anonymous catalog; configure an OpenCode Zen API key for paid models.", model)
 		}
 		if p.auth.CanRefresh() && (resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden) {
 			return nil, failoverInvocationStatus(fmt.Sprintf("openai: upstream returned %d: %s", resp.StatusCode, redact(errMsg)), resp.StatusCode)
@@ -242,7 +270,7 @@ func (p OpenAIProvider) ListModelsWithError() (
 		timeout = 10
 	}
 	get := func(b string, h http.Header) (*http.Response, error) {
-		req, _ := http.NewRequest("GET", b+"/models", nil)
+		req, _ := http.NewRequest("GET", p.modelsURL(b), nil)
 		req.Header = h
 		return httpClient(timeout).Do(req)
 	}
@@ -287,6 +315,10 @@ func (p OpenAIProvider) ListModelsWithError() (
 			resp.StatusCode,
 		)
 	}
+	if p.registryID == "pollinations" {
+		rows, decodeErr := decodePollinationsCatalog(resp, p.anonymous)
+		return rows, observation, decodeErr
+	}
 	body, err := decodeCatalogResponse(resp, "data", "id", "name")
 	if err != nil {
 		return nil, observation, err
@@ -320,6 +352,12 @@ func (p OpenAIProvider) ListModelsWithError() (
 			row.SupportedSurfaces = eps
 		}
 		out = append(out, row)
+	}
+	if p.anonymous {
+		out, err = p.normalizeAnonymousCatalog(out, items)
+		if err != nil {
+			return nil, observation, err
+		}
 	}
 	return out, observation, nil
 }
@@ -561,6 +599,9 @@ func (p OpenAIProvider) StreamResponsesContext(
 }
 
 func (p OpenAIProvider) supportsNativeResponses(model string) bool {
+	if p.zenUsesResponses(model) {
+		return true
+	}
 	if providerConfig := config.Get().Providers[p.providerID]; providerConfig != nil {
 		switch EffectiveRegistryID(
 			p.providerID, providerConfig.RegistryID, providerConfig.Type,
@@ -580,6 +621,15 @@ func (p OpenAIProvider) supportsNativeResponses(model string) bool {
 		}
 	}
 	return false
+}
+
+func (p OpenAIProvider) isAnonymousZen() bool {
+	return p.registryID == "opencode_zen" && p.anonymous
+}
+
+func (p OpenAIProvider) zenUsesResponses(model string) bool {
+	return p.registryID == "opencode_zen" &&
+		strings.HasPrefix(strings.ToLower(strings.TrimSpace(model)), "muse-spark-")
 }
 
 func cloneMap(source map[string]any) map[string]any {

@@ -2,6 +2,7 @@ import { lookup } from 'node:dns/promises';
 import https from 'node:https';
 import { isIP } from 'node:net';
 import { withinUTF8, MAX_URL_BYTES } from './limits.mjs';
+import { MODEL_CATALOG_PROBES } from './catalog.mjs';
 
 export class FetchError extends Error {
   constructor(code) { super(code); this.code = code; }
@@ -155,7 +156,8 @@ export async function probeEndpoint(entry, fetcher, now) {
     return { status: 'not_checked', checked_at: '', http_status: 0 };
   }
   try {
-    const response = await fetcher(entry.base_url, { maxBytes: 64 * 1024, timeoutMs: 6000 });
+    const catalogProbe = MODEL_CATALOG_PROBES[entry.base_url];
+    const response = await fetcher(catalogProbe ?? entry.base_url, { maxBytes: catalogProbe ? 1024 * 1024 : 64 * 1024, timeoutMs: 6000 });
     const status = response.status === 401 || response.status === 403 ? 'auth_required'
       : response.status === 429 ? 'rate_limited'
         : response.status >= 200 && response.status < 300 ? 'reachable' : 'failed';

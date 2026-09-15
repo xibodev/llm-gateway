@@ -3,6 +3,7 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -160,6 +161,56 @@ func TestSaveLoadRoundTrip(t *testing.T) {
 	ep, ok := reloaded.Endpoints["smart"]
 	if !ok || len(ep.Failover) != 1 || ep.Failover[0].Provider != "br" {
 		t.Fatalf("endpoint round-trip wrong: %+v", ep)
+	}
+}
+
+func TestAddProviderIfMissingPersistsWithoutOverwrite(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("LLMGW_STATE_DIR", dir)
+	t.Setenv("LLMGW_CONFIG", filepath.Join(dir, "config.yaml"))
+	if err := os.WriteFile(filepath.Join(dir, "config.yaml"), []byte("gateway_preamble: keep-me\ncustom_future_setting: keep-too\nproviders:\n  existing:\n    type: openai_compatible\n    api_key: ${ENV:EXISTING_KEY}\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	Load()
+	added, err := AddProviderIfMissing("anonymous", &ProviderConfig{Type: "openai_compatible", RegistryID: "fixture", BaseURL: "https://example.com/v1"})
+	if err != nil || !added {
+		t.Fatalf("added=%v err=%v", added, err)
+	}
+	added, err = AddProviderIfMissing("anonymous", &ProviderConfig{Type: "echo"})
+	if err != nil || added {
+		t.Fatalf("overwrite added=%v err=%v", added, err)
+	}
+	reloaded := Load()
+	if got := reloaded.Providers["anonymous"]; got == nil || got.RegistryID != "fixture" || got.Type != "openai_compatible" {
+		t.Fatalf("provider=%+v", got)
+	}
+	raw, err := os.ReadFile(filepath.Join(dir, "config.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(raw)
+	for _, preserved := range []string{"gateway_preamble: keep-me", "custom_future_setting: keep-too", "api_key: ${ENV:EXISTING_KEY}"} {
+		if !strings.Contains(text, preserved) {
+			t.Fatalf("provider patch dropped %q:\n%s", preserved, text)
+		}
+	}
+	if info, err := os.Stat(filepath.Join(dir, "config.yaml")); err != nil ||
+		(runtime.GOOS != "windows" && info.Mode().Perm()&0o077 != 0) {
+		t.Fatalf("config permissions=%v err=%v", info.Mode().Perm(), err)
+	}
+}
+
+func TestAddProviderIfMissingRejectsMalformedExistingConfig(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("LLMGW_STATE_DIR", dir)
+	t.Setenv("LLMGW_CONFIG", filepath.Join(dir, "config.yaml"))
+	Update(func(s *Settings) { s.Providers = map[string]*ProviderConfig{} })
+	if err := os.WriteFile(filepath.Join(dir, "config.yaml"), []byte("providers: [broken\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	added, err := AddProviderIfMissing("anonymous", &ProviderConfig{Type: "openai_compatible"})
+	if err == nil || added || Get().Providers["anonymous"] != nil {
+		t.Fatalf("added=%v err=%v providers=%+v", added, err, Get().Providers)
 	}
 }
 

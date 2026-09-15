@@ -11,7 +11,7 @@ import { SOURCES, extractSource, classifyAuth, canonicalURL, stableID, normalize
   mergeEntries, carryState, isPublicAddress, publicURL, createSafeFetcher, Scheduler, probeEndpoint,
   collectLogos, validatePNG, validatePayload, buildRoster, loadSnapshot, sha256, MAX_ENTRIES } from './index.mjs';
 import { crc32, extractLogoPNG, validateLogo } from './logos.mjs';
-import { LOGO_SOURCES } from './catalog.mjs';
+import { API_EVIDENCE, LOGO_SOURCES, MODEL_CATALOG_PROBES } from './catalog.mjs';
 import { main } from './build.mjs';
 
 const fixtures = fileURLToPath(new URL('./fixtures/', import.meta.url));
@@ -89,6 +89,16 @@ test('unknown auth never means no key; no card and key links do not prove anonym
   assert.equal(unknown.setup, 'candidate');
   assert.equal(unknown.protocol, 'unknown');
   assert.equal(row({ base_url: 'https://console.groq.com/keys', endpointEvidence: false }).setup, 'candidate');
+});
+
+test('reviewed anonymous provider roots carry explicit model-catalog probes', () => {
+  for (const url of ['https://opencode.ai/zen/v1', 'https://api.kilo.ai/api/gateway',
+    'https://api.llm7.io/v1', 'https://oai.endpoints.kepler.ai.cloud.ovh.net/v1',
+    'https://text.pollinations.ai']) {
+    assert.equal(API_EVIDENCE[url].protocol, 'openai');
+    assert.equal(API_EVIDENCE[url].auth, 'none');
+    assert.equal(MODEL_CATALOG_PROBES[url], `${url}/models`);
+  }
 });
 
 test('canonical identity preserves protocol, region, gateway and meaningful paths', () => {
@@ -328,7 +338,12 @@ test('probes measure HTTP only, never mutate auth/offer or request inference', a
     [429, 'rate_limited'], [404, 'failed'], [500, 'failed']]) {
     const entry = row();
     const before = structuredClone(entry);
-    const probe = await probeEndpoint(entry, async url => { assert.equal(url, entry.base_url); return { status }; }, now);
+    const probe = await probeEndpoint(entry, async (url, options) => {
+      const catalog = MODEL_CATALOG_PROBES[entry.base_url];
+      assert.equal(url, catalog ?? entry.base_url);
+      assert.equal(options.maxBytes, catalog ? 1024 * 1024 : 64 * 1024);
+      return { status };
+    }, now);
     assert.equal(probe.status, expected);
     assert.deepEqual(entry, before);
   }

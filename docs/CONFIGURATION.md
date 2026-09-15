@@ -11,6 +11,11 @@ Configuration resolves in this order:
 2. `LLMGW_CONFIG`, or `<state>/config.yaml` when unset;
 3. environment overrides.
 
+Anonymous-provider automation is the deliberate exception: the environment is
+the deployment default, and an administrator can persist an explicit On or Off
+override in `gateway.db`. Selecting **Use deployment default** removes that UI
+override.
+
 `LLMGW_STATE_DIR` defaults to `~/.llmgw`. `LLMGW_CONFIG_SEED` is copied to the
 configured path only when that path does not yet exist. Local Compose uses this
 to turn a read-only repository example into writable volume state.
@@ -112,6 +117,7 @@ backups and pruned with the usage-retention window.
 | `LLMGW_API_KEYS` | unset | Comma-separated additional static gateway keys. |
 | `LLMGW_ALLOW_UNAUTHENTICATED_API` | `0` | Disable data-plane authentication for deliberate local use only; never disables admin authentication. |
 | `LLMGW_GATEWAY_PREAMBLE` | unset | Optional gateway-owned system preamble. |
+| `LLMGW_ANONYMOUS_PROVIDER_AUTOMATION` | `false` | Deployment default for connecting and checking reviewed no-key providers. Admin Settings can override it. |
 
 ### Credential and identity boundary
 

@@ -33,6 +33,8 @@ type catalogEntry struct {
 	//     six of whose nine ids exist in no region a given instance can call.
 	//     A key-only Vertex instance can never refresh, so without this drop
 	//     it would serve that list forever.
+	//   - v1 anonymous OpenCode Zen rows include paid and deprecated models
+	//     because they predate the active zero-cost metadata intersection.
 	//
 	// Bump this whenever a release changes what a persisted row means; the
 	// cost is one forced re-discovery per provider, the alternative is
@@ -42,7 +44,7 @@ type catalogEntry struct {
 	RefreshedAt   time.Time   `json:"refreshed_at"`
 }
 
-const catalogSchemaVersion = 1
+const catalogSchemaVersion = 2
 
 var (
 	catMu         sync.Mutex

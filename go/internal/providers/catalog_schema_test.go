@@ -99,3 +99,19 @@ func TestCurrentSchemaCatalogEntriesSurviveAReload(t *testing.T) {
 		t.Fatal("reload lost the refresh timestamp")
 	}
 }
+
+func TestPreAnonymousZenFilterCatalogEntriesAreDiscarded(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("LLMGW_STATE_DIR", dir)
+	resetCatalogForTest(t)
+
+	legacy := `{"opencode-zen":{"schema_version":1,"models":[{"id":"paid-model"}],"refreshed_at":"` +
+		time.Now().UTC().Format(time.RFC3339) + `"}}`
+	if err := os.WriteFile(filepath.Join(dir, "catalog.json"), []byte(legacy), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	models, refreshed := CatalogCached("opencode-zen")
+	if len(models) != 0 || !refreshed.IsZero() {
+		t.Fatalf("pre-filter Zen catalog survived: models=%+v refreshed=%v", models, refreshed)
+	}
+}

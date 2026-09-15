@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"llmgw/internal/gcpauth"
+	"net"
 	"net/url"
 	"regexp"
 	"strings"
@@ -139,6 +140,20 @@ func validateProviderRegistry(entries []RegistryEntry) error {
 		}
 		if entry.AuthAdapter != "" && !registryIdentifierPattern.MatchString(entry.AuthAdapter) {
 			return fmt.Errorf("entry %q has invalid auth_adapter %q", entry.ID, entry.AuthAdapter)
+		}
+		if entry.AnonymousAutomation {
+			if entry.Availability != ProviderAvailable || entry.RuntimeType != "openai_compatible" ||
+				entry.Protocol != "openai" || entry.ConnectionScope != ConnectionScopeSystemOrPersonal ||
+				entry.RequiresAPIKey || !entry.SupportsModelDiscovery || !hasNone ||
+				entry.RiskLevel != "green" || strings.TrimSpace(entry.DefaultBaseURL) == "" {
+				return fmt.Errorf("entry %q has an unsafe anonymous automation contract", entry.ID)
+			}
+			parsed, err := url.Parse(entry.DefaultBaseURL)
+			host := strings.ToLower(parsed.Hostname())
+			if err != nil || parsed.Scheme != "https" || host == "" || net.ParseIP(host) != nil ||
+				host == "localhost" || !strings.Contains(host, ".") || strings.HasSuffix(host, ".local") {
+				return fmt.Errorf("entry %q anonymous automation requires a public HTTPS base URL", entry.ID)
+			}
 		}
 		if err := validateRegistryURL(entry.ID, "default_base_url", entry.DefaultBaseURL); err != nil {
 			return err

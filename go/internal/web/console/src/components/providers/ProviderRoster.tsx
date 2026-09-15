@@ -64,7 +64,7 @@ export function mergeProviderRoster(builtins: JSONRecord[], roster: JSONRecord[]
     // A familiar ID with a different endpoint remains a separate discovery option.
     const builtin = merged.find((entry) => {
       const base = endpointIdentity(entry.default_base_url);
-      return endpoint && base ? endpoint === base && (!protocol || protocol === stringValue(entry.protocol))
+      return endpoint && base ? endpoint === base && (!protocol || protocol === "unknown" || protocol === stringValue(entry.protocol))
         : !endpoint && id === stringValue(entry.id);
     });
     if (builtin && !rosterUnavailable(remote)) {

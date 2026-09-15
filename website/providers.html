@@ -23,6 +23,9 @@
 <tr><td>Custom OpenAI-compatible</td><td>OpenAI-compatible</td><td>Optional API key</td><td>Actual surfaces depend on upstream.</td></tr>
 <tr><td>OpenCode Zen</td><td>OpenAI-compatible</td><td>None by default; optional API key</td><td>System or personal. Anonymous multi-model endpoint; availability varies by model.</td></tr>
 <tr><td>Kilo Code</td><td>OpenAI-compatible</td><td>None by default; optional API key</td><td>System or personal. Anonymous multi-model endpoint with auto/free routing.</td></tr>
+<tr><td>LLM7.io</td><td>OpenAI-compatible</td><td>None by default</td><td>System or personal. Anonymous turbo-tier chat models.</td></tr>
+<tr><td>OVH AI Endpoints</td><td>OpenAI-compatible</td><td>None by default</td><td>System or personal. Anonymous per-IP tier with strict rate limits.</td></tr>
+<tr><td>Pollinations.ai</td><td>OpenAI-compatible</td><td>None by default</td><td>System or personal. Anonymous text inference with provider-specific paths.</td></tr>
 <tr><td>Custom Anthropic-compatible</td><td>Anthropic</td><td>API key</td><td>Requires Messages-compatible upstream.</td></tr>
 </tbody></table></div><p><code>litellm</code> is also an advanced runtime type without a curated card.</p>
 <h2 id="credentials">Credential resolution</h2><p>Generic API-key providers resolve the human's private default connection, then a system connection, then the legacy config/secret seed. Generic system fallback is not project-binding-gated today.</p><p>Copilot is stricter: humans use their own OAuth; services require an exact active project/provider/<code>service</code> binding to a gateway-owned credential. Codex OAuth remains human-private.</p><div class="callout warning"><strong>At-rest qualification</strong>Human connections are encrypted. System provider keys can also remain in plaintext <code>secrets.json</code> for compatibility, so protect all state and backups.</div>

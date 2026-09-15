@@ -56,7 +56,8 @@ func instantiate(
 		}
 		return NewEdgeTTS(cfg.BaseURL, token, cfg.DefaultVoice, cfg.TimeoutOr(60)), nil
 	case "openai_compatible", "openai", "litellm":
-		if EffectiveRegistryID(providerID, cfg.RegistryID, cfg.Type) == "openai_codex" {
+		registryID := EffectiveRegistryID(providerID, cfg.RegistryID, cfg.Type)
+		if registryID == "openai_codex" {
 			if principal == nil || strings.TrimSpace(principal.PrincipalID) == "" {
 				return nil, &ConfigError{Msg: "openai_codex: a human principal private connection is required"}
 			}
@@ -77,9 +78,17 @@ func instantiate(
 		if base == "" {
 			base = s.OpenAICompatibleBaseURL
 		}
-		return OpenAIProvider{auth: bearerAuth{
-			base: strings.TrimRight(base, "/"), apiKey: apiKey, observation: observation,
-		}, Timeout: timeout, forceAdapt: cfg.ForceApiSupport, providerID: providerID, principal: principal}, nil
+		registryEntry, _ := RegistryProviderByID(registryID)
+		anonymous := registryEntry.AnonymousAutomation && AnonymousAPIKey(apiKey)
+		auth, authErr := newBearerAuth(base, apiKey, observation, registryID == "opencode_zen")
+		if authErr != nil {
+			return nil, &ConfigError{Msg: fmt.Sprintf("provider '%s': initialize request identity: %v", providerID, authErr)}
+		}
+		return OpenAIProvider{
+			auth: auth, Timeout: timeout, forceAdapt: cfg.ForceApiSupport,
+			providerID: providerID, principal: principal, registryID: registryID,
+			anonymous: anonymous,
+		}, nil
 	case "azure_openai":
 		// Normalised, not merely checked for emptiness: the catalog derives the
 		// deployments route from scheme+host alone while inference appends to

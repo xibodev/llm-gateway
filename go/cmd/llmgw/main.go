@@ -26,6 +26,7 @@ import (
 	"llmgw/internal/config"
 	"llmgw/internal/iam"
 	"llmgw/internal/operations"
+	"llmgw/internal/roster"
 	"llmgw/internal/router"
 )
 
@@ -44,6 +45,7 @@ Environment:
   LLMGW_HOST=127.0.0.1  LLMGW_PORT=8787
   LLMGW_CONFIG=<path to yaml>  LLMGW_API_KEY=<bearer>  LLMGW_ALLOW_UNAUTHENTICATED_API=0
   LLMGW_STATE_DIR=<dir for config/keys/secrets/db>
+  LLMGW_ANONYMOUS_PROVIDER_AUTOMATION=0  (1 -> connect and check reviewed no-key providers)
   LLMGW_LOG_REQUESTS=0  (1 -> append request metadata JSONL to <state>/requests.jsonl)
   LLMGW_LOG_REQUEST_BODIES=0  (1 -> also capture sensitive request/response bodies)
 `
@@ -118,6 +120,10 @@ func serve() {
 	}
 	retentionStop := startRetention()
 	defer retentionStop()
+	rosterStop := roster.Default().Start(context.Background())
+	defer rosterStop()
+	automationStop := api.StartAnonymousProviderAutomation(context.Background())
+	defer automationStop()
 
 	// Local providers are surfaced via the /admin "Detect local" button, not
 	// hardwired. Opt in to silent auto-add on startup with LLMGW_AUTODISCOVER_LOCAL=1.

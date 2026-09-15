@@ -391,6 +391,17 @@ test("settings editor covers every writable project policy field", () => {
   assert.doesNotMatch(settings, /grouped here rather than mixed into provider and routing workflows/);
 });
 
+test("provider automation is admin-only, inherited, explicit, and non-destructive", () => {
+  const settings = readFileSync(resolve(root, "src/pages/Settings.tsx"), "utf8");
+  assert.match(settings, /mode === "admin" \? <AnonymousProviderAutomation/);
+  assert.match(settings, /\/settings\/anonymous-provider-automation/);
+  assert.match(settings, /Use deployment default/);
+  assert.match(settings, /value="on">On/);
+  assert.match(settings, /value="off">Off/);
+  assert.match(settings, /Existing provider configuration was not removed/);
+  assert.match(settings, /never creates credentials, changes routes, or replaces an existing provider/);
+});
+
 test("audit history copy reflects bounded retention", () => {
   const settings = readFileSync(resolve(root, "src/pages/Settings.tsx"), "utf8");
   assert.match(settings, /retained audit history/);
@@ -559,6 +570,8 @@ test("model selection is a type-ahead, not a list of hundreds", () => {
   assert.match(picker, /Type to search models/);
   assert.match(picker, /event.key === "ArrowDown"/);
   assert.match(playground, /<ModelCombo models=\{voiceModels\}/);
+	assert.match(picker, /free: row\.free === true/);
+	assert.match(picker, /const isFree = model\.free/);
 });
 
 test("provider models hand off to the playground and back", () => {

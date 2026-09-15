@@ -111,8 +111,9 @@ and encoded bodies are rejected. There are total request deadlines (including
 DNS), header bounds and byte limits. No environment proxy, cookies, ambient
 credentials, browser or runtime image fetches are used.
 
-Probes GET only the known API root, at most 64 KiB in six seconds. A provider
-can legitimately return 404 at that root; `failed` does not establish an
+Probes GET the reviewed model-catalog URL when one is registered, otherwise the
+known API root, at most 64 KiB in six seconds. A provider can legitimately return
+404 at its root; `failed` does not establish an
 inference outage. HTTP 2xx means reachability only, not entitlement or free use.
 
 Automatic logos first use the reviewed official raster mapping in `catalog.mjs`

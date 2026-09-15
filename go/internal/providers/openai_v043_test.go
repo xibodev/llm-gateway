@@ -3,6 +3,7 @@ package providers
 import (
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"llmgw/internal/config"
@@ -120,6 +121,19 @@ func TestV043OpenAIRejectsStructurallyInvalidSuccessPayloads(t *testing.T) {
 				t.Fatalf("error=%v circuit=%v retry=%v", err, InvocationCircuitFailure(err), InvocationRetryable(err))
 			}
 		})
+	}
+}
+
+func TestOpenAIRejectsHTTP200SoftError(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(`{"error":{"message":"service temporarily overloaded"}}`))
+	}))
+	defer server.Close()
+	_, err := (OpenAIProvider{auth: bearerAuth{base: server.URL}, Timeout: 2}).Complete(
+		"model", []Message{{"role": "user", "content": "hi"}}, nil,
+	)
+	if err == nil || !InvocationRetryable(err) || !strings.Contains(err.Error(), "soft error") {
+		t.Fatalf("error=%v retryable=%v", err, InvocationRetryable(err))
 	}
 }
 

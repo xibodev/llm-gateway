@@ -102,6 +102,46 @@ func TestExplicitModelVerificationDoesNotRequireCatalog(t *testing.T) {
 	}
 }
 
+func TestProviderVerificationRejectsMalformedSuccess(t *testing.T) {
+	t.Setenv("LLMGW_STATE_DIR", t.TempDir())
+	iam.ResetForTests()
+	t.Cleanup(iam.ResetForTests)
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"id":"chat_1","choices":[{}]}`))
+	}))
+	defer upstream.Close()
+	config.Update(func(s *config.Settings) {
+		s.Providers = map[string]*config.ProviderConfig{
+			"fixture": {Type: "openai_compatible", BaseURL: upstream.URL, APIKey: "fixture"},
+		}
+		s.Policies.Defaults = config.ProviderPolicy{}
+		s.Policies.Overrides = map[string]config.ProviderPolicy{}
+	})
+	providers.ResetProviders()
+	t.Cleanup(providers.ResetProviders)
+	result := runProviderVerify("fixture", "fixture-model", nil)
+	if result["success"] != false || result["failure_code"] != "verification_failed" {
+		t.Fatalf("verification=%+v", result)
+	}
+}
+
+func TestProviderVerificationAcceptsTextPartAcknowledgement(t *testing.T) {
+	if !verificationReplyOK(map[string]any{"choices": []any{map[string]any{
+		"message": map[string]any{"content": []any{map[string]any{"type": "text", "text": "ok"}}},
+	}}}, true) {
+		t.Fatal("text-part response was not accepted")
+	}
+	if verificationReplyOK(map[string]any{"choices": []any{map[string]any{"message": map[string]any{}}}}, false) {
+		t.Fatal("empty message was accepted")
+	}
+	if verificationReplyOK(map[string]any{"choices": []any{map[string]any{
+		"message": map[string]any{"content": "quota exceeded"},
+	}}}, true) {
+		t.Fatal("automatic verification accepted a soft-error message")
+	}
+}
+
 func TestGoogleVerificationDoesNotStarveThinkingOutputBudget(t *testing.T) {
 	t.Setenv("LLMGW_STATE_DIR", t.TempDir())
 	iam.ResetForTests()
