@@ -42,7 +42,11 @@ test("live results distinguish external availability from product regressions", 
   assert.equal(classifyPairedObservation(
     { status: 502, error: "gateway failed" },
     { status: 200, validEnvelope: true },
-  ), classifications.productRegression);
+	), classifications.dependencyOutage);
+	assert.equal(classifyPairedObservation(
+	  { status: 200, validEnvelope: false },
+	  { status: 200, validEnvelope: true },
+	), classifications.productRegression);
   assert.equal(classifyPairedObservation(
     { status: 400, error: "Model is unavailable" },
     { status: 400, error: "Model is unavailable" },
