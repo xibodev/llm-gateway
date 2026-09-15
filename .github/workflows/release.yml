@@ -400,6 +400,9 @@ jobs:
     name: live release acceptance
     if: github.event_name == 'push' && github.ref_type == 'tag'
     needs: [validate, image-publish]
+    permissions:
+      contents: read
+      packages: read
     uses: ./.github/workflows/live-acceptance.yml
     with:
       enforce: true
