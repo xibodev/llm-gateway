@@ -45,7 +45,12 @@ export function classifyPairedObservation(gateway, direct) {
   const gatewayClass = classifyObservation(gateway);
   if (gatewayClass === classifications.pass) return gatewayClass;
   const directClass = classifyObservation(direct);
-  if (directClass === classifications.pass) return classifications.productRegression;
+  if (directClass === classifications.pass) {
+	if (gatewayClass === classifications.dependencyOutage || gatewayClass === classifications.rateLimited) {
+	  return gatewayClass;
+	}
+	return classifications.productRegression;
+  }
   if (gatewayClass === directClass) {
     return directClass === classifications.productRegression ? classifications.providerContractDrift : directClass;
   }
