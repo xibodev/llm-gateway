@@ -54,7 +54,11 @@ export function classifyPairedObservation(gateway, direct) {
 }
 
 export function directProviderObservation(result, text, model) {
-  const status = result?.status || 0;
+	const transportStatus = result?.status || 0;
+	const embeddedStatus = Number(result?.json?.error?.code ?? result?.json?.error?.status ?? 0);
+	const status = transportStatus >= 200 && transportStatus < 300 &&
+	  Number.isInteger(embeddedStatus) && embeddedStatus >= 400 && embeddedStatus <= 599
+	  ? embeddedStatus : transportStatus;
   const error = result?.error || result?.json?.error?.message || result?.json?.error || result?.text || "";
   return { ...result, status, error, validEnvelope: status >= 200 && status < 300 && Boolean(text) && result?.json?.model === model };
 }

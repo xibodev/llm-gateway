@@ -23,10 +23,11 @@ test("free model selection is provider-specific", () => {
 });
 
 test("direct provider soft errors are never valid success envelopes", () => {
-  const observation = directProviderObservation({ status: 200, json: { error: { message: "overloaded" } }, text: '{"error":{"message":"overloaded"}}' }, "", "model");
+	const observation = directProviderObservation({ status: 200, json: { error: { message: "overloaded", code: 502 } }, text: '{"error":{"message":"overloaded","code":502}}' }, "", "model");
   assert.equal(observation.validEnvelope, false);
   assert.equal(observation.error, "overloaded");
-  assert.equal(classifyObservation(observation), classifications.productRegression);
+	assert.equal(observation.status, 502);
+	assert.equal(classifyObservation(observation), classifications.dependencyOutage);
 });
 
 test("live results distinguish external availability from product regressions", () => {
