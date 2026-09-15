@@ -68,6 +68,11 @@ export function directProviderObservation(result, text, model) {
   return { ...result, status, error, validEnvelope: status >= 200 && status < 300 && Boolean(text) && result?.json?.model === model };
 }
 
+export function chatCompletionPassed(result, model) {
+  const text = result?.json?.choices?.[0]?.message?.content || "";
+  return result?.status >= 200 && result.status < 300 && Boolean(text) && result?.json?.model === model;
+}
+
 export function selectHealthyModels(observations, limit = 3) {
   const passed = observations.filter((item) => item.classification === classifications.pass && item.text);
   const selected = [];
