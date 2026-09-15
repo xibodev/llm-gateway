@@ -103,3 +103,49 @@ jobs:
 
       - name: Validate documentation and website
         run: node scripts/check-docs.mjs
+
+      - name: Validate live-acceptance policy core
+        working-directory: test/live-acceptance
+        run: npm test
+
+  deterministic-acceptance:
+    name: deterministic Docker acceptance
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: "22.23.2"
+          cache: npm
+          cache-dependency-path: test/live-acceptance/package-lock.json
+
+      - name: Initialize failure report
+        env:
+          LLMGW_ACCEPTANCE_MODE: deterministic
+          LLMGW_ACCEPTANCE_REPORT: ${{ github.workspace }}/test/live-acceptance/report.deterministic.json
+        run: node test/live-acceptance/bootstrap-report.mjs
+
+      - name: Install pinned harness and browser
+        working-directory: test/live-acceptance
+        run: |
+          npm ci --ignore-scripts --no-audit --no-fund
+          npx playwright install --with-deps chromium
+
+      - name: Run clean-state deterministic acceptance
+        env:
+          LLMGW_ACCEPTANCE_MODE: deterministic
+          LLMGW_ACCEPTANCE_REPORT: ${{ github.workspace }}/test/live-acceptance/report.deterministic.json
+          LLMGW_ACCEPTANCE_PORT: "18810"
+        run: node test/live-acceptance/run.mjs
+
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: always()
+        with:
+          name: deterministic-acceptance-${{ github.sha }}
+          path: test/live-acceptance/report.deterministic.json
+          if-no-files-found: error
+          retention-days: 14

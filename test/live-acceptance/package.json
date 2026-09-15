@@ -1,0 +1,13 @@
+{
+  "name": "llmgw-live-acceptance",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node --test core.test.mjs",
+    "run": "node run.mjs"
+  },
+  "dependencies": {
+    "@anthropic-ai/claude-code": "2.1.270",
+    "playwright": "1.63.0"
+  }
+}

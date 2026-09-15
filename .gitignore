@@ -28,6 +28,9 @@ deploy/state/
 *.tmp.md
 .website-dist/
 test/uat-output/
+test/live-acceptance/node_modules/
+test/live-acceptance/report*.json
+.acceptance-claude/
 test/upgrade-drill/
 test/docker-roster/build-context/
 test/docker-roster/test-output-*/
