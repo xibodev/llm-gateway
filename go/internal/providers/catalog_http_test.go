@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"llmgw/internal/codexauth"
+	codexauth "github.com/xibodev/llm-provider-auth/codex"
 )
 
 func catalogFixtureCodex(t *testing.T, base string) Provider {

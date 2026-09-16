@@ -10,7 +10,8 @@ import (
 
 	"llmgw/internal/config"
 	"llmgw/internal/iam"
-	"llmgw/internal/translate"
+
+	"github.com/xibodev/llm-translate"
 )
 
 // OpenAIProvider speaks the OpenAI wire standard (/chat/completions, /models)

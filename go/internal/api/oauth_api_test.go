@@ -12,11 +12,12 @@ import (
 	"testing"
 	"time"
 
-	"llmgw/internal/codexauth"
 	"llmgw/internal/config"
-	"llmgw/internal/copilotauth"
 	"llmgw/internal/iam"
 	"llmgw/internal/providers"
+
+	codexauth "github.com/xibodev/llm-provider-auth/codex"
+	copilotauth "github.com/xibodev/llm-provider-auth/copilot"
 )
 
 func TestOAuthAdapterPrefersExactConfiguredProviderID(t *testing.T) {

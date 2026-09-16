@@ -13,11 +13,12 @@ import (
 
 	"llmgw/internal/buildinfo"
 	"llmgw/internal/config"
-	"llmgw/internal/copilotauth"
-	"llmgw/internal/gcpauth"
 	"llmgw/internal/iam"
 	"llmgw/internal/providers"
 	"llmgw/internal/router"
+
+	copilotauth "github.com/xibodev/llm-provider-auth/copilot"
+	gcpauth "github.com/xibodev/llm-provider-auth/gcp"
 )
 
 func persist() {

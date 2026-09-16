@@ -10,9 +10,17 @@ import (
 
 	"llmgw/internal/buildinfo"
 	"llmgw/internal/config"
-	"llmgw/internal/copilotauth"
 	"llmgw/internal/iam"
+
+	copilotauth "github.com/xibodev/llm-provider-auth/copilot"
 )
+
+func init() {
+	copilotauth.CacheDirFunc = func() string { return config.Get().GithubCopilotCacheDir }
+	copilotauth.OAuthTokenFunc = func() string { return config.Get().GithubCopilotOAuthToken }
+	copilotauth.UseGhCLIFunc = func() bool { return config.Get().GithubCopilotUseGhCLI }
+	copilotauth.AllowProxyFunc = func() bool { return config.Get().AllowCopilotProxy }
+}
 
 // OpenAIAuth decouples authentication from the OpenAI wire transport. It
 // resolves the base URL + request headers for a call and can refresh

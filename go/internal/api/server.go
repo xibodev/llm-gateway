@@ -117,6 +117,7 @@ func NewServer() http.Handler {
 	mux.HandleFunc("GET /admin/api/state", handleState)
 	mux.HandleFunc("GET /admin/api/settings/anonymous-provider-automation", handleGetAnonymousProviderAutomation)
 	mux.HandleFunc("POST /admin/api/settings/anonymous-provider-automation", handleSetAnonymousProviderAutomation)
+	mux.HandleFunc("POST /admin/api/providers/auto-connect-free", handleAutoConnectFreeProviders)
 	mux.HandleFunc("GET /admin/api/provider-roster", handleAdminRoster)
 	mux.HandleFunc("POST /admin/api/provider-roster/refresh", handleRefreshRoster)
 	mux.HandleFunc("POST /admin/api/playground", handleAdminPlayground)

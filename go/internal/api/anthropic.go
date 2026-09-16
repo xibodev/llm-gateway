@@ -12,7 +12,8 @@ import (
 	"llmgw/internal/config"
 	"llmgw/internal/providers"
 	"llmgw/internal/router"
-	"llmgw/internal/translate"
+
+	"github.com/xibodev/llm-translate"
 )
 
 const maxAnthropicTokenCountBodyBytes = 32 << 20 // 32 MiB

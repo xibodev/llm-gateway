@@ -8,8 +8,9 @@ import (
 	"sync"
 
 	"llmgw/internal/config"
-	"llmgw/internal/gcpauth"
 	"llmgw/internal/iam"
+
+	gcpauth "github.com/xibodev/llm-provider-auth/gcp"
 )
 
 var (

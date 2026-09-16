@@ -7,11 +7,12 @@ import (
 	"strings"
 	"sync"
 
-	"llmgw/internal/codexauth"
 	"llmgw/internal/config"
-	"llmgw/internal/copilotauth"
 	"llmgw/internal/diagnostics"
 	"llmgw/internal/iam"
+
+	codexauth "github.com/xibodev/llm-provider-auth/codex"
+	copilotauth "github.com/xibodev/llm-provider-auth/copilot"
 )
 
 const maxProviderAuthDiagnosticChars = 300

@@ -15,8 +15,9 @@ import (
 	"testing"
 
 	"llmgw/internal/config"
-	"llmgw/internal/gcpauth"
 	"llmgw/internal/iam"
+
+	gcpauth "github.com/xibodev/llm-provider-auth/gcp"
 )
 
 // serviceAccountFixture builds a service-account key whose token endpoint is a

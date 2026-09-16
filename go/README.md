@@ -1,8 +1,16 @@
 # Go implementation
 
-`go/` is the only runtime implementation of llm-gateway. It builds a static Go
-binary with the Preact console embedded at compile time; Node.js is a build-time
-dependency only.
+`go/` is the canonical product application implementation of llm-gateway. It builds
+a static Go binary with the Preact console embedded at compile time; Node.js is a
+build-time dependency only.
+
+The application composes three standalone, modular libraries:
+- `github.com/xibodev/llm-translate`: protocol translation for Anthropic, OpenAI Chat, and Responses APIs.
+- `github.com/xibodev/llm-provider-auth`: provider authentication flows, OAuth device codes, and key parsing.
+- `github.com/xibodev/llmgw-core`: headless proxy engine, target resolution, and circuit breaking.
+
+These external modules are versioned Go dependencies in `go.mod`, not vendored directories.
+See [`docs/ARCHITECTURE.md`](../docs/ARCHITECTURE.md) for module boundaries and dependency rules.
 
 ## Package map
 
@@ -11,11 +19,12 @@ cmd/llmgw             CLI: serve, health, version, backup/inspect/restore
 internal/api          OpenAI/Anthropic facades and admin/user APIs
 internal/buildinfo    linker-injected version, commit, and build time
 internal/config       settings, provider instances, endpoints, local detection
+internal/diagnostics  secret-redaction, text-limiting utilities
 internal/iam          SQLite IAM, keys, quotas, usage, audit, alerts, retention
 internal/operations   locked backup, inspection, restore, and recovery journal
-internal/providers    transports, auth adapters, catalogs, retries, circuit state
+internal/providers    transports, auth adapters, core adapters, catalogs, retries, circuit state
+internal/roster       provider catalog synchronization and metadata
 internal/router       target resolution, ordered failover, telemetry, usage bridge
-internal/translate    strict Anthropic/Chat/Responses transformations
 internal/web          embedded Preact bundle and legacy compatibility documents
 ```
 

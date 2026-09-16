@@ -8,7 +8,7 @@ release verification, and rollback for the single-node gateway.
 ### Published image (recommended)
 
 Use the standalone [Quickstart Compose recipe](QUICKSTART.md#docker-compose),
-pinned to `ghcr.io/xibodev/llm-gateway:0.3.1`. No clone, build or config seed is
+pinned to `ghcr.io/xibodev/llm-gateway:0.5.1`. No clone, build or config seed is
 required. From the private installation folder containing `compose.yaml` and
 the generate-once `.env`:
 

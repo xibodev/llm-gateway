@@ -9,7 +9,8 @@ import (
 	"time"
 
 	"llmgw/internal/config"
-	"llmgw/internal/gcpauth"
+
+	gcpauth "github.com/xibodev/llm-provider-auth/gcp"
 )
 
 const (
