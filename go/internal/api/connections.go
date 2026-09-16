@@ -6,9 +6,10 @@ import (
 	"strings"
 
 	"llmgw/internal/config"
-	"llmgw/internal/gcpauth"
 	"llmgw/internal/iam"
 	"llmgw/internal/providers"
+
+	gcpauth "github.com/xibodev/llm-provider-auth/gcp"
 )
 
 type connectionBody struct {

@@ -15,11 +15,12 @@ import (
 	"testing"
 	"time"
 
-	"llmgw/internal/codexauth"
 	"llmgw/internal/config"
 	"llmgw/internal/iam"
 	"llmgw/internal/providers"
 	"llmgw/internal/router"
+
+	codexauth "github.com/xibodev/llm-provider-auth/codex"
 )
 
 var _ http.Flusher = (*streamTestWriter)(nil)

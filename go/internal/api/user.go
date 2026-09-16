@@ -8,9 +8,10 @@ import (
 	"strings"
 
 	"llmgw/internal/config"
-	"llmgw/internal/copilotauth"
 	"llmgw/internal/iam"
 	"llmgw/internal/providers"
+
+	copilotauth "github.com/xibodev/llm-provider-auth/copilot"
 )
 
 func handleUserMe(w http.ResponseWriter, r *http.Request) {

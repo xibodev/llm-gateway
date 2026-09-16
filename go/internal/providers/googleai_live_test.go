@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"llmgw/internal/gcpauth"
+	gcpauth "github.com/xibodev/llm-provider-auth/gcp"
 )
 
 // TestLiveVertexServiceAccountCall drives the whole service-account path

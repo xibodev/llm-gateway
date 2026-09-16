@@ -5,9 +5,10 @@ import (
 	"strings"
 
 	"llmgw/internal/config"
-	"llmgw/internal/copilotauth"
 	"llmgw/internal/iam"
 	"llmgw/internal/providers"
+
+	copilotauth "github.com/xibodev/llm-provider-auth/copilot"
 )
 
 type principalBody struct {

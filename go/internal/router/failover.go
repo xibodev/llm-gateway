@@ -12,21 +12,17 @@ import (
 	"llmgw/internal/config"
 	"llmgw/internal/iam"
 	"llmgw/internal/providers"
-	"llmgw/internal/translate"
+
+	core "github.com/xibodev/llmgw-core"
+	"github.com/xibodev/llm-translate"
 )
 
 // Target is one resolved provider/model in a chain.
-type Target struct {
-	Provider string
-	Model    string
-}
+type Target = core.Target
 
 // Resolution records both the resolved targets and the canonical category name,
 // when the request addressed a category rather than a direct model.
-type Resolution struct {
-	Targets  []Target
-	Category string
-}
+type Resolution = core.Resolution
 
 // ModelNotFoundError means the requested model is unknown or its route has no
 // enabled providers (HTTP 404).

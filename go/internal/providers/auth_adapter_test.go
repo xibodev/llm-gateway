@@ -6,8 +6,9 @@ import (
 	"testing"
 
 	"llmgw/internal/config"
-	"llmgw/internal/copilotauth"
 	"llmgw/internal/iam"
+
+	copilotauth "github.com/xibodev/llm-provider-auth/copilot"
 )
 
 type fixtureProviderAuthAdapter struct{}
