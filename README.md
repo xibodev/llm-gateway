@@ -142,6 +142,7 @@ backup, recovery, release verification, and rollback.
 ## Documentation
 
 - [Quickstart](docs/QUICKSTART.md)
+- [Architecture and modular design](docs/ARCHITECTURE.md)
 - [Configuration reference](docs/CONFIGURATION.md)
 - [Client profiles](docs/CLIENTS.md)
 - [Provider integrations](docs/PROVIDERS.md)
