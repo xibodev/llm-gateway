@@ -62,10 +62,7 @@ func instantiate(
 			if principal == nil || strings.TrimSpace(principal.PrincipalID) == "" {
 				return nil, &ConfigError{Msg: "openai_codex: a human principal private connection is required"}
 			}
-			clientID := strings.TrimSpace(config.Get().OpenAICodexClientID)
-			if clientID == "" {
-				return nil, &ConfigError{Msg: "openai_codex: openai_codex_client_id is required"}
-			}
+			clientID := EffectiveCodexClientID()
 			return CodexProvider{inner: OpenAIProvider{
 				auth:    codexAuth{principalID: principal.PrincipalID, providerID: providerID, clientID: clientID},
 				Timeout: timeout, providerID: providerID, principal: principal,

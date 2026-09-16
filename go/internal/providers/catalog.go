@@ -87,7 +87,7 @@ func ProviderConfigurationIssue(providerID string) string {
 			return "Azure OpenAI base URL is not a resource endpoint: it must be an http(s) URL with no path, or a path ending in /openai/v1."
 		}
 	case "openai_codex":
-		if strings.TrimSpace(config.Get().OpenAICodexClientID) == "" {
+		if EffectiveCodexClientID() == "" {
 			return "OpenAI Codex requires an OAuth client ID."
 		}
 	}

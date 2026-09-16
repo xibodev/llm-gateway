@@ -9,7 +9,7 @@ require (
 	github.com/gorilla/websocket v1.5.3
 	github.com/xibodev/llm-provider-auth v0.1.2
 	github.com/xibodev/llm-translate v0.1.1
-	github.com/xibodev/llmgw-core v0.1.2
+	github.com/xibodev/llmgw-core v0.2.1
 	golang.org/x/sys v0.22.0
 	gopkg.in/yaml.v3 v3.0.1
 	modernc.org/sqlite v1.34.4

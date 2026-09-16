@@ -15,7 +15,17 @@ import (
 	copilotauth "github.com/xibodev/llm-provider-auth/copilot"
 )
 
-const maxProviderAuthDiagnosticChars = 300
+const (
+	maxProviderAuthDiagnosticChars = 300
+	DefaultCodexClientID           = "app_EMoamEEZ73f0CkXaXp7hrann"
+)
+
+func EffectiveCodexClientID() string {
+	if clientID := strings.TrimSpace(config.Get().OpenAICodexClientID); clientID != "" {
+		return clientID
+	}
+	return DefaultCodexClientID
+}
 
 type ProviderAuthCapabilities struct {
 	DeviceCode      bool `json:"device_code"`
@@ -124,10 +134,7 @@ var providerAuthAdapters = struct {
 		return githubCopilotAuthAdapter{}, nil
 	},
 	"openai_codex": func(string) (ProviderAuthAdapter, error) {
-		clientID := strings.TrimSpace(config.Get().OpenAICodexClientID)
-		if clientID == "" {
-			return nil, fmt.Errorf("openai_codex_client_id is required for the official Codex OAuth flow")
-		}
+		clientID := EffectiveCodexClientID()
 		return openAICodexAuthAdapter{clientID: clientID}, nil
 	},
 }}
