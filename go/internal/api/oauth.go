@@ -261,7 +261,7 @@ func configureOAuthClientID(providerRef, clientID string, allowUpdate bool) erro
 			return fmt.Errorf("Could not persist the Codex OAuth client ID.")
 		}
 	}
-	if strings.TrimSpace(config.Get().OpenAICodexClientID) == "" {
+	if strings.TrimSpace(providers.EffectiveCodexClientID()) == "" {
 		return fmt.Errorf("OpenAI Codex client ID is required. Enter it in the official sign-in dialog.")
 	}
 	return nil
