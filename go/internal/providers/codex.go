@@ -9,8 +9,9 @@ import (
 	"sync"
 	"time"
 
-	"llmgw/internal/codexauth"
 	"llmgw/internal/iam"
+
+	codexauth "github.com/xibodev/llm-provider-auth/codex"
 )
 
 // codexAuth supplies owner-private official Codex credentials to the common

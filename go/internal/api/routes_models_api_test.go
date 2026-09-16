@@ -7,10 +7,11 @@ import (
 	"sync"
 	"testing"
 
-	"llmgw/internal/codexauth"
 	"llmgw/internal/config"
 	"llmgw/internal/iam"
 	"llmgw/internal/providers"
+
+	codexauth "github.com/xibodev/llm-provider-auth/codex"
 )
 
 func TestAdminRouteRejectsUnknownMembersAndPreservesOrder(t *testing.T) {

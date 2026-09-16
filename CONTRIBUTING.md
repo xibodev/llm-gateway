@@ -6,9 +6,13 @@ all contributors.
 
 ## Development
 
-The Go module is under `go/`. The console source is under
-`go/internal/web/console/` and its generated `dist/` is committed because the Go
-binary embeds it.
+The Go module is under `go/`. The gateway composes three external modular
+libraries (`llm-translate`, `llm-provider-auth`, and `llmgw-core`) as versioned
+dependencies in `go.mod`, not as vendored directories. See
+[`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) for module boundaries and dependency rules.
+
+The console source is under `go/internal/web/console/` and its generated `dist/` is
+committed because the Go binary embeds it.
 
 ```bash
 cd go
@@ -45,6 +49,7 @@ node scripts/check-docs.mjs
 ## Documentation ownership
 
 - `README.md`: concise product entry point and tested quickstart.
+- `docs/ARCHITECTURE.md`: modular architecture, module graph, boundaries, extension points.
 - `docs/CONFIGURATION.md`: YAML/environment/state reference.
 - `docs/CLIENTS.md`: coding-client setup and compatibility.
 - `docs/PROVIDERS.md`: curated integration and credential boundary.

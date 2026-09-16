@@ -8,7 +8,8 @@ import (
 	"strings"
 
 	"llmgw/internal/iam"
-	"llmgw/internal/translate"
+
+	"github.com/xibodev/llm-translate"
 )
 
 const (

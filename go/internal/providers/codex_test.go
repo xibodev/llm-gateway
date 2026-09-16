@@ -10,9 +10,10 @@ import (
 	"testing"
 	"time"
 
-	"llmgw/internal/codexauth"
 	"llmgw/internal/config"
 	"llmgw/internal/iam"
+
+	codexauth "github.com/xibodev/llm-provider-auth/codex"
 )
 
 func TestCodexCatalogRefreshStoresModelsAfterCredentialRotation(t *testing.T) {

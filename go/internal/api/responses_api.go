@@ -12,7 +12,8 @@ import (
 	"llmgw/internal/iam"
 	"llmgw/internal/providers"
 	"llmgw/internal/router"
-	"llmgw/internal/translate"
+
+	"github.com/xibodev/llm-translate"
 )
 
 func handleResponsesAPI(w http.ResponseWriter, r *http.Request) {

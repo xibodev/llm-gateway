@@ -6,11 +6,12 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"llmgw/internal/gcpauth"
 	"net"
 	"net/url"
 	"regexp"
 	"strings"
+
+	gcpauth "github.com/xibodev/llm-provider-auth/gcp"
 )
 
 //go:embed registry_manifest.json
