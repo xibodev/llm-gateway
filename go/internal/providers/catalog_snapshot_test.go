@@ -65,21 +65,19 @@ func TestCatalogInvalidationRejectsInFlightStaleWrite(t *testing.T) {
 
 func TestIncompleteProviderConfigurationHidesCachedCatalog(t *testing.T) {
 	oldProviders := config.Get().Providers
-	oldClientID := config.Get().OpenAICodexClientID
 	t.Cleanup(func() {
 		config.Update(func(settings *config.Settings) {
 			settings.Providers = oldProviders
-			settings.OpenAICodexClientID = oldClientID
 		})
 	})
 	config.Update(func(settings *config.Settings) {
 		settings.Providers = map[string]*config.ProviderConfig{
 			"vertex_ai": {Type: "vertex_ai", RegistryID: "vertex_ai"},
-			"codex":     {Type: "openai_compatible", RegistryID: "openai_codex"},
+			"azure":     {Type: "azure_openai", RegistryID: "azure_openai"},
 		}
-		settings.OpenAICodexClientID = ""
 	})
 	storeEntry("vertex_ai", []ModelInfo{{ID: "gemini-test"}})
+	storeEntry("azure", []ModelInfo{{ID: "azure-test"}})
 
 	if issue := ProviderConfigurationIssue("vertex_ai"); issue == "" {
 		t.Fatal("Vertex without a project should report incomplete configuration")
@@ -87,13 +85,16 @@ func TestIncompleteProviderConfigurationHidesCachedCatalog(t *testing.T) {
 	if models, _ := CatalogSnapshot("vertex_ai"); len(models) != 0 {
 		t.Fatalf("incomplete Vertex provider exposed cached models: %+v", models)
 	}
-	if issue := ProviderConfigurationIssue("codex"); issue == "" {
-		t.Fatal("Codex without a client ID should report incomplete configuration")
+	if issue := ProviderConfigurationIssue("azure"); issue == "" {
+		t.Fatal("Azure without a base URL should report incomplete configuration")
+	}
+	if models, _ := CatalogSnapshot("azure"); len(models) != 0 {
+		t.Fatalf("incomplete Azure provider exposed cached models: %+v", models)
 	}
 
 	config.Update(func(settings *config.Settings) {
 		settings.Providers["vertex_ai"].Project = "project-a"
-		settings.OpenAICodexClientID = "client-a"
+		settings.Providers["azure"].BaseURL = "https://example.openai.azure.com"
 	})
 	if issue := ProviderConfigurationIssue("vertex_ai"); issue != "" {
 		t.Fatalf("configured Vertex issue=%q", issue)
@@ -101,7 +102,10 @@ func TestIncompleteProviderConfigurationHidesCachedCatalog(t *testing.T) {
 	if models, _ := CatalogSnapshot("vertex_ai"); len(models) != 1 {
 		t.Fatalf("configured Vertex catalog models=%+v", models)
 	}
-	if issue := ProviderConfigurationIssue("codex"); issue != "" {
-		t.Fatalf("configured Codex issue=%q", issue)
+	if issue := ProviderConfigurationIssue("azure"); issue != "" {
+		t.Fatalf("configured Azure issue=%q", issue)
+	}
+	if models, _ := CatalogSnapshot("azure"); len(models) != 1 {
+		t.Fatalf("configured Azure catalog models=%+v", models)
 	}
 }

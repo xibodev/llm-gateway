@@ -113,6 +113,8 @@ func (a codexAuth) PrepareObserved() (
 	headers.Set("Content-Type", "application/json")
 	headers.Set("Accept", "application/json")
 	headers.Set("User-Agent", "llm-gateway/codex")
+	headers.Set("originator", "codex_cli_rs")
+	headers.Set("OpenAI-Beta", "responses=experimental")
 	if strings.TrimSpace(envelope.AccountID) != "" {
 		headers.Set("ChatGPT-Account-ID", envelope.AccountID)
 	}
@@ -227,6 +229,9 @@ func codexAccountMismatch(expected, actual string) bool {
 func RefreshCodexOAuthConnection(
 	principalID, providerID, connectionName, clientID string,
 ) (iam.OAuthTokenEnvelope, iam.ProviderConnection, error) {
+	if clientID == "" {
+		clientID = EffectiveCodexClientID()
+	}
 	auth := codexAuth{
 		principalID: principalID, providerID: providerID,
 		connectionName: connectionName, clientID: clientID,
