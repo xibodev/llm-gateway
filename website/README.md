@@ -22,7 +22,7 @@ CDN, remote image, or external font dependency.
 `quickstart.html` is its manually maintained website counterpart. Keep the
 homepage snippet, docs landing page, operations/upgrading pages, and `search.json`
 aligned with it. The default is the published
-`ghcr.io/xibodev/llm-gateway:0.5.1` image, not a repository clone or build.
+`ghcr.io/xibodev/llm-gateway:0.6.0` image, not a repository clone or build.
 
 The standalone recipe uses an installation-local `compose.yaml` and generate-once
 `.env`, two required keys, a loopback host mapping with optional `LLMGW_PORT`,
