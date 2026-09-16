@@ -48,10 +48,6 @@ go/internal/web/console/node_modules/
 go.work
 go.work.sum
 Dockerfile.modular
-
-# release-harness local runs and bindings
-.release-harness/runs/
-.release-harness/bindings/
 SESSION-HANDOFF.md
 libs/
 app/
