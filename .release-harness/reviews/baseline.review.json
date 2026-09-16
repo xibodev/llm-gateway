@@ -1,0 +1,56 @@
+{
+  "schema_version": "1.0.0",
+  "mode": "baseline",
+  "contract": {
+    "digest": "31b393ab3e80162226619c441694573993ac618382d74642101484a0bf2e9c80"
+  },
+  "authoring_provenance": {
+    "status": "established",
+    "path": ".release-harness/drafts/llm-gateway.record.json",
+    "digest": "6732ddf3dc8236b974e2aae5f81b546d89c2a466b6fb0a368d76620955bf981e"
+  },
+  "sources": [
+    {
+      "source_id": "primary",
+      "status": "not_established",
+      "repository_identity": "https://github.com/xibodev/llm-gateway.git",
+      "reason": "Uncommitted product source exists (3 paths); exact source identity cannot be established."
+    }
+  ],
+  "facts": [],
+  "impact": {
+    "assertions": [
+      {
+        "id": "A1",
+        "impact": "not_established",
+        "supported_by": []
+      },
+      {
+        "id": "A2",
+        "impact": "not_established",
+        "supported_by": []
+      },
+      {
+        "id": "A3",
+        "impact": "not_established",
+        "supported_by": []
+      },
+      {
+        "id": "A4",
+        "impact": "not_established",
+        "supported_by": []
+      }
+    ],
+    "requires": [],
+    "possible_binding_changes": []
+  },
+  "questions": [],
+  "conclusion": {
+    "action": "block",
+    "summary": "Semantic impact has not been established."
+  },
+  "proposed": {
+    "by": "unattributed",
+    "at": "2026-09-16T22:23:28.681Z"
+  }
+}

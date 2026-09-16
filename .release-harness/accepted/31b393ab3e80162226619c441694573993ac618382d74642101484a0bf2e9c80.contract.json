@@ -1,0 +1,55 @@
+{
+  "assertions": [
+    {
+      "description": "the CLI reports release version and build identity",
+      "expect": {
+        "args": "version",
+        "exit_code": 0,
+        "stdout_contains": "llm-gateway"
+      },
+      "id": "A1",
+      "kind": "cli",
+      "target": "cli"
+    },
+    {
+      "description": "the CLI health command verifies local process health",
+      "expect": {
+        "args": "health",
+        "exit_code": 0
+      },
+      "id": "A2",
+      "kind": "cli",
+      "target": "cli"
+    },
+    {
+      "description": "the gateway exposes an unauthenticated GET /health endpoint reporting status ok",
+      "expect": {
+        "body_contains": "\"status\":\"ok\"",
+        "method": "GET",
+        "path": "/health",
+        "status": 200
+      },
+      "id": "A3",
+      "kind": "http",
+      "target": "gateway"
+    },
+    {
+      "description": "the gateway serves public models list on GET /v1/models",
+      "expect": {
+        "body_contains": "\"object\":\"list\"",
+        "method": "GET",
+        "path": "/v1/models",
+        "status": 200
+      },
+      "id": "A4",
+      "kind": "http",
+      "target": "gateway"
+    }
+  ],
+  "schema_version": "1.0.0",
+  "subject": {
+    "id": "llm-gateway",
+    "name": "LLM Gateway"
+  },
+  "digest": "31b393ab3e80162226619c441694573993ac618382d74642101484a0bf2e9c80"
+}
