@@ -59,22 +59,30 @@
       {
         "id": "A1",
         "impact": "unchanged",
-        "supported_by": ["cli-version-command"]
+        "supported_by": [
+          "cli-version-command"
+        ]
       },
       {
         "id": "A2",
         "impact": "unchanged",
-        "supported_by": ["cli-health-command"]
+        "supported_by": [
+          "cli-health-command"
+        ]
       },
       {
         "id": "A3",
         "impact": "unchanged",
-        "supported_by": ["http-health-endpoint"]
+        "supported_by": [
+          "http-health-endpoint"
+        ]
       },
       {
         "id": "A4",
         "impact": "unchanged",
-        "supported_by": ["http-models-endpoint"]
+        "supported_by": [
+          "http-models-endpoint"
+        ]
       }
     ],
     "requires": [],
@@ -88,5 +96,6 @@
   "proposed": {
     "by": "agent-session",
     "at": "2026-09-16T22:25:00.000Z"
-  }
+  },
+  "digest": "cc6d98ccc1822f50abf0b65f81c3601e47b57023b65a53f658566765a5e83352"
 }
