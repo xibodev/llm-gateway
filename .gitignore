@@ -18,6 +18,9 @@ deploy/state/
 .gateway-state/
 *.exe
 *.exe~
+go/llmgw
+dist/
+!go/internal/web/console/dist/
 
 # tooling / agent scratch
 .playwright-cli/
