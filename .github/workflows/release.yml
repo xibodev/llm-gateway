@@ -101,6 +101,11 @@ jobs:
             echo "release_exists=$release_exists"
           } >> "$GITHUB_OUTPUT"
 
+      - name: Validate release-harness contracts and lifecycle
+        run: |
+          npx --yes @xibodev/release-harness@3.0.0-beta.1 validate --all
+          npx --yes @xibodev/release-harness@3.0.0-beta.1 lifecycle check
+
   ci:
     needs: validate
     uses: ./.github/workflows/ci.yml
@@ -156,6 +161,15 @@ jobs:
               printf '%s\n' "$output" | grep -Fx "llm-gateway $VERSION"
               printf '%s\n' "$output" | grep -Fx "commit $COMMIT"
               printf '%s\n' "$output" | grep -Fx "build_time $BUILD_TIME"
+              ./llmgw serve &
+              SERVER_PID=$!
+              sleep 2
+              cd ..
+              npx --yes @xibodev/release-harness@3.0.0-beta.1 bind ci --target "cli=$(pwd)/go/llmgw" --target "gateway=http://127.0.0.1:8787"
+              npx --yes @xibodev/release-harness@3.0.0-beta.1 run --binding ci
+              npx --yes @xibodev/release-harness@3.0.0-beta.1 verify
+              kill $SERVER_PID
+              cd go
             fi
             if [ "$os" = "windows" ]; then
               touch -d "$BUILD_TIME" "llmgw${ext}"

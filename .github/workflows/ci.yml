@@ -108,6 +108,11 @@ jobs:
         working-directory: test/live-acceptance
         run: npm test
 
+      - name: Validate release-harness contracts and lifecycle
+        run: |
+          npx --yes @xibodev/release-harness@3.0.0-beta.1 validate --all
+          npx --yes @xibodev/release-harness@3.0.0-beta.1 lifecycle check
+
   deterministic-acceptance:
     name: deterministic Docker acceptance
     runs-on: ubuntu-latest
