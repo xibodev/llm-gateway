@@ -109,3 +109,10 @@ console source change **must** be rebuilt and committed with it or CI fails.
   the standard library; a new dependency needs a reason that survives review.
 - No AI attribution trailers in commit messages.
 - Do not commit dates or version stamps into documentation — git records history.
+\n\n<!-- release-harness:managed:start -->
+When work affects tests, public behavior, packaging, build/release configuration,
+deployment inputs, compatibility boundaries, or normative dependencies, load the
+project Release-Harness capability. Read existing Release-Harness state before
+reasoning from the repository. Perform change-impact review before claiming
+release readiness.
+<!-- release-harness:managed:end -->\n

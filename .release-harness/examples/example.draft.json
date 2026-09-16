@@ -1,0 +1,33 @@
+{
+  "_comment": "An EXAMPLE. It describes a fictional service and is never read at run time. Copy it to drafts/ and edit, or run `release-harness draft new <name>`.",
+  "schema_version": "1.0.0",
+  "proposition": {
+    "subject": {
+      "id": "example-service",
+      "name": "Example Service"
+    },
+    "assertions": [
+      {
+        "id": "A1",
+        "kind": "http",
+        "target": "api",
+        "description": "the service reports itself healthy",
+        "expect": {
+          "method": "GET",
+          "path": "/health",
+          "status": 200
+        },
+        "supported_by": [
+          "health-endpoint"
+        ]
+      }
+    ]
+  },
+  "questions": [
+    {
+      "id": "Q1",
+      "question": "Does /health check dependencies, or only that the process is up?",
+      "blocking": true
+    }
+  ]
+}
