@@ -161,7 +161,7 @@ jobs:
               printf '%s\n' "$output" | grep -Fx "llm-gateway $VERSION"
               printf '%s\n' "$output" | grep -Fx "commit $COMMIT"
               printf '%s\n' "$output" | grep -Fx "build_time $BUILD_TIME"
-              ./llmgw serve &
+              LLMGW_ALLOW_UNAUTHENTICATED_API=1 ./llmgw serve &
               SERVER_PID=$!
               sleep 2
               cd ..
@@ -169,6 +169,7 @@ jobs:
               npx --yes @xibodev/release-harness@3.0.0-beta.1 run --binding ci
               npx --yes @xibodev/release-harness@3.0.0-beta.1 verify
               kill $SERVER_PID
+              rm -rf .release-harness/bindings .release-harness/runs
               cd go
             fi
             if [ "$os" = "windows" ]; then
