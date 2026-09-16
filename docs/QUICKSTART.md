@@ -19,7 +19,7 @@ Create `compose.yaml` in it with the following contents:
 ```yaml
 services:
   gateway:
-    image: ghcr.io/xibodev/llm-gateway:0.6.0
+    image: ghcr.io/xibodev/llm-gateway:0.6.1
     ports:
       - "127.0.0.1:${LLMGW_PORT:-8787}:8787"
     environment:
@@ -39,7 +39,7 @@ healthcheck. No command or healthcheck override is needed. The named volume
 persists configuration and databases at `/state`, owned by container UID/GID
 65532. Configure providers in the console; no config seed is needed.
 
-This recipe pins [v0.6.0](https://github.com/xibodev/llm-gateway/releases/tag/v0.6.0).
+This recipe pins [v0.6.1](https://github.com/xibodev/llm-gateway/releases/tag/v0.6.1).
 See [latest releases](https://github.com/xibodev/llm-gateway/releases/latest)
 when choosing a future version, and follow [Upgrading](UPGRADING.md).
 
@@ -166,30 +166,30 @@ Keep the original encryption key and folder through every upgrade.
 
 This is an **alternative installation**, not a way to access the Compose volume.
 Choose a separate private folder and download your archive plus
-[SHA256SUMS](https://github.com/xibodev/llm-gateway/releases/download/v0.6.0/SHA256SUMS):
+[SHA256SUMS](https://github.com/xibodev/llm-gateway/releases/download/v0.6.1/SHA256SUMS):
 
-| Platform | v0.6.0 download |
+| Platform | v0.6.1 download |
 | --- | --- |
-| Windows x64 | [windows_amd64.zip](https://github.com/xibodev/llm-gateway/releases/download/v0.6.0/llmgw_v0.6.0_windows_amd64.zip) |
-| Linux x64 | [linux_amd64.tar.gz](https://github.com/xibodev/llm-gateway/releases/download/v0.6.0/llmgw_v0.6.0_linux_amd64.tar.gz) |
-| Linux ARM64 | [linux_arm64.tar.gz](https://github.com/xibodev/llm-gateway/releases/download/v0.6.0/llmgw_v0.6.0_linux_arm64.tar.gz) |
-| macOS Intel | [darwin_amd64.tar.gz](https://github.com/xibodev/llm-gateway/releases/download/v0.6.0/llmgw_v0.6.0_darwin_amd64.tar.gz) |
-| macOS Apple Silicon | [darwin_arm64.tar.gz](https://github.com/xibodev/llm-gateway/releases/download/v0.6.0/llmgw_v0.6.0_darwin_arm64.tar.gz) |
+| Windows x64 | [windows_amd64.zip](https://github.com/xibodev/llm-gateway/releases/download/v0.6.1/llmgw_v0.6.1_windows_amd64.zip) |
+| Linux x64 | [linux_amd64.tar.gz](https://github.com/xibodev/llm-gateway/releases/download/v0.6.1/llmgw_v0.6.1_linux_amd64.tar.gz) |
+| Linux ARM64 | [linux_arm64.tar.gz](https://github.com/xibodev/llm-gateway/releases/download/v0.6.1/llmgw_v0.6.1_linux_arm64.tar.gz) |
+| macOS Intel | [darwin_amd64.tar.gz](https://github.com/xibodev/llm-gateway/releases/download/v0.6.1/llmgw_v0.6.1_darwin_amd64.tar.gz) |
+| macOS Apple Silicon | [darwin_arm64.tar.gz](https://github.com/xibodev/llm-gateway/releases/download/v0.6.1/llmgw_v0.6.1_darwin_arm64.tar.gz) |
 
 Before unpacking, calculate the archive's SHA-256 and compare it with the exact
 filename's entry in `SHA256SUMS`. Stop if they differ. For Linux x64:
 
 ```bash
-sha256sum llmgw_v0.6.0_linux_amd64.tar.gz
-tar -xzf llmgw_v0.6.0_linux_amd64.tar.gz
+sha256sum llmgw_v0.6.1_linux_amd64.tar.gz
+tar -xzf llmgw_v0.6.1_linux_amd64.tar.gz
 ```
 
 On macOS use `shasum -a 256 <ARCHIVE>` and `tar -xzf <ARCHIVE>` with your actual
 archive name. On Windows:
 
 ```powershell
-Get-FileHash .\llmgw_v0.6.0_windows_amd64.zip -Algorithm SHA256
-Expand-Archive .\llmgw_v0.6.0_windows_amd64.zip -DestinationPath .
+Get-FileHash .\llmgw_v0.6.1_windows_amd64.zip -Algorithm SHA256
+Expand-Archive .\llmgw_v0.6.1_windows_amd64.zip -DestinationPath .
 ```
 
 For this fresh native installation, generate `.env` once using the earlier
@@ -236,7 +236,7 @@ image recipe and native installation; do not mix their folders, projects or volu
 Clone the selected source release (Git required):
 
 ```bash
-git clone --branch v0.6.0 https://github.com/xibodev/llm-gateway.git
+git clone --branch v0.6.1 https://github.com/xibodev/llm-gateway.git
 cd llm-gateway
 ```
 
