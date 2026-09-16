@@ -197,6 +197,47 @@ func TestAnonymousProviderAutomationRunsOncePerDay(t *testing.T) {
 	}
 }
 
+func TestAutoConnectFreeProvidersAPI(t *testing.T) {
+	setupAnonymousAutomationAPITest(t)
+	server := httptest.NewServer(NewServer())
+	defer server.Close()
+
+	// Anonymous request rejected
+	req, _ := http.NewRequest(http.MethodPost, server.URL+"/admin/api/providers/auto-connect-free", nil)
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("expected 401 unauthorized, got %d", resp.StatusCode)
+	}
+
+	// Authed request runs and returns ok
+	req, _ = http.NewRequest(http.MethodPost, server.URL+"/admin/api/providers/auto-connect-free", nil)
+	req.Header.Set("Authorization", "Bearer admin")
+	resp, err = http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200 ok, got %d", resp.StatusCode)
+	}
+
+	var payload struct {
+		OK       bool             `json:"ok"`
+		Total    int              `json:"total"`
+		Results  []map[string]any `json:"results"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
+		t.Fatal(err)
+	}
+	if !payload.OK || payload.Total != 5 || len(payload.Results) != 5 {
+		t.Fatalf("unexpected payload: %+v", payload)
+	}
+}
+
 func jsonBody(value any) *bytes.Reader {
 	raw, _ := json.Marshal(value)
 	return bytes.NewReader(raw)

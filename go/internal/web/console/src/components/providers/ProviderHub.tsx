@@ -8,6 +8,7 @@ import {
   ShieldCheck,
   Trash2,
   X,
+  Zap,
 } from "lucide-preact";
 import { sendForm, sendJSON, type JSONRecord } from "../../lib/api";
 import type { ConsoleMode } from "../../lib/mode";
@@ -387,9 +388,34 @@ export function ProviderHub({ data, mode, onChanged, onOpenDetail }: { data: JSO
     }
   };
 
+  const [autoConnectBusy, setAutoConnectBusy] = useState(false);
+
+  const autoConnectFree = async () => {
+    setAutoConnectBusy(true);
+    try {
+      const res = await sendJSON<JSONRecord>("admin", "/providers/auto-connect-free", "POST", {});
+      await onChanged();
+      const verified = numberValue(res?.verified);
+      const total = numberValue(res?.total);
+      setResult({
+        title: "Auto-connected Free Providers",
+        success: true,
+        detail: `Connected ${total} reviewed anonymous providers (${verified} verified active).`,
+      });
+    } catch (cause) {
+      setResult({
+        title: "Auto-connect Free Providers",
+        success: false,
+        detail: cause instanceof Error ? cause.message : "Failed to auto-connect free providers.",
+      });
+    } finally {
+      setAutoConnectBusy(false);
+    }
+  };
+
   return (
     <div class="page-stack provider-hub" ref={shelfRef} onKeyDown={(event) => { if (event.key === "Escape" && expanded && !connectEntry && !privateKeyEntry && !oauthEntry) { event.preventDefault(); closeExpansion(); } }}>
-      <PageHeading eyebrow="Provider hub" title="Providers" detail="Find a provider. Expand its name to add an account or manage an instance." actions={mode === "admin" ? <><label class="owner-select">Catalog owner<select value={ownerID} onInput={(event) => setOwnerID((event.currentTarget as HTMLSelectElement).value)}><option value="">No private owner selected</option>{owners.map((owner) => <option value={stringValue(owner.id)} key={stringValue(owner.id)}>{stringValue(owner.display_name, stringValue(owner.email, stringValue(owner.id)))}</option>)}</select></label><button class="button button--secondary" type="button" disabled={detectBusy} onClick={() => void detectLocal()}><Compass size={16} /> Detect local</button><button class="button button--primary" type="button" onClick={() => { setSearch("custom"); setFilter("all"); setExpanded("custom_openai"); }}>+ Custom</button></> : undefined} />
+      <PageHeading eyebrow="Provider hub" title="Providers" detail="Find a provider. Expand its name to add an account or manage an instance." actions={mode === "admin" ? <><label class="owner-select">Catalog owner<select value={ownerID} onInput={(event) => setOwnerID((event.currentTarget as HTMLSelectElement).value)}><option value="">No private owner selected</option>{owners.map((owner) => <option value={stringValue(owner.id)} key={stringValue(owner.id)}>{stringValue(owner.display_name, stringValue(owner.email, stringValue(owner.id)))}</option>)}</select></label><button class="button button--secondary" type="button" disabled={autoConnectBusy} onClick={() => void autoConnectFree()}>{autoConnectBusy ? <LoaderCircle class="spin" size={16} /> : <Zap size={16} />} {autoConnectBusy ? "Connecting…" : "Auto-connect Free"}</button><button class="button button--secondary" type="button" disabled={detectBusy} onClick={() => void detectLocal()}><Compass size={16} /> Detect local</button><button class="button button--primary" type="button" onClick={() => { setSearch("custom"); setFilter("all"); setExpanded("custom_openai"); }}>+ Custom</button></> : undefined} />
       <section class="provider-toolbar surface" aria-label="Provider filters">
         <label class="search-field"><Search size={17} /><span class="sr-only">Search providers</span><input value={search} onInput={(event) => { setSearch((event.currentTarget as HTMLInputElement).value); setExpanded(""); }} placeholder="Search name, API or instance ID" /></label>
         <div class="filter-row" role="group" aria-label="Integration filter">

@@ -109,6 +109,63 @@ func handleSetAnonymousProviderAutomation(w http.ResponseWriter, r *http.Request
 	writeJSON(w, http.StatusOK, state)
 }
 
+func handleAutoConnectFreeProviders(w http.ResponseWriter, r *http.Request) {
+	if !adminAuthed(w, r) {
+		return
+	}
+	w.Header().Set("Cache-Control", "no-store")
+	_ = iam.SetAnonymousProviderAutomationOverride("on")
+
+	profiles := providers.AnonymousProviderProfiles()
+	results := make([]map[string]any, 0, len(profiles))
+	verifiedCount := 0
+
+	for _, profile := range profiles {
+		providerID, status := ensureAnonymousProvider(profile)
+		item := map[string]any{
+			"provider_id": providerID,
+			"registry_id": profile.RegistryID,
+			"status":      status,
+		}
+		if status == "managed" {
+			probe := runProviderProbe(providerID, "refresh", nil)
+			if probe["success"] == true {
+				rows := providers.CatalogModels(providerID)
+				model := providers.AnonymousVerificationModel(profile.RegistryID, rows)
+				if model != "" {
+					verification := runProviderVerifyContext(r.Context(), providerID, model, nil)
+					if verification["success"] == true {
+						item["status"] = "verified"
+						item["model"] = model
+						verifiedCount++
+					} else {
+						item["status"] = "connected"
+						item["verification_error"] = verification["error"]
+					}
+					recordAnonymousAutomationCheck(providerID, "verify", verification)
+				} else {
+					item["status"] = "connected"
+				}
+				recordAnonymousAutomationCheck(providerID, "catalog", probe)
+			} else {
+				item["catalog_error"] = probe["error"]
+			}
+		}
+		results = append(results, item)
+	}
+
+	auditAdmin(r, "provider_automation.auto_connect", "provider", "free_anonymous", map[string]any{
+		"verified": verifiedCount, "total": len(profiles),
+	})
+
+	writeJSON(w, http.StatusOK, map[string]any{
+		"ok":       true,
+		"verified": verifiedCount,
+		"total":    len(profiles),
+		"results":  results,
+	})
+}
+
 func requestAnonymousProviderAutomation() {
 	select {
 	case anonymousAutomationWake <- struct{}{}:
