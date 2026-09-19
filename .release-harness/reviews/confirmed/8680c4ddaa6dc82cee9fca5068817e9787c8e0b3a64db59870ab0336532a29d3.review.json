@@ -1,0 +1,101 @@
+{
+  "schema_version": "1.0.0",
+  "mode": "baseline",
+  "contract": {
+    "digest": "31b393ab3e80162226619c441694573993ac618382d74642101484a0bf2e9c80"
+  },
+  "authoring_provenance": {
+    "status": "established",
+    "path": ".release-harness/drafts/llm-gateway.record.json",
+    "digest": "6732ddf3dc8236b974e2aae5f81b546d89c2a466b6fb0a368d76620955bf981e"
+  },
+  "sources": [
+    {
+      "source_id": "primary",
+      "status": "established",
+      "repository_identity": "https://github.com/xibodev/llm-gateway.git",
+      "head_commit": "80a593ef7b44b6306e8093752eef5c73be7cc17e",
+      "head_tree": "c0fd6bf4183eca5167bad50aacffc155ff284523",
+      "reviewed_source_digest": "8b05a1dac432c19a3bbbb3e452f821d86dd87fa0b9c4bd1410c09a8601d82090",
+      "changed_paths": []
+    }
+  ],
+  "facts": [
+    {
+      "id": "cli-version-command",
+      "claim": "llmgw version prints version, commit, and build time and exits 0",
+      "status": "observed",
+      "evidence": {
+        "source": "go/cmd/llmgw/main.go:65-66"
+      }
+    },
+    {
+      "id": "cli-health-command",
+      "claim": "llmgw health probes local /health endpoint and exits 0 on success",
+      "status": "observed",
+      "evidence": {
+        "source": "go/cmd/llmgw/main.go:61"
+      }
+    },
+    {
+      "id": "http-health-endpoint",
+      "claim": "the server exposes an unauthenticated GET /health endpoint returning HTTP 200 with status ok",
+      "status": "observed",
+      "evidence": {
+        "source": "go/internal/api/server.go:33"
+      }
+    },
+    {
+      "id": "http-models-endpoint",
+      "claim": "the server exposes GET /v1/models returning model list",
+      "status": "observed",
+      "evidence": {
+        "source": "go/internal/api/server.go:43"
+      }
+    }
+  ],
+  "impact": {
+    "assertions": [
+      {
+        "id": "A1",
+        "impact": "unchanged",
+        "supported_by": [
+          "cli-version-command"
+        ]
+      },
+      {
+        "id": "A2",
+        "impact": "unchanged",
+        "supported_by": [
+          "cli-health-command"
+        ]
+      },
+      {
+        "id": "A3",
+        "impact": "unchanged",
+        "supported_by": [
+          "http-health-endpoint"
+        ]
+      },
+      {
+        "id": "A4",
+        "impact": "unchanged",
+        "supported_by": [
+          "http-models-endpoint"
+        ]
+      }
+    ],
+    "requires": [],
+    "possible_binding_changes": []
+  },
+  "questions": [],
+  "conclusion": {
+    "action": "reuse_contract",
+    "summary": "Bugfix ensures anonymous OpenCode Zen free model inference compatibility; core contract assertions A1-A4 remain fully satisfied."
+  },
+  "proposed": {
+    "by": "agent-session",
+    "at": "2026-09-19T00:43:12.756Z"
+  },
+  "digest": "8680c4ddaa6dc82cee9fca5068817e9787c8e0b3a64db59870ab0336532a29d3"
+}
