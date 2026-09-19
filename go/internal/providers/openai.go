@@ -537,6 +537,17 @@ func (p OpenAIProvider) completeViaResponsesContextWithObservation(
 		return nil, observation, err
 	}
 	chat := translate.ResponsesToChat(model, resp)
+	if choices, ok := chat["choices"].([]any); ok && len(choices) > 0 {
+		if choice, ok := choices[0].(map[string]any); ok {
+			if msg, ok := choice["message"].(map[string]any); ok {
+				c, _ := msg["content"].(string)
+				r, _ := msg["reasoning_content"].(string)
+				if strings.TrimSpace(c) == "" && strings.TrimSpace(r) != "" {
+					msg["content"] = r
+				}
+			}
+		}
+	}
 	chat["forced_support"] = map[string]any{"req_api": "chat", "resp_api": "responses"}
 	return chat, observation, nil
 }
@@ -626,9 +637,14 @@ func (p OpenAIProvider) completeViaStream(
 		respModel = model
 	}
 
+	finalContent := content.String()
+	if strings.TrimSpace(finalContent) == "" && reasoning.Len() > 0 {
+		finalContent = reasoning.String()
+	}
+
 	msg := map[string]any{
 		"role":    role,
-		"content": content.String(),
+		"content": finalContent,
 	}
 	if reasoning.Len() > 0 {
 		msg["reasoning_content"] = reasoning.String()

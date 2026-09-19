@@ -103,7 +103,8 @@ async function request(path, { method = "GET", key = adminKey, body, timeout = 3
 }
 
 function chatText(json) {
-  return json?.choices?.[0]?.message?.content || "";
+  const msg = json?.choices?.[0]?.message;
+  return msg?.content || msg?.reasoning || msg?.reasoning_content || "";
 }
 
 function messagesText(json) {
