@@ -178,6 +178,11 @@ func zeroNumber(value any) bool {
 	return ok && number == 0
 }
 
+func isZenBaseURL(base string) bool {
+	u := strings.ToLower(strings.TrimSpace(base))
+	return strings.HasPrefix(u, "https://opencode.ai/zen") || strings.HasPrefix(u, "http://opencode.ai/zen")
+}
+
 func openCodeModelCapabilities(model openCodeModelsDevModel) map[string]any {
 	capabilities := map[string]any{}
 	if model.Family != "" {

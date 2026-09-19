@@ -80,7 +80,7 @@ func (p OpenAIProvider) normalizeAnonymousCatalog(rows []ModelInfo, items []any)
 	if !p.anonymous {
 		return rows, nil
 	}
-	if p.registryID == "opencode_zen" {
+	if p.isAnonymousZen() {
 		return p.filterAnonymousZenModels(rows)
 	}
 	byID := make(map[string]map[string]any, len(items))

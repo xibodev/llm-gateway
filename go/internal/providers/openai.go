@@ -73,7 +73,9 @@ func (p OpenAIProvider) CompleteContextWithObservation(
 	kw = withOpenAIOutputLimit(kw)
 	if p.isAnonymousZen() {
 		messages = adaptAnonymousZenMessages(messages)
-		return p.completeViaStream(ctx, model, messages, kw)
+		if !p.zenUsesResponses(model) {
+			return p.completeViaStream(ctx, model, messages, kw)
+		}
 	}
 	if p.zenUsesResponses(model) {
 		return p.completeViaResponsesContextWithObservation(ctx, model, messages, kw)
@@ -752,12 +754,22 @@ func (p OpenAIProvider) supportsNativeResponses(model string) bool {
 	return false
 }
 
+func (p OpenAIProvider) baseURL() string {
+	if p.auth == nil {
+		return ""
+	}
+	base, _, _ := p.auth.Prepare()
+	return base
+}
+
 func (p OpenAIProvider) isAnonymousZen() bool {
-	return p.registryID == "opencode_zen" && p.anonymous
+	isZen := p.registryID == "opencode_zen" || isZenBaseURL(p.baseURL())
+	return isZen && p.anonymous
 }
 
 func (p OpenAIProvider) zenUsesResponses(model string) bool {
-	return p.registryID == "opencode_zen" &&
+	isZen := p.registryID == "opencode_zen" || isZenBaseURL(p.baseURL())
+	return isZen &&
 		strings.HasPrefix(strings.ToLower(strings.TrimSpace(model)), "muse-spark-")
 }
 
@@ -784,6 +796,9 @@ func (p OpenAIProvider) callResponsesPayload(
 func (p OpenAIProvider) callResponsesPayloadContext(
 	ctx context.Context, payload map[string]any, allowUnsupportedParameterRetry bool,
 ) (map[string]any, *iam.ProviderAccountObservation, error) {
+	if p.isAnonymousZen() {
+		payload["stream"] = true
+	}
 	base, headers, observation, err := prepareOpenAIAuth(p.auth)
 	if err != nil {
 		return nil, observation, err
@@ -791,7 +806,11 @@ func (p OpenAIProvider) callResponsesPayloadContext(
 	headers.Set("Accept", "application/json")
 	applyResponsesVisionHeader(headers, payload)
 	post := func(b string, h http.Header) (*http.Response, error) {
-		body, _ := json.Marshal(payload)
+		buf := bytes.Buffer{}
+		enc := json.NewEncoder(&buf)
+		enc.SetEscapeHTML(false)
+		_ = enc.Encode(payload)
+		body := bytes.TrimRight(buf.Bytes(), "\n")
 		req, _ := http.NewRequestWithContext(ctx, "POST", b+"/responses", bytes.NewReader(body))
 		req.Header = h
 		return httpClient(p.Timeout).Do(req)
@@ -846,13 +865,35 @@ func (p OpenAIProvider) callResponsesPayloadContext(
 		return nil, observation, invocationStatus(message, resp.StatusCode)
 	}
 	var out map[string]any
-	if json.Unmarshal(raw, &out) != nil || len(out) == 0 {
+	if p.isAnonymousZen() {
+		out = extractFinalResponsesObject(raw)
+	}
+	if len(out) == 0 && (json.Unmarshal(raw, &out) != nil || len(out) == 0) {
 		return nil, observation, circuitFailureInvocation("openai: invalid JSON in responses payload")
 	}
 	if _, ok := out["output"].([]any); !ok {
 		return nil, observation, circuitFailureInvocation("openai: invalid Responses payload")
 	}
 	return out, observation, nil
+}
+
+func extractFinalResponsesObject(raw []byte) map[string]any {
+	lines := strings.Split(string(raw), "\n")
+	var lastResponse map[string]any
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+		if !strings.HasPrefix(line, "data:") {
+			continue
+		}
+		data := strings.TrimSpace(strings.TrimPrefix(line, "data:"))
+		var item map[string]any
+		if err := json.Unmarshal([]byte(data), &item); err == nil {
+			if resp, ok := item["response"].(map[string]any); ok && len(resp) > 0 {
+				lastResponse = resp
+			}
+		}
+	}
+	return lastResponse
 }
 
 func (p OpenAIProvider) streamResponsesPayload(

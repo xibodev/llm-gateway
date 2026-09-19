@@ -77,8 +77,9 @@ func instantiate(
 			base = s.OpenAICompatibleBaseURL
 		}
 		registryEntry, _ := RegistryProviderByID(registryID)
-		anonymous := registryEntry.AnonymousAutomation && AnonymousAPIKey(apiKey)
-		auth, authErr := newBearerAuth(base, apiKey, observation, registryID == "opencode_zen")
+		isZen := registryID == "opencode_zen" || isZenBaseURL(base)
+		anonymous := (registryEntry.AnonymousAutomation || isZen) && AnonymousAPIKey(apiKey)
+		auth, authErr := newBearerAuth(base, apiKey, observation, isZen)
 		if authErr != nil {
 			return nil, &ConfigError{Msg: fmt.Sprintf("provider '%s': initialize request identity: %v", providerID, authErr)}
 		}

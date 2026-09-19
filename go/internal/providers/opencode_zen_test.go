@@ -299,3 +299,55 @@ func TestAnonymousZenCompleteAdaptsMessages(t *testing.T) {
 		t.Fatalf("expected 1 unadapted message, got %d: %+v", len(capturedMessages), capturedMessages)
 	}
 }
+
+func TestAnonymousZenRecognizedByBaseURL(t *testing.T) {
+	// A provider configured as "zen" with base_url "https://opencode.ai/zen/v1"
+	// and NO explicit registry_id must still be recognized as Zen.
+	auth, err := newBearerAuth("https://opencode.ai/zen/v1", "", nil, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	p := OpenAIProvider{
+		auth:       auth,
+		providerID: "zen",
+		registryID: "",
+		anonymous:  true,
+		Timeout:    15,
+	}
+	if !p.isAnonymousZen() {
+		t.Fatal("expected isAnonymousZen to be true based on base_url")
+	}
+	if !p.zenUsesResponses("muse-spark-1.2-contributor-free") {
+		t.Fatal("expected zenUsesResponses to be true based on base_url")
+	}
+	if !p.zenUsesResponses("muse-spark-1.3-contributor-free") {
+		t.Fatal("expected zenUsesResponses to be true based on base_url")
+	}
+	if p.zenUsesResponses("ling-3.0-flash-fin-free") {
+		t.Fatal("expected zenUsesResponses to be false for non-muse models")
+	}
+
+	// Live test with non-streaming Complete (accumulated via stream)
+	resp, err := p.Complete("ling-3.0-flash-fin-free", []Message{
+		{"role": "user", "content": "What is 2+2? Answer in one word."},
+	}, Kwargs{"max_tokens": 100})
+	if err != nil {
+		t.Logf("Complete ling err: %v", err)
+	} else {
+		choices, _ := resp["choices"].([]any)
+		msg, _ := choices[0].(map[string]any)["message"].(map[string]any)
+		t.Logf("Alias-named provider Complete response: %q", msg["content"])
+	}
+
+	// Live test with muse-spark (routed to /responses)
+	museResp, err := p.Complete("muse-spark-1.2-contributor-free", []Message{
+		{"role": "user", "content": "Say hello in one word."},
+	}, Kwargs{"max_tokens": 200})
+	if err != nil {
+		t.Logf("Complete muse err: %v", err)
+	} else {
+		choices, _ := museResp["choices"].([]any)
+		msg, _ := choices[0].(map[string]any)["message"].(map[string]any)
+		t.Logf("Alias-named provider muse-spark content: %q", msg["content"])
+	}
+}
