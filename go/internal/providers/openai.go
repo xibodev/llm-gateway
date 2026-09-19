@@ -896,6 +896,7 @@ func (p OpenAIProvider) callResponsesPayloadContext(
 func extractFinalResponsesObject(raw []byte) map[string]any {
 	lines := strings.Split(string(raw), "\n")
 	var lastResponse map[string]any
+	var textBuilder strings.Builder
 	for _, line := range lines {
 		line = strings.TrimSpace(line)
 		if !strings.HasPrefix(line, "data:") {
@@ -906,6 +907,30 @@ func extractFinalResponsesObject(raw []byte) map[string]any {
 		if err := json.Unmarshal([]byte(data), &item); err == nil {
 			if resp, ok := item["response"].(map[string]any); ok && len(resp) > 0 {
 				lastResponse = resp
+			}
+			if d, ok := item["delta"].(string); ok && d != "" {
+				textBuilder.WriteString(d)
+			}
+		}
+	}
+	if lastResponse != nil {
+		if outList, ok := lastResponse["output"].([]any); !ok || len(outList) == 0 {
+			msgText := textBuilder.String()
+			if strings.TrimSpace(msgText) == "" {
+				msgText = "completed"
+			}
+			lastResponse["output"] = []any{
+				map[string]any{
+					"type":   "message",
+					"role":   "assistant",
+					"status": "completed",
+					"content": []any{
+						map[string]any{
+							"type": "output_text",
+							"text": msgText,
+						},
+					},
+				},
 			}
 		}
 	}
