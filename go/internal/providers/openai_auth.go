@@ -99,7 +99,7 @@ func AnonymousAPIKey(value string) bool {
 }
 
 func openCodeCorrelationID(prefix string) (string, error) {
-	var raw [16]byte
+	var raw [13]byte
 	if _, err := rand.Read(raw[:]); err != nil {
 		return "", err
 	}
@@ -145,8 +145,13 @@ func (a bearerAuth) Prepare() (string, http.Header, error) {
 		h.Set("x-opencode-project", a.opencodeProject)
 		h.Set("x-opencode-session", sessionID)
 		h.Set("x-opencode-request", requestID)
-		h.Set("x-opencode-client", "llmgw")
-		h.Set("User-Agent", "llm-gateway/"+buildinfo.Version)
+		if key == "public" {
+			h.Set("x-opencode-client", "cli")
+			h.Set("User-Agent", openCodeAnonymousUserAgent)
+		} else {
+			h.Set("x-opencode-client", "llmgw")
+			h.Set("User-Agent", "llm-gateway/"+buildinfo.Version)
+		}
 	}
 	if key != "" {
 		h.Set("Authorization", "Bearer "+key)

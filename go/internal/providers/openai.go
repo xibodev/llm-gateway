@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/http"
 	"strings"
+	"time"
 
 	"llmgw/internal/config"
 	"llmgw/internal/iam"
@@ -70,6 +71,10 @@ func (p OpenAIProvider) CompleteContextWithObservation(
 	ctx context.Context, model string, messages []Message, kw Kwargs,
 ) (map[string]any, *iam.ProviderAccountObservation, error) {
 	kw = withOpenAIOutputLimit(kw)
+	if p.isAnonymousZen() {
+		messages = adaptAnonymousZenMessages(messages)
+		return p.completeViaStream(ctx, model, messages, kw)
+	}
 	if p.zenUsesResponses(model) {
 		return p.completeViaResponsesContextWithObservation(ctx, model, messages, kw)
 	}
@@ -87,7 +92,11 @@ func (p OpenAIProvider) CompleteContextWithObservation(
 		return nil, observation, err
 	}
 	applyVisionHeader(headers, messages)
-	body, _ := json.Marshal(buildOpenAIPayload(model, messages, false, kw))
+	buf := bytes.Buffer{}
+	enc := json.NewEncoder(&buf)
+	enc.SetEscapeHTML(false)
+	_ = enc.Encode(buildOpenAIPayload(model, messages, false, kw))
+	body := bytes.TrimRight(buf.Bytes(), "\n")
 	do := func(b string, h http.Header) (*http.Response, error) {
 		req, _ := http.NewRequestWithContext(ctx, "POST", p.chatURL(b), bytes.NewReader(body))
 		req.Header = h
@@ -171,6 +180,9 @@ func (p OpenAIProvider) Stream(model string, messages []Message, kw Kwargs) (Str
 
 func (p OpenAIProvider) StreamContext(ctx context.Context, model string, messages []Message, kw Kwargs) (StreamIter, error) {
 	kw = withOpenAIOutputLimit(kw)
+	if p.isAnonymousZen() {
+		messages = adaptAnonymousZenMessages(messages)
+	}
 	if p.zenUsesResponses(model) {
 		return p.streamViaResponsesContext(ctx, model, messages, kw)
 	}
@@ -188,7 +200,11 @@ func (p OpenAIProvider) StreamContext(ctx context.Context, model string, message
 		return nil, err
 	}
 	applyVisionHeader(headers, messages)
-	body, _ := json.Marshal(buildOpenAIPayload(model, messages, true, kw))
+	buf := bytes.Buffer{}
+	enc := json.NewEncoder(&buf)
+	enc.SetEscapeHTML(false)
+	_ = enc.Encode(buildOpenAIPayload(model, messages, true, kw))
+	body := bytes.TrimRight(buf.Bytes(), "\n")
 	do := func(b string, h http.Header) (*http.Response, error) {
 		req, _ := http.NewRequestWithContext(ctx, "POST", p.chatURL(b), bytes.NewReader(body))
 		req.Header = h
@@ -521,6 +537,118 @@ func (p OpenAIProvider) completeViaResponsesContextWithObservation(
 	chat := translate.ResponsesToChat(model, resp)
 	chat["forced_support"] = map[string]any{"req_api": "chat", "resp_api": "responses"}
 	return chat, observation, nil
+}
+
+func (p OpenAIProvider) completeViaStream(
+	ctx context.Context, model string, messages []Message, kw Kwargs,
+) (map[string]any, *iam.ProviderAccountObservation, error) {
+	it, err := p.StreamContext(ctx, model, messages, kw)
+	if err != nil {
+		return nil, nil, err
+	}
+	defer it.Close()
+
+	var (
+		id        string
+		created   float64
+		respModel string
+		content   strings.Builder
+		reasoning strings.Builder
+		role      = "assistant"
+		usage     map[string]any
+	)
+
+	for {
+		chunkStr, ok := it.Next()
+		if !ok {
+			break
+		}
+		var chunk map[string]any
+		if err := json.Unmarshal([]byte(chunkStr), &chunk); err != nil {
+			continue
+		}
+		if id == "" {
+			if s, ok := chunk["id"].(string); ok {
+				id = s
+			}
+		}
+		if created == 0 {
+			if c, ok := chunk["created"].(float64); ok {
+				created = c
+			}
+		}
+		if respModel == "" {
+			if m, ok := chunk["model"].(string); ok {
+				respModel = m
+			}
+		}
+		if u, ok := chunk["usage"].(map[string]any); ok && u != nil {
+			usage = u
+		}
+		choices, ok := chunk["choices"].([]any)
+		if !ok || len(choices) == 0 {
+			continue
+		}
+		firstChoice, ok := choices[0].(map[string]any)
+		if !ok {
+			continue
+		}
+		delta, ok := firstChoice["delta"].(map[string]any)
+		if !ok {
+			continue
+		}
+		if r, ok := delta["role"].(string); ok && r != "" {
+			role = r
+		}
+		if c, ok := delta["content"].(string); ok {
+			content.WriteString(c)
+		}
+		if r, ok := delta["reasoning"].(string); ok {
+			reasoning.WriteString(r)
+		} else if r, ok := delta["reasoning_content"].(string); ok {
+			reasoning.WriteString(r)
+		}
+	}
+
+	if err := it.Err(); err != nil {
+		return nil, nil, err
+	}
+
+	if id == "" {
+		id = "chatcmpl-" + model
+	}
+	if created == 0 {
+		created = float64(time.Now().Unix())
+	}
+	if respModel == "" {
+		respModel = model
+	}
+
+	msg := map[string]any{
+		"role":    role,
+		"content": content.String(),
+	}
+	if reasoning.Len() > 0 {
+		msg["reasoning_content"] = reasoning.String()
+	}
+
+	resp := map[string]any{
+		"id":      id,
+		"object":  "chat.completion",
+		"created": created,
+		"model":   respModel,
+		"choices": []any{
+			map[string]any{
+				"index":         0,
+				"message":       msg,
+				"finish_reason": "stop",
+			},
+		},
+	}
+	if usage != nil {
+		resp["usage"] = usage
+	}
+	return resp, nil, nil
 }
 
 func (p OpenAIProvider) streamViaResponses(model string, messages []Message, kw Kwargs) (StreamIter, error) {

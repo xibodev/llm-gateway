@@ -42,7 +42,7 @@ func TestAnonymousOpenCodeHeadersMatchCLIContract(t *testing.T) {
 		first.Get("x-opencode-request") == second.Get("x-opencode-request") {
 		t.Fatalf("unexpected correlation lifetimes: first=%v second=%v", first, second)
 	}
-	if first.Get("x-opencode-client") != "llmgw" || first.Get("User-Agent") != "llm-gateway/test-version" {
+	if first.Get("x-opencode-client") != "cli" || first.Get("User-Agent") != openCodeAnonymousUserAgent {
 		t.Fatalf("client headers=%v", first)
 	}
 	if first.Get("x-session-id") != "" {
@@ -56,6 +56,9 @@ func TestAnonymousOpenCodeHeadersMatchCLIContract(t *testing.T) {
 	_, headers, err := keyed.Prepare()
 	if err != nil || headers.Get("Authorization") != "Bearer secret" {
 		t.Fatalf("configured key changed: headers=%v err=%v", headers, err)
+	}
+	if headers.Get("x-opencode-client") != "llmgw" || headers.Get("User-Agent") != "llm-gateway/test-version" {
+		t.Fatalf("keyed client headers=%v", headers)
 	}
 
 	ordinary, err := newBearerAuth("https://example.com/v1", "", nil, false)
@@ -182,5 +185,117 @@ func TestZenMuseChatUsesResponses(t *testing.T) {
 	_, err = provider.Complete("big-pickle", []Message{{"role": "user", "content": "hi"}}, nil)
 	if err == nil || !strings.Contains(err.Error(), "invalid chat response payload") || path != "/chat/completions" {
 		t.Fatalf("ordinary Zen path=%q err=%v", path, err)
+	}
+}
+
+func TestAdaptAnonymousZenMessages(t *testing.T) {
+	// Case 1: empty messages
+	empty := adaptAnonymousZenMessages(nil)
+	if len(empty) != 1 || empty[0]["role"] != "system" || empty[0]["content"] != openCodeAnonymousPreamble {
+		t.Fatalf("empty messages: %+v", empty)
+	}
+
+	// Case 2: bare user message
+	userOnly := []Message{{"role": "user", "content": "hello"}}
+	adapted := adaptAnonymousZenMessages(userOnly)
+	if len(adapted) != 2 {
+		t.Fatalf("expected 2 messages, got %d", len(adapted))
+	}
+	if adapted[0]["role"] != "system" || adapted[0]["content"] != openCodeAnonymousPreamble {
+		t.Fatalf("unexpected system preamble: %+v", adapted[0])
+	}
+	if adapted[1]["role"] != "user" || adapted[1]["content"] != "hello" {
+		t.Fatalf("unexpected user message: %+v", adapted[1])
+	}
+
+	// Case 3: existing system message is prepended
+	existingSys := []Message{
+		{"role": "system", "content": "You are a coding assistant."},
+		{"role": "user", "content": "write code"},
+	}
+	adaptedSys := adaptAnonymousZenMessages(existingSys)
+	if len(adaptedSys) != 2 {
+		t.Fatalf("expected 2 messages, got %d", len(adaptedSys))
+	}
+	sysContent, _ := adaptedSys[0]["content"].(string)
+	if !strings.HasPrefix(sysContent, openCodeAnonymousPreamble) || !strings.HasSuffix(sysContent, "You are a coding assistant.") {
+		t.Fatalf("expected combined preamble, got: %q", sysContent)
+	}
+
+	// Case 4: already has preamble -> no duplicate
+	alreadyAdapted := []Message{
+		{"role": "system", "content": openCodeAnonymousPreamble + "\n\nExtra instructions"},
+		{"role": "user", "content": "hi"},
+	}
+	notReAdapted := adaptAnonymousZenMessages(alreadyAdapted)
+	if len(notReAdapted) != 2 || notReAdapted[0]["content"] != alreadyAdapted[0]["content"] {
+		t.Fatalf("preamble duplicated: %+v", notReAdapted)
+	}
+}
+
+func TestAnonymousZenCompleteAdaptsMessages(t *testing.T) {
+	var capturedMessages []any
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var payload map[string]any
+		_ = json.NewDecoder(r.Body).Decode(&payload)
+		if msgs, ok := payload["messages"].([]any); ok {
+			capturedMessages = msgs
+		}
+		_, _ = fmt.Fprint(w, `{"id":"chat_1","object":"chat.completion","choices":[{"message":{"role":"assistant","content":"hello"}}]}`)
+	}))
+	defer server.Close()
+
+	// Anonymous Zen provider -> must adapt messages
+	anonZen := OpenAIProvider{
+		auth:       bearerAuth{base: server.URL},
+		Timeout:    2,
+		providerID: "zen",
+		registryID: "opencode_zen",
+		anonymous:  true,
+	}
+	_, err := anonZen.Complete("big-pickle", []Message{{"role": "user", "content": "test"}}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(capturedMessages) != 2 {
+		t.Fatalf("expected 2 messages in payload, got %d: %+v", len(capturedMessages), capturedMessages)
+	}
+	firstMsg, ok := capturedMessages[0].(map[string]any)
+	if !ok || firstMsg["role"] != "system" || firstMsg["content"] != openCodeAnonymousPreamble {
+		t.Fatalf("expected anonymous preamble in first message, got: %+v", firstMsg)
+	}
+
+	// Keyed Zen provider -> must NOT adapt messages
+	capturedMessages = nil
+	keyedZen := OpenAIProvider{
+		auth:       bearerAuth{base: server.URL},
+		Timeout:    2,
+		providerID: "zen",
+		registryID: "opencode_zen",
+		anonymous:  false,
+	}
+	_, err = keyedZen.Complete("big-pickle", []Message{{"role": "user", "content": "test"}}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(capturedMessages) != 1 {
+		t.Fatalf("expected 1 unadapted message, got %d: %+v", len(capturedMessages), capturedMessages)
+	}
+
+	// Non-Zen anonymous provider -> must NOT adapt messages
+	capturedMessages = nil
+	nonZen := OpenAIProvider{
+		auth:       bearerAuth{base: server.URL},
+		Timeout:    2,
+		providerID: "other",
+		registryID: "kilo_code",
+		anonymous:  true,
+	}
+	_, err = nonZen.Complete("kilo-free", []Message{{"role": "user", "content": "test"}}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(capturedMessages) != 1 {
+		t.Fatalf("expected 1 unadapted message, got %d: %+v", len(capturedMessages), capturedMessages)
 	}
 }
