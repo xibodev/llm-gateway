@@ -173,6 +173,20 @@ func zeroModelsDevCost(cost map[string]any) bool {
 	return true
 }
 
+func adaptAnonymousZenResponsesPayload(payload map[string]any) map[string]any {
+	out := cloneMap(payload)
+	inst, _ := out["instructions"].(string)
+	if strings.Contains(inst, "You are a title generator") {
+		return out
+	}
+	if strings.TrimSpace(inst) != "" {
+		out["instructions"] = openCodeAnonymousPreamble + "\n\n" + inst
+	} else {
+		out["instructions"] = openCodeAnonymousPreamble
+	}
+	return out
+}
+
 func zeroNumber(value any) bool {
 	number, ok := value.(float64)
 	return ok && number == 0

@@ -814,6 +814,7 @@ func (p OpenAIProvider) callResponsesPayloadContext(
 ) (map[string]any, *iam.ProviderAccountObservation, error) {
 	if p.isAnonymousZen() {
 		payload["stream"] = true
+		payload = adaptAnonymousZenResponsesPayload(payload)
 	}
 	base, headers, observation, err := prepareOpenAIAuth(p.auth)
 	if err != nil {
@@ -946,6 +947,9 @@ func (p OpenAIProvider) streamResponsesPayload(
 func (p OpenAIProvider) streamResponsesPayloadContext(
 	ctx context.Context, payload map[string]any,
 ) (StreamIter, *iam.ProviderAccountObservation, error) {
+	if p.isAnonymousZen() {
+		payload = adaptAnonymousZenResponsesPayload(payload)
+	}
 	base, headers, observation, err := prepareOpenAIAuth(p.auth)
 	if err != nil {
 		return nil, observation, err
@@ -953,7 +957,11 @@ func (p OpenAIProvider) streamResponsesPayloadContext(
 	headers.Set("Accept", "text/event-stream")
 	applyResponsesVisionHeader(headers, payload)
 	post := func(b string, h http.Header) (*http.Response, error) {
-		body, _ := json.Marshal(payload)
+		buf := bytes.Buffer{}
+		enc := json.NewEncoder(&buf)
+		enc.SetEscapeHTML(false)
+		_ = enc.Encode(payload)
+		body := bytes.TrimRight(buf.Bytes(), "\n")
 		request, _ := http.NewRequestWithContext(ctx, "POST", b+"/responses", bytes.NewReader(body))
 		request.Header = h
 		return httpClient(p.Timeout).Do(request)

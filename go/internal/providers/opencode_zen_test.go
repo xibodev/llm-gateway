@@ -1,6 +1,7 @@
 package providers
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -349,5 +350,53 @@ func TestAnonymousZenRecognizedByBaseURL(t *testing.T) {
 		choices, _ := museResp["choices"].([]any)
 		msg, _ := choices[0].(map[string]any)["message"].(map[string]any)
 		t.Logf("Alias-named provider muse-spark content: %q", msg["content"])
+	}
+}
+
+func TestAnonymousZenResponsesAPI(t *testing.T) {
+	auth, err := newBearerAuth("https://opencode.ai/zen/v1", "", nil, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	p := OpenAIProvider{
+		auth:       auth,
+		providerID: "zen",
+		registryID: "",
+		anonymous:  true,
+		Timeout:    15,
+	}
+
+	// Test CompleteResponsesContext with muse-spark (which uses native responses)
+	resp, _, err := p.CompleteResponsesContext(context.Background(), "muse-spark-1.2-contributor-free", map[string]any{
+		"input": "hi",
+	})
+	if err != nil {
+		t.Fatalf("CompleteResponsesContext failed: %v", err)
+	}
+	if resp == nil {
+		t.Fatal("expected non-nil response")
+	}
+
+	// Test StreamResponsesContext with muse-spark
+	stream, _, err := p.StreamResponsesContext(context.Background(), "muse-spark-1.2-contributor-free", map[string]any{
+		"input": "hi",
+	})
+	if err != nil {
+		t.Fatalf("StreamResponsesContext failed: %v", err)
+	}
+	defer stream.Close()
+	var chunks int
+	for {
+		_, ok := stream.Next()
+		if !ok {
+			break
+		}
+		chunks++
+	}
+	if err := stream.Err(); err != nil {
+		t.Fatalf("StreamResponsesContext stream error: %v", err)
+	}
+	if chunks == 0 {
+		t.Fatal("expected at least 1 stream chunk")
 	}
 }
