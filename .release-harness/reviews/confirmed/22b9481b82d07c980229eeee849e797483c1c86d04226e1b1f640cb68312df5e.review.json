@@ -14,9 +14,9 @@
       "source_id": "primary",
       "status": "established",
       "repository_identity": "https://github.com/xibodev/llm-gateway.git",
-      "head_commit": "930ad69b0bf1e2bdc7d09e35c5f9a6df839700b6",
-      "head_tree": "f2584579003d9caa084ca5704a1f556c0a43b8a2",
-      "reviewed_source_digest": "e478c5c774734a07dd27ea814e6386070d62df6bb6904d6c665b02af858795d6",
+      "head_commit": "74887f9d3730d06e4deb16d99a310b93aabcd31f",
+      "head_tree": "8d0f661a73768ef568b4913cd92309166caaf6e2",
+      "reviewed_source_digest": "1c98071ac43b4caa53ddcd429f54fb92c5b70e7eb70731343d2b0534de8c9fe2",
       "changed_paths": []
     }
   ],
@@ -91,11 +91,11 @@
   "questions": [],
   "conclusion": {
     "action": "reuse_contract",
-    "summary": "Support multi-turn conversations and tool calling for anonymous Zen; accept valid route member in failover acceptance."
+    "summary": "Support multi-turn conversations and tool calling for anonymous Zen; classify circuit breaker 503 paired with upstream 429 as rate limited in acceptance harness."
   },
   "proposed": {
     "by": "agent-session",
-    "at": "2026-09-20T08:35:00.000Z"
+    "at": "2026-09-20T08:50:00.000Z"
   },
-  "digest": "c767aace6988c392df8a99455270a26a4c1121c0d06f7d3744448f532a4fc2fc"
+  "digest": "22b9481b82d07c980229eeee849e797483c1c86d04226e1b1f640cb68312df5e"
 }
