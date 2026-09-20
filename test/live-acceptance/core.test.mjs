@@ -72,6 +72,10 @@ test("live results distinguish external availability from product regressions", 
     { status: 200, validEnvelope: false },
     { status: 429, validEnvelope: false },
   ), classifications.attributionInconclusive);
+  assert.equal(classifyPairedObservation(
+    { status: 503, error: "circuit breaker open" },
+    { status: 429, error: "Rate limit exceeded" },
+  ), classifications.rateLimited);
 });
 
 test("healthy cohort prefers distinct providers and builds required routes", () => {

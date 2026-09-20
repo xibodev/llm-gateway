@@ -54,6 +54,12 @@ export function classifyPairedObservation(gateway, direct) {
   if (gatewayClass === directClass) {
     return directClass === classifications.productRegression ? classifications.providerContractDrift : directClass;
   }
+  if (
+    (gatewayClass === classifications.dependencyOutage && directClass === classifications.rateLimited) ||
+    (gatewayClass === classifications.rateLimited && directClass === classifications.dependencyOutage)
+  ) {
+    return directClass;
+  }
   if (directClass === classifications.noEvidence) return classifications.attributionInconclusive;
   return classifications.attributionInconclusive;
 }

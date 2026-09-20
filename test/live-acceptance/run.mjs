@@ -354,8 +354,8 @@ async function testAPIs(key, plans, healthy) {
   const targets = [{ name: `${healthy[0].provider}/${healthy[0].model}`, kind: "exact", expectedAttempts: 1 }, ...plans.map((item) => ({ name: item.name, kind: item.kind, expectedAttempts: item.expectedAttempts }))];
   for (const target of targets) {
     const plan = plans.find((item) => item.name === target.name);
-    const validModels = plan ? plan.members.map((item) => item.model) : [healthy[0].model];
-    const targetFinal = plan ? plan.members[0] : healthy[0];
+    const validModels = plan ? plan.members.filter((m) => !m.provider.startsWith("fault-")).map((item) => item.model) : [healthy[0].model];
+    const targetFinal = plan ? (plan.members.find((m) => !m.provider.startsWith("fault-")) || healthy[0]) : healthy[0];
     const chat = await request("/v1/chat/completions", { method: "POST", key, body: { model: target.name, messages: [{ role: "user", content: "hi" }], max_tokens: completionMaxTokens }, timeout: 90_000 });
     const chatBody = chatText(chat.json);
     report.api.push({ surface: "chat", target: target.name, status: chat.status, duration_ms: chat.duration_ms, text: safeExcerpt(chatBody), error: safeExcerpt(errorText(chat)) });
