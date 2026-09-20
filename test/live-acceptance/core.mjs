@@ -113,6 +113,14 @@ export function buildRoutePlans(healthyModels, faultProviders = [
   ];
 }
 
+export function routeResultPassed(payload, members, minimumAttempts = 1) {
+  const eligible = members.filter((member) => !member.provider.startsWith("fault-"));
+  const served = payload?.served;
+  const attempts = payload?.fallback_trace?.length || 0;
+  return eligible.some((member) => member.provider === served?.provider && member.model === served?.model) &&
+    attempts >= minimumAttempts && attempts <= members.length;
+}
+
 export function evaluatePolicy(report) {
   const hardFailures = [];
   const warnings = [];

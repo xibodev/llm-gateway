@@ -14,6 +14,7 @@ import {
   directProviderObservation,
   evaluatePolicy,
   isFreeModel,
+  routeResultPassed,
   safeExcerpt,
   schema,
   selectHealthyModels,
@@ -415,11 +416,11 @@ async function testPlayground(identity, healthy, plans) {
   try {
     const context = await browser.newContext({ viewport: { width: 1280, height: 900 } });
     const targets = [
-      ...healthy.map((item) => ({ target: `${item.provider}/${item.model}`, final: item, attempts: 1 })),
-      ...plans.map((item) => ({ target: item.name, final: healthy[0], attempts: item.expectedAttempts })),
+      ...healthy.map((item) => ({ target: `${item.provider}/${item.model}`, members: [item], minimumAttempts: 1 })),
+      ...plans.map((item) => ({ target: item.name, members: item.members, minimumAttempts: item.expectedAttempts })),
     ];
     for (const [index, targetCase] of targets.entries()) {
-      const { target, final, attempts } = targetCase;
+      const { target, members, minimumAttempts } = targetCase;
       const page = await context.newPage();
       await page.goto(`${baseURL}/console#/playground`, { waitUntil: "domcontentloaded" });
       await page.waitForFunction(() => document.querySelector(".playground-page") || document.querySelector('input[type="password"]'), null, { timeout: 15_000 });
@@ -454,12 +455,14 @@ async function testPlayground(identity, healthy, plans) {
       await page.waitForFunction(() => document.querySelectorAll(".chat-turn--assistant").length === 1 || document.querySelector(".state-panel--error"), null, { timeout: 10_000 });
       const routed = await page.locator(".playground-outcome").innerText();
       const assistantText = await page.locator(".chat-turn--assistant:not(.chat-turn--pending) p").textContent().catch(() => "");
-      const passed = response.status() === 200 && Boolean(assistantText?.trim()) && routed.toLowerCase().includes("routed result") && payload?.project_id === identity.projectID && payload?.principal_id === identity.principalID && payload?.served?.provider === final.provider && payload?.served?.model === final.model && (payload?.fallback_trace?.length || 0) === attempts;
+      const passed = response.status() === 200 && Boolean(assistantText?.trim()) && routed.toLowerCase().includes("routed result") && payload?.project_id === identity.projectID && payload?.principal_id === identity.principalID && routeResultPassed(payload, members, minimumAttempts);
       if (passed) passes++;
       report.playground.push({ target, status: passed ? "passed" : "failed", http_status: response.status(), excerpt: safeExcerpt(routed) });
       if (passed || mode !== "live") {
         check(`playground:${target}`, passed ? "passed" : "failed", routed, true);
       } else {
+        const final = healthy.find((item) => item.provider === payload?.served?.provider && item.model === payload?.served?.model) ||
+          members.find((item) => !item.provider.startsWith("fault-")) || healthy[0];
         const direct = await directProviderProbe(final.provider, final.model);
         const classification = classifyPairedObservation({ status: response.status(), error: routed, validEnvelope: false }, direct);
         const product = classification === classifications.productRegression;

@@ -10,6 +10,7 @@ import {
   directProviderObservation,
   isFreeModel,
   requiredChecks,
+  routeResultPassed,
   schema,
   selectHealthyModels,
 } from "./core.mjs";
@@ -92,6 +93,18 @@ test("healthy cohort prefers distinct providers and builds required routes", () 
     ["live-one-broken", 2, 2],
     ["live-two-broken", 3, 3],
   ]);
+  assert.equal(routeResultPassed({
+    served: { provider: "zen", model: "b" },
+    fallback_trace: [{}, {}],
+  }, routes[0].members), true);
+  assert.equal(routeResultPassed({
+    served: { provider: "fault-429", model: "fault-model" },
+    fallback_trace: [{}],
+  }, routes[1].members, routes[1].expectedAttempts), false);
+  assert.equal(routeResultPassed({
+    served: { provider: "zen", model: "a" },
+    fallback_trace: [{}],
+  }, routes[1].members, routes[1].expectedAttempts), false);
 });
 
 test("release policy requires execution but tolerates external outages", () => {
