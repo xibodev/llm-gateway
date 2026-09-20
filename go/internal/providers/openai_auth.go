@@ -142,16 +142,17 @@ func (a bearerAuth) Prepare() (string, http.Header, error) {
 		if key == "" {
 			key = "public"
 		}
-		h.Set("x-opencode-project", a.opencodeProject)
-		h.Set("x-opencode-session", sessionID)
-		h.Set("x-opencode-request", requestID)
 		if key == "public" {
+			h.Set("x-opencode-project", "global")
 			h.Set("x-opencode-client", "cli")
 			h.Set("User-Agent", openCodeAnonymousUserAgent)
 		} else {
+			h.Set("x-opencode-project", a.opencodeProject)
 			h.Set("x-opencode-client", "llmgw")
 			h.Set("User-Agent", "llm-gateway/"+buildinfo.Version)
 		}
+		h.Set("x-opencode-session", sessionID)
+		h.Set("x-opencode-request", requestID)
 	}
 	if key != "" {
 		h.Set("Authorization", "Bearer "+key)

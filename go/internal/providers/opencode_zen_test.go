@@ -363,7 +363,7 @@ func TestAnonymousZenResponsesAPI(t *testing.T) {
 		providerID: "zen",
 		registryID: "",
 		anonymous:  true,
-		Timeout:    15,
+		Timeout:    35,
 	}
 
 	// Test CompleteResponsesContext with muse-spark (which uses native responses)
@@ -399,4 +399,84 @@ func TestAnonymousZenResponsesAPI(t *testing.T) {
 	if chunks == 0 {
 		t.Fatal("expected at least 1 stream chunk")
 	}
+}
+
+func TestAnonymousZenToolsAndMultiTurn(t *testing.T) {
+	// 1. Verify adaptAnonymousZenChat adds bash and read when tools are provided
+	origMessages := []Message{
+		{"role": "system", "content": "You are Pi, a personal AI coding agent."},
+		{"role": "user", "content": "What is the weather?"},
+	}
+	customTool := map[string]any{
+		"type": "function",
+		"function": map[string]any{
+			"name":        "get_weather",
+			"description": "get weather",
+			"parameters":  map[string]any{"type": "object"},
+		},
+	}
+	kw := Kwargs{"tools": []any{customTool}}
+
+	adaptedMessages, adaptedKw := adaptAnonymousZenChat(origMessages, kw)
+
+	// Ensure system prompt is preserved (NOT replaced with title generator preamble)
+	if sys, _ := adaptedMessages[0]["content"].(string); !strings.Contains(sys, "You are Pi") {
+		t.Fatalf("expected Pi system prompt preserved, got: %s", sys)
+	}
+	if sys, _ := adaptedMessages[0]["content"].(string); strings.Contains(sys, "You are a title generator") {
+		t.Fatal("title generator preamble must NOT be present when tools are used")
+	}
+
+	// Ensure bash and read were added to tools
+	tools, ok := adaptedKw["tools"].([]any)
+	if !ok || len(tools) != 3 {
+		t.Fatalf("expected 3 tools (custom + bash + read), got %d: %+v", len(tools), tools)
+	}
+
+	// 2. Live test with tools on ling-3.0-flash-fin-free
+	auth, err := newBearerAuth("https://opencode.ai/zen/v1", "", nil, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	p := OpenAIProvider{
+		auth:       auth,
+		providerID: "zen",
+		registryID: "",
+		anonymous:  true,
+		Timeout:    15,
+	}
+
+	resp, err := p.Complete("ling-3.0-flash-fin-free", origMessages, adaptedKw)
+	if err != nil {
+		t.Fatalf("Complete with tools failed on ling: %v", err)
+	}
+	choices, _ := resp["choices"].([]any)
+	if len(choices) == 0 {
+		t.Fatal("expected non-empty choices")
+	}
+	t.Logf("Ling with tools response: %+v", choices[0])
+
+	// 3. Live test with tools on muse-spark-1.2-contributor-free via Responses
+	respPayload := map[string]any{
+		"input": []any{
+			map[string]any{"role": "developer", "content": "You are Pi, a personal AI coding agent."},
+			map[string]any{"role": "user", "content": "Hi there!"},
+		},
+		"tools": []any{
+			map[string]any{
+				"type":        "function",
+				"name":        "get_weather",
+				"description": "get weather",
+				"parameters":  map[string]any{"type": "object"},
+			},
+		},
+	}
+	museResp, _, err := p.CompleteResponsesContext(context.Background(), "muse-spark-1.2-contributor-free", respPayload)
+	if err != nil {
+		t.Fatalf("CompleteResponsesContext with tools failed on muse: %v", err)
+	}
+	if museResp == nil {
+		t.Fatal("expected non-nil muse response")
+	}
+	t.Logf("Muse with tools response status: %v", museResp["status"])
 }

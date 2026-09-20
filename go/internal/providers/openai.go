@@ -72,7 +72,7 @@ func (p OpenAIProvider) CompleteContextWithObservation(
 ) (map[string]any, *iam.ProviderAccountObservation, error) {
 	kw = withOpenAIOutputLimit(kw)
 	if p.isAnonymousZen() {
-		messages = adaptAnonymousZenMessages(messages)
+		messages, kw = adaptAnonymousZenChat(messages, kw)
 		if !p.zenUsesResponses(model) {
 			return p.completeViaStream(ctx, model, messages, kw)
 		}
@@ -183,7 +183,7 @@ func (p OpenAIProvider) Stream(model string, messages []Message, kw Kwargs) (Str
 func (p OpenAIProvider) StreamContext(ctx context.Context, model string, messages []Message, kw Kwargs) (StreamIter, error) {
 	kw = withOpenAIOutputLimit(kw)
 	if p.isAnonymousZen() {
-		messages = adaptAnonymousZenMessages(messages)
+		messages, kw = adaptAnonymousZenChat(messages, kw)
 	}
 	if p.zenUsesResponses(model) {
 		return p.streamViaResponsesContext(ctx, model, messages, kw)
