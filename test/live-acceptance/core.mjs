@@ -60,6 +60,9 @@ export function classifyPairedObservation(gateway, direct) {
   ) {
     return directClass;
   }
+  if (directClass === classifications.authConfig && (gatewayClass === classifications.dependencyOutage || gatewayClass === classifications.rateLimited)) {
+    return gatewayClass;
+  }
   if (directClass === classifications.noEvidence) return classifications.attributionInconclusive;
   return classifications.attributionInconclusive;
 }

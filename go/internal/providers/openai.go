@@ -641,6 +641,9 @@ func (p OpenAIProvider) completeViaStream(
 	if strings.TrimSpace(finalContent) == "" && reasoning.Len() > 0 {
 		finalContent = reasoning.String()
 	}
+	if strings.TrimSpace(finalContent) == "" {
+		return nil, nil, retryableInvocation("openai: upstream stream produced no content")
+	}
 
 	msg := map[string]any{
 		"role":    role,

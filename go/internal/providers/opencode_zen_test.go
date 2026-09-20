@@ -242,7 +242,11 @@ func TestAnonymousZenCompleteAdaptsMessages(t *testing.T) {
 		if msgs, ok := payload["messages"].([]any); ok {
 			capturedMessages = msgs
 		}
-		_, _ = fmt.Fprint(w, `{"id":"chat_1","object":"chat.completion","choices":[{"message":{"role":"assistant","content":"hello"}}]}`)
+		if stream, _ := payload["stream"].(bool); stream {
+			_, _ = fmt.Fprint(w, "data: {\"id\":\"chat_1\",\"object\":\"chat.completion.chunk\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"hello\"}}]}\n\ndata: [DONE]\n\n")
+		} else {
+			_, _ = fmt.Fprint(w, `{"id":"chat_1","object":"chat.completion","choices":[{"message":{"role":"assistant","content":"hello"}}]}`)
+		}
 	}))
 	defer server.Close()
 
