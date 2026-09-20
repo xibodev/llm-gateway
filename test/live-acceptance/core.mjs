@@ -70,7 +70,8 @@ export function directProviderObservation(result, text, model) {
 
 export function chatCompletionPassed(result, model) {
   const text = result?.json?.choices?.[0]?.message?.content || "";
-  return result?.status >= 200 && result.status < 300 && Boolean(text) && result?.json?.model === model;
+  const models = Array.isArray(model) ? model : [model];
+  return result?.status >= 200 && result.status < 300 && Boolean(text) && models.includes(result?.json?.model);
 }
 
 export function selectHealthyModels(observations, limit = 3) {

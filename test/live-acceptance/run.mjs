@@ -353,18 +353,20 @@ async function testAPIs(key, plans, healthy) {
   let routePasses = 0;
   const targets = [{ name: `${healthy[0].provider}/${healthy[0].model}`, kind: "exact", expectedAttempts: 1 }, ...plans.map((item) => ({ name: item.name, kind: item.kind, expectedAttempts: item.expectedAttempts }))];
   for (const target of targets) {
+    const plan = plans.find((item) => item.name === target.name);
+    const validModels = plan ? plan.members.map((item) => item.model) : [healthy[0].model];
+    const targetFinal = plan ? plan.members[0] : healthy[0];
     const chat = await request("/v1/chat/completions", { method: "POST", key, body: { model: target.name, messages: [{ role: "user", content: "hi" }], max_tokens: completionMaxTokens }, timeout: 90_000 });
     const chatBody = chatText(chat.json);
     report.api.push({ surface: "chat", target: target.name, status: chat.status, duration_ms: chat.duration_ms, text: safeExcerpt(chatBody), error: safeExcerpt(errorText(chat)) });
     const chatModel = chat.json?.model || "";
-    await recordLiveCheck(`chat:${target.name}`, chatCompletionPassed(chat, healthy[0].model), chat, healthy[0]);
+    await recordLiveCheck(`chat:${target.name}`, chatCompletionPassed(chat, validModels), chat, targetFinal);
     if (target.expectedAttempts > 1 && chat.status === 200 && Boolean(chatBody)) {
       const telemetry = await request("/admin/api/telemetry");
       const event = (telemetry.json?.recent || []).find((item) => item.requested === target.name);
       const attempts = event?.attempts?.length || 0;
       const served = event?.served || "";
       const expectedServed = `${healthy[0].provider}/${healthy[0].model}`;
-      const plan = plans.find((item) => item.name === target.name);
       const order = (event?.attempts || []).map((attempt) => `${attempt.provider}/${attempt.model}`);
       const expectedOrder = (plan?.members || []).map((member) => `${member.provider}/${member.model}`);
       const valid = attempts === target.expectedAttempts && served === expectedServed && JSON.stringify(order) === JSON.stringify(expectedOrder) && (target.expectedAttempts < 2 || event?.attempts?.[0]?.throttled === true);
@@ -373,8 +375,8 @@ async function testAPIs(key, plans, healthy) {
     const messages = await request("/v1/messages", { method: "POST", key, body: { model: target.name, messages: [{ role: "user", content: "hi" }], max_tokens: completionMaxTokens }, timeout: 90_000 });
     const messageBody = messagesText(messages.json);
     report.api.push({ surface: "messages", target: target.name, status: messages.status, duration_ms: messages.duration_ms, text: safeExcerpt(messageBody), error: safeExcerpt(errorText(messages)) });
-    const messagesPassed = messages.status === 200 && Boolean(messageBody) && messages.json?.model === healthy[0].model;
-    await recordLiveCheck(`messages:${target.name}`, messagesPassed, messages, healthy[0]);
+    const messagesPassed = messages.status === 200 && Boolean(messageBody) && validModels.includes(messages.json?.model);
+    await recordLiveCheck(`messages:${target.name}`, messagesPassed, messages, targetFinal);
     if (target.kind !== "exact" && chat.status === 200 && Boolean(chatBody) && messagesPassed) routePasses++;
   }
   check("api-evidence", report.api.some((item) => item.status === 200) ? "passed" : "inconclusive", `${report.api.filter((item) => item.status === 200).length}/${report.api.length} API call(s) passed`, true);
