@@ -126,8 +126,17 @@ func AdaptCoreProviderEvidence(
 			result.Catalog.Status = core.CatalogDiscovered
 			result.Catalog.Models = make([]core.ModelInfo, 0, len(models))
 			for _, model := range models {
+				var verifiedAt time.Time
+				for _, probe := range result.Probes {
+					if probe.Status == core.CompletionVerified && probe.Target.Model == model.ID && probe.ObservedAt.After(verifiedAt) {
+						verifiedAt = probe.ObservedAt
+					}
+				}
 				result.Catalog.Models = append(result.Catalog.Models, core.ModelInfo{
 					ID: model.ID, Object: "model", OwnedBy: model.Vendor, Description: model.Label,
+					Capabilities: AdaptModelCapabilities(
+						model.Capabilities, model.SupportedSurfaces, result.Catalog.ObservedAt, verifiedAt,
+					),
 				})
 			}
 		}

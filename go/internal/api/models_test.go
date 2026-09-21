@@ -11,6 +11,8 @@ import (
 	"llmgw/internal/iam"
 	"llmgw/internal/providers"
 	"llmgw/internal/router"
+
+	core "github.com/xibodev/llmgw-core"
 )
 
 func TestIsChatModel(t *testing.T) {
@@ -326,6 +328,55 @@ func TestSetSurfacesEmitsBothKeysWithEqualValues(t *testing.T) {
 	}
 	if _, ok := empty["supported_endpoints"]; ok {
 		t.Fatalf("supported_endpoints set for an empty surface list: %+v", empty)
+	}
+}
+
+func TestModelListAddsTypedCapabilitiesWithoutChangingLegacyFields(t *testing.T) {
+	config.Update(func(s *config.Settings) {
+		s.AllowUnauthenticatedAPI = true
+		s.Providers = map[string]*config.ProviderConfig{"typed": {Type: "echo"}}
+		s.Endpoints = map[string]*config.EndpointConfig{}
+	})
+	originalCatalog := catalogModelsForPrincipal
+	catalogModelsForPrincipal = func(string, *config.Principal) []providers.ModelInfo {
+		return []providers.ModelInfo{{
+			ID: "model", Capabilities: map[string]any{
+				"chat": true, "vision": true, "context_window": 32000,
+			}, SupportedSurfaces: []string{"/v1/chat/completions"},
+		}}
+	}
+	t.Cleanup(func() { catalogModelsForPrincipal = originalCatalog })
+
+	response, err := buildModelList(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var row map[string]any
+	for _, raw := range response["data"].([]any) {
+		candidate := raw.(map[string]any)
+		if candidate["id"] == "typed/model" {
+			row = candidate
+			break
+		}
+	}
+	if row == nil {
+		t.Fatalf("typed model missing: %+v", response["data"])
+	}
+	legacy := row["capabilities"].(map[string]any)
+	if legacy["chat"] != true || legacy["vision"] != true || legacy["context_window"] != 32000 {
+		t.Fatalf("legacy capabilities changed: %+v", legacy)
+	}
+	if row["supported_surfaces"].([]string)[0] != "/v1/chat/completions" ||
+		row["supported_endpoints"].([]string)[0] != "/v1/chat/completions" {
+		t.Fatalf("legacy surfaces changed: %+v", row)
+	}
+	typed, ok := row["typed_capabilities"].(*core.ModelCapabilities)
+	if !ok || typed.Operations.Chat != core.SupportSupported || typed.Inputs.Image != core.SupportSupported ||
+		typed.Limits.ContextTokens == nil || *typed.Limits.ContextTokens != 32000 {
+		t.Fatalf("typed capabilities = %#v", row["typed_capabilities"])
+	}
+	if typed.Freshness.VerifiedAt != nil {
+		t.Fatalf("model list invented verification: %+v", typed.Freshness)
 	}
 }
 

@@ -35,6 +35,8 @@ type catalogEntry struct {
 	//     it would serve that list forever.
 	//   - v1 anonymous OpenCode Zen rows include paid and deprecated models
 	//     because they predate the active zero-cost metadata intersection.
+	//   - v2 rows predate persisted typed capability snapshots and discovery
+	//     timestamps.
 	//
 	// Bump this whenever a release changes what a persisted row means; the
 	// cost is one forced re-discovery per provider, the alternative is
@@ -44,7 +46,7 @@ type catalogEntry struct {
 	RefreshedAt   time.Time   `json:"refreshed_at"`
 }
 
-const catalogSchemaVersion = 2
+const catalogSchemaVersion = 3
 
 var (
 	catMu         sync.Mutex
@@ -145,8 +147,9 @@ func storeEntry(providerID string, models []ModelInfo) {
 	catMu.Lock()
 	defer catMu.Unlock()
 	loadCatalogLocked()
+	refreshedAt := time.Now()
 	catData[providerID] = catalogEntry{
-		SchemaVersion: catalogSchemaVersion, Models: models, RefreshedAt: time.Now(),
+		SchemaVersion: catalogSchemaVersion, Models: catalogModelsWithTypedCapabilities(models, refreshedAt), RefreshedAt: refreshedAt,
 	}
 	saveCatalogLocked()
 }
@@ -170,11 +173,23 @@ func storeEntryIfGeneration(
 	if catGeneration[providerID] != expected {
 		return false
 	}
+	refreshedAt := time.Now()
 	catData[providerID] = catalogEntry{
-		SchemaVersion: catalogSchemaVersion, Models: models, RefreshedAt: time.Now(),
+		SchemaVersion: catalogSchemaVersion, Models: catalogModelsWithTypedCapabilities(models, refreshedAt), RefreshedAt: refreshedAt,
 	}
 	saveCatalogLocked()
 	return true
+}
+
+func catalogModelsWithTypedCapabilities(models []ModelInfo, discoveredAt time.Time) []ModelInfo {
+	out := make([]ModelInfo, len(models))
+	copy(out, models)
+	for index := range out {
+		out[index].TypedCapabilities = AdaptModelCapabilities(
+			out[index].Capabilities, out[index].SupportedSurfaces, discoveredAt, time.Time{},
+		)
+	}
+	return out
 }
 
 // CatalogModels returns the cached model list for a provider, refreshing lazily
