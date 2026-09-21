@@ -436,7 +436,7 @@ async function run() {
       throw new Error(`Inference call to allowed route failed with status ${chatRes.status}: ${chatBody}`);
     }
 
-    // 2. Out-of-Scope Existing Route (Must be blocked with 403 Forbidden)
+    // 2. Out-of-Scope Existing Route (hidden as 404 to avoid route disclosure)
     console.log('[UAT] 2. Calling forbidden existing route "admin-only-route"...');
     const forbiddenRes = await fetch(`${BASE_URL}/v1/chat/completions`, {
       method: 'POST',
@@ -450,11 +450,11 @@ async function run() {
       }),
     });
 
-    console.log('[UAT] Forbidden route status (expect 403):', forbiddenRes.status);
-    if (forbiddenRes.status !== 403) {
-      throw new Error(`Expected 403 Forbidden for out-of-scope model, got ${forbiddenRes.status}`);
+    console.log('[UAT] Hidden route status (expect 404):', forbiddenRes.status);
+    if (forbiddenRes.status !== 404) {
+      throw new Error(`Expected 404 non-disclosure for out-of-scope route, got ${forbiddenRes.status}`);
     }
-    console.log('[UAT] Key scope security boundary verified: out-of-scope route returned 403 Forbidden!');
+    console.log('[UAT] Key scope security boundary verified: out-of-scope route remained undisclosed.');
 
     // 3. Non-Existent Model (Must return 404 Not Found)
     console.log('[UAT] 3. Calling non-existent route "does-not-exist"...');
