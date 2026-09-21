@@ -251,7 +251,7 @@ func TestAnonymousZenCompletePreservesOrdinaryAndExplicitTitlePrompts(t *testing
 		t.Fatalf("ordinary prompt changed: %+v", capturedMessages)
 	}
 	adaptedMessages, adaptedKw := adaptAnonymousZenChat([]Message{{"role": "user", "content": "test"}}, nil)
-	if len(adaptedMessages) != 1 || adaptedKw["tool_choice"] != "none" {
+	if len(adaptedMessages) != 1 || adaptedKw["tool_choice"] != "auto" {
 		t.Fatalf("ordinary agent admission shape: messages=%+v kwargs=%+v", adaptedMessages, adaptedKw)
 	}
 	if tools, _ := adaptedKw["tools"].([]any); len(tools) != 2 {
@@ -311,7 +311,7 @@ func TestAnonymousZenResponsesPreservesOrdinaryAndExplicitTitleInstructions(t *t
 	if ordinary["instructions"] != "Be concise" || strings.Contains(fmt.Sprint(ordinary["instructions"]), "title generator") {
 		t.Fatalf("ordinary Responses instructions changed: %+v", ordinary)
 	}
-	if tools, _ := ordinary["tools"].([]any); len(tools) != 2 || ordinary["tool_choice"] != "none" {
+	if tools, _ := ordinary["tools"].([]any); len(tools) != 2 || ordinary["tool_choice"] != "auto" {
 		t.Fatalf("ordinary Responses admission shape: %+v", ordinary)
 	}
 	title := adaptAnonymousZenResponsesPayload(map[string]any{"input": "Explain this failure", "instructions": "You are a title generator"})

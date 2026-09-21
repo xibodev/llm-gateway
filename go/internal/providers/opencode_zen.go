@@ -355,7 +355,7 @@ func adaptAnonymousZenResponsesPayload(payload map[string]any) map[string]any {
 	out["tools"] = ensureOpenCodeResponsesTools(callerTools)
 	if len(callerTools) == 0 {
 		if _, supplied := out["tool_choice"]; !supplied {
-			out["tool_choice"] = "none"
+			out["tool_choice"] = "auto"
 		}
 	}
 	return out
@@ -418,7 +418,7 @@ func adaptAnonymousZenChat(messages []Message, kw Kwargs) ([]Message, Kwargs) {
 	outKw["tools"] = ensureOpenCodeChatTools(callerTools)
 	if len(callerTools) == 0 {
 		if _, supplied := outKw["tool_choice"]; !supplied {
-			outKw["tool_choice"] = "none"
+			outKw["tool_choice"] = "auto"
 		}
 	}
 	return messages, outKw

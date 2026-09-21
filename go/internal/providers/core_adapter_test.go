@@ -24,6 +24,10 @@ func TestCoreAdapterProviderLifecycle(t *testing.T) {
 	if len(models) == 0 {
 		t.Fatal("expected models from echo provider")
 	}
+	if models[0].Capabilities == nil || models[0].Capabilities.SchemaVersion != core.ModelCapabilitiesSchemaVersion ||
+		models[0].Capabilities.Freshness.DiscoveredAt == nil || models[0].Capabilities.Freshness.VerifiedAt != nil {
+		t.Fatalf("core model capabilities = %+v", models[0].Capabilities)
+	}
 
 	// Complete
 	resp, err := adapter.Complete(context.Background(), "echo-model", map[string]any{

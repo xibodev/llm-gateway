@@ -4,6 +4,7 @@ import (
 	"net/http"
 	"sort"
 	"strings"
+	"time"
 
 	"llmgw/internal/buildinfo"
 	"llmgw/internal/config"
@@ -155,6 +156,7 @@ func buildModelList(principal *config.Principal) (map[string]any, error) {
 		}
 		eligibleProviders[providerID] = true
 		rows := append([]providers.ModelInfo(nil), catalogModelsForPrincipal(providerID, principal)...)
+		discoveredAt := providers.CatalogRefreshedAtForPrincipal(providerID, principal)
 		sort.Slice(rows, func(i, j int) bool { return rows[i].ID < rows[j].ID })
 		for _, row := range rows {
 			if row.ID == "" {
@@ -188,6 +190,9 @@ func buildModelList(principal *config.Principal) (map[string]any, error) {
 				entry["capabilities"] = capabilities
 			}
 			setSurfaces(entry, surfaces)
+			entry["typed_capabilities"] = providers.AdaptModelCapabilities(
+				capabilities, surfaces, modelDiscoveredAt(row, discoveredAt), time.Time{},
+			)
 			data = append(data, entry)
 		}
 	}
@@ -299,6 +304,13 @@ func buildModelList(principal *config.Principal) (map[string]any, error) {
 	})
 
 	return map[string]any{"object": "list", "data": data}, nil
+}
+
+func modelDiscoveredAt(row providers.ModelInfo, fallback time.Time) time.Time {
+	if row.TypedCapabilities != nil && row.TypedCapabilities.Freshness.DiscoveredAt != nil {
+		return *row.TypedCapabilities.Freshness.DiscoveredAt
+	}
+	return fallback
 }
 
 func nativeAliasKey(id string) string {

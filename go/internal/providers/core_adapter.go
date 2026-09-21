@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"strings"
+	"time"
 
 	"llmgw/internal/config"
 	"llmgw/internal/iam"
@@ -98,6 +99,7 @@ func (a *CoreProviderAdapter) ListModels(
 	ctx context.Context, cred *core.Credential,
 ) ([]core.ModelInfo, error) {
 	models := a.Inner.ListModels()
+	discoveredAt := time.Now()
 	out := make([]core.ModelInfo, 0, len(models))
 	for _, m := range models {
 		out = append(out, core.ModelInfo{
@@ -105,6 +107,9 @@ func (a *CoreProviderAdapter) ListModels(
 			Object:      "model",
 			OwnedBy:     m.Vendor,
 			Description: m.Label,
+			Capabilities: AdaptModelCapabilities(
+				m.Capabilities, m.SupportedSurfaces, discoveredAt, time.Time{},
+			),
 		})
 	}
 	return out, nil
