@@ -51,6 +51,13 @@ func TestChatToResponsesTranslationLossPolicy(t *testing.T) {
 	}
 }
 
+func TestExtractFinalResponsesObjectNeverInventsCompletedText(t *testing.T) {
+	raw := []byte("data: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_1\",\"output\":[]}}\n\n")
+	if got := extractFinalResponsesObject(raw); len(got) != 0 {
+		t.Fatalf("invented terminal response: %+v", got)
+	}
+}
+
 func TestV043OpenAIRetryPreservesVisionHeaders(t *testing.T) {
 	for name, invoke := range map[string]func(OpenAIProvider) error{
 		"chat": func(provider OpenAIProvider) error {

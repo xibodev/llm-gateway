@@ -950,7 +950,7 @@ func extractFinalResponsesObject(raw []byte) map[string]any {
 		if outList, ok := lastResponse["output"].([]any); !ok || len(outList) == 0 {
 			msgText := textBuilder.String()
 			if strings.TrimSpace(msgText) == "" {
-				msgText = "completed"
+				return map[string]any{}
 			}
 			lastResponse["output"] = []any{
 				map[string]any{
