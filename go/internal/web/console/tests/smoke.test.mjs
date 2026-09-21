@@ -30,6 +30,13 @@ test("console provides local light and dark themes without changing the professi
   assert.match(styles, /:root\[data-theme="dark"\]/);
 });
 
+test("playground chat isolates completed turns from request-state rerenders", () => {
+  const playground = readFileSync(resolve(root, "src/pages/Playground.tsx"), "utf8");
+  assert.match(playground, /const ChatTurnView = memo/);
+  assert.match(playground, /<ChatTurnView turn=\{turn\} key=\{index\} \/>/);
+  assert.doesNotMatch(playground, /stream:\s*true/);
+});
+
 test("mode-aware API client names only local API roots", () => {
   const mode = readFileSync(resolve(root, "src/lib/mode.ts"), "utf8");
   assert.match(mode, /"\/user\/api"/);

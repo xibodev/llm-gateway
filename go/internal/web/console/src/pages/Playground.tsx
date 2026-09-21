@@ -1,3 +1,4 @@
+import { memo } from "preact/compat";
 import { useEffect, useMemo, useRef, useState } from "preact/hooks";
 import { AlertCircle, ChevronDown, ChevronUp, FileAudio, Play, RefreshCw, Send, Trash2 } from "lucide-preact";
 import { getJSON, requestJSON, sendJSON, type JSONRecord } from "../lib/api";
@@ -15,6 +16,13 @@ import {
 } from "../components/ModelPicker";
 
 type ChatTurn = { role: "user" | "assistant"; content: string; served?: string; latency?: number };
+
+const ChatTurnView = memo(function ChatTurnView({ turn }: { turn: ChatTurn }) {
+  return <article class={`chat-turn chat-turn--${turn.role}`}>
+    <header><span>{turn.role === "user" ? "You" : "Assistant"}</span>{turn.served ? <small class="technical">{turn.served}{turn.latency ? ` · ${turn.latency} ms` : ""}</small> : null}</header>
+    <p>{turn.content}</p>
+  </article>;
+});
 
 // modeFor picks the playground surface a model can actually be exercised on.
 // A model that only synthesizes speech must not be offered a chat composer.
@@ -42,10 +50,7 @@ function ChatThread({ turns, running, onClear }: { turns: ChatTurn[]; running: b
     <div class="chat-thread">
       <div class="chat-thread__scroll">
         {!turns.length ? <p class="muted-copy chat-thread__hint">Send a message to start. Every turn is replayed as real conversation history through the selected route.</p> : null}
-        {turns.map((turn, index) => <article class={`chat-turn chat-turn--${turn.role}`} key={index}>
-          <header><span>{turn.role === "user" ? "You" : "Assistant"}</span>{turn.served ? <small class="technical">{turn.served}{turn.latency ? ` · ${turn.latency} ms` : ""}</small> : null}</header>
-          <p>{turn.content}</p>
-        </article>)}
+        {turns.map((turn, index) => <ChatTurnView turn={turn} key={index} />)}
         {running ? <article class="chat-turn chat-turn--assistant chat-turn--pending"><header><span>Assistant</span></header><p><RefreshCw class="spin" size={15} /> Routing…</p></article> : null}
         <div ref={endRef} />
       </div>

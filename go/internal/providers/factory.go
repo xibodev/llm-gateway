@@ -130,7 +130,7 @@ func instantiate(
 		if cfg != nil && !cfg.ForceApiSupport && os.Getenv("LLMGW_DISABLE_COPILOT_API_ADAPTATION") == "1" {
 			forceAdapt = false
 		}
-		return OpenAIProvider{auth: copilotAuth{providerID: providerID, principal: principal}, Timeout: s.GithubCopilotTimeoutSeconds, forceAdapt: forceAdapt, providerID: providerID, principal: principal}, nil
+		return OpenAIProvider{auth: copilotAuth{providerID: providerID, principal: principal}, Timeout: cfg.TimeoutOr(s.GithubCopilotTimeoutSeconds), forceAdapt: forceAdapt, providerID: providerID, principal: principal}, nil
 	case "ollama":
 		base := cfg.BaseURL
 		if base == "" {

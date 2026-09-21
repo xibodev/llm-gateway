@@ -50,6 +50,28 @@ func TestCopilotProviderCacheIsPrincipalScoped(t *testing.T) {
 	assertCopilotPrincipal(second, "prn_two")
 }
 
+func TestCopilotUsesProviderTimeoutOverride(t *testing.T) {
+	timeout := 7.5
+	config.Update(func(s *config.Settings) {
+		s.Providers = map[string]*config.ProviderConfig{
+			"copilot": {Type: "github_copilot", Timeout: &timeout},
+		}
+		s.Policies.Defaults = config.ProviderPolicy{}
+		s.Policies.Overrides = map[string]config.ProviderPolicy{}
+	})
+	ResetProviders()
+	t.Cleanup(ResetProviders)
+
+	provider, err := GetProviderForPrincipal("copilot", &config.Principal{PrincipalID: "prn_timeout"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	openAI, ok := provider.(OpenAIProvider)
+	if !ok || openAI.Timeout != timeout {
+		t.Fatalf("provider=%T timeout=%v, want %v", provider, openAI.Timeout, timeout)
+	}
+}
+
 func TestBedrockCarriesPersonalCredentialObservation(t *testing.T) {
 	t.Setenv("LLMGW_STATE_DIR", t.TempDir())
 	iam.ResetForTests()

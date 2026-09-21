@@ -5,10 +5,25 @@ import (
 	"errors"
 	"strconv"
 	"testing"
+	"time"
 
 	"llmgw/internal/config"
 	"llmgw/internal/iam"
 )
+
+func TestRetryDelayHonorsLongerRetryAfter(t *testing.T) {
+	provider := &ResilientProvider{policy: config.ProviderPolicy{
+		RetryInitialBackoffSeconds: 0.01,
+		RetryBackoffMultiplier:     2,
+		RetryMaxBackoffSeconds:     1,
+	}}
+	if delay := provider.retryDelay(invocationStatusRetryAfter("throttled", 429, "2"), 1); delay != 2*time.Second {
+		t.Fatalf("retry delay=%v, want 2s", delay)
+	}
+	if delay := provider.retryDelay(invocationStatusRetryAfter("throttled", 429, "invalid"), 1); delay != 10*time.Millisecond {
+		t.Fatalf("invalid Retry-After delay=%v, want policy backoff", delay)
+	}
+}
 
 type retryResponsesProvider struct {
 	completeCalls int
