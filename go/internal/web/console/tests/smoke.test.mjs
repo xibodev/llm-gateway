@@ -265,6 +265,14 @@ test("console routes support a detail segment and provider detail pages", () => 
   assert.match(detail, /Private connections/);
 });
 
+test("retired credential routes fall back to models or provider details", () => {
+  const app = readFileSync(resolve(root, "src/App.tsx"), "utf8");
+  const navigation = readFileSync(resolve(root, "src/lib/navigation.ts"), "utf8");
+  assert.doesNotMatch(navigation, /id: "credentials"/);
+  assert.match(app, /candidate === "credentials"/);
+  assert.match(app, /provider \? \{ page: "providers", detail: provider \} : \{ page: "models", detail: "" \}/);
+});
+
 test("provider cards and overview metrics navigate to their destinations", () => {
   const hub = readFileSync(resolve(root, "src/components/providers/ProviderHub.tsx"), "utf8");
   const overview = readFileSync(resolve(root, "src/pages/Overview.tsx"), "utf8");
