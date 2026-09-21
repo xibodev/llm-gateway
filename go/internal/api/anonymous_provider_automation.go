@@ -10,6 +10,8 @@ import (
 	"sync"
 	"time"
 
+	core "github.com/xibodev/llmgw-core"
+
 	"llmgw/internal/config"
 	"llmgw/internal/iam"
 	"llmgw/internal/providers"
@@ -120,6 +122,11 @@ func handleAutoConnectFreeProviders(w http.ResponseWriter, r *http.Request) {
 	results := make([]map[string]any, 0, len(profiles))
 	verifiedCount := 0
 
+	orchestrator, err := providers.NewGatewayProviderOrchestrator(profiles)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "Provider automation is unavailable.")
+		return
+	}
 	for _, profile := range profiles {
 		providerID, status := ensureAnonymousProvider(profile)
 		item := map[string]any{
@@ -128,33 +135,19 @@ func handleAutoConnectFreeProviders(w http.ResponseWriter, r *http.Request) {
 			"status":      status,
 		}
 		if status == "managed" {
-			probe := runProviderProbe(providerID, "refresh", nil)
-			if probe["success"] == true {
-				rows := providers.CatalogModels(providerID)
-				model := providers.AnonymousVerificationModel(profile.RegistryID, rows)
-				if model != "" {
-					verification := runProviderVerifyContext(r.Context(), providerID, model, nil)
-					if verification["success"] == true {
-						item["status"] = "verified"
-						item["model"] = model
-						verifiedCount++
-					} else {
-						item["status"] = "connected"
-						item["verification_error"] = verification["details"]
-					}
-					item["authentication_state"] = verification["authentication_state"]
-					item["catalog_evidence"] = "discovered"
-					item["completion_evidence"] = verification["completion_evidence"]
-					recordAnonymousAutomationCheck(providerID, "verify", verification)
-				} else {
-					item["status"] = "connected"
+			result := connectAnonymousProvider(r.Context(), orchestrator, profile)
+			for key, value := range result {
+				if key != "status" {
+					item[key] = value
 				}
-				recordAnonymousAutomationCheck(providerID, "catalog", probe)
-			} else {
-				item["catalog_error"] = probe["details"]
-				item["authentication_state"] = probe["authentication_state"]
-				item["catalog_evidence"] = probe["catalog_evidence"]
-				item["completion_evidence"] = "not_probed"
+			}
+			if result["success"] == true {
+				item["status"] = "verified"
+				verifiedCount++
+			} else if result["catalog_evidence"] == string(core.CatalogDiscovered) {
+				item["status"] = "connected"
+			} else if details, _ := result["details"].(string); details != "" {
+				item["catalog_error"] = details
 			}
 		}
 		results = append(results, item)
@@ -211,6 +204,10 @@ func runAnonymousProviderAutomationProfiles(
 	if err != nil || !state.Effective || ctx.Err() != nil {
 		return nil
 	}
+	orchestrator, err := providers.NewGatewayProviderOrchestrator(profiles)
+	if err != nil {
+		return []map[string]any{{"status": "failed", "failure_code": "orchestrator_unavailable"}}
+	}
 	results := []map[string]any{}
 	for _, profile := range profiles {
 		if ctx.Err() != nil {
@@ -235,22 +232,6 @@ func runAnonymousProviderAutomationProfiles(
 			results = append(results, map[string]any{"provider_id": providerID, "status": status})
 			continue
 		}
-		probe := runProviderProbe(providerID, "refresh", nil)
-		if probe["success"] != true {
-			results = append(results, probe)
-			recordAnonymousAutomationCheck(providerID, "catalog", probe)
-			continue
-		}
-		rows := providers.CatalogModels(providerID)
-		model := providers.AnonymousVerificationModel(profile.RegistryID, rows)
-		if model == "" {
-			failure := map[string]any{
-				"provider_id": providerID, "status": "failed", "failure_code": "model_unavailable",
-			}
-			results = append(results, failure)
-			recordAnonymousAutomationCheck(providerID, "verify", failure)
-			continue
-		}
 		currentState, stateErr := anonymousProviderAutomationState()
 		if stateErr != nil || !currentState.Effective {
 			break
@@ -261,11 +242,103 @@ func runAnonymousProviderAutomationProfiles(
 			results = append(results, map[string]any{"provider_id": providerID, "status": status})
 			continue
 		}
-		verification := runProviderVerifyContext(ctx, providerID, model, nil)
-		results = append(results, verification)
-		recordAnonymousAutomationCheck(providerID, "verify", verification)
+		results = append(results, connectAnonymousProvider(ctx, orchestrator, profile))
 	}
 	return results
+}
+
+func connectAnonymousProvider(
+	ctx context.Context, orchestrator *core.ProviderOrchestrator, profile providers.AnonymousProviderProfile,
+) map[string]any {
+	connection := core.ProviderConnection{
+		ProviderID: profile.ProviderID, Kind: core.ProviderConnectionAnonymous, AuthKind: core.ProviderAuthAnonymous,
+	}
+	result, connectErr := orchestrator.Connect(ctx, core.ProviderConnectRequest{
+		Connection: connection, PublicationPolicy: core.PublishVerifiedTargets,
+	})
+	item := map[string]any{
+		"provider_id": profile.ProviderID, "operation": "verify", "success": false,
+		"status": "failed", "authentication_state": authenticationState(result.Health),
+		"catalog_evidence": string(result.Catalog.Status), "completion_evidence": "not_probed",
+	}
+	if connectErr != nil {
+		item["failure_code"] = providerHealthFailureCode(result.Health, true)
+		item["details"] = connectErr.Error()
+		recordOrchestratorChecks(profile.ProviderID, result)
+		return item
+	}
+	if len(result.Probes) == 0 {
+		item["failure_code"] = "model_unavailable"
+		item["details"] = "No reviewed anonymous model was available for verification."
+		recordOrchestratorChecks(profile.ProviderID, result)
+		return item
+	}
+	probe := result.Probes[0]
+	item["model"] = probe.Target.Model
+	item["completion_evidence"] = string(probe.Status)
+	item["latency_ms"] = probe.Latency.Milliseconds()
+	if probe.Status == core.CompletionVerified {
+		item["success"] = true
+		item["status"] = "passed"
+		item["authentication_state"] = "accepted"
+		item["failure_code"] = ""
+	} else {
+		item["failure_code"] = providerHealthFailureCode(result.Health, false)
+		item["verification_error"] = "Provider inference verification failed."
+	}
+	item["retryable"] = result.Health.Retryable
+	if result.Health.RetryAfter > 0 {
+		item["retry_after"] = strconv.FormatInt(int64(result.Health.RetryAfter/time.Second), 10)
+	}
+	recordOrchestratorChecks(profile.ProviderID, result)
+	return item
+}
+
+func authenticationState(health core.ProviderHealthEvidence) string {
+	if health.ErrorClass == core.ProviderErrorAuth || health.ErrorClass == core.ProviderErrorForbidden {
+		return "rejected"
+	}
+	if health.Status == core.ProviderHealthHealthy || health.Status == core.ProviderHealthDegraded {
+		return "accepted"
+	}
+	return "unknown"
+}
+
+func providerHealthFailureCode(health core.ProviderHealthEvidence, catalog bool) string {
+	if health.ErrorClass == core.ProviderErrorAuth || health.ErrorClass == core.ProviderErrorForbidden {
+		return "authentication_rejected"
+	}
+	if catalog {
+		return "catalog_failed"
+	}
+	return "verification_failed"
+}
+
+func recordOrchestratorChecks(providerID string, result core.ProviderConnectResult) {
+	generation, err := iam.ProviderCheckGeneration(providerID, "")
+	if err != nil {
+		return
+	}
+	catalogSuccess := result.Catalog.Status == core.CatalogDiscovered
+	_ = iam.RecordProviderCheck(iam.ProviderCheck{
+		ProviderID: providerID, Operation: iam.CheckCatalogSync, Generation: generation, Success: catalogSuccess,
+		Detail: providerCheckDetail(catalogSuccess, map[bool]string{true: "", false: "catalog_failed"}[catalogSuccess]),
+	})
+	recordAnonymousAutomationCheck(providerID, "catalog", map[string]any{
+		"success": catalogSuccess, "failure_code": map[bool]string{true: "", false: "catalog_failed"}[catalogSuccess],
+	})
+	for _, probe := range result.Probes {
+		success := probe.Status == core.CompletionVerified
+		_ = iam.RecordProviderCheck(iam.ProviderCheck{
+			ProviderID: providerID, Operation: iam.CheckVerify, Generation: generation, Success: success,
+			Detail: providerCheckDetail(success, map[bool]string{true: "", false: "verification_failed"}[success]),
+			Model:  probe.Target.Model, LatencyMS: probe.Latency.Milliseconds(),
+		})
+		recordAnonymousAutomationCheck(providerID, "verify", map[string]any{
+			"success": success, "model": probe.Target.Model,
+			"failure_code": map[bool]string{true: "", false: "verification_failed"}[success],
+		})
+	}
 }
 
 func ensureAnonymousProvider(profile providers.AnonymousProviderProfile) (string, string) {

@@ -169,6 +169,13 @@ func TestAnonymousProviderAutomationRunsOncePerDay(t *testing.T) {
 			_, _ = w.Write([]byte(`{"data":[{"id":"codestral-latest","tier":"turbo","usage_based_only":false,"model_type":"chat","schema_endpoints":["openai"]}]}`))
 		case "/chat/completions":
 			completions.Add(1)
+			var request map[string]any
+			if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+				t.Fatal(err)
+			}
+			if request["max_tokens"] != float64(16) {
+				t.Fatalf("shared orchestrator probe request=%+v", request)
+			}
 			_, _ = w.Write([]byte(`{"id":"chat_1","model":"codestral-latest","choices":[{"message":{"role":"assistant","content":"ok"},"finish_reason":"stop"}],"usage":{"prompt_tokens":1,"completion_tokens":1,"total_tokens":2}}`))
 		default:
 			http.NotFound(w, r)
@@ -194,6 +201,48 @@ func TestAnonymousProviderAutomationRunsOncePerDay(t *testing.T) {
 	results = runAnonymousProviderAutomationProfiles(context.Background(), profiles)
 	if len(results) != 0 || catalogs.Load() != 1 || completions.Load() != 1 {
 		t.Fatalf("daily claim repeated work: results=%+v catalogs=%d completions=%d", results, catalogs.Load(), completions.Load())
+	}
+}
+
+func TestAnonymousProviderAutomationPreservesSharedFailureEvidence(t *testing.T) {
+	setupAnonymousAutomationAPITest(t)
+	t.Setenv(anonymousProviderAutomationEnv, "true")
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/models":
+			_, _ = w.Write([]byte(`{"data":[{"id":"codestral-latest","tier":"turbo","usage_based_only":false,"model_type":"chat","schema_endpoints":["openai"]}]}`))
+		case "/chat/completions":
+			w.Header().Set("Retry-After", "17")
+			http.Error(w, "limited", http.StatusTooManyRequests)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer upstream.Close()
+	profile := providers.AnonymousProviderProfile{
+		RegistryID: "llm7", ProviderID: "shared-failure-fixture",
+		RuntimeType: "openai_compatible", BaseURL: upstream.URL,
+	}
+	results := runAnonymousProviderAutomationProfiles(context.Background(), []providers.AnonymousProviderProfile{profile})
+	if len(results) != 1 {
+		t.Fatalf("results=%+v", results)
+	}
+	result := results[0]
+	if result["status"] != "failed" || result["success"] != false ||
+		result["authentication_state"] != "accepted" || result["catalog_evidence"] != "discovered" ||
+		result["completion_evidence"] != "failed" || result["failure_code"] != "verification_failed" ||
+		result["retryable"] != true || result["retry_after"] != "17" {
+		t.Fatalf("result=%+v", result)
+	}
+	checks, err := iam.LastProviderChecks("")
+	providerChecks := checks[profile.ProviderID]
+	if err != nil || len(providerChecks) != 2 {
+		t.Fatalf("checks=%+v err=%v", checks[profile.ProviderID], err)
+	}
+	for _, check := range providerChecks {
+		if check.Operation == iam.CheckVerify && check.Success {
+			t.Fatalf("verification check=%+v", check)
+		}
 	}
 }
 
