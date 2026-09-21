@@ -197,6 +197,57 @@ func TestAnonymousProviderAutomationRunsOncePerDay(t *testing.T) {
 	}
 }
 
+func TestAnonymousVerificationClassifiesPermanentAuthFailureWithoutRetry(t *testing.T) {
+	setupAnonymousAutomationAPITest(t)
+	var calls atomic.Int32
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/chat/completions" {
+			http.NotFound(w, r)
+			return
+		}
+		calls.Add(1)
+		http.Error(w, "denied", http.StatusUnauthorized)
+	}))
+	defer upstream.Close()
+	config.Update(func(s *config.Settings) {
+		s.Providers["auth-fixture"] = &config.ProviderConfig{
+			Type: "openai_compatible", RegistryID: "llm7", BaseURL: upstream.URL,
+		}
+		s.Policies.Defaults.RetryMaxAttempts = 3
+	})
+	providers.ResetProviders()
+	t.Cleanup(providers.ResetProviders)
+
+	result := runProviderVerifyContext(context.Background(), "auth-fixture", "fixture-model", nil)
+	if result["success"] != false || result["failure_code"] != "authentication_rejected" ||
+		result["authentication_state"] != "rejected" || result["completion_evidence"] != "failed" ||
+		result["retryable"] != false || result["upstream_status"] != http.StatusUnauthorized || calls.Load() != 1 {
+		t.Fatalf("result=%+v calls=%d", result, calls.Load())
+	}
+}
+
+func TestAnonymousVerificationPreservesRetryAfterClassification(t *testing.T) {
+	setupAnonymousAutomationAPITest(t)
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Retry-After", "17")
+		http.Error(w, "slow down", http.StatusTooManyRequests)
+	}))
+	defer upstream.Close()
+	config.Update(func(s *config.Settings) {
+		s.Providers["throttle-fixture"] = &config.ProviderConfig{
+			Type: "openai_compatible", RegistryID: "llm7", BaseURL: upstream.URL,
+		}
+		s.Policies.Defaults.RetryMaxAttempts = 1
+	})
+	providers.ResetProviders()
+	t.Cleanup(providers.ResetProviders)
+
+	result := runProviderVerifyContext(context.Background(), "throttle-fixture", "fixture-model", nil)
+	if result["retryable"] != true || result["upstream_status"] != http.StatusTooManyRequests || result["retry_after"] != "17" {
+		t.Fatalf("result=%+v", result)
+	}
+}
+
 func TestAutoConnectFreeProvidersAPI(t *testing.T) {
 	setupAnonymousAutomationAPITest(t)
 	server := httptest.NewServer(NewServer())
@@ -226,9 +277,9 @@ func TestAutoConnectFreeProvidersAPI(t *testing.T) {
 	}
 
 	var payload struct {
-		OK       bool             `json:"ok"`
-		Total    int              `json:"total"`
-		Results  []map[string]any `json:"results"`
+		OK      bool             `json:"ok"`
+		Total   int              `json:"total"`
+		Results []map[string]any `json:"results"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
 		t.Fatal(err)

@@ -3,6 +3,7 @@ package config
 import (
 	"fmt"
 	"net/http"
+	"os"
 	"sort"
 	"strings"
 	"sync"
@@ -33,7 +34,10 @@ type LocalCandidate struct {
 // localHosts are the addresses probed for local backends. host.docker.internal
 // matters when the gateway runs in a container and the backend on the host.
 func localHosts() []string {
-	cands := []string{"127.0.0.1", "host.docker.internal", "localhost"}
+	cands := []string{"127.0.0.1", "localhost"}
+	if processRunsInContainer() {
+		cands = append(cands, "host.docker.internal")
+	}
 	seen := map[string]bool{}
 	var out []string
 	for _, h := range cands {
@@ -43,6 +47,18 @@ func localHosts() []string {
 		}
 	}
 	return out
+}
+
+var processRunsInContainer = func() bool {
+	if _, err := os.Stat("/.dockerenv"); err == nil {
+		return true
+	}
+	for _, name := range []string{"DOTNET_RUNNING_IN_CONTAINER", "RUNNING_IN_CONTAINER"} {
+		if value := strings.ToLower(strings.TrimSpace(os.Getenv(name))); value == "true" || value == "1" {
+			return true
+		}
+	}
+	return false
 }
 
 // openaiCompatProbe is a well-known local OpenAI-compatible server.

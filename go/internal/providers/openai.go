@@ -141,7 +141,7 @@ func (p OpenAIProvider) CompleteContextWithObservation(
 		if p.auth.CanRefresh() && (resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden) {
 			return nil, observation, failoverInvocationStatus(fmt.Sprintf("openai: upstream returned %d: %s", resp.StatusCode, redact(errMsg)), resp.StatusCode)
 		}
-		return nil, observation, invocationStatus(fmt.Sprintf("openai: upstream returned %d: %s", resp.StatusCode, redact(errMsg)), resp.StatusCode)
+		return nil, observation, invocationStatusRetryAfter(fmt.Sprintf("openai: upstream returned %d: %s", resp.StatusCode, redact(errMsg)), resp.StatusCode, resp.Header.Get("Retry-After"))
 	}
 	var out map[string]any
 	if json.Unmarshal(raw, &out) != nil || len(out) == 0 {
@@ -246,7 +246,7 @@ func (p OpenAIProvider) StreamContext(ctx context.Context, model string, message
 		if p.auth.CanRefresh() && (resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden) {
 			return nil, failoverInvocationStatus(fmt.Sprintf("openai: upstream returned %d: %s", resp.StatusCode, redact(errMsg)), resp.StatusCode)
 		}
-		return nil, invocationStatus(fmt.Sprintf("openai: upstream returned %d: %s", resp.StatusCode, redact(errMsg)), resp.StatusCode)
+		return nil, invocationStatusRetryAfter(fmt.Sprintf("openai: upstream returned %d: %s", resp.StatusCode, redact(errMsg)), resp.StatusCode, resp.Header.Get("Retry-After"))
 	}
 	return newHTTPStreamIter(resp, "openai"), nil
 }
@@ -882,7 +882,7 @@ func (p OpenAIProvider) callResponsesPayloadContext(
 		if p.auth.CanRefresh() && (resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden) {
 			return nil, observation, failoverInvocationStatus(message, resp.StatusCode)
 		}
-		return nil, observation, invocationStatus(message, resp.StatusCode)
+		return nil, observation, invocationStatusRetryAfter(message, resp.StatusCode, resp.Header.Get("Retry-After"))
 	}
 	var out map[string]any
 	if p.isAnonymousZen() {
@@ -1007,12 +1007,13 @@ func (p OpenAIProvider) streamResponsesPayloadContext(
 				response.StatusCode,
 			)
 		}
-		return nil, observation, invocationStatus(
+		return nil, observation, invocationStatusRetryAfter(
 			fmt.Sprintf(
 				"openai: responses endpoint returned %d: %s",
 				response.StatusCode, redact(extractError(raw)),
 			),
 			response.StatusCode,
+			response.Header.Get("Retry-After"),
 		)
 	}
 	return newHTTPStreamIter(response, "responses"), observation, nil

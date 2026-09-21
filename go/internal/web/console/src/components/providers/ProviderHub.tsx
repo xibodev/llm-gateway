@@ -58,7 +58,7 @@ export function ConnectDialog({ entry, onClose, onConfigured, mode = "create", t
   );
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
-  const requiresKey = boolValue(entry.requires_api_key);
+  const requiresKey = boolValue(entry.requires_api_key) || asList(entry.onboarding_fields).includes("api_key");
   // providerConfig is the FIRST configured instance's record, which says nothing
   // about the instance being created. Trusting it when adding an instance
   // promised "leave blank to keep the current key" for a provider that has no
@@ -75,7 +75,7 @@ export function ConnectDialog({ entry, onClose, onConfigured, mode = "create", t
     event.preventDefault();
     if (!providerID.trim()) { setError("Provider ID is required."); return; }
     if (mode === "create" && taken.has(providerID.trim())) { setError("That provider ID is already configured. Choose a new ID to keep the existing instance unchanged."); return; }
-    if (requiresKey && !apiKey.trim() && !apiKeySet) { setError(usingServiceAccount ? "A service account key is required." : "An API key is required for this integration."); return; }
+    if (boolValue(entry.requires_api_key) && !apiKey.trim() && !apiKeySet) { setError(usingServiceAccount ? "A service account key is required." : "An API key is required for this integration."); return; }
     if (usingServiceAccount && apiKey.trim() && !isServiceAccountJSON(apiKey)) { setError("That does not look like a service account key. Choose the whole service account JSON file, including its \"type\": \"service_account\" field."); return; }
     if (fields.has("base_url") && boolValue(entry.requires_base_url) && !baseURL.trim()) { setError("A base URL is required for this integration."); return; }
     if (fields.has("project") && !project.trim()) { setError("A Google Cloud project ID is required."); return; }

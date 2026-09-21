@@ -454,6 +454,8 @@ test("compact providers preserve the complete discovery and onboarding surface",
   assert.match(hub, /<PrivateAPIKeyDialog/);
   assert.match(hub, /<OAuthConnectDialog/);
   assert.match(hub, /provider-hub__details/);
+  assert.match(hub, /boolValue\(entry\.requires_api_key\) \|\| asList\(entry\.onboarding_fields\)\.includes\("api_key"\)/);
+  assert.match(hub, /if \(boolValue\(entry\.requires_api_key\) && !apiKey\.trim\(\)/);
 });
 
 test("keys expose scopes, owner filters and admin management without unrestricted claims", () => {

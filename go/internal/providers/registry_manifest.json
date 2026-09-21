@@ -520,7 +520,8 @@
     "supports_model_discovery": true,
     "anonymous_automation": true,
     "onboarding_fields": [
-      "base_url"
+      "base_url",
+      "api_key"
     ],
     "risk_level": "green",
     "docs_url": "https://opencode.ai/zen"
