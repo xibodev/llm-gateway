@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"fmt"
+	"net/http"
 	"sort"
 	"strings"
 	"time"
@@ -631,11 +632,22 @@ func runProviderProbe(providerID, operation string, principal *config.Principal)
 		"latency_ms":           latency,
 		"authentication_state": evidence.Authentication,
 		"catalog_evidence":     evidence.Catalog, "completion_evidence": evidence.Completion,
+		"owner_scope": providerOwnerScope(principal),
 	}
 	if refreshed := providers.CatalogRefreshedAtForPrincipal(providerID, principal); !refreshed.IsZero() {
 		result["catalog_refreshed"] = refreshed.UTC().Format(time.RFC3339)
 	}
 	return result
+}
+
+func providerOwnerScope(principal *config.Principal) string {
+	if principal == nil || strings.TrimSpace(principal.PrincipalID) == "" {
+		return "gateway"
+	}
+	if principal.PrincipalKind == "service" {
+		return "service_project"
+	}
+	return "human_owner"
 }
 
 func providerCheckScope(principal *config.Principal) string {
@@ -810,12 +822,15 @@ func runProviderVerifyWithContext(
 		if checkGenerationErr == nil {
 			_ = iam.RecordProviderCheck(check)
 		}
-		return map[string]any{
+		result := map[string]any{
 			"provider_id": providerID, "operation": "verify", "success": false,
 			"status": "failed", "details": detail, "failure_code": failureCode,
 			"model": model, "checked_at": time.Now().UTC().Format(time.RFC3339),
-			"latency_ms": latency,
+			"latency_ms": latency, "owner_scope": providerOwnerScope(principal),
+			"authentication_state": "unknown", "catalog_evidence": "not_probed",
+			"completion_evidence": "failed",
 		}
+		return result
 	}
 
 	provider, err := providers.GetProviderForPrincipal(providerID, principal)
@@ -919,10 +934,23 @@ func runProviderVerifyWithContext(
 	}
 	latency := time.Since(started).Milliseconds()
 	if err != nil {
-		return fail(
+		result := fail(
 			fmt.Sprintf("Test completion against %q failed: %v", model, err),
 			"verification_failed",
 		)
+		status := providers.UpstreamStatus(err)
+		if status != 0 {
+			result["upstream_status"] = status
+		}
+		if retryAfter := providers.InvocationRetryAfter(err); retryAfter != "" {
+			result["retry_after"] = retryAfter
+		}
+		if status == http.StatusUnauthorized || status == http.StatusForbidden {
+			result["authentication_state"] = "rejected"
+			result["failure_code"] = "authentication_rejected"
+		}
+		result["retryable"] = providers.InvocationRetryable(err)
+		return result
 	}
 	if !verificationReplyOK(response, requireAcknowledgement) {
 		return fail(
@@ -956,7 +984,10 @@ func runProviderVerifyWithContext(
 		"provider_id": providerID, "operation": "verify", "success": true,
 		"status": "passed", "details": detail, "model": model,
 		"checked_at": time.Now().UTC().Format(time.RFC3339), "latency_ms": latency,
-		"usage": map[string]any{"input_tokens": inputTokens, "output_tokens": outputTokens},
+		"usage":       map[string]any{"input_tokens": inputTokens, "output_tokens": outputTokens},
+		"owner_scope": providerOwnerScope(principal), "authentication_state": "accepted",
+		"catalog_evidence":    map[bool]string{true: "discovered", false: "not_probed"}[catalogRefreshed],
+		"completion_evidence": "verified", "retryable": false,
 	}
 }
 

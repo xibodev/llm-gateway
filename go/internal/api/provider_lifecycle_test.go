@@ -348,7 +348,7 @@ func TestProviderProbeRecordsCatalogFailureAndAccountRecovery(t *testing.T) {
 	empty := runProviderProbe("fixture", "repair", principal)
 	if empty["success"] != false || empty["failure_code"] != "catalog_empty" ||
 		empty["authentication_state"] != "accepted" || empty["catalog_evidence"] != "empty" ||
-		empty["completion_evidence"] != "not_probed" {
+		empty["completion_evidence"] != "not_probed" || empty["owner_scope"] != "human_owner" {
 		t.Fatalf("empty probe=%+v", empty)
 	}
 	state, found, err = iam.ProviderAccountStateByConnection(connection.ID)

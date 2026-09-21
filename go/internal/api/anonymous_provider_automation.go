@@ -140,15 +140,21 @@ func handleAutoConnectFreeProviders(w http.ResponseWriter, r *http.Request) {
 						verifiedCount++
 					} else {
 						item["status"] = "connected"
-						item["verification_error"] = verification["error"]
+						item["verification_error"] = verification["details"]
 					}
+					item["authentication_state"] = verification["authentication_state"]
+					item["catalog_evidence"] = "discovered"
+					item["completion_evidence"] = verification["completion_evidence"]
 					recordAnonymousAutomationCheck(providerID, "verify", verification)
 				} else {
 					item["status"] = "connected"
 				}
 				recordAnonymousAutomationCheck(providerID, "catalog", probe)
 			} else {
-				item["catalog_error"] = probe["error"]
+				item["catalog_error"] = probe["details"]
+				item["authentication_state"] = probe["authentication_state"]
+				item["catalog_evidence"] = probe["catalog_evidence"]
+				item["completion_evidence"] = "not_probed"
 			}
 		}
 		results = append(results, item)

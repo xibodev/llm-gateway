@@ -219,52 +219,7 @@ func TestZenMuseChatUsesResponses(t *testing.T) {
 	}
 }
 
-func TestAdaptAnonymousZenMessages(t *testing.T) {
-	// Case 1: empty messages
-	empty := adaptAnonymousZenMessages(nil)
-	if len(empty) != 1 || empty[0]["role"] != "system" || empty[0]["content"] != openCodeAnonymousPreamble {
-		t.Fatalf("empty messages: %+v", empty)
-	}
-
-	// Case 2: bare user message
-	userOnly := []Message{{"role": "user", "content": "hello"}}
-	adapted := adaptAnonymousZenMessages(userOnly)
-	if len(adapted) != 2 {
-		t.Fatalf("expected 2 messages, got %d", len(adapted))
-	}
-	if adapted[0]["role"] != "system" || adapted[0]["content"] != openCodeAnonymousPreamble {
-		t.Fatalf("unexpected system preamble: %+v", adapted[0])
-	}
-	if adapted[1]["role"] != "user" || adapted[1]["content"] != "hello" {
-		t.Fatalf("unexpected user message: %+v", adapted[1])
-	}
-
-	// Case 3: existing system message is prepended
-	existingSys := []Message{
-		{"role": "system", "content": "You are a coding assistant."},
-		{"role": "user", "content": "write code"},
-	}
-	adaptedSys := adaptAnonymousZenMessages(existingSys)
-	if len(adaptedSys) != 2 {
-		t.Fatalf("expected 2 messages, got %d", len(adaptedSys))
-	}
-	sysContent, _ := adaptedSys[0]["content"].(string)
-	if !strings.HasPrefix(sysContent, openCodeAnonymousPreamble) || !strings.HasSuffix(sysContent, "You are a coding assistant.") {
-		t.Fatalf("expected combined preamble, got: %q", sysContent)
-	}
-
-	// Case 4: already has preamble -> no duplicate
-	alreadyAdapted := []Message{
-		{"role": "system", "content": openCodeAnonymousPreamble + "\n\nExtra instructions"},
-		{"role": "user", "content": "hi"},
-	}
-	notReAdapted := adaptAnonymousZenMessages(alreadyAdapted)
-	if len(notReAdapted) != 2 || notReAdapted[0]["content"] != alreadyAdapted[0]["content"] {
-		t.Fatalf("preamble duplicated: %+v", notReAdapted)
-	}
-}
-
-func TestAnonymousZenCompleteAdaptsMessages(t *testing.T) {
+func TestAnonymousZenCompletePreservesOrdinaryAndExplicitTitlePrompts(t *testing.T) {
 	var capturedMessages []any
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		var payload map[string]any
@@ -280,7 +235,7 @@ func TestAnonymousZenCompleteAdaptsMessages(t *testing.T) {
 	}))
 	defer server.Close()
 
-	// Anonymous Zen provider -> must adapt messages
+	// Ordinary first turns must remain ordinary assistant requests.
 	anonZen := OpenAIProvider{
 		auth:       bearerAuth{base: server.URL},
 		Timeout:    2,
@@ -292,12 +247,28 @@ func TestAnonymousZenCompleteAdaptsMessages(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(capturedMessages) != 2 {
-		t.Fatalf("expected 2 messages in payload, got %d: %+v", len(capturedMessages), capturedMessages)
+	if len(capturedMessages) != 1 || capturedMessages[0].(map[string]any)["role"] != "user" {
+		t.Fatalf("ordinary prompt changed: %+v", capturedMessages)
 	}
-	firstMsg, ok := capturedMessages[0].(map[string]any)
-	if !ok || firstMsg["role"] != "system" || firstMsg["content"] != openCodeAnonymousPreamble {
-		t.Fatalf("expected anonymous preamble in first message, got: %+v", firstMsg)
+	adaptedMessages, adaptedKw := adaptAnonymousZenChat([]Message{{"role": "user", "content": "test"}}, nil)
+	if len(adaptedMessages) != 1 || adaptedKw["tool_choice"] != "none" {
+		t.Fatalf("ordinary agent admission shape: messages=%+v kwargs=%+v", adaptedMessages, adaptedKw)
+	}
+	if tools, _ := adaptedKw["tools"].([]any); len(tools) != 2 {
+		t.Fatalf("ordinary agent compatibility tools=%+v", tools)
+	}
+
+	capturedMessages = nil
+	title := []Message{{"role": "system", "content": "You are a title generator. Output one title."}, {"role": "user", "content": "test"}}
+	if _, err = anonZen.Complete("big-pickle", title, nil); err != nil {
+		t.Fatal(err)
+	}
+	if len(capturedMessages) != 2 || capturedMessages[0].(map[string]any)["content"] != title[0]["content"] {
+		t.Fatalf("explicit title prompt changed: %+v", capturedMessages)
+	}
+	_, titleKw := adaptAnonymousZenChat(title, nil)
+	if titleKw["tools"] != nil || titleKw["tool_choice"] != nil {
+		t.Fatalf("explicit title request gained agent tools: %+v", titleKw)
 	}
 
 	// Keyed Zen provider -> must NOT adapt messages
@@ -332,6 +303,23 @@ func TestAnonymousZenCompleteAdaptsMessages(t *testing.T) {
 	}
 	if len(capturedMessages) != 1 {
 		t.Fatalf("expected 1 unadapted message, got %d: %+v", len(capturedMessages), capturedMessages)
+	}
+}
+
+func TestAnonymousZenResponsesPreservesOrdinaryAndExplicitTitleInstructions(t *testing.T) {
+	ordinary := adaptAnonymousZenResponsesPayload(map[string]any{"input": "Explain this failure", "instructions": "Be concise"})
+	if ordinary["instructions"] != "Be concise" || strings.Contains(fmt.Sprint(ordinary["instructions"]), "title generator") {
+		t.Fatalf("ordinary Responses instructions changed: %+v", ordinary)
+	}
+	if tools, _ := ordinary["tools"].([]any); len(tools) != 2 || ordinary["tool_choice"] != "none" {
+		t.Fatalf("ordinary Responses admission shape: %+v", ordinary)
+	}
+	title := adaptAnonymousZenResponsesPayload(map[string]any{"input": "Explain this failure", "instructions": "You are a title generator"})
+	if title["instructions"] != "You are a title generator" {
+		t.Fatalf("explicit title instructions changed: %+v", title)
+	}
+	if title["tools"] != nil || title["tool_choice"] != nil {
+		t.Fatalf("explicit title request gained agent tools: %+v", title)
 	}
 }
 

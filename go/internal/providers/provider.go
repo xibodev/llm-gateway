@@ -491,6 +491,7 @@ func listModelsWithError(
 type InvocationError struct {
 	Msg              string
 	Status           int
+	RetryAfter       string
 	Retryable        bool
 	FailoverEligible bool
 	CircuitFailure   bool
@@ -527,6 +528,10 @@ func invocationStatus(msg string, status int) error {
 	return &InvocationError{Msg: msg, Status: status}
 }
 
+func invocationStatusRetryAfter(msg string, status int, retryAfter string) error {
+	return &InvocationError{Msg: msg, Status: status, RetryAfter: strings.TrimSpace(retryAfter)}
+}
+
 // UpstreamStatus returns the upstream HTTP status carried by err, or 0.
 func UpstreamStatus(err error) int {
 	var e *InvocationError
@@ -534,6 +539,15 @@ func UpstreamStatus(err error) int {
 		return e.Status
 	}
 	return 0
+}
+
+// InvocationRetryAfter returns the upstream Retry-After value, when supplied.
+func InvocationRetryAfter(err error) string {
+	var e *InvocationError
+	if asError(err, &e) {
+		return e.RetryAfter
+	}
+	return ""
 }
 
 // IsInvocation reports whether err is (or wraps) an InvocationError.

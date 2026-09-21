@@ -208,6 +208,8 @@ type CatalogDiagnostics struct {
 	FromCache      bool   `json:"from_cache"`
 	// SourceScope describes the cache boundary, not the credential's owner.
 	SourceScope string `json:"source_scope"`
+	// OwnerScope describes whose credential was used without exposing identity.
+	OwnerScope string `json:"owner_scope"`
 }
 
 // ReadCatalogForPrincipal never borrows another caller's cache or runs inference.
@@ -220,11 +222,13 @@ func readCatalogForPrincipal(
 	providerID string, principal *config.Principal,
 	refresh func(string, *config.Principal) ([]ModelInfo, *iam.ProviderAccountObservation, error),
 ) CatalogReadResult {
-	result := CatalogReadResult{Diagnostics: CatalogDiagnostics{SourceScope: "gateway"}}
+	result := CatalogReadResult{Diagnostics: CatalogDiagnostics{SourceScope: "gateway", OwnerScope: "gateway"}}
 	if principal != nil && principal.PrincipalID != "" {
 		result.Diagnostics.SourceScope = "principal"
+		result.Diagnostics.OwnerScope = "human_owner"
 		if principal.PrincipalKind == "service" && principal.ProjectID != "" {
 			result.Diagnostics.SourceScope = "service_project"
+			result.Diagnostics.OwnerScope = "service_project"
 		}
 	}
 	if issue := ProviderConfigurationIssue(providerID); issue != "" {

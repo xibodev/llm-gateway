@@ -2,6 +2,7 @@ package providers
 
 import (
 	"encoding/json"
+	"slices"
 	"testing"
 )
 
@@ -44,6 +45,14 @@ func TestAnonymousAutomationRegistryIsExplicitAndSafe(t *testing.T) {
 		if entry.AnonymousAutomation != want[entry.ID] {
 			t.Fatalf("anonymous automation eligibility for %q=%v", entry.ID, entry.AnonymousAutomation)
 		}
+	}
+}
+
+func TestOpenCodeZenAPIKeyIsOptionalButOnboardable(t *testing.T) {
+	entry, ok := RegistryProvider("opencode_zen")
+	if !ok || entry.RequiresAPIKey || !slices.Contains(entry.AuthMethods, "none") ||
+		!slices.Contains(entry.AuthMethods, "api_key") || !slices.Contains(entry.OnboardingFields, "api_key") {
+		t.Fatalf("OpenCode Zen optional key contract=%+v", entry)
 	}
 }
 

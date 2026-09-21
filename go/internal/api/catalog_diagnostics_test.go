@@ -99,7 +99,7 @@ func TestAdminCatalogDiagnosticsEmptyHTTPAndDNS(t *testing.T) {
 				}
 				diagnostic := payload["catalog"].(map[string]any)
 				if diagnostic["status"] != scenario.want || stringOf(diagnostic["failure_code"]) != scenario.code ||
-					diagnostic["stale"] != false || diagnostic["source_scope"] != "principal" {
+					diagnostic["stale"] != false || diagnostic["source_scope"] != "principal" || diagnostic["owner_scope"] != "human_owner" {
 					t.Fatalf("diagnostics: %+v", diagnostic)
 				}
 				if scenario.code != "" && scenario.status != 0 && diagnostic["upstream_status"] != float64(scenario.status) {
