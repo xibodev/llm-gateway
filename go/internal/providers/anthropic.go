@@ -45,8 +45,12 @@ func (p AnthropicNativeProvider) headers() http.Header {
 	return h
 }
 
-func (p AnthropicNativeProvider) payload(model string, messages []Message, stream bool, kw Kwargs) map[string]any {
-	system, anthropicMessages := translate.OpenAIMessagesToAnthropic(messages)
+func (p AnthropicNativeProvider) payload(model string, messages []Message, stream bool, kw Kwargs) (map[string]any, error) {
+	conversion := translate.OpenAIMessagesToAnthropicWithReport(messages)
+	if err := conversion.RejectMaterialLoss(); err != nil {
+		return nil, &ConfigError{Msg: err.Error()}
+	}
+	system, anthropicMessages := conversion.Value.System, conversion.Value.Messages
 	maxTokens := anthropicDefaultMax
 	if v := intOf(kw["max_tokens"]); v > 0 {
 		maxTokens = v
@@ -93,11 +97,15 @@ func (p AnthropicNativeProvider) payload(model string, messages []Message, strea
 	if outputConfig, ok := kw["output_config"].(map[string]any); ok && len(outputConfig) > 0 {
 		payload["output_config"] = outputConfig
 	}
-	return payload
+	return payload, nil
 }
 
 func (p AnthropicNativeProvider) Complete(model string, messages []Message, kw Kwargs) (map[string]any, error) {
-	body, _ := json.Marshal(p.payload(model, messages, false, kw))
+	payload, err := p.payload(model, messages, false, kw)
+	if err != nil {
+		return nil, err
+	}
+	body, _ := json.Marshal(payload)
 	req, _ := http.NewRequest("POST", p.base()+"/v1/messages", bytes.NewReader(body))
 	req.Header = p.headers()
 	resp, err := httpClient(p.timeout()).Do(req)
@@ -122,7 +130,11 @@ func (p AnthropicNativeProvider) Complete(model string, messages []Message, kw K
 	if _, ok := anthropicResp["content"].([]any); !ok {
 		return nil, circuitFailureInvocation("anthropic: invalid Messages response payload")
 	}
-	return translate.AnthropicResponseToOpenAI(anthropicResp, model), nil
+	converted := translate.AnthropicResponseToOpenAIWithReport(anthropicResp, model)
+	if err := converted.RejectMaterialLoss(); err != nil {
+		return nil, &ConfigError{Msg: err.Error()}
+	}
+	return converted.Value, nil
 }
 
 func (p AnthropicNativeProvider) CompleteAnthropicMessages(model string, payload map[string]any) (map[string]any, error) {
@@ -243,7 +255,11 @@ func nonnegativeInteger(value string) bool {
 }
 
 func (p AnthropicNativeProvider) Stream(model string, messages []Message, kw Kwargs) (StreamIter, error) {
-	body, _ := json.Marshal(p.payload(model, messages, true, kw))
+	payload, err := p.payload(model, messages, true, kw)
+	if err != nil {
+		return nil, err
+	}
+	body, _ := json.Marshal(payload)
 	req, _ := http.NewRequest("POST", p.base()+"/v1/messages", bytes.NewReader(body))
 	req.Header = p.headers()
 	resp, err := httpClient(p.timeout()).Do(req)

@@ -1,9 +1,11 @@
 package providers
 
 import (
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync/atomic"
 	"testing"
 
 	"llmgw/internal/config"
@@ -19,6 +21,35 @@ func (auth v043RefreshAuth) Prepare() (string, http.Header, error) {
 }
 func (v043RefreshAuth) CanRefresh() bool { return true }
 func (v043RefreshAuth) Refresh() error   { return nil }
+
+func TestChatToResponsesTranslationLossPolicy(t *testing.T) {
+	var calls atomic.Int32
+	var request map[string]any
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls.Add(1)
+		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+			t.Error(err)
+		}
+		_, _ = w.Write([]byte(`{"id":"resp_1","status":"completed","output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"ok"}]}]}`))
+	}))
+	defer server.Close()
+	provider := OpenAIProvider{auth: v043RefreshAuth{base: server.URL}}
+	messages := []Message{{"role": "user", "content": "hi"}}
+
+	if _, err := provider.completeViaResponses("model", messages, Kwargs{"stop": []any{"END"}}); err == nil || !strings.Contains(err.Error(), "stop") {
+		t.Fatalf("material conversion error=%v", err)
+	}
+	if calls.Load() != 0 {
+		t.Fatalf("material conversion dispatched %d request(s)", calls.Load())
+	}
+
+	if _, err := provider.completeViaResponses("model", messages, Kwargs{"max_tokens": 8, "_force_api_support": true}); err != nil {
+		t.Fatalf("advisory conversion rejected: %v", err)
+	}
+	if calls.Load() != 1 || request["max_output_tokens"] != float64(8) {
+		t.Fatalf("calls=%d request=%+v", calls.Load(), request)
+	}
+}
 
 func TestV043OpenAIRetryPreservesVisionHeaders(t *testing.T) {
 	for name, invoke := range map[string]func(OpenAIProvider) error{

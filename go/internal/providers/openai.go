@@ -517,6 +517,16 @@ func withRenamedMaxTokens(kw Kwargs) Kwargs {
 	return out
 }
 
+func chatToResponsesWithReport(model string, messages []Message, kw Kwargs) translate.ConversionResult[map[string]any] {
+	reportable := make(Kwargs, len(kw))
+	for key, value := range kw {
+		if !strings.HasPrefix(key, "_") {
+			reportable[key] = value
+		}
+	}
+	return translate.ChatToResponsesWithReport(model, messages, reportable, false)
+}
+
 func (p OpenAIProvider) completeViaResponses(model string, messages []Message, kw Kwargs) (map[string]any, error) {
 	response, _, err := p.completeViaResponsesWithObservation(model, messages, kw)
 	return response, err
@@ -531,12 +541,20 @@ func (p OpenAIProvider) completeViaResponsesWithObservation(
 func (p OpenAIProvider) completeViaResponsesContextWithObservation(
 	ctx context.Context, model string, messages []Message, kw Kwargs,
 ) (map[string]any, *iam.ProviderAccountObservation, error) {
-	payload := translate.ChatToResponses(model, messages, kw, false)
+	conversion := chatToResponsesWithReport(model, messages, kw)
+	if err := conversion.RejectMaterialLoss(); err != nil {
+		return nil, nil, &ConfigError{Msg: err.Error()}
+	}
+	payload := conversion.Value
 	resp, observation, err := p.callResponsesPayloadContext(ctx, payload, true)
 	if err != nil {
 		return nil, observation, err
 	}
-	chat := translate.ResponsesToChat(model, resp)
+	converted := translate.ResponsesToChatWithReport(model, resp)
+	if err := converted.RejectMaterialLoss(); err != nil {
+		return nil, observation, &ConfigError{Msg: err.Error()}
+	}
+	chat := converted.Value
 	if choices, ok := chat["choices"].([]any); ok && len(choices) > 0 {
 		if choice, ok := choices[0].(map[string]any); ok {
 			if msg, ok := choice["message"].(map[string]any); ok {
@@ -677,12 +695,20 @@ func (p OpenAIProvider) streamViaResponses(model string, messages []Message, kw 
 }
 
 func (p OpenAIProvider) streamViaResponsesContext(ctx context.Context, model string, messages []Message, kw Kwargs) (StreamIter, error) {
-	payload := translate.ChatToResponses(model, messages, kw, false)
+	conversion := chatToResponsesWithReport(model, messages, kw)
+	if err := conversion.RejectMaterialLoss(); err != nil {
+		return nil, &ConfigError{Msg: err.Error()}
+	}
+	payload := conversion.Value
 	resp, _, err := p.callResponsesPayloadContext(ctx, payload, true)
 	if err != nil {
 		return nil, err
 	}
-	return &sliceIter{chunks: translate.ResponsesToChatChunks(model, resp)}, nil
+	converted := translate.ResponsesToChatChunksWithReport(model, resp)
+	if err := converted.RejectMaterialLoss(); err != nil {
+		return nil, &ConfigError{Msg: err.Error()}
+	}
+	return &sliceIter{chunks: converted.Value}, nil
 }
 
 // callResponses posts a translated request to /responses. On a 400 naming a
@@ -696,8 +722,11 @@ func (p OpenAIProvider) callResponses(model string, messages []Message, kw Kwarg
 func (p OpenAIProvider) callResponsesWithObservation(
 	model string, messages []Message, kw Kwargs,
 ) (map[string]any, *iam.ProviderAccountObservation, error) {
-	payload := translate.ChatToResponses(model, messages, kw, false)
-	return p.callResponsesPayload(payload, true)
+	conversion := chatToResponsesWithReport(model, messages, kw)
+	if err := conversion.RejectMaterialLoss(); err != nil {
+		return nil, nil, &ConfigError{Msg: err.Error()}
+	}
+	return p.callResponsesPayload(conversion.Value, true)
 }
 
 func (p OpenAIProvider) CompleteResponses(
