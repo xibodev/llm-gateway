@@ -8,6 +8,7 @@ import (
 	"strings"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"llmgw/internal/config"
 	"llmgw/internal/iam"
@@ -499,6 +500,25 @@ func TestVerifyProviderFailureIsRecordedAndSurfaced(t *testing.T) {
 		}
 	}
 	t.Fatalf("dead-upstream snapshot not present")
+}
+
+func TestProviderEvidenceSnapshotKeepsCatalogAndCompletionIndependent(t *testing.T) {
+	refreshed := time.Now()
+	auth, catalog, completion := providerEvidenceSnapshot(
+		true, 3, refreshed, "catalog_synced",
+		map[string]any{"verification_state": "unknown"},
+	)
+	if auth != "accepted" || catalog != "discovered" || completion != "not_probed" {
+		t.Fatalf("catalog evidence = %q %q %q", auth, catalog, completion)
+	}
+
+	auth, catalog, completion = providerEvidenceSnapshot(
+		true, 0, time.Time{}, "check_failed",
+		map[string]any{"verification_state": "failed"},
+	)
+	if auth != "unknown" || catalog != "failed" || completion != "failed" {
+		t.Fatalf("failed evidence = %q %q %q", auth, catalog, completion)
+	}
 }
 
 func TestVerifyProviderImmediateFailureDetailsAreSanitized(t *testing.T) {

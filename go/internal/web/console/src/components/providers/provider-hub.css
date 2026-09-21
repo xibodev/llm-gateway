@@ -34,6 +34,10 @@
 .provider-roster-metadata h3 { margin: 0 0 8px; font-size: 0.85rem; }
 .provider-roster-metadata > section + section { border-top: 1px solid #dce1e6; padding-top: 16px; margin-top: 16px; }
 .provider-roster-links { display: flex; flex-wrap: wrap; gap: 12px 20px; margin-top: 12px; }
+.evidence-list { display: grid; gap: 4px; margin: 0; min-width: 150px; }
+.evidence-list div { display: flex; justify-content: space-between; gap: 12px; }
+.evidence-list dt { color: #596574; font-size: 0.72rem; }
+.evidence-list dd { margin: 0; font-size: 0.75rem; font-weight: 600; }
 .provider-shelf__trigger:focus-visible, .provider-hub__detail-link:focus-visible, .provider-roster-links a:focus-visible { outline: 2px solid #2f65aa; outline-offset: 2px; }
 
 :root[data-theme="dark"] .provider-shelf { background: #171c24; border-color: #343e4c; }

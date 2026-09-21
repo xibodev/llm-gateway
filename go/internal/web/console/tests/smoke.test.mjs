@@ -303,10 +303,29 @@ test("lifecycle verbs say what they do and verify runs a real completion", () =>
   assert.match(hub, /Check reachability/);
   assert.match(hub, /Sync catalog/);
   assert.doesNotMatch(hub, />\s*Repair</);
-  assert.match(detail, /Run test completion/);
+  assert.match(detail, /Test inference/);
   assert.match(detail, /Clear cache &amp; retry/);
   assert.match(detail, /cannot fix a wrong credential or endpoint|cannot repair credentials or endpoints/);
   assert.match(detail, /Never — run a test completion/);
+});
+
+test("provider details own connection choices, evidence, playground, and disconnect", () => {
+  const shared = readFileSync(resolve(root, "src/components/providers/shared.tsx"), "utf8");
+  const detail = readFileSync(resolve(root, "src/pages/ProviderDetail.tsx"), "utf8");
+  assert.match(shared, /Personal subscription · device OAuth/);
+  assert.match(shared, /Anonymous access · no key/);
+  assert.match(shared, /Optional personal API key/);
+  assert.match(detail, /Human owner/);
+  assert.match(detail, /Connected account/);
+  assert.match(detail, /authentication_state/);
+  assert.match(detail, /catalog_evidence/);
+  assert.match(detail, /completion_evidence/);
+  assert.match(detail, /Try in Playground/);
+  assert.match(detail, /Disconnect/);
+  assert.match(detail, /Native Ollama root/);
+  assert.match(detail, /Connect anonymously/);
+  assert.match(detail, /Connect with API key/);
+  assert.doesNotMatch(detail, /credential reference/i);
 });
 
 test("routes render as clickable tiles with a detail page and end-to-end test runner", () => {
@@ -454,8 +473,8 @@ test("compact providers preserve the complete discovery and onboarding surface",
   assert.match(hub, /<PrivateAPIKeyDialog/);
   assert.match(hub, /<OAuthConnectDialog/);
   assert.match(hub, /provider-hub__details/);
-  assert.match(hub, /boolValue\(entry\.requires_api_key\) \|\| asList\(entry\.onboarding_fields\)\.includes\("api_key"\)/);
-  assert.match(hub, /if \(boolValue\(entry\.requires_api_key\) && !apiKey\.trim\(\)/);
+  assert.match(hub, /const requiresKey = boolValue\(entry\.requires_api_key\)/);
+  assert.match(hub, /if \(requiresKey && !apiKey\.trim\(\)/);
 });
 
 test("keys expose scopes, owner filters and admin management without unrestricted claims", () => {
