@@ -10,6 +10,8 @@ import (
 	"llmgw/internal/iam"
 	"llmgw/internal/providers"
 	"llmgw/internal/router"
+
+	core "github.com/xibodev/llmgw-core"
 )
 
 type playgroundBody struct {
@@ -21,6 +23,8 @@ type playgroundBody struct {
 	Temperature     any              `json:"temperature"`
 	MaxTokens       any              `json:"max_tokens"`
 	ReasoningEffort any              `json:"reasoning_effort"`
+	Tools           any              `json:"tools"`
+	ToolChoice      any              `json:"tool_choice"`
 }
 
 func handleUserPlayground(w http.ResponseWriter, r *http.Request) {
@@ -126,7 +130,14 @@ func executePlayground(w http.ResponseWriter, r *http.Request, body playgroundBo
 		writeError(w, status, message)
 		return
 	}
-	request := chatRequest{Model: body.Model, Messages: body.Messages, Temperature: body.Temperature, MaxTokens: body.MaxTokens, ReasoningEffort: body.ReasoningEffort}
+	targets, err = router.FilterCompatibleTargets(targets, principal, router.CompatibilityRequest{
+		Surface: core.ModelSurfaceChatCompletions, Tools: requestHasTools(body.Tools),
+	})
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	request := chatRequest{Model: body.Model, Messages: body.Messages, Temperature: body.Temperature, MaxTokens: body.MaxTokens, ReasoningEffort: body.ReasoningEffort, Tools: body.Tools, ToolChoice: body.ToolChoice}
 	response, served, trace, err := router.ExecuteCompleteWithTraceContext(r.Context(), targets, providerMessages(body.Messages), body.Model, principal, chatKwargs(&request))
 	latency := time.Since(started).Milliseconds()
 	if err != nil {
@@ -153,6 +164,7 @@ func executePlayground(w http.ResponseWriter, r *http.Request, body playgroundBo
 		"served":     map[string]any{"provider": served.Provider, "model": served.Model},
 		"latency_ms": latency, "usage": safePlaygroundValue(response["usage"]),
 		"fallback_trace": trace, "raw_response": safePlaygroundValue(response),
+		"transport_mode": targetTransportMode(*served, principal, "/v1/chat/completions"),
 	})
 }
 

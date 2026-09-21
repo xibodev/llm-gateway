@@ -91,7 +91,12 @@ func handleMessages(w http.ResponseWriter, r *http.Request) {
 		writeError(w, 422, "model is required")
 		return
 	}
-	if pre := config.Get().GatewayPreamble; pre != "" {
+	transportMode, modeErr := requestedTransportMode(r)
+	if modeErr != nil {
+		writeError(w, http.StatusBadRequest, modeErr.Error())
+		return
+	}
+	if pre := config.Get().GatewayPreamble; pre != "" && transportMode != "transparent" {
 		raw["_llmgw_preamble"] = pre
 	}
 
@@ -111,6 +116,33 @@ func handleMessages(w http.ResponseWriter, r *http.Request) {
 	if polStatus != 0 {
 		recordFailureUsage("anthropic.messages", req.Model, principal, polStatus, "policy", started)
 		writeError(w, polStatus, polMsg)
+		return
+	}
+	if transportMode == "transparent" {
+		target, transparentErr := exactNativeTransparentTarget(req.Model, "/v1/messages", resolution, principal)
+		if transparentErr != nil {
+			recordFailureUsage("anthropic.messages", req.Model, principal, 400, "transparent_contract", started)
+			writeError(w, http.StatusBadRequest, transparentErr.Error())
+			return
+		}
+		if rejectTransparentStream(w, req.Stream) {
+			recordFailureUsage("anthropic.messages", req.Model, principal, 400, "transparent_stream", started)
+			return
+		}
+		provider, providerErr := providers.GetProviderForPrincipal(target.Provider, principal)
+		if providerErr != nil || !providers.SupportsAnthropicMessages(provider) {
+			writeError(w, http.StatusBadRequest, "provider does not implement its catalog-declared native Messages surface")
+			return
+		}
+		response, providerErr := providers.CompleteAnthropicMessages(provider, target.Model, raw)
+		if providerErr != nil {
+			writeUpstreamError(w, providerErr)
+			return
+		}
+		served := target
+		w.Header().Set(transportModeHeader, "transparent")
+		recordFromResponse("anthropic.messages", req.Model, &served, principal, response, time.Since(started).Milliseconds())
+		writeJSON(w, http.StatusOK, response)
 		return
 	}
 
@@ -144,6 +176,7 @@ func handleMessages(w http.ResponseWriter, r *http.Request) {
 		"anthropic.messages", req.Model, served, principal, response,
 		time.Since(started).Milliseconds(),
 	)
+	w.Header().Set(transportModeHeader, targetTransportMode(*served, principal, "/v1/messages"))
 	writeJSON(w, 200, response)
 }
 

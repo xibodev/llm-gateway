@@ -33,12 +33,17 @@ func handleResponsesAPI(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusUnprocessableEntity, "model is required")
 		return
 	}
+	transportMode, modeErr := requestedTransportMode(r)
+	if modeErr != nil {
+		writeError(w, http.StatusBadRequest, modeErr.Error())
+		return
+	}
 	publicPayload := cloneResponsesPayload(payload)
 	delete(payload, "fallback_timeout_ms")
 	delete(payload, "affinity_key")
 	delete(publicPayload, "fallback_timeout_ms")
 	delete(publicPayload, "affinity_key")
-	if preamble := config.Get().GatewayPreamble; preamble != "" {
+	if preamble := config.Get().GatewayPreamble; preamble != "" && transportMode != "transparent" {
 		switch instructions := payload["instructions"].(type) {
 		case string:
 			payload["instructions"] = preamble + "\n\n" + instructions
@@ -115,6 +120,33 @@ func responsesDispatch(
 		writeError(w, 400, err.Error())
 		return
 	}
+	if mode, _ := requestedTransportMode(r); mode == "transparent" {
+		target, transparentErr := exactNativeTransparentTarget(request.Model, "/v1/responses", resolution, principal)
+		if transparentErr != nil {
+			recordFailureUsage("openai.responses", request.Model, principal, 400, "transparent_contract", started)
+			writeError(w, http.StatusBadRequest, transparentErr.Error())
+			return
+		}
+		if rejectTransparentStream(w, request.Stream) {
+			recordFailureUsage("openai.responses", request.Model, principal, 400, "transparent_stream", started)
+			return
+		}
+		provider, providerErr := providers.GetProviderForPrincipal(target.Provider, principal)
+		if providerErr != nil {
+			writeUpstreamError(w, providerErr)
+			return
+		}
+		response, _, providerErr := providers.CompleteResponsesContext(r.Context(), provider, target.Model, payload)
+		if providerErr != nil {
+			writeUpstreamError(w, providerErr)
+			return
+		}
+		served := target
+		w.Header().Set(transportModeHeader, "transparent")
+		recordFromResponses(request.Model, &served, principal, response, time.Since(started).Milliseconds())
+		writeJSON(w, http.StatusOK, response)
+		return
+	}
 	ctx := fallbackContext(r, request.FallbackTimeoutMS, request.AffinityKey)
 	if request.Stream {
 		streamResponsesSSE(
@@ -138,6 +170,7 @@ func responsesDispatch(
 		request.Model, served, principal, response,
 		time.Since(started).Milliseconds(),
 	)
+	w.Header().Set(transportModeHeader, targetTransportMode(*served, principal, "/v1/responses"))
 	writeJSON(w, http.StatusOK, response)
 }
 

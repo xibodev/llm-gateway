@@ -92,6 +92,10 @@ export function Playground({ data, mode, principalID, onPrincipalIDChange, prese
   const [settingsOpen, setSettingsOpen] = useState(true);
   const [turns, setTurns] = useState<ChatTurn[]>([]);
   const [draft, setDraft] = useState("");
+  const [toolsOpen, setToolsOpen] = useState(false);
+  const [toolDefinitions, setToolDefinitions] = useState("");
+  const [toolResult, setToolResult] = useState("");
+  const [toolCallID, setToolCallID] = useState("");
   const [speechText, setSpeechText] = useState("The gateway routed this request end to end.");
   const [speechSpeed, setSpeechSpeed] = useState("1");
   const [locale, setLocale] = useState("all");
@@ -139,7 +143,14 @@ export function Playground({ data, mode, principalID, onPrincipalIDChange, prese
   }, [eligibleProjects, scopedPrincipalID]);
   useEffect(() => { setCatalog(null); setCatalogSource(""); void loadCatalog(); }, [catalogPath]);
 
-  const models = useMemo(() => catalogSource === catalogPath ? catalogModels(catalog) : [], [catalog, catalogSource, catalogPath]);
+  const models = useMemo(() => {
+    const rows = catalogSource === catalogPath ? catalogModels(catalog) : [];
+    // Portal exposes only its chat playground route. Admin-only media handlers
+    // must never be advertised as runnable self-service actions.
+    return mode === "portal"
+      ? rows.filter((row) => row.capabilities.includes("chat"))
+      : rows.filter((row) => row.capabilities.some((capability) => ["chat", "tts", "transcription", "image", "video"].includes(capability)));
+  }, [catalog, catalogSource, catalogPath, mode]);
   const visible = useMemo(() => filterModels(models, filter), [models, filter]);
   // A model handed over from a provider page wins over any default selection.
   useEffect(() => {
@@ -165,6 +176,7 @@ export function Playground({ data, mode, principalID, onPrincipalIDChange, prese
   }, [visible, preset]);
   const selected = models.find((row) => row.id === model);
   const surface = modeFor(selected);
+  const toolsUnsupported = selected?.tools === "unsupported" || !selected?.capabilities.includes("chat");
   useEffect(() => {
     executionAbort.current?.abort();
     executionAbort.current = null;
@@ -234,6 +246,16 @@ export function Playground({ data, mode, principalID, onPrincipalIDChange, prese
         project_id: projectID, model,
         messages: history.map((turn) => ({ role: turn.role, content: turn.content })),
       };
+      if (toolsOpen && toolDefinitions.trim()) {
+        let parsed: unknown;
+        try { parsed = JSON.parse(toolDefinitions); } catch { throw new Error("Tool definitions must be valid JSON."); }
+        if (!Array.isArray(parsed)) throw new Error("Tool definitions must be a JSON array.");
+        body.tools = parsed;
+      }
+      if (toolsOpen && toolResult.trim()) {
+        if (!toolCallID.trim()) throw new Error("Enter the provider's tool call ID before adding a tool result.");
+        body.messages = [...asList(body.messages), { role: "tool", content: toolResult.trim(), tool_call_id: toolCallID.trim() }];
+      }
       if (mode === "admin") body.principal_id = principalID;
       const payload = await sendJSON<JSONRecord>(mode, "/playground", "POST", body, controller.signal);
       if (request !== executionRequest.current) return;
@@ -428,6 +450,14 @@ export function Playground({ data, mode, principalID, onPrincipalIDChange, prese
   const capabilityNote = selected
     ? selected.capabilities.map((capability) => capabilityLabels[capability as keyof typeof capabilityLabels] ?? capability).join(" · ")
     : "";
+  const selectedSurface = surface === "chat" ? "/v1/chat/completions" : {
+    tts: "/v1/audio/speech", transcription: "/v1/audio/transcriptions",
+    image: "/v1/images/generations", video: "/v1/videos/generations",
+  }[surface];
+  const expectedTransport = selected?.nativeSurfaces.some((candidate) => candidate.replace(/^\/v1/, "") === selectedSurface.replace(/^\/v1/, ""))
+    ? "native"
+    : selected?.emulatedSurfaces.some((candidate) => candidate.replace(/^\/v1/, "") === selectedSurface.replace(/^\/v1/, "")) ? "translated" : "unknown";
+  const formatFreshness = (value: string) => value ? new Date(value).toLocaleString() : "Not available";
   const scopeSummary = [
     humans.find((principal) => stringValue(principal.id) === principalID),
     eligibleProjects.find((project) => stringValue(project.id) === projectID),
@@ -460,6 +490,12 @@ export function Playground({ data, mode, principalID, onPrincipalIDChange, prese
           </div>
           <ModelFilters models={models} filter={filter} onChange={setFilter} />
           <ModelCombo models={voiceModels} filter={localeFilter} value={model} onChange={setModel} label="Model or route" />
+          {selected ? <dl class="playground-capability-facts compact-facts">
+            <div><dt>Catalog freshness</dt><dd>{formatFreshness(selected.discoveredAt)}</dd></div>
+            <div><dt>Verification freshness</dt><dd>{formatFreshness(selected.verifiedAt)}</dd></div>
+            <div><dt>Expected transport</dt><dd>{expectedTransport}</dd></div>
+            <div><dt>Surface</dt><dd class="technical">{selectedSurface}</dd></div>
+          </dl> : null}
         </div> : null}
       </section>
 
@@ -468,6 +504,12 @@ export function Playground({ data, mode, principalID, onPrincipalIDChange, prese
         {surface === "chat" ? <>
           <ChatThread turns={turns} running={running} onClear={() => { executionAbort.current?.abort(); executionAbort.current = null; executionRequest.current += 1; executionPending.current = false; setRunning(false); setTurns([]); setResult(null); setError(""); }} />
           <form class="chat-composer surface" onSubmit={sendChat}>
+            <details class="playground-tools" open={toolsOpen} onToggle={(event) => setToolsOpen((event.currentTarget as HTMLDetailsElement).open)}>
+              <summary>Tools {toolsUnsupported ? "(unsupported by this model)" : "(optional)"}</summary>
+              <label>Tool definitions (JSON array)<textarea value={toolDefinitions} rows={5} disabled={toolsUnsupported} placeholder='[{"type":"function","function":{"name":"lookup","parameters":{"type":"object"}}}]' onInput={(event) => setToolDefinitions((event.currentTarget as HTMLTextAreaElement).value)} /></label>
+              <label>Tool call ID<input value={toolCallID} disabled={toolsUnsupported} placeholder="call_..." onInput={(event) => setToolCallID((event.currentTarget as HTMLInputElement).value)} /></label>
+              <label>Tool result for follow-up (optional)<textarea value={toolResult} rows={2} disabled={toolsUnsupported} onInput={(event) => setToolResult((event.currentTarget as HTMLTextAreaElement).value)} /></label>
+            </details>
             <textarea
               value={draft}
               rows={3}
@@ -512,7 +554,7 @@ export function Playground({ data, mode, principalID, onPrincipalIDChange, prese
         </form> : null}
 
         {error ? <ErrorState title="Playground request did not complete" detail={error} /> : null}
-        <p class="playground-limit"><AlertCircle size={16} /> Streaming is explicitly unavailable in this playground. Non-streaming requests follow the normal gateway route.</p>
+        <p class="playground-limit"><AlertCircle size={16} /> Streaming is unavailable in this playground. Capability-proven controls and routes are enabled for the selected model only.</p>
         </div>
 
         <aside class="playground-panel">
@@ -526,8 +568,9 @@ export function Playground({ data, mode, principalID, onPrincipalIDChange, prese
             <div><dt>Input tokens</dt><dd>{numberValue(usage.prompt_tokens, numberValue(usage.input_tokens))}</dd></div>
             <div><dt>Output tokens</dt><dd>{numberValue(usage.completion_tokens, numberValue(usage.output_tokens))}</dd></div>
             <div><dt>Fallback attempts</dt><dd>{trace.length}</dd></div>
+            <div><dt>Transport mode</dt><dd>{stringValue(result.transport_mode, expectedTransport)}</dd></div>
           </dl>
-          {trace.length ? <div class="trace-list"><h3>Fallback trace</h3>{trace.map((attempt, index) => <div key={`${index}-${stringValue(attempt.provider)}`}><span class="route-order">{index + 1}</span><span class="technical">{stringValue(attempt.provider)}/{stringValue(attempt.model)}</span><span class={`status-pill ${stringValue(attempt.status) === "served" ? "status-pill--ready" : "status-pill--attention"}`}>{stringValue(attempt.status)}</span></div>)}</div> : null}
+          {trace.length ? <div class="trace-list"><h3>Fallback and exclusion diagnostics</h3>{trace.map((attempt, index) => <div key={`${index}-${stringValue(attempt.provider)}`}><span class="route-order">{index + 1}</span><span class="technical">{stringValue(attempt.provider)}/{stringValue(attempt.model)}</span><span class={`status-pill ${stringValue(attempt.status) === "served" ? "status-pill--ready" : "status-pill--attention"}`}>{stringValue(attempt.status)}</span></div>)}</div> : <p class="form-help">No fallback was needed. Capability-incompatible route members are excluded before execution.</p>}
           <details class="raw-response" open={rawOpen} onToggle={(event) => setRawOpen((event.currentTarget as HTMLDetailsElement).open)}>
             <summary>Raw gateway response</summary>
             <pre class="technical">{JSON.stringify(result.raw_response ?? result, null, 2)}</pre>

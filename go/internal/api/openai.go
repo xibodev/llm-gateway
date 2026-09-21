@@ -126,6 +126,10 @@ func handleChat(w http.ResponseWriter, r *http.Request) {
 		writeError(w, 422, "invalid request body")
 		return
 	}
+	if _, err := requestedTransportMode(r); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
 	chatDispatch(w, r, &req, principal, "openai.chat")
 }
 
@@ -193,6 +197,13 @@ func chatDispatch(w http.ResponseWriter, r *http.Request, req *chatRequest, prin
 	targets := resolution.Targets
 	msgs := providerMessages(req.Messages)
 	kw := chatKwargs(req)
+	transportMode, _ := requestedTransportMode(r)
+	if transportMode == "transparent" {
+		msgs = make([]providers.Message, len(req.Messages))
+		for index := range req.Messages {
+			msgs[index] = providers.Message(req.Messages[index])
+		}
+	}
 
 	targets, polStatus, polMsg := enforceKeyPolicy(principal, req.Model, resolution.Category, targets)
 	if polStatus != 0 {
@@ -207,6 +218,35 @@ func chatDispatch(w http.ResponseWriter, r *http.Request, req *chatRequest, prin
 	if err != nil {
 		recordFailureUsage(endpoint, req.Model, principal, 400, "compatibility", started)
 		writeError(w, 400, err.Error())
+		return
+	}
+	if transportMode == "transparent" {
+		target, transparentErr := exactNativeTransparentTarget(req.Model, "/v1/chat/completions", resolution, principal)
+		if transparentErr != nil {
+			recordFailureUsage(endpoint, req.Model, principal, 400, "transparent_contract", started)
+			writeError(w, http.StatusBadRequest, transparentErr.Error())
+			return
+		}
+		if rejectTransparentStream(w, req.Stream) {
+			recordFailureUsage(endpoint, req.Model, principal, 400, "transparent_stream", started)
+			return
+		}
+		provider, providerErr := providers.GetProviderForPrincipal(target.Provider, principal)
+		if providerErr != nil {
+			writeUpstreamError(w, providerErr)
+			return
+		}
+		kw["_force_api_support"] = false
+		response, providerErr := providers.CompleteProviderContext(r.Context(), provider, target.Model, msgs, kw)
+		if providerErr != nil {
+			recordFailureUsage(endpoint, req.Model, principal, upstreamErrorStatus(providerErr), "upstream", started)
+			writeUpstreamError(w, providerErr)
+			return
+		}
+		served := target
+		w.Header().Set(transportModeHeader, "transparent")
+		recordFromResponse(endpoint, req.Model, &served, principal, response, time.Since(started).Milliseconds())
+		writeJSON(w, http.StatusOK, response)
 		return
 	}
 
@@ -238,7 +278,20 @@ func chatDispatch(w http.ResponseWriter, r *http.Request, req *chatRequest, prin
 	response["model"] = served.Model
 	normalizeChatResponseEnvelope(response)
 	recordFromResponse(endpoint, req.Model, served, principal, response, time.Since(started).Milliseconds())
+	w.Header().Set(transportModeHeader, targetTransportMode(*served, principal, "/v1/chat/completions"))
 	writeJSON(w, 200, response)
+}
+
+func targetTransportMode(target router.Target, principal *config.Principal, surface string) string {
+	model, ok := providers.CatalogCachedLookupForPrincipal(target.Provider, target.Model, principal)
+	if ok {
+		for _, candidate := range model.SupportedSurfaces {
+			if strings.EqualFold(strings.TrimPrefix(strings.TrimSpace(candidate), "/v1"), strings.TrimPrefix(surface, "/v1")) {
+				return "native"
+			}
+		}
+	}
+	return "translated"
 }
 
 func normalizeChatResponseEnvelope(response map[string]any) {
