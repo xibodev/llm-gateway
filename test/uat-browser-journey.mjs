@@ -22,6 +22,7 @@ async function loadPlaywright() {
 const BASE_URL = process.env.LLMGW_BASE_URL || 'http://127.0.0.1:8787';
 const ADMIN_KEY = process.env.LLMGW_API_KEY || 'test-admin-key-llmgw-secret-2026';
 const MOCK_PORT = 18080;
+const MOCK_BASE_URL = process.env.LLMGW_UAT_MOCK_BASE_URL || `http://127.0.0.1:${MOCK_PORT}`;
 const OUTPUT_DIR = resolve('test/uat-output');
 const SCREENSHOTS_DIR = join(OUTPUT_DIR, 'screenshots');
 
@@ -284,11 +285,14 @@ async function run() {
         id: 'opencode-zen',
         label: 'OpenCode Zen (Free Tier)',
         type: 'openai_compatible',
-        base_url: `http://127.0.0.1:${MOCK_PORT}/v1`,
+        base_url: `${MOCK_BASE_URL}/v1`,
         api_key: 'free',
       }),
     });
     console.log('[UAT] Provider configure status:', provUpsert.status);
+
+    const catalogSync = await api('/admin/api/providers/opencode-zen/refresh', { method: 'POST', body: '{}' });
+    if (!catalogSync.ok) throw new Error(`Provider catalog sync failed: ${catalogSync.text}`);
 
     // 2. Set up fallback route 'free-tier-chat'
     const routeUpsert = await api('/admin/api/endpoints', {
@@ -389,7 +393,7 @@ async function run() {
     }
 
     // Try sending prompt in playground
-    const promptArea = await page.$('textarea, [contenteditable="true"]');
+    const promptArea = await page.$('textarea[placeholder^="Send a message"]');
     if (promptArea) {
       await promptArea.fill('Say hello from Playground test');
       const sendBtn = await page.$('button:has-text("Send"), button:has-text("Run"), button[type="submit"]');
@@ -517,9 +521,11 @@ async function run() {
 
     try {
       // 1. Register Providers X, Y, Z
-      await api('/admin/api/providers', { method: 'POST', body: JSON.stringify({ id: 'prov-x', label: 'Provider X', type: 'openai_compatible', base_url: 'http://127.0.0.1:18081/v1', api_key: 'k-x' }) });
-      await api('/admin/api/providers', { method: 'POST', body: JSON.stringify({ id: 'prov-y', label: 'Provider Y', type: 'openai_compatible', base_url: 'http://127.0.0.1:18082/v1', api_key: 'k-y' }) });
-      await api('/admin/api/providers', { method: 'POST', body: JSON.stringify({ id: 'prov-z', label: 'Provider Z', type: 'openai_compatible', base_url: 'http://127.0.0.1:18083/v1', api_key: 'k-z' }) });
+      const mockOrigin = new URL(MOCK_BASE_URL);
+      const mockURL = (port) => `${mockOrigin.protocol}//${mockOrigin.hostname}:${port}/v1`;
+      await api('/admin/api/providers', { method: 'POST', body: JSON.stringify({ id: 'prov-x', label: 'Provider X', type: 'openai_compatible', base_url: mockURL(18081), api_key: 'k-x' }) });
+      await api('/admin/api/providers', { method: 'POST', body: JSON.stringify({ id: 'prov-y', label: 'Provider Y', type: 'openai_compatible', base_url: mockURL(18082), api_key: 'k-y' }) });
+      await api('/admin/api/providers', { method: 'POST', body: JSON.stringify({ id: 'prov-z', label: 'Provider Z', type: 'openai_compatible', base_url: mockURL(18083), api_key: 'k-z' }) });
 
       // 2. Sync catalogs
       await api('/admin/api/providers/prov-x/refresh', { method: 'POST' });
