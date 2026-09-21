@@ -122,6 +122,7 @@ test("human-like UAT uses a gateway-visible mock and syncs catalogs before route
   assert.match(source, /LLMGW_UAT_MOCK_BASE_URL/);
   assert.match(source, /providers\/opencode-zen\/refresh/);
   assert.match(source, /textarea\[placeholder\^=\"Send a message\"\]/);
+  assert.match(source, /Expected 404 non-disclosure for out-of-scope route/);
 });
 
 test("release policy requires execution but tolerates external outages", () => {
