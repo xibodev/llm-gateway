@@ -94,6 +94,52 @@ func TestCodexCatalogTrimsIdentityFallback(t *testing.T) {
 	}
 }
 
+func TestCodexCatalogEvidenceSeparatesOAuthFromCatalogContents(t *testing.T) {
+	for _, scenario := range []struct {
+		name, body  string
+		status      int
+		wantAuth    string
+		wantCatalog string
+	}{
+		{name: "authenticated empty catalog", status: http.StatusOK, body: `{"data":[]}`, wantAuth: "accepted", wantCatalog: "empty"},
+		{name: "authenticated catalog", status: http.StatusOK, body: `{"data":[{"id":"gpt-codex"}]}`, wantAuth: "accepted", wantCatalog: "discovered"},
+		{name: "OAuth rejected", status: http.StatusUnauthorized, body: `{"error":"invalid token"}`, wantAuth: "rejected", wantCatalog: "failed"},
+		{name: "catalog unavailable", status: http.StatusServiceUnavailable, body: `{"error":"unavailable"}`, wantAuth: "unknown", wantCatalog: "failed"},
+	} {
+		t.Run(scenario.name, func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.Header.Get("Authorization") != "Bearer fixture" {
+					t.Fatalf("Codex catalog omitted personal OAuth bearer: %v", r.Header)
+				}
+				w.WriteHeader(scenario.status)
+				_, _ = w.Write([]byte(scenario.body))
+			}))
+			defer server.Close()
+			provider := CodexProvider{inner: OpenAIProvider{auth: catalogFixtureAuth{base: server.URL}, Timeout: 2}}
+			oldURL := codexauth.ModelsURL
+			codexauth.ModelsURL = server.URL
+			t.Cleanup(func() { codexauth.ModelsURL = oldURL })
+			models, _, err := provider.ListModelsWithError()
+			evidence := ClassifyProviderEvidence(err, len(models), false, false)
+			if evidence.Authentication != scenario.wantAuth || evidence.Catalog != scenario.wantCatalog || evidence.Completion != "not_probed" {
+				t.Fatalf("evidence=%+v err=%v models=%+v", evidence, err, models)
+			}
+		})
+	}
+}
+
+func TestCodexRequiresHumanOwnedOAuth(t *testing.T) {
+	oldProviders := config.Get().Providers
+	config.Update(func(s *config.Settings) {
+		s.Providers = map[string]*config.ProviderConfig{"codex": {Type: "openai_compatible", RegistryID: "openai_codex"}}
+	})
+	t.Cleanup(func() { config.Update(func(s *config.Settings) { s.Providers = oldProviders }); ResetProviders() })
+	ResetProviders()
+	if _, err := GetProvider("codex"); err == nil || !strings.Contains(err.Error(), "human principal private connection is required") {
+		t.Fatalf("Codex became anonymous/free: %v", err)
+	}
+}
+
 func TestCodexProviderUsesResponsesRefreshesOnceAndCatalogsWithClientVersion(t *testing.T) {
 	setupCodexProviderTest(t)
 	human, err := iam.CreatePrincipal("human", "authentik:codex-owner", "", "Codex Owner")

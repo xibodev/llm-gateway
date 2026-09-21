@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"strings"
 
 	"llmgw/internal/iam"
@@ -17,6 +18,34 @@ import (
 type OllamaProvider struct {
 	BaseURL string
 	Timeout float64
+}
+
+func ollamaBaseURLIssue(base string) string {
+	base = strings.TrimSpace(base)
+	parsed, err := url.Parse(base)
+	if err != nil || (parsed.Scheme != "http" && parsed.Scheme != "https") || parsed.Host == "" {
+		return "Ollama base URL must be an http(s) native daemon root such as http://127.0.0.1:11434."
+	}
+	path := strings.TrimRight(parsed.EscapedPath(), "/")
+	if path != "" {
+		if strings.EqualFold(path, "/v1") {
+			return "Ollama uses its native daemon root, not the OpenAI-compatible /v1 URL; remove /v1."
+		}
+		return "Ollama base URL must be the native daemon root with no path."
+	}
+	return ""
+}
+
+func ollamaProcessBoundaryGuidance(base string) string {
+	parsed, err := url.Parse(strings.TrimSpace(base))
+	if err != nil {
+		return ""
+	}
+	host := strings.ToLower(parsed.Hostname())
+	if host == "127.0.0.1" || host == "localhost" || host == "::1" {
+		return "Loopback reaches Ollama only from the gateway's own network boundary; a container must use a host-reachable address such as host.docker.internal."
+	}
+	return ""
 }
 
 func (OllamaProvider) IsStub() bool { return false }

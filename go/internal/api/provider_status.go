@@ -603,6 +603,7 @@ func runProviderProbe(providerID, operation string, principal *config.Principal)
 		details = "No models were returned. Verify the endpoint, supported credential, and upstream catalog access before retrying."
 		failureCode = "catalog_empty"
 	}
+	evidence := providers.ClassifyProviderEvidence(catalogErr, len(rows), false, false)
 	if observation != nil {
 		if catalogErr == nil {
 			_, _ = iam.RecordProviderAccountSuccessIfCurrent(*observation, time.Now())
@@ -627,7 +628,9 @@ func runProviderProbe(providerID, operation string, principal *config.Principal)
 		"status":  map[bool]string{true: "passed", false: "failed"}[success],
 		"details": details, "failure_code": failureCode, "model_count": len(rows),
 		"sample": sample, "checked_at": time.Now().UTC().Format(time.RFC3339),
-		"latency_ms": latency,
+		"latency_ms":           latency,
+		"authentication_state": evidence.Authentication,
+		"catalog_evidence":     evidence.Catalog, "completion_evidence": evidence.Completion,
 	}
 	if refreshed := providers.CatalogRefreshedAtForPrincipal(providerID, principal); !refreshed.IsZero() {
 		result["catalog_refreshed"] = refreshed.UTC().Format(time.RFC3339)
