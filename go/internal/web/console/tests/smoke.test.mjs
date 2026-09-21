@@ -224,6 +224,21 @@ test("admin model catalogs stay scoped to the selected principal", () => {
   assert.match(app, /<Playground.*principalID=\{initialOwner\}/);
 });
 
+test("playground uses typed capabilities and does not expose portal media routes", () => {
+  const picker = readFileSync(resolve(root, "src/components/ModelPicker.tsx"), "utf8");
+  const playground = readFileSync(resolve(root, "src/pages/Playground.tsx"), "utf8");
+  assert.match(picker, /typed_capabilities/);
+  assert.match(picker, /native_surfaces/);
+  assert.match(picker, /emulated_surfaces/);
+  assert.match(playground, /mode === "portal"/);
+  assert.match(playground, /row\.capabilities\.includes\("chat"\)/);
+  assert.match(playground, /Catalog freshness/);
+  assert.match(playground, /Verification freshness/);
+  assert.match(playground, /Transport mode/);
+  assert.match(playground, /Tool definitions \(JSON array\)/);
+  assert.match(playground, /toolsUnsupported/);
+});
+
 test("access page manages principals, projects, and memberships over the IAM API", () => {
   const access = readFileSync(resolve(root, "src/pages/Access.tsx"), "utf8");
   const navigation = readFileSync(resolve(root, "src/lib/navigation.ts"), "utf8");

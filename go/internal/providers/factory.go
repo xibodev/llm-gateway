@@ -417,6 +417,24 @@ func ProviderCredentialAuthorized(
 	return found, nil
 }
 
+// AnonymousZenForPrincipal reports the effective OpenCode Zen access mode
+// without exposing the resolved credential.
+func AnonymousZenForPrincipal(providerID string, principal *config.Principal) (bool, error) {
+	cfg, ok := config.Get().Providers[providerID]
+	if !ok || cfg == nil {
+		return false, &ConfigError{Msg: fmt.Sprintf("provider '%s': not configured", providerID)}
+	}
+	registryID := EffectiveRegistryID(providerID, cfg.RegistryID, cfg.Type)
+	if registryID != "opencode_zen" && !isZenBaseURL(cfg.BaseURL) {
+		return false, nil
+	}
+	key, _, err := resolveAPIKeyObserved(providerID, cfg, principal)
+	if err != nil {
+		return false, err
+	}
+	return AnonymousAPIKey(key), nil
+}
+
 // ListProviderModels returns a fresh catalog for one provider ([] on any failure).
 func ListProviderModels(providerID string) []ModelInfo {
 	return ListProviderModelsForPrincipal(providerID, nil)

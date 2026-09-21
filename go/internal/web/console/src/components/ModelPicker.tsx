@@ -12,6 +12,12 @@ export type CatalogModel = {
   surfaces: string[];
   free: boolean;
   isCategory: boolean;
+  nativeSurfaces: string[];
+  emulatedSurfaces: string[];
+  tools: string;
+  streaming: string;
+  discoveredAt: string;
+  verifiedAt: string;
 };
 
 // Capability names the console reasons about. A model may carry several; the
@@ -69,6 +75,8 @@ export function catalogModels(payload: JSONRecord | null): CatalogModel[] {
   return asList(payload?.data).map(asRecord).map((row) => {
     const id = stringValue(row.id);
     const owner = stringValue(row.owned_by);
+    const typed = asRecord(row.typed_capabilities);
+    const freshness = asRecord(typed.freshness);
     return {
       id,
       provider: owner || "gateway",
@@ -78,6 +86,12 @@ export function catalogModels(payload: JSONRecord | null): CatalogModel[] {
       free: row.free === true,
       // Routing-chain pseudo-model rows report owned_by "endpoint" on the wire.
       isCategory: owner === "endpoint",
+      nativeSurfaces: asList(row.native_surfaces).map(String),
+      emulatedSurfaces: asList(row.emulated_surfaces).map(String),
+      tools: stringValue(typed.tools, "unknown"),
+      streaming: stringValue(typed.streaming, "unknown"),
+      discoveredAt: stringValue(freshness.discovered_at),
+      verifiedAt: stringValue(freshness.verified_at),
     };
   }).filter((row) => row.id);
 }

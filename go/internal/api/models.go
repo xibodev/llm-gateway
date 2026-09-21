@@ -128,6 +128,12 @@ func buildModelList(principal *config.Principal) (map[string]any, error) {
 	seen := map[string]bool{}
 	s := config.Get()
 	projectPolicy := iam.ProjectPolicy{}
+	verificationChecks := map[string][]iam.ProviderCheck{}
+	if principal != nil {
+		if checks, err := iam.LastProviderChecks(principal.PrincipalID); err == nil {
+			verificationChecks = checks
+		}
+	}
 	if principal != nil && principal.ProjectID != "" {
 		var err error
 		projectPolicy, err = iam.GetProjectPolicy(principal.ProjectID)
@@ -190,8 +196,16 @@ func buildModelList(principal *config.Principal) (map[string]any, error) {
 				entry["capabilities"] = capabilities
 			}
 			setSurfaces(entry, surfaces)
+			native, emulated := modelTransportSurfaces(providerID, principal, capabilities, surfaces)
+			if len(native) > 0 {
+				entry["native_surfaces"] = native
+			}
+			if len(emulated) > 0 {
+				entry["emulated_surfaces"] = emulated
+			}
 			entry["typed_capabilities"] = providers.AdaptModelCapabilities(
-				capabilities, surfaces, modelDiscoveredAt(row, discoveredAt), time.Time{},
+				capabilities, surfaces, modelDiscoveredAt(row, discoveredAt),
+				modelVerifiedAt(row.ID, verificationChecks[providerID]),
 			)
 			data = append(data, entry)
 		}
@@ -311,6 +325,48 @@ func modelDiscoveredAt(row providers.ModelInfo, fallback time.Time) time.Time {
 		return *row.TypedCapabilities.Freshness.DiscoveredAt
 	}
 	return fallback
+}
+
+func modelVerifiedAt(model string, checks []iam.ProviderCheck) time.Time {
+	var verified time.Time
+	for _, check := range checks {
+		if check.Operation != iam.CheckVerify || !check.Success || check.Model != model {
+			continue
+		}
+		candidate := time.Unix(check.CheckedAt, 0)
+		if candidate.After(verified) {
+			verified = candidate
+		}
+	}
+	return verified
+}
+
+func modelTransportSurfaces(providerID string, principal *config.Principal, capabilities map[string]any, surfaces []string) ([]string, []string) {
+	native := append([]string(nil), surfaces...)
+	has := func(wanted string) bool {
+		for _, surface := range native {
+			if strings.EqualFold(strings.TrimSpace(surface), wanted) {
+				return true
+			}
+		}
+		return false
+	}
+	emulated := []string{}
+	chat, _ := capabilities["chat"].(bool)
+	if chat || has("/v1/chat/completions") || has("/v1/responses") || has("/v1/messages") {
+		if !has("/v1/responses") && !has("/responses") {
+			emulated = append(emulated, "/v1/responses")
+		}
+		if !has("/v1/messages") && !has("/messages") {
+			emulated = append(emulated, "/v1/messages")
+		}
+	}
+	// OpenCode Zen's anonymous transport is intentionally bespoke adaptation,
+	// not an authentic client-to-provider surface.
+	if anonymous, _ := providers.AnonymousZenForPrincipal(providerID, principal); anonymous {
+		return nil, append(emulated, native...)
+	}
+	return native, emulated
 }
 
 func nativeAliasKey(id string) string {
