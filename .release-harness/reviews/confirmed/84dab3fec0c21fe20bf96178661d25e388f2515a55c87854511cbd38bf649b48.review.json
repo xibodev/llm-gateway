@@ -14,19 +14,19 @@
       "source_id": "primary",
       "status": "established",
       "repository_identity": "https://github.com/xibodev/llm-gateway.git",
-      "head_commit": "f8be211b7410495e04327cce720e85cd5b58988e",
-      "head_tree": "e2fd3f4c6ffb051c0fad4f1c6bc80144154c6297",
-      "reviewed_source_digest": "4a36d9a888bada1c3796c41fabe1a53f7c1376b1f5be3adcf2437d7fd8e76b83",
+      "head_commit": "90c73f55a364823ebc8087542439bb8e90ada22e",
+      "head_tree": "77964da7ce55caccc8f2366443f6910bca1ff301",
+      "reviewed_source_digest": "24e6f58182ff49c73ba594d8db493284bc7e3f5a92a9ede2b7953f272ecb4ae4",
       "changed_paths": []
     }
   ],
   "facts": [
     {
-      "id": "responses-reasoning-preservation",
-      "claim": "Responses-to-Chat conversion treats a reasoning item as advisory omission when a normal answer message is preserved, and anonymous Responses accumulation no longer fabricates completion text for empty output.",
+      "id": "published-module-bindings",
+      "claim": "The gateway now resolves llm-translate v0.2.0 and llmgw-core v0.3.0 from published tags, and the complete application build, vet, tests, vulnerability scan, console checks, and documentation checks pass with GOWORK=off.",
       "status": "observed",
       "evidence": {
-        "source": "llm-translate/compatibility_conversions.go; go/internal/providers/openai.go; focused and full Go tests"
+        "source": "go/go.mod; go/go.sum; standalone validation output"
       }
     }
   ],
@@ -36,28 +36,28 @@
         "id": "A1",
         "impact": "unchanged",
         "supported_by": [
-          "responses-reasoning-preservation"
+          "published-module-bindings"
         ]
       },
       {
         "id": "A2",
         "impact": "unchanged",
         "supported_by": [
-          "responses-reasoning-preservation"
+          "published-module-bindings"
         ]
       },
       {
         "id": "A3",
         "impact": "unchanged",
         "supported_by": [
-          "responses-reasoning-preservation"
+          "published-module-bindings"
         ]
       },
       {
         "id": "A4",
         "impact": "unchanged",
         "supported_by": [
-          "responses-reasoning-preservation"
+          "published-module-bindings"
         ]
       }
     ],
@@ -67,11 +67,11 @@
   "questions": [],
   "conclusion": {
     "action": "reuse_contract",
-    "summary": "The correction preserves real Responses answer text and fails honestly on empty terminal output without changing accepted CLI or model-list behavior."
+    "summary": "Published module bindings reproduce the reviewed local behavior without changing accepted CLI health/version or model-list assertions."
   },
   "proposed": {
     "by": "agent-session",
-    "at": "2026-09-21T05:17:02.688Z"
+    "at": "2026-09-21T14:46:04.288Z"
   },
-  "digest": "a356437eb66c25321d2f07c085cdeba36fb3a476fc42eeb5ff544cba8773aea0"
+  "digest": "84dab3fec0c21fe20bf96178661d25e388f2515a55c87854511cbd38bf649b48"
 }
