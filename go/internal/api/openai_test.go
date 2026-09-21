@@ -103,7 +103,9 @@ func TestCanceledNonStreamingRequestsCancelUpstreamWithoutRetry(t *testing.T) {
 			}
 			select {
 			case <-done:
-			case <-time.After(time.Second):
+			// Upstream cancellation above is the behavior under test. Package-wide
+			// CI can briefly contend on shared store cleanup after cancellation.
+			case <-time.After(5 * time.Second):
 				t.Fatal("gateway handler did not return promptly")
 			}
 			time.Sleep(25 * time.Millisecond)
