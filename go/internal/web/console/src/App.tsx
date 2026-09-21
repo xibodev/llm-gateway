@@ -21,6 +21,12 @@ type ConsoleRoute = { page: PageID; detail: string };
 function routeFromHash(mode: ConsoleMode): ConsoleRoute {
   const raw = window.location.hash.replace(/^#\/?/, "");
   const [candidate, ...rest] = raw.split("/");
+  if (candidate === "credentials") {
+    let provider = "";
+    try { provider = decodeURIComponent(rest.join("/")); }
+    catch { /* A malformed legacy detail falls back to the models catalog. */ }
+    return provider ? { page: "providers", detail: provider } : { page: "models", detail: "" };
+  }
   const page = navigationFor(mode).some((item) => item.id === candidate) ? (candidate as PageID) : "overview";
   let detail = "";
   try { detail = page === candidate ? decodeURIComponent(rest.join("/")) : ""; }
