@@ -445,7 +445,7 @@ async function testPlayground(identity, healthy, plans) {
       await option.waitFor({ state: "visible", timeout: 10_000 });
       await option.dispatchEvent("mousedown");
       await page.waitForFunction((value) => document.querySelector(".model-combo input")?.value === value, target, { timeout: 10_000 });
-      const composer = page.locator(".chat-composer textarea");
+      const composer = page.locator('.chat-composer textarea[placeholder^="Send a message"]');
       await composer.fill("hi");
       const [response] = await Promise.all([
         page.waitForResponse((candidate) => candidate.request().method() === "POST" && candidate.url().endsWith("/admin/api/playground"), { timeout: 70_000 }),

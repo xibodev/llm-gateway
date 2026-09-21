@@ -107,6 +107,14 @@ test("healthy cohort prefers distinct providers and builds required routes", () 
   }, routes[1].members, routes[1].expectedAttempts), false);
 });
 
+test("browser acceptance selects the message composer rather than tool editors", async () => {
+  const source = await import("node:fs/promises").then(({ readFile }) =>
+    readFile(new URL("./run.mjs", import.meta.url), "utf8"),
+  );
+  assert.match(source, /textarea\[placeholder\^=\"Send a message\"\]/);
+  assert.doesNotMatch(source, /locator\("\.chat-composer textarea"\)/);
+});
+
 test("release policy requires execution but tolerates external outages", () => {
   const required = ["docker-health", "model-sweep-completeness", "model-sweep-evidence", "api-evidence", "route-evidence", "playground-evidence", "restart-persistence", "restart-api-evidence", "cleanup"];
   const base = { schema, mode: "deterministic", execution: { started: true, completed: true, commit: "abc" }, checks: required.map((name) => ({ name, required: true, status: "passed" })), model_sweep: [] };
