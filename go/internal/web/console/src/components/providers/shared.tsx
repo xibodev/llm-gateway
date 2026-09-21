@@ -6,6 +6,28 @@ export type ActionResult = { title: string; success: boolean; detail: string } |
 
 export function boolValue(value: unknown): boolean { return value === true; }
 
+export function connectionChoices(entry: JSONRecord): string[] {
+  const id = stringValue(entry.id);
+  if (id === "openai_codex") return ["Personal subscription · device OAuth"];
+  return asList(entry.auth_methods).map(String).map((method) => ({
+    oauth_device: "Personal account · device OAuth",
+    api_key: id === "opencode_zen" ? "Optional personal API key" : "API key",
+    none: id === "opencode_zen" ? "Anonymous access · no key" : "No credential",
+    gcp_service_account: "Google Cloud service account",
+  }[method] ?? method.replaceAll("_", " ")));
+}
+
+export function evidenceLabel(kind: "authentication" | "catalog" | "completion", value: unknown): string {
+  const state = stringValue(value, "unknown");
+  const labels: Record<string, string> = {
+    configured: "Configured · not tested", accepted: "Accepted", rejected: "Rejected",
+    discovered: "Models discovered", empty: "Reached · no models", not_probed: "Not tested",
+    verified: "Inference verified", failed: "Failed", unknown: "Unknown",
+  };
+  if (kind === "catalog" && state === "failed") return "Catalog failed";
+  return labels[state] ?? state.replaceAll("_", " ");
+}
+
 export function groupFor(entry: JSONRecord): string {
   if (boolValue(entry.client_only)) return "Gateway clients";
   const methods = asList(entry.auth_methods).map(String);

@@ -27,6 +27,9 @@ type configuredProviderSnapshot struct {
 	lastVerify         *iam.ProviderCheck
 	configurationIssue string
 	readiness          map[string]any
+	authentication     string
+	catalogEvidence    string
+	completionEvidence string
 }
 
 // Check history proves one model in one credential scope, never entitlement to
@@ -360,6 +363,9 @@ func providerStatusSnapshots(
 			readiness["model_verified"] = false
 			readiness["verification_state"] = "disabled"
 		}
+		authentication, catalogEvidence, completionEvidence := providerEvidenceSnapshot(
+			credentialPresent, len(models), refreshed, status, readiness,
+		)
 		catalogState := "unknown"
 		refreshedAt := ""
 		if !refreshed.IsZero() {
@@ -388,6 +394,8 @@ func providerStatusSnapshots(
 			catalogRefresh: refreshedAt, modelCount: len(models), connectionCount: connectionCounts[providerID],
 			disabled: providerConfig.Disabled, lastCheck: lastCheck, lastVerify: lastVerify,
 			configurationIssue: configurationIssue, readiness: readiness,
+			authentication: authentication, catalogEvidence: catalogEvidence,
+			completionEvidence: completionEvidence,
 		}
 		configured = append(configured, snapshot)
 		if registryID != "" {
@@ -449,7 +457,10 @@ func providerStatusSnapshots(
 				"model_count": match.modelCount, "connection_count": match.connectionCount,
 				"catalog_state": match.catalogState, "catalog_refreshed": match.catalogRefresh,
 				"disabled": match.disabled, "configuration_issue": match.configurationIssue,
-				"readiness": match.readiness,
+				"readiness":            match.readiness,
+				"authentication_state": match.authentication,
+				"catalog_evidence":     match.catalogEvidence,
+				"completion_evidence":  match.completionEvidence,
 			}, match.lastCheck, match.lastVerify))
 		}
 		snapshots = append(snapshots, providerSnapshotRow(map[string]any{
@@ -483,7 +494,10 @@ func providerStatusSnapshots(
 			"model_count": snapshot.modelCount, "connection_count": snapshot.connectionCount,
 			"catalog_state": snapshot.catalogState, "catalog_refreshed": snapshot.catalogRefresh,
 			"disabled": snapshot.disabled, "configuration_issue": snapshot.configurationIssue,
-			"readiness": snapshot.readiness,
+			"readiness":            snapshot.readiness,
+			"authentication_state": snapshot.authentication,
+			"catalog_evidence":     snapshot.catalogEvidence,
+			"completion_evidence":  snapshot.completionEvidence,
 		}, snapshot.lastCheck, snapshot.lastVerify)
 		snapshots = append(snapshots, providerSnapshotRow(map[string]any{
 			"id": snapshot.id, "registry_id": snapshot.registryID, "label": snapshot.id, "description": "Custom configured provider.",
@@ -508,6 +522,36 @@ func providerStatusSnapshots(
 		return snapshots[i]["label"].(string) < snapshots[j]["label"].(string)
 	})
 	return snapshots, nil
+}
+
+func providerEvidenceSnapshot(
+	credentialPresent bool, modelCount int, refreshed time.Time, status string,
+	readiness map[string]any,
+) (string, string, string) {
+	authentication := "unknown"
+	catalog := "not_probed"
+	completion := "not_probed"
+
+	if !refreshed.IsZero() {
+		authentication = "accepted"
+		catalog = "empty"
+		if modelCount > 0 {
+			catalog = "discovered"
+		}
+	} else if status == "check_failed" {
+		catalog = "failed"
+	} else if credentialPresent {
+		authentication = "configured"
+	}
+
+	switch readiness["verification_state"] {
+	case "verified", "stale":
+		authentication = "accepted"
+		completion = "verified"
+	case "failed":
+		completion = "failed"
+	}
+	return authentication, catalog, completion
 }
 
 func providerSnapshotRow(row map[string]any, lastCheck, lastVerify *iam.ProviderCheck) map[string]any {
