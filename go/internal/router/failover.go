@@ -13,8 +13,8 @@ import (
 	"llmgw/internal/iam"
 	"llmgw/internal/providers"
 
-	core "github.com/xibodev/llmgw-core"
 	"github.com/xibodev/llm-translate"
+	core "github.com/xibodev/llmgw-core"
 )
 
 // Target is one resolved provider/model in a chain.
@@ -410,7 +410,9 @@ func ExecuteResponsesContext(
 	if providers.ResponsesPayloadIsStateful(payload) && len(targets) > 1 {
 		targets = targets[:1]
 	}
-	chatMessages, chatKw, conversionErr := translate.ResponsesRequestToChat(payload)
+	conversion, conversionErr := translate.ResponsesRequestToChatWithReport(payload)
+	chatMessages, chatKw := conversion.Value.Messages, conversion.Value.Keywords
+	materialErr := conversion.RejectMaterialLoss()
 	var attempts []attempt
 	var lastErr error
 	lastStatus := 0
@@ -431,6 +433,15 @@ func ExecuteResponsesContext(
 		}
 		result, _, err := providers.CompleteResponsesContext(ctx, provider, target.Model, payload)
 		if errors.Is(err, providers.ErrResponsesUnsupported) {
+			if materialErr != nil {
+				lastErr = &providers.ConfigError{Msg: materialErr.Error()}
+				lastStatus = 400
+				attempts = append(attempts, attempt{
+					Provider: target.Provider, Model: target.Model,
+					Error: truncate(lastErr.Error()),
+				})
+				continue
+			}
 			if conversionErr != nil {
 				lastErr = &providers.ConfigError{Msg: conversionErr.Error()}
 				lastStatus = 400
@@ -453,9 +464,12 @@ func ExecuteResponsesContext(
 			}
 			chat, chatErr := providers.CompleteProviderContext(ctx, provider, target.Model, chatMessages, chatKw)
 			if chatErr == nil {
-				result = translate.ChatResponseToResponsesWithRequest(
-					target.Model, chat, payload,
-				)
+				converted := translate.ChatResponseToResponsesWithRequestAndReport(target.Model, chat, payload)
+				if lossErr := converted.RejectMaterialLoss(); lossErr != nil {
+					chatErr = &providers.ConfigError{Msg: lossErr.Error()}
+				} else {
+					result = converted.Value
+				}
 			}
 			err = chatErr
 		}
@@ -504,8 +518,10 @@ func ExecuteAnthropicMessagesContext(
 	requested string,
 	principal *config.Principal,
 ) (map[string]any, *Target, error) {
-	messages, kw, incompatible := translate.AnthropicRequestToOpenAI(payload)
-	requiresNative := len(incompatible) > 0
+	conversion := translate.AnthropicRequestToOpenAIWithReport(payload)
+	messages, kw := conversion.Value.Messages, conversion.Value.Keywords
+	materialErr := conversion.RejectMaterialLoss()
+	requiresNative := materialErr != nil
 	if requiresNative {
 		hasNative := false
 		for _, target := range targets {
@@ -516,7 +532,7 @@ func ExecuteAnthropicMessagesContext(
 			}
 		}
 		if !hasNative {
-			return nil, nil, &AllTargetsFailed{Msg: "Anthropic request requires a native Messages target; unsupported fields: " + strings.Join(incompatible, ", "), Status: 400}
+			return nil, nil, &AllTargetsFailed{Msg: "Anthropic request requires a native Messages target: " + materialErr.Error(), Status: 400}
 		}
 	}
 	var attempts []attempt
@@ -542,7 +558,12 @@ func ExecuteAnthropicMessagesContext(
 			var chat map[string]any
 			chat, err = providers.CompleteProviderContext(ctx, provider, target.Model, messages, kw)
 			if err == nil {
-				result = translate.OpenAIResponseToAnthropic(chat, target.Model)
+				converted := translate.OpenAIResponseToAnthropicWithReport(chat, target.Model)
+				if lossErr := converted.RejectMaterialLoss(); lossErr != nil {
+					err = &providers.ConfigError{Msg: lossErr.Error()}
+				} else {
+					result = converted.Value
+				}
 			}
 		}
 		if err != nil {
@@ -656,7 +677,9 @@ func ExecuteResponsesStreamContext(
 	if providers.ResponsesPayloadIsStateful(payload) && len(targets) > 1 {
 		targets = targets[:1]
 	}
-	chatMessages, chatKw, conversionErr := translate.ResponsesRequestToChat(payload)
+	conversion, conversionErr := translate.ResponsesRequestToChatWithReport(payload)
+	chatMessages, chatKw := conversion.Value.Messages, conversion.Value.Keywords
+	materialErr := conversion.RejectMaterialLoss()
 	var attempts []attempt
 	var lastErr error
 	lastStatus := 0
@@ -687,6 +710,15 @@ func ExecuteResponsesStreamContext(
 		native := true
 		if errors.Is(err, providers.ErrResponsesUnsupported) {
 			native = false
+			if materialErr != nil {
+				lastErr = &providers.ConfigError{Msg: materialErr.Error()}
+				lastStatus = 400
+				attempts = append(attempts, attempt{
+					Provider: target.Provider, Model: target.Model,
+					Error: truncate(lastErr.Error()),
+				})
+				continue
+			}
 			if conversionErr != nil {
 				lastErr = &providers.ConfigError{Msg: conversionErr.Error()}
 				lastStatus = 400

@@ -15,7 +15,7 @@ import (
 
 func TestAnthropicNativePayloadPreservesThinkingAndOutputConfig(t *testing.T) {
 	p := AnthropicNativeProvider{}
-	payload := p.payload(
+	payload, err := p.payload(
 		"claude-opus-4.8",
 		[]Message{{"role": "user", "content": "hi"}},
 		false,
@@ -25,6 +25,9 @@ func TestAnthropicNativePayloadPreservesThinkingAndOutputConfig(t *testing.T) {
 			"metadata":      map[string]any{"user_id": "fixture"},
 		},
 	)
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	thinking, ok := payload["thinking"].(map[string]any)
 	if !ok || thinking["type"] != "adaptive" {
@@ -37,6 +40,22 @@ func TestAnthropicNativePayloadPreservesThinkingAndOutputConfig(t *testing.T) {
 	metadata, ok := payload["metadata"].(map[string]any)
 	if !ok || metadata["user_id"] != "fixture" {
 		t.Fatalf("metadata = %#v, want fixture user", payload["metadata"])
+	}
+}
+
+func TestAnthropicNativePayloadTranslationLossPolicy(t *testing.T) {
+	p := AnthropicNativeProvider{}
+	payload, err := p.payload("model", []Message{{"role": "developer", "content": "instruction"}, {"role": "user", "content": "hi"}}, false, nil)
+	if err != nil {
+		t.Fatalf("advisory developer conversion rejected: %v", err)
+	}
+	if payload["system"] != "instruction" {
+		t.Fatalf("system=%#v", payload["system"])
+	}
+
+	_, err = p.payload("model", []Message{{"role": "unknown", "content": "hi"}}, false, nil)
+	if err == nil || !strings.Contains(err.Error(), "messages.0.role") {
+		t.Fatalf("material role conversion error=%v", err)
 	}
 }
 
