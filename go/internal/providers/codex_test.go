@@ -513,7 +513,7 @@ func TestCodexRefreshInvocationErrorPreservesRetryClassification(t *testing.T) {
 		t.Fatal("Codex transport error should be retryable")
 	}
 	rejected := codexRefreshInvocationError(&codexauth.RefreshError{StatusCode: http.StatusUnauthorized, Code: "invalid_grant"})
-	if InvocationRetryable(rejected) || !InvocationFailoverEligible(rejected) || UpstreamStatus(rejected) != http.StatusUnauthorized {
+	if InvocationRetryable(rejected) || InvocationFailoverEligible(rejected) || UpstreamStatus(rejected) != http.StatusUnauthorized {
 		t.Fatalf("Codex credential rejection retry=%v failover=%v status=%d", InvocationRetryable(rejected), InvocationFailoverEligible(rejected), UpstreamStatus(rejected))
 	}
 }

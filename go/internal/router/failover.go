@@ -4,10 +4,14 @@ package router
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/binary"
 	"errors"
 	"fmt"
 	"sort"
+	"strconv"
 	"strings"
+	"time"
 
 	"llmgw/internal/config"
 	"llmgw/internal/iam"
@@ -23,6 +27,106 @@ type Target = core.Target
 // Resolution records both the resolved targets and the canonical category name,
 // when the request addressed a category rather than a direct model.
 type Resolution = core.Resolution
+
+const defaultFallbackTimeout = 2 * time.Minute
+
+type fallbackOptions struct {
+	timeout  time.Duration
+	affinity string
+}
+
+type fallbackOptionsKey struct{}
+
+// WithFallbackOptions attaches request-level routing controls without changing
+// provider payloads. A non-positive timeout uses the bounded default.
+func WithFallbackOptions(ctx context.Context, timeout time.Duration, affinity string) context.Context {
+	return context.WithValue(ctx, fallbackOptionsKey{}, fallbackOptions{timeout: timeout, affinity: strings.TrimSpace(affinity)})
+}
+
+func prepareFallback(ctx context.Context, targets []Target, kw providers.Kwargs) (context.Context, context.CancelFunc, []Target) {
+	options, _ := ctx.Value(fallbackOptionsKey{}).(fallbackOptions)
+	if value, ok := kw["_fallback_timeout_ms"]; ok && options.timeout <= 0 {
+		if milliseconds, err := strconv.ParseInt(fmt.Sprint(value), 10, 64); err == nil && milliseconds > 0 {
+			options.timeout = time.Duration(milliseconds) * time.Millisecond
+		}
+	}
+	if value, ok := kw["_affinity_key"].(string); ok && options.affinity == "" && strings.TrimSpace(value) != "" {
+		options.affinity = strings.TrimSpace(value)
+	}
+	if options.timeout <= 0 {
+		options.timeout = defaultFallbackTimeout
+	}
+	prepared := append([]Target(nil), targets...)
+	if len(prepared) > 1 && options.affinity != "" {
+		digest := sha256.Sum256([]byte(options.affinity))
+		start := int(binary.BigEndian.Uint64(digest[:8]) % uint64(len(prepared)))
+		prepared = append(prepared[start:], prepared[:start]...)
+	}
+	bounded, cancel := context.WithTimeout(ctx, options.timeout)
+	return bounded, cancel, prepared
+}
+
+// CompatibilityRequest describes only requirements that can be proven from the
+// bounded typed capability contract. Unknown values remain eligible.
+type CompatibilityRequest struct {
+	Surface   core.ModelSurface
+	Tools     bool
+	Vision    bool
+	Streaming bool
+}
+
+// FilterCompatibleTargets removes targets with explicit typed incompatibility.
+// It returns a 400-style configuration error when every target is excluded.
+func FilterCompatibleTargets(targets []Target, principal *config.Principal, request CompatibilityRequest) ([]Target, error) {
+	compatible := make([]Target, 0, len(targets))
+	for _, target := range targets {
+		model, ok := providers.CatalogCachedLookupForPrincipal(target.Provider, target.Model, principal)
+		if !ok || model.TypedCapabilities == nil {
+			compatible = append(compatible, target)
+			continue
+		}
+		if modelCompatible(model.TypedCapabilities, request) {
+			compatible = append(compatible, target)
+		}
+	}
+	if len(compatible) == 0 {
+		return nil, &providers.ConfigError{Msg: "no route member supports the requested operation and capabilities"}
+	}
+	return compatible, nil
+}
+
+func modelCompatible(capabilities *core.ModelCapabilities, request CompatibilityRequest) bool {
+	if capabilities == nil {
+		return true
+	}
+	if capabilities.Operations.Chat == core.SupportUnsupported ||
+		(request.Tools && capabilities.Tools == core.SupportUnsupported) ||
+		(request.Vision && capabilities.Inputs.Image == core.SupportUnsupported) ||
+		(request.Streaming && capabilities.Streaming == core.SupportUnsupported) {
+		return false
+	}
+	surface := capabilities.SurfaceCompatibility(request.Surface)
+	if surface == core.SupportUnsupported {
+		// Responses can use the strict Chat fallback. Chat itself must not
+		// claim a known Responses-only target without explicit adaptation.
+		if request.Surface == core.ModelSurfaceChatCompletions ||
+			capabilities.Surfaces.ChatCompletions == core.SupportUnsupported {
+			return false
+		}
+	}
+	return true
+}
+
+func shouldAdvance(err error) bool {
+	return providers.IsInvocation(err) && providers.InvocationFailoverEligible(err)
+}
+
+func deadlineStatus(err error) int {
+	if errors.Is(err, context.DeadlineExceeded) {
+		return 504
+	}
+	return providers.UpstreamStatus(err)
+}
 
 // ModelNotFoundError means the requested model is unknown or its route has no
 // enabled providers (HTTP 404).
@@ -410,6 +514,8 @@ func ExecuteResponsesContext(
 	if providers.ResponsesPayloadIsStateful(payload) && len(targets) > 1 {
 		targets = targets[:1]
 	}
+	ctx, cancel, targets := prepareFallback(ctx, targets, nil)
+	defer cancel()
 	conversion, conversionErr := translate.ResponsesRequestToChatWithReport(payload)
 	chatMessages, chatKw := conversion.Value.Messages, conversion.Value.Keywords
 	materialErr := conversion.RejectMaterialLoss()
@@ -419,6 +525,7 @@ func ExecuteResponsesContext(
 	for index := range targets {
 		if ctx.Err() != nil {
 			lastErr = ctx.Err()
+			lastStatus = deadlineStatus(lastErr)
 			break
 		}
 		target := targets[index]
@@ -429,7 +536,10 @@ func ExecuteResponsesContext(
 				Error: truncate(err.Error()), Throttled: providers.IsThrottle(err),
 			})
 			lastErr = err
-			continue
+			if shouldAdvance(err) {
+				continue
+			}
+			break
 		}
 		result, _, err := providers.CompleteResponsesContext(ctx, provider, target.Model, payload)
 		if errors.Is(err, providers.ErrResponsesUnsupported) {
@@ -440,7 +550,7 @@ func ExecuteResponsesContext(
 					Provider: target.Provider, Model: target.Model,
 					Error: truncate(lastErr.Error()),
 				})
-				continue
+				break
 			}
 			if conversionErr != nil {
 				lastErr = &providers.ConfigError{Msg: conversionErr.Error()}
@@ -449,7 +559,7 @@ func ExecuteResponsesContext(
 					Provider: target.Provider, Model: target.Model,
 					Error: truncate(lastErr.Error()),
 				})
-				continue
+				break
 			}
 			if compatibilityErr := responsesFallbackCompatibility(
 				target, principal, chatMessages, chatKw,
@@ -460,7 +570,7 @@ func ExecuteResponsesContext(
 					Provider: target.Provider, Model: target.Model,
 					Error: truncate(lastErr.Error()),
 				})
-				continue
+				break
 			}
 			chat, chatErr := providers.CompleteProviderContext(ctx, provider, target.Model, chatMessages, chatKw)
 			if chatErr == nil {
@@ -480,7 +590,10 @@ func ExecuteResponsesContext(
 			})
 			lastErr = err
 			lastStatus = providers.UpstreamStatus(err)
-			continue
+			if shouldAdvance(err) {
+				continue
+			}
+			break
 		}
 		result["model"] = target.Model
 		attempts = append(attempts, attempt{
@@ -491,6 +604,9 @@ func ExecuteResponsesContext(
 		return result, &served, nil
 	}
 	recordChain(requested, attempts, nil, principal)
+	if errors.Is(lastErr, context.Canceled) {
+		return nil, nil, context.Canceled
+	}
 	message := "no failover targets"
 	if lastErr != nil {
 		message = lastErr.Error()
@@ -658,6 +774,24 @@ type ResponsesExecutionStream struct {
 	Native bool
 }
 
+type boundedStream struct {
+	providers.StreamIter
+	cancel context.CancelFunc
+}
+
+func (stream *boundedStream) Next() (string, bool) {
+	chunk, ok := stream.StreamIter.Next()
+	if !ok {
+		stream.cancel()
+	}
+	return chunk, ok
+}
+
+func (stream *boundedStream) Close() error {
+	stream.cancel()
+	return stream.StreamIter.Close()
+}
+
 func ExecuteResponsesStream(
 	targets []Target,
 	payload map[string]any,
@@ -677,6 +811,7 @@ func ExecuteResponsesStreamContext(
 	if providers.ResponsesPayloadIsStateful(payload) && len(targets) > 1 {
 		targets = targets[:1]
 	}
+	ctx, cancel, targets := prepareFallback(ctx, targets, nil)
 	conversion, conversionErr := translate.ResponsesRequestToChatWithReport(payload)
 	chatMessages, chatKw := conversion.Value.Messages, conversion.Value.Keywords
 	materialErr := conversion.RejectMaterialLoss()
@@ -685,12 +820,16 @@ func ExecuteResponsesStreamContext(
 	lastStatus := 0
 	for index := range targets {
 		if err := ctx.Err(); err != nil {
-			return nil, nil, err
+			lastErr = err
+			lastStatus = deadlineStatus(err)
+			break
 		}
 		target := targets[index]
 		provider, err := providers.GetProviderForPrincipal(target.Provider, principal)
 		if ctxErr := ctx.Err(); ctxErr != nil {
-			return nil, nil, ctxErr
+			lastErr = ctxErr
+			lastStatus = deadlineStatus(ctxErr)
+			break
 		}
 		if err != nil {
 			attempts = append(attempts, attempt{
@@ -698,14 +837,19 @@ func ExecuteResponsesStreamContext(
 				Error: truncate(err.Error()), Throttled: providers.IsThrottle(err),
 			})
 			lastErr = err
-			continue
+			if shouldAdvance(err) {
+				continue
+			}
+			break
 		}
 		stream, _, err := providers.StreamResponsesContext(ctx, provider, target.Model, payload)
 		if ctxErr := ctx.Err(); ctxErr != nil {
 			if stream != nil {
 				_ = stream.Close()
 			}
-			return nil, nil, ctxErr
+			lastErr = ctxErr
+			lastStatus = deadlineStatus(ctxErr)
+			break
 		}
 		native := true
 		if errors.Is(err, providers.ErrResponsesUnsupported) {
@@ -717,7 +861,7 @@ func ExecuteResponsesStreamContext(
 					Provider: target.Provider, Model: target.Model,
 					Error: truncate(lastErr.Error()),
 				})
-				continue
+				break
 			}
 			if conversionErr != nil {
 				lastErr = &providers.ConfigError{Msg: conversionErr.Error()}
@@ -726,7 +870,7 @@ func ExecuteResponsesStreamContext(
 					Provider: target.Provider, Model: target.Model,
 					Error: truncate(lastErr.Error()),
 				})
-				continue
+				break
 			}
 			if compatibilityErr := responsesFallbackCompatibility(
 				target, principal, chatMessages, chatKw,
@@ -737,17 +881,21 @@ func ExecuteResponsesStreamContext(
 					Provider: target.Provider, Model: target.Model,
 					Error: truncate(lastErr.Error()),
 				})
-				continue
+				break
 			}
 			if ctxErr := ctx.Err(); ctxErr != nil {
-				return nil, nil, ctxErr
+				lastErr = ctxErr
+				lastStatus = deadlineStatus(ctxErr)
+				break
 			}
 			stream, err = providers.StreamProviderContext(ctx, provider, target.Model, chatMessages, chatKw)
 			if ctxErr := ctx.Err(); ctxErr != nil {
 				if stream != nil {
 					_ = stream.Close()
 				}
-				return nil, nil, ctxErr
+				lastErr = ctxErr
+				lastStatus = deadlineStatus(ctxErr)
+				break
 			}
 		}
 		if err != nil {
@@ -757,16 +905,23 @@ func ExecuteResponsesStreamContext(
 			})
 			lastErr = err
 			lastStatus = providers.UpstreamStatus(err)
-			continue
+			if shouldAdvance(err) {
+				continue
+			}
+			break
 		}
 		attempts = append(attempts, attempt{
 			Provider: target.Provider, Model: target.Model, OK: true,
 		})
 		served := target
 		recordChain(requested, attempts, &served, principal)
-		return &ResponsesExecutionStream{Iter: stream, Native: native}, &served, nil
+		return &ResponsesExecutionStream{Iter: &boundedStream{StreamIter: stream, cancel: cancel}, Native: native}, &served, nil
 	}
+	cancel()
 	recordChain(requested, attempts, nil, principal)
+	if errors.Is(lastErr, context.Canceled) {
+		return nil, nil, context.Canceled
+	}
 	message := "no failover targets"
 	if lastErr != nil {
 		message = lastErr.Error()
@@ -874,6 +1029,8 @@ func responsesFallbackCompatibility(
 }
 
 func executeCompleteWithTrace(ctx context.Context, targets []Target, messages []providers.Message, requested string, principal *config.Principal, kw providers.Kwargs) (map[string]any, *Target, []AttemptTrace, error) {
+	ctx, cancel, targets := prepareFallback(ctx, targets, kw)
+	defer cancel()
 	var attempts []attempt
 	trace := make([]AttemptTrace, 0, len(targets))
 	var lastErr error
@@ -889,7 +1046,10 @@ func executeCompleteWithTrace(ctx context.Context, targets []Target, messages []
 			attempts = append(attempts, attempt{Provider: t.Provider, Model: t.Model, OK: false, Error: truncate(err.Error()), Throttled: throttled})
 			trace = append(trace, AttemptTrace{Provider: t.Provider, Model: t.Model, Status: "failed", Throttled: throttled})
 			lastErr = err
-			continue
+			if shouldAdvance(err) {
+				continue
+			}
+			break
 		}
 		result, err := providers.CompleteProviderContext(ctx, prov, t.Model, messages, kw)
 		if err != nil {
@@ -897,7 +1057,10 @@ func executeCompleteWithTrace(ctx context.Context, targets []Target, messages []
 			attempts = append(attempts, attempt{Provider: t.Provider, Model: t.Model, OK: false, Error: truncate(err.Error()), Throttled: throttled})
 			trace = append(trace, AttemptTrace{Provider: t.Provider, Model: t.Model, Status: "failed", Throttled: throttled})
 			lastErr = err
-			continue
+			if shouldAdvance(err) {
+				continue
+			}
+			break
 		}
 		attempts = append(attempts, attempt{Provider: t.Provider, Model: t.Model, OK: true})
 		trace = append(trace, AttemptTrace{Provider: t.Provider, Model: t.Model, Status: "served"})
@@ -906,11 +1069,14 @@ func executeCompleteWithTrace(ctx context.Context, targets []Target, messages []
 		return result, &served, trace, nil
 	}
 	recordChain(requested, attempts, nil, principal)
+	if errors.Is(lastErr, context.Canceled) {
+		return nil, nil, trace, context.Canceled
+	}
 	msg := "no failover targets"
 	if lastErr != nil {
 		msg = lastErr.Error()
 	}
-	return nil, nil, trace, &AllTargetsFailed{Msg: msg, Status: providers.UpstreamStatus(lastErr)}
+	return nil, nil, trace, &AllTargetsFailed{Msg: msg, Status: deadlineStatus(lastErr)}
 }
 
 // ExecuteStream runs the chain for a streaming request, failing over pre-first-byte.
@@ -929,12 +1095,15 @@ func ExecuteAnthropicStreamContext(ctx context.Context, targets []Target, messag
 }
 
 func executeStreamContext(ctx context.Context, targets []Target, messages []providers.Message, requested string, principal *config.Principal, kw providers.Kwargs, validate func(Target) error) (providers.StreamIter, *Target, error) {
+	ctx, cancel, targets := prepareFallback(ctx, targets, kw)
 	var attempts []attempt
 	var lastErr error
 	lastStatus := 0
 	for i := range targets {
 		if err := ctx.Err(); err != nil {
-			return nil, nil, err
+			lastErr = err
+			lastStatus = deadlineStatus(err)
+			break
 		}
 		t := targets[i]
 		if validate != nil {
@@ -947,33 +1116,47 @@ func executeStreamContext(ctx context.Context, targets []Target, messages []prov
 		}
 		prov, err := providers.GetProviderForPrincipal(t.Provider, principal)
 		if ctxErr := ctx.Err(); ctxErr != nil {
-			return nil, nil, ctxErr
+			lastErr = ctxErr
+			lastStatus = deadlineStatus(ctxErr)
+			break
 		}
 		if err != nil {
 			attempts = append(attempts, attempt{Provider: t.Provider, Model: t.Model, OK: false, Error: truncate(err.Error()), Throttled: providers.IsThrottle(err)})
 			lastErr = err
 			lastStatus = providers.UpstreamStatus(err)
-			continue
+			if shouldAdvance(err) {
+				continue
+			}
+			break
 		}
 		it, err := providers.StreamProviderContext(ctx, prov, t.Model, messages, kw)
 		if ctxErr := ctx.Err(); ctxErr != nil {
 			if it != nil {
 				_ = it.Close()
 			}
-			return nil, nil, ctxErr
+			lastErr = ctxErr
+			lastStatus = deadlineStatus(ctxErr)
+			break
 		}
 		if err != nil {
 			attempts = append(attempts, attempt{Provider: t.Provider, Model: t.Model, OK: false, Error: truncate(err.Error()), Throttled: providers.IsThrottle(err)})
 			lastErr = err
 			lastStatus = providers.UpstreamStatus(err)
-			continue
+			if shouldAdvance(err) {
+				continue
+			}
+			break
 		}
 		attempts = append(attempts, attempt{Provider: t.Provider, Model: t.Model, OK: true})
 		served := t
 		recordChain(requested, attempts, &served, principal)
-		return it, &served, nil
+		return &boundedStream{StreamIter: it, cancel: cancel}, &served, nil
 	}
+	cancel()
 	recordChain(requested, attempts, nil, principal)
+	if errors.Is(lastErr, context.Canceled) {
+		return nil, nil, context.Canceled
+	}
 	msg := "no failover targets"
 	if lastErr != nil {
 		msg = lastErr.Error()

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"math"
 	"net/http"
@@ -14,6 +15,8 @@ import (
 	"llmgw/internal/config"
 	"llmgw/internal/providers"
 	"llmgw/internal/router"
+
+	core "github.com/xibodev/llmgw-core"
 )
 
 type chatRequest struct {
@@ -29,6 +32,8 @@ type chatRequest struct {
 	TopP                any              `json:"top_p"`
 	Stop                any              `json:"stop"`
 	ReasoningEffort     any              `json:"reasoning_effort"`
+	FallbackTimeoutMS   any              `json:"fallback_timeout_ms"`
+	AffinityKey         string           `json:"affinity_key"`
 	// ForceApiSupport opts this request into experimental API adaptation
 	// (e.g. reaching a Responses-only model over /chat/completions). A present
 	// value overrides the provider's config-level setting.
@@ -36,18 +41,20 @@ type chatRequest struct {
 }
 
 type responsesRequest struct {
-	Model           string         `json:"model"`
-	Input           any            `json:"input"`
-	Instructions    any            `json:"instructions"`
-	Stream          bool           `json:"stream"`
-	MaxOutputTokens any            `json:"max_output_tokens"`
-	Reasoning       map[string]any `json:"reasoning"`
-	Temperature     any            `json:"temperature"`
-	TopP            any            `json:"top_p"`
-	Tools           any            `json:"tools"`
-	ToolChoice      any            `json:"tool_choice"`
-	Metadata        any            `json:"metadata"`
-	ForceApiSupport *bool          `json:"force_api_support"`
+	Model             string         `json:"model"`
+	Input             any            `json:"input"`
+	Instructions      any            `json:"instructions"`
+	Stream            bool           `json:"stream"`
+	MaxOutputTokens   any            `json:"max_output_tokens"`
+	Reasoning         map[string]any `json:"reasoning"`
+	Temperature       any            `json:"temperature"`
+	TopP              any            `json:"top_p"`
+	Tools             any            `json:"tools"`
+	ToolChoice        any            `json:"tool_choice"`
+	Metadata          any            `json:"metadata"`
+	FallbackTimeoutMS any            `json:"fallback_timeout_ms"`
+	AffinityKey       string         `json:"affinity_key"`
+	ForceApiSupport   *bool          `json:"force_api_support"`
 }
 
 func chatKwargs(req *chatRequest) providers.Kwargs {
@@ -66,10 +73,25 @@ func chatKwargs(req *chatRequest) providers.Kwargs {
 	put("top_p", req.TopP)
 	put("stop", req.Stop)
 	put("reasoning_effort", req.ReasoningEffort)
+	put("_fallback_timeout_ms", req.FallbackTimeoutMS)
+	if strings.TrimSpace(req.AffinityKey) != "" {
+		kw["_affinity_key"] = strings.TrimSpace(req.AffinityKey)
+	}
 	if req.ForceApiSupport != nil {
 		kw["_force_api_support"] = *req.ForceApiSupport
 	}
 	return kw
+}
+
+func fallbackContext(r *http.Request, timeout any, affinity string) context.Context {
+	if header := strings.TrimSpace(r.Header.Get("X-LLMGW-Fallback-Timeout-Ms")); header != "" {
+		timeout = header
+	}
+	if header := strings.TrimSpace(r.Header.Get("X-LLMGW-Affinity-Key")); header != "" {
+		affinity = header
+	}
+	milliseconds, _ := strconv.ParseInt(fmt.Sprint(timeout), 10, 64)
+	return router.WithFallbackOptions(r.Context(), time.Duration(milliseconds)*time.Millisecond, affinity)
 }
 
 func providerMessages(messages []map[string]any) []providers.Message {
@@ -81,6 +103,17 @@ func providerMessages(messages []map[string]any) []providers.Message {
 		out = append(out, providers.Message(m))
 	}
 	return out
+}
+
+func requestHasTools(value any) bool {
+	switch tools := value.(type) {
+	case []any:
+		return len(tools) > 0
+	case []map[string]any:
+		return len(tools) > 0
+	default:
+		return false
+	}
 }
 
 func handleChat(w http.ResponseWriter, r *http.Request) {
@@ -138,6 +171,8 @@ func responsesToChatRequest(rr *responsesRequest) *chatRequest {
 		Tools:               rr.Tools,
 		ToolChoice:          rr.ToolChoice,
 		Metadata:            rr.Metadata,
+		FallbackTimeoutMS:   rr.FallbackTimeoutMS,
+		AffinityKey:         rr.AffinityKey,
 		ForceApiSupport:     rr.ForceApiSupport,
 	}
 }
@@ -165,25 +200,24 @@ func chatDispatch(w http.ResponseWriter, r *http.Request, req *chatRequest, prin
 		writeError(w, polStatus, polMsg)
 		return
 	}
-
-	// Capability-aware routing: a multimodal request must land on a vision-capable
-	// target. Filter the failover chain to vision models; fail clearly if none.
-	if requestIsMultimodal(req.Messages) {
-		vt := filterVisionTargets(targets)
-		if len(vt) == 0 {
-			recordFailureUsage(endpoint, req.Model, principal, 400, "vision_unavailable", started)
-			writeError(w, 400, "This request includes non-text content but no vision-capable model is available in the requested route.")
-			return
-		}
-		targets = vt
-	}
-
-	if req.Stream {
-		streamChatSSE(w, r.Context(), targets, msgs, req.Model, principal, kw, endpoint, started)
+	targets, err = router.FilterCompatibleTargets(targets, principal, router.CompatibilityRequest{
+		Surface: core.ModelSurfaceChatCompletions, Tools: requestHasTools(req.Tools),
+		Vision: requestIsMultimodal(req.Messages), Streaming: req.Stream,
+	})
+	if err != nil {
+		recordFailureUsage(endpoint, req.Model, principal, 400, "compatibility", started)
+		writeError(w, 400, err.Error())
 		return
 	}
 
-	response, served, err := router.ExecuteCompleteContext(r.Context(), targets, msgs, req.Model, principal, kw)
+	ctx := fallbackContext(r, req.FallbackTimeoutMS, req.AffinityKey)
+
+	if req.Stream {
+		streamChatSSE(w, ctx, targets, msgs, req.Model, principal, kw, endpoint, started)
+		return
+	}
+
+	response, served, err := router.ExecuteCompleteContext(ctx, targets, msgs, req.Model, principal, kw)
 	if err != nil {
 		recordFailureUsage(
 			endpoint, req.Model, principal, upstreamErrorStatus(err), "upstream",
