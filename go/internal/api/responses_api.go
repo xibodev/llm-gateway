@@ -14,6 +14,7 @@ import (
 	"llmgw/internal/router"
 
 	"github.com/xibodev/llm-translate"
+	core "github.com/xibodev/llmgw-core"
 )
 
 func handleResponsesAPI(w http.ResponseWriter, r *http.Request) {
@@ -33,6 +34,10 @@ func handleResponsesAPI(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	publicPayload := cloneResponsesPayload(payload)
+	delete(payload, "fallback_timeout_ms")
+	delete(payload, "affinity_key")
+	delete(publicPayload, "fallback_timeout_ms")
+	delete(publicPayload, "affinity_key")
 	if preamble := config.Get().GatewayPreamble; preamble != "" {
 		switch instructions := payload["instructions"].(type) {
 		case string:
@@ -101,22 +106,24 @@ func responsesDispatch(
 			return
 		}
 	}
-	if responsesRequestIsMultimodal(payload) {
-		targets = filterVisionTargets(targets)
-		if len(targets) == 0 {
-			recordFailureUsage("openai.responses", request.Model, principal, 400, "vision_unavailable", started)
-			writeError(w, 400, "This request includes an image but no vision-capable model is available in the requested route.")
-			return
-		}
+	targets, err = router.FilterCompatibleTargets(targets, principal, router.CompatibilityRequest{
+		Surface: core.ModelSurfaceResponses, Tools: requestHasTools(request.Tools),
+		Vision: responsesRequestIsMultimodal(payload), Streaming: request.Stream,
+	})
+	if err != nil {
+		recordFailureUsage("openai.responses", request.Model, principal, 400, "compatibility", started)
+		writeError(w, 400, err.Error())
+		return
 	}
+	ctx := fallbackContext(r, request.FallbackTimeoutMS, request.AffinityKey)
 	if request.Stream {
 		streamResponsesSSE(
-			w, r.Context(), targets, payload, publicPayload, request.Model, principal, started,
+			w, ctx, targets, payload, publicPayload, request.Model, principal, started,
 		)
 		return
 	}
 	response, served, err := router.ExecuteResponsesContext(
-		r.Context(), targets, payload, request.Model, principal,
+		ctx, targets, payload, request.Model, principal,
 	)
 	if err != nil {
 		recordFailureUsage(

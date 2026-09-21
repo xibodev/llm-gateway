@@ -203,6 +203,9 @@ func InvocationFailoverEligible(err error) bool {
 	if !asError(err, &invocationError) {
 		return false
 	}
+	if invocationError.Status == 401 || invocationError.Status == 403 {
+		return false
+	}
 	if invocationError.FailoverEligible || invocationError.Status == 0 {
 		return true
 	}

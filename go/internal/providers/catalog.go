@@ -378,6 +378,19 @@ func CatalogLookupForPrincipal(
 	return ModelInfo{}, false
 }
 
+// CatalogCachedLookupForPrincipal returns only already-known capability data and
+// never performs provider discovery. Dispatch uses it to avoid adding a catalog
+// network call to the request path.
+func CatalogCachedLookupForPrincipal(providerID, model string, principal *config.Principal) (ModelInfo, bool) {
+	models, _ := CatalogCachedForPrincipal(providerID, principal)
+	for _, current := range models {
+		if current.ID == model {
+			return current, true
+		}
+	}
+	return ModelInfo{}, false
+}
+
 // CatalogRefreshedAt reports when a provider's catalog was last refreshed (zero
 // time if never).
 func CatalogRefreshedAt(providerID string) time.Time {

@@ -1,16 +1,20 @@
 package router
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"llmgw/internal/config"
 	"llmgw/internal/iam"
 	"llmgw/internal/providers"
+
+	core "github.com/xibodev/llmgw-core"
 )
 
 func setupEcho(t *testing.T) {
@@ -214,6 +218,93 @@ func TestExecuteCompleteFailover(t *testing.T) {
 	}
 	if recent[0]["served"] != "echo/echo-default" {
 		t.Errorf("served wrong in telemetry: %v", recent[0]["served"])
+	}
+}
+
+func TestGenericFailoverUsesInvocationEligibility(t *testing.T) {
+	for _, status := range []int{http.StatusUnauthorized, http.StatusForbidden, http.StatusTooManyRequests, http.StatusInternalServerError} {
+		t.Run(http.StatusText(status), func(t *testing.T) {
+			t.Setenv("LLMGW_STATE_DIR", t.TempDir())
+			ResetTelemetryState()
+			t.Cleanup(ResetTelemetryState)
+			requests := 0
+			upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				requests++
+				w.WriteHeader(status)
+				_, _ = w.Write([]byte(`{"error":{"message":"fixture"}}`))
+			}))
+			defer upstream.Close()
+			config.Update(func(settings *config.Settings) {
+				settings.Providers = map[string]*config.ProviderConfig{
+					"upstream": {Type: "openai_compatible", BaseURL: upstream.URL},
+					"echo":     {Type: "echo"},
+				}
+				settings.Policies.Defaults = config.ProviderPolicy{RetryMaxAttempts: 1}
+			})
+			providers.ResetProviders()
+			t.Cleanup(providers.ResetProviders)
+			_, served, err := ExecuteComplete([]Target{{Provider: "upstream", Model: "model"}, {Provider: "echo", Model: "echo-default"}}, []providers.Message{{"role": "user", "content": "hi"}}, "route", nil, nil)
+			eligible := status == http.StatusTooManyRequests || status == http.StatusInternalServerError
+			if eligible && (err != nil || served == nil || served.Provider != "echo") {
+				t.Fatalf("eligible status did not fail over: served=%+v err=%v", served, err)
+			}
+			if !eligible && (err == nil || served != nil) {
+				t.Fatalf("definitive status replayed: served=%+v err=%v", served, err)
+			}
+			if requests != 1 {
+				t.Fatalf("requests=%d want=1", requests)
+			}
+		})
+	}
+}
+
+func TestFallbackTimeoutBoundsWholeChain(t *testing.T) {
+	setupEcho(t)
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		time.Sleep(200 * time.Millisecond)
+		w.WriteHeader(http.StatusServiceUnavailable)
+	}))
+	defer upstream.Close()
+	config.Update(func(settings *config.Settings) {
+		settings.Providers["slow"] = &config.ProviderConfig{Type: "openai_compatible", BaseURL: upstream.URL}
+		settings.Policies.Defaults = config.ProviderPolicy{RetryMaxAttempts: 1}
+	})
+	providers.ResetProviders()
+	started := time.Now()
+	ctx := WithFallbackOptions(context.Background(), 20*time.Millisecond, "")
+	_, _, err := ExecuteCompleteContext(ctx, []Target{{Provider: "slow", Model: "model"}, {Provider: "echo", Model: "echo-default"}}, nil, "route", nil, nil)
+	if err == nil || time.Since(started) > time.Second {
+		t.Fatalf("timeout err=%v elapsed=%v", err, time.Since(started))
+	}
+}
+
+func TestCompatibilityFilterExcludesOnlyKnownUnsupported(t *testing.T) {
+	setupEcho(t)
+	unsupported := providers.AdaptModelCapabilities(map[string]any{"chat": true, "tools": false}, []string{"/v1/chat/completions"}, time.Now(), time.Time{})
+	request := CompatibilityRequest{Surface: core.ModelSurfaceChatCompletions, Tools: true}
+	if unsupported.Tools != core.SupportUnsupported || modelCompatible(unsupported, request) {
+		t.Fatal("explicitly unsupported tools were accepted")
+	}
+	filtered, err := FilterCompatibleTargets([]Target{{Provider: "echo", Model: "echo-default"}}, nil, request)
+	if err != nil || len(filtered) != 1 || filtered[0].Provider != "echo" {
+		t.Fatalf("unknown target should remain eligible: targets=%+v err=%v", filtered, err)
+	}
+}
+
+func TestAffinitySelectsDeterministicStart(t *testing.T) {
+	setupEcho(t)
+	targets := []Target{{Provider: "echo", Model: "echo-small"}, {Provider: "echo", Model: "echo-strong"}, {Provider: "echo", Model: "echo-deep"}}
+	var selected Target
+	for range 2 {
+		ctx := WithFallbackOptions(context.Background(), time.Second, "agent-loop")
+		_, served, err := ExecuteCompleteContext(ctx, targets, nil, "route", nil, nil)
+		if err != nil || served == nil {
+			t.Fatal(err)
+		}
+		if selected != (Target{}) && selected != *served {
+			t.Fatalf("affinity moved from %+v to %+v", selected, *served)
+		}
+		selected = *served
 	}
 }
 

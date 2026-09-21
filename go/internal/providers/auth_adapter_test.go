@@ -119,7 +119,7 @@ func TestCopilotInvocationErrorPreservesRetryClassification(t *testing.T) {
 		t.Fatal("Copilot transport error should be retryable")
 	}
 	rejected := copilotInvocationError(&copilotauth.AuthError{Msg: "rejected", StatusCode: 401})
-	if InvocationRetryable(rejected) || !InvocationFailoverEligible(rejected) || UpstreamStatus(rejected) != 401 {
+	if InvocationRetryable(rejected) || InvocationFailoverEligible(rejected) || UpstreamStatus(rejected) != 401 {
 		t.Fatalf("Copilot rejection retry=%v failover=%v status=%d", InvocationRetryable(rejected), InvocationFailoverEligible(rejected), UpstreamStatus(rejected))
 	}
 }

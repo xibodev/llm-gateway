@@ -168,7 +168,7 @@ func TestOpenAIRejectsHTTP200SoftError(t *testing.T) {
 	}
 }
 
-func TestV043RefreshedOAuthRejectionRemainsFailoverEligible(t *testing.T) {
+func TestV043RefreshedOAuthRejectionIsDefinitive(t *testing.T) {
 	for name, invoke := range map[string]func(OpenAIProvider) error{
 		"chat": func(provider OpenAIProvider) error {
 			_, err := provider.Complete("model", []Message{{"role": "user", "content": "hi"}}, nil)
@@ -188,7 +188,7 @@ func TestV043RefreshedOAuthRejectionRemainsFailoverEligible(t *testing.T) {
 			}))
 			defer server.Close()
 			err := invoke(OpenAIProvider{auth: v043RefreshAuth{base: server.URL}, Timeout: 2})
-			if err == nil || InvocationRetryable(err) || !InvocationFailoverEligible(err) || UpstreamStatus(err) != http.StatusUnauthorized {
+			if err == nil || InvocationRetryable(err) || InvocationFailoverEligible(err) || UpstreamStatus(err) != http.StatusUnauthorized {
 				t.Fatalf("error=%v retry=%v failover=%v status=%d", err, InvocationRetryable(err), InvocationFailoverEligible(err), UpstreamStatus(err))
 			}
 			if requests != 2 {
