@@ -118,6 +118,11 @@ func serve() {
 			migrated.Keys, migrated.Projects, migrated.Principals,
 		)
 	}
+	externalKeysStop, err := iam.StartExternalKeysFromEnv(context.Background())
+	if err != nil {
+		log.Fatalf("initialize external gateway keys: %v", err)
+	}
+	defer externalKeysStop()
 	retentionStop := startRetention()
 	defer retentionStop()
 	rosterStop := roster.Default().Start(context.Background())
