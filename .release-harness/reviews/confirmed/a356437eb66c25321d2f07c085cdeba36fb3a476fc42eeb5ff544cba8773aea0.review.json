@@ -1,0 +1,77 @@
+{
+  "schema_version": "1.0.0",
+  "mode": "baseline",
+  "contract": {
+    "digest": "31b393ab3e80162226619c441694573993ac618382d74642101484a0bf2e9c80"
+  },
+  "authoring_provenance": {
+    "status": "established",
+    "path": ".release-harness/drafts/llm-gateway.record.json",
+    "digest": "6732ddf3dc8236b974e2aae5f81b546d89c2a466b6fb0a368d76620955bf981e"
+  },
+  "sources": [
+    {
+      "source_id": "primary",
+      "status": "established",
+      "repository_identity": "https://github.com/xibodev/llm-gateway.git",
+      "head_commit": "f8be211b7410495e04327cce720e85cd5b58988e",
+      "head_tree": "e2fd3f4c6ffb051c0fad4f1c6bc80144154c6297",
+      "reviewed_source_digest": "4a36d9a888bada1c3796c41fabe1a53f7c1376b1f5be3adcf2437d7fd8e76b83",
+      "changed_paths": []
+    }
+  ],
+  "facts": [
+    {
+      "id": "responses-reasoning-preservation",
+      "claim": "Responses-to-Chat conversion treats a reasoning item as advisory omission when a normal answer message is preserved, and anonymous Responses accumulation no longer fabricates completion text for empty output.",
+      "status": "observed",
+      "evidence": {
+        "source": "llm-translate/compatibility_conversions.go; go/internal/providers/openai.go; focused and full Go tests"
+      }
+    }
+  ],
+  "impact": {
+    "assertions": [
+      {
+        "id": "A1",
+        "impact": "unchanged",
+        "supported_by": [
+          "responses-reasoning-preservation"
+        ]
+      },
+      {
+        "id": "A2",
+        "impact": "unchanged",
+        "supported_by": [
+          "responses-reasoning-preservation"
+        ]
+      },
+      {
+        "id": "A3",
+        "impact": "unchanged",
+        "supported_by": [
+          "responses-reasoning-preservation"
+        ]
+      },
+      {
+        "id": "A4",
+        "impact": "unchanged",
+        "supported_by": [
+          "responses-reasoning-preservation"
+        ]
+      }
+    ],
+    "requires": [],
+    "possible_binding_changes": []
+  },
+  "questions": [],
+  "conclusion": {
+    "action": "reuse_contract",
+    "summary": "The correction preserves real Responses answer text and fails honestly on empty terminal output without changing accepted CLI or model-list behavior."
+  },
+  "proposed": {
+    "by": "agent-session",
+    "at": "2026-09-21T05:17:02.688Z"
+  },
+  "digest": "a356437eb66c25321d2f07c085cdeba36fb3a476fc42eeb5ff544cba8773aea0"
+}
