@@ -4,6 +4,11 @@ Copyright 2026 Xibodev
 
 This product includes software developed at Xibodev.
 
+This product includes an adapted external API-key snapshot and reload pattern
+from openziti/llm-gateway, Copyright NetFoundry Inc., licensed under the Apache
+License, Version 2.0. The implementation was modified for this product's IAM
+model, standard-library-only dependencies, and environment-based configuration.
+
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
 You may obtain a copy of the License at

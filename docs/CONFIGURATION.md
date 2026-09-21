@@ -115,6 +115,12 @@ backups and pruned with the usage-retention window.
 | `LLMGW_CONFIG_SEED` | unset | Read-once seed copied only when `LLMGW_CONFIG` is missing. |
 | `LLMGW_API_KEY` | unset | Static recovery/administrator key and accepted data-plane key. |
 | `LLMGW_API_KEYS` | unset | Comma-separated additional static gateway keys. |
+| `LLMGW_EXTERNAL_KEYS_FILE` | unset | Opt in to a reloadable version-1 JSON gateway-key document. |
+| `LLMGW_EXTERNAL_KEYS_URL` | unset | Opt in to a reloadable version-1 JSON gateway-key endpoint; supports ETag/304. |
+| `LLMGW_EXTERNAL_KEYS_HTTP_TOKEN` | unset | Optional bearer credential for the external key endpoint. |
+| `LLMGW_EXTERNAL_KEYS_REFRESH_INTERVAL` | `30s` | File/HTTP key snapshot refresh interval. |
+| `LLMGW_EXTERNAL_KEYS_HTTP_TIMEOUT` | `5s` | Per-request deadline for the external key endpoint. |
+| `LLMGW_EXTERNAL_KEYS_MAX_STALENESS` | `0` | Optional duration after which an unrefreshed source is excluded (fail closed); zero keeps last-known-good indefinitely. |
 | `LLMGW_ALLOW_UNAUTHENTICATED_API` | `0` | Disable data-plane authentication for deliberate local use only; never disables admin authentication. |
 | `LLMGW_GATEWAY_PREAMBLE` | unset | Optional gateway-owned system preamble. |
 | `LLMGW_ANONYMOUS_PROVIDER_AUTOMATION` | `false` | Deployment default for connecting and checking reviewed no-key providers. Admin Settings can override it. |
@@ -157,6 +163,15 @@ values at startup (see [Provider resilience](#provider-resilience)).
 Environment-only secrets are not written to YAML. Prefer environment variables
 for other process settings so an administration save cannot turn a runtime
 secret into file content.
+
+External key documents are opt-in and replace their source atomically after a
+successful refresh. File documents use `{"version":1,"keys":[...]}`; HTTP
+documents also require `count` equal to the number of keys. A key record requires
+`name`, an existing active `project` slug, and exactly one of `key` or `key_sha256`, and may set
+`expires_at` (RFC3339), `allowed_models`, `allowed_routes`, and
+`allowed_providers`. Failed refreshes retain the last accepted snapshot unless
+`LLMGW_EXTERNAL_KEYS_MAX_STALENESS` excludes it. Existing administrator and IAM
+keys keep precedence and behavior.
 
 Provider keys entered in the administration UI create an encrypted authoritative
 connection when credential encryption is configured. The current compatibility

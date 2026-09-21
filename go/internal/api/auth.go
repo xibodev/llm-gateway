@@ -88,7 +88,7 @@ func requireAPIKey(r *http.Request) (*config.Principal, int, string) {
 	if err != nil {
 		return nil, http.StatusInternalServerError, "Identity store unavailable."
 	}
-	if len(adminKeys) == 0 && !hasKeys {
+	if len(adminKeys) == 0 && !hasKeys && !iam.HasExternalAPIKeys() {
 		return nil, http.StatusInternalServerError, "No API key configured. Set LLMGW_API_KEY, " +
 			"mint a project key in /admin, or set LLMGW_ALLOW_UNAUTHENTICATED_API=1 for local use."
 	}

@@ -179,7 +179,8 @@ WHERE k.secret_hash=?`, sum[:]).Scan(
 		&projectID, &projectSlug, &projectStatus, &role, &scopeJSON,
 	)
 	if err == sql.ErrNoRows {
-		return nil, false, nil
+		principal, found := resolveExternalAPIKey(token)
+		return principal, found, nil
 	}
 	if err != nil {
 		return nil, false, err
