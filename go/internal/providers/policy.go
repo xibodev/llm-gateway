@@ -4,6 +4,9 @@ import (
 	"context"
 	"errors"
 	"math"
+	"net/http"
+	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -107,6 +110,26 @@ func (r *ResilientProvider) nextBackoff(attempt int) float64 {
 	return math.Min(raw, r.policy.RetryMaxBackoffSeconds)
 }
 
+func (r *ResilientProvider) retryDelay(err error, attempt int) time.Duration {
+	delay := time.Duration(r.nextBackoff(attempt) * float64(time.Second))
+	retryAfter := strings.TrimSpace(InvocationRetryAfter(err))
+	if retryAfter == "" {
+		return delay
+	}
+	if seconds, parseErr := strconv.ParseInt(retryAfter, 10, 64); parseErr == nil {
+		if serverDelay := time.Duration(seconds) * time.Second; serverDelay > delay {
+			return serverDelay
+		}
+		return delay
+	}
+	if retryAt, parseErr := http.ParseTime(retryAfter); parseErr == nil {
+		if serverDelay := time.Until(retryAt); serverDelay > delay {
+			return serverDelay
+		}
+	}
+	return delay
+}
+
 func waitForRetry(ctx context.Context, delay time.Duration) error {
 	if err := ctx.Err(); err != nil {
 		return err
@@ -170,7 +193,7 @@ func (r *ResilientProvider) CompleteContextWithObservation(
 			return nil, observation, err
 		}
 		if attempt < attempts {
-			if waitErr := waitForRetry(ctx, time.Duration(r.nextBackoff(attempt)*float64(time.Second))); waitErr != nil {
+			if waitErr := waitForRetry(ctx, r.retryDelay(err, attempt)); waitErr != nil {
 				return nil, observation, waitErr
 			}
 			continue
@@ -222,7 +245,7 @@ func (r *ResilientProvider) CompleteResponsesContext(
 			return nil, observation, err
 		}
 		if attempt < attempts {
-			if waitErr := waitForRetry(ctx, time.Duration(r.nextBackoff(attempt)*float64(time.Second))); waitErr != nil {
+			if waitErr := waitForRetry(ctx, r.retryDelay(err, attempt)); waitErr != nil {
 				return nil, observation, waitErr
 			}
 			continue
@@ -280,7 +303,7 @@ func (r *ResilientProvider) StreamResponsesContext(
 			return nil, observation, err
 		}
 		if attempt < attempts {
-			if waitErr := waitForRetry(ctx, time.Duration(r.nextBackoff(attempt)*float64(time.Second))); waitErr != nil {
+			if waitErr := waitForRetry(ctx, r.retryDelay(err, attempt)); waitErr != nil {
 				return nil, observation, waitErr
 			}
 			continue
@@ -329,7 +352,7 @@ func (r *ResilientProvider) StreamContext(ctx context.Context, model string, mes
 			return nil, err
 		}
 		if attempt < attempts {
-			if waitErr := waitForRetry(ctx, time.Duration(r.nextBackoff(attempt)*float64(time.Second))); waitErr != nil {
+			if waitErr := waitForRetry(ctx, r.retryDelay(err, attempt)); waitErr != nil {
 				return nil, waitErr
 			}
 			continue
@@ -378,7 +401,7 @@ func (r *ResilientProvider) SynthesizeContext(ctx context.Context, voice, text, 
 		if !r.retryNativeInvocation(err, attempt, attempts) {
 			return nil, "", err
 		}
-		if waitErr := waitForRetry(ctx, time.Duration(r.nextBackoff(attempt)*float64(time.Second))); waitErr != nil {
+		if waitErr := waitForRetry(ctx, r.retryDelay(err, attempt)); waitErr != nil {
 			return nil, "", waitErr
 		}
 	}
@@ -472,7 +495,7 @@ func (r *ResilientProvider) PollVideoContext(ctx context.Context, operation stri
 		if !r.retryNativeInvocation(err, attempt, attempts) {
 			return VideoJob{}, err
 		}
-		if waitErr := waitForRetry(ctx, time.Duration(r.nextBackoff(attempt)*float64(time.Second))); waitErr != nil {
+		if waitErr := waitForRetry(ctx, r.retryDelay(err, attempt)); waitErr != nil {
 			return VideoJob{}, waitErr
 		}
 	}

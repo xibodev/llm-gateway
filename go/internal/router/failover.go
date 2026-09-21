@@ -465,10 +465,11 @@ func recordChain(requested string, attempts []attempt, served *Target, principal
 
 // AttemptTrace is a secret-free record of one complete-request routing attempt.
 type AttemptTrace struct {
-	Provider  string `json:"provider"`
-	Model     string `json:"model"`
-	Status    string `json:"status"`
-	Throttled bool   `json:"throttled,omitempty"`
+	Provider   string `json:"provider"`
+	Model      string `json:"model"`
+	Status     string `json:"status"`
+	Throttled  bool   `json:"throttled,omitempty"`
+	DurationMS int64  `json:"duration_ms"`
 }
 
 // ExecuteComplete runs the chain for a non-streaming request. Returns the
@@ -1040,11 +1041,12 @@ func executeCompleteWithTrace(ctx context.Context, targets []Target, messages []
 			break
 		}
 		t := targets[i]
+		attemptStarted := time.Now()
 		prov, err := providers.GetProviderForPrincipal(t.Provider, principal)
 		if err != nil {
 			throttled := providers.IsThrottle(err)
 			attempts = append(attempts, attempt{Provider: t.Provider, Model: t.Model, OK: false, Error: truncate(err.Error()), Throttled: throttled})
-			trace = append(trace, AttemptTrace{Provider: t.Provider, Model: t.Model, Status: "failed", Throttled: throttled})
+			trace = append(trace, AttemptTrace{Provider: t.Provider, Model: t.Model, Status: "failed", Throttled: throttled, DurationMS: time.Since(attemptStarted).Milliseconds()})
 			lastErr = err
 			if shouldAdvance(err) {
 				continue
@@ -1055,7 +1057,7 @@ func executeCompleteWithTrace(ctx context.Context, targets []Target, messages []
 		if err != nil {
 			throttled := providers.IsThrottle(err)
 			attempts = append(attempts, attempt{Provider: t.Provider, Model: t.Model, OK: false, Error: truncate(err.Error()), Throttled: throttled})
-			trace = append(trace, AttemptTrace{Provider: t.Provider, Model: t.Model, Status: "failed", Throttled: throttled})
+			trace = append(trace, AttemptTrace{Provider: t.Provider, Model: t.Model, Status: "failed", Throttled: throttled, DurationMS: time.Since(attemptStarted).Milliseconds()})
 			lastErr = err
 			if shouldAdvance(err) {
 				continue
@@ -1063,7 +1065,7 @@ func executeCompleteWithTrace(ctx context.Context, targets []Target, messages []
 			break
 		}
 		attempts = append(attempts, attempt{Provider: t.Provider, Model: t.Model, OK: true})
-		trace = append(trace, AttemptTrace{Provider: t.Provider, Model: t.Model, Status: "served"})
+		trace = append(trace, AttemptTrace{Provider: t.Provider, Model: t.Model, Status: "served", DurationMS: time.Since(attemptStarted).Milliseconds()})
 		served := t
 		recordChain(requested, attempts, &served, principal)
 		return result, &served, trace, nil

@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -325,6 +326,64 @@ func setupResponsesAPITest(t *testing.T) *httptest.Server {
 		providers.ResetProviders()
 	})
 	return server
+}
+
+func TestNonStreamingChatReturnsSafeLatencyDiagnostics(t *testing.T) {
+	server := setupResponsesAPITest(t)
+	body := `{"model":"echo/echo-default","messages":[{"role":"user","content":"hello"}],"tools":[{"type":"function","function":{"name":"lookup","parameters":{"type":"object"}}}]}`
+	request, err := http.NewRequest(http.MethodPost, server.URL+"/v1/chat/completions", strings.NewReader(body))
+	if err != nil {
+		t.Fatal(err)
+	}
+	request.Header.Set("Authorization", "Bearer test-secret")
+	request.Header.Set("Content-Type", "application/json")
+	response, err := http.DefaultClient.Do(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer response.Body.Close()
+	if response.StatusCode != http.StatusOK {
+		raw, _ := io.ReadAll(response.Body)
+		t.Fatalf("status=%d body=%s", response.StatusCode, raw)
+	}
+	for _, name := range []string{
+		"X-LLMGW-TTFB-Ms", "X-LLMGW-Duration-Ms", "X-LLMGW-Attempts",
+		"X-LLMGW-Fallback-Ms", "X-LLMGW-Prompt-Bytes", "X-LLMGW-Tool-Schema-Bytes",
+	} {
+		value := response.Header.Get(name)
+		if value == "" {
+			t.Errorf("missing %s", name)
+			continue
+		}
+		if _, err := strconv.ParseInt(value, 10, 64); err != nil {
+			t.Errorf("%s=%q is not numeric", name, value)
+		}
+	}
+	if response.Header.Get("X-LLMGW-Attempts") != "1" || response.Header.Get("X-LLMGW-Fallback-Ms") != "0" {
+		t.Fatalf("attempts=%q fallback=%q", response.Header.Get("X-LLMGW-Attempts"), response.Header.Get("X-LLMGW-Fallback-Ms"))
+	}
+}
+
+func TestStreamingChatReturnsPreBodyDiagnostics(t *testing.T) {
+	server := setupResponsesAPITest(t)
+	request, err := http.NewRequest(http.MethodPost, server.URL+"/v1/chat/completions", strings.NewReader(
+		`{"model":"echo/echo-default","messages":[{"role":"user","content":"hello"}],"stream":true}`,
+	))
+	if err != nil {
+		t.Fatal(err)
+	}
+	request.Header.Set("Authorization", "Bearer test-secret")
+	request.Header.Set("Content-Type", "application/json")
+	response, err := http.DefaultClient.Do(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer response.Body.Close()
+	for _, name := range []string{"X-LLMGW-TTFB-Ms", "X-LLMGW-Prompt-Bytes", "X-LLMGW-Tool-Schema-Bytes"} {
+		if _, err := strconv.ParseInt(response.Header.Get(name), 10, 64); err != nil {
+			t.Errorf("%s=%q is not numeric", name, response.Header.Get(name))
+		}
+	}
 }
 
 func TestResponsesEndpointReturnsResponsesEnvelope(t *testing.T) {

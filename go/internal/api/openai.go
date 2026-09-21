@@ -116,6 +116,33 @@ func requestHasTools(value any) bool {
 	}
 }
 
+func payloadBytes(value any) int {
+	if value == nil {
+		return 0
+	}
+	encoded, err := json.Marshal(value)
+	if err != nil {
+		return 0
+	}
+	return len(encoded)
+}
+
+func setChatDiagnostics(w http.ResponseWriter, started time.Time, messages []providers.Message, tools any, trace []router.AttemptTrace) {
+	duration := time.Since(started).Milliseconds()
+	fallbackMS := int64(0)
+	for _, attempt := range trace {
+		if attempt.Status != "served" {
+			fallbackMS += attempt.DurationMS
+		}
+	}
+	w.Header().Set("X-LLMGW-TTFB-Ms", strconv.FormatInt(duration, 10))
+	w.Header().Set("X-LLMGW-Duration-Ms", strconv.FormatInt(duration, 10))
+	w.Header().Set("X-LLMGW-Attempts", strconv.Itoa(len(trace)))
+	w.Header().Set("X-LLMGW-Fallback-Ms", strconv.FormatInt(fallbackMS, 10))
+	w.Header().Set("X-LLMGW-Prompt-Bytes", strconv.Itoa(payloadBytes(messages)))
+	w.Header().Set("X-LLMGW-Tool-Schema-Bytes", strconv.Itoa(payloadBytes(tools)))
+}
+
 func handleChat(w http.ResponseWriter, r *http.Request) {
 	principal, ok := authed(w, r)
 	if !ok {
@@ -257,7 +284,8 @@ func chatDispatch(w http.ResponseWriter, r *http.Request, req *chatRequest, prin
 		return
 	}
 
-	response, served, err := router.ExecuteCompleteContext(ctx, targets, msgs, req.Model, principal, kw)
+	response, served, trace, err := router.ExecuteCompleteWithTraceContext(ctx, targets, msgs, req.Model, principal, kw)
+	setChatDiagnostics(w, started, msgs, req.Tools, trace)
 	if err != nil {
 		recordFailureUsage(
 			endpoint, req.Model, principal, upstreamErrorStatus(err), "upstream",
@@ -391,6 +419,9 @@ func streamChatSSE(w http.ResponseWriter, ctx context.Context, targets []router.
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("Cache-Control", "no-cache")
 	w.Header().Set("Connection", "keep-alive")
+	w.Header().Set("X-LLMGW-TTFB-Ms", strconv.FormatInt(time.Since(started).Milliseconds(), 10))
+	w.Header().Set("X-LLMGW-Prompt-Bytes", strconv.Itoa(payloadBytes(msgs)))
+	w.Header().Set("X-LLMGW-Tool-Schema-Bytes", strconv.Itoa(payloadBytes(kw["tools"])))
 	w.WriteHeader(200)
 
 	usageAcc := map[string]int{"prompt_tokens": 0, "completion_tokens": 0}
