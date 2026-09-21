@@ -74,6 +74,15 @@ func ProviderConfigurationIssue(providerID string) string {
 	if entry.RequiresBaseURL && strings.TrimSpace(cfg.BaseURL) == "" {
 		return entry.Label + " requires a base URL."
 	}
+	if strings.EqualFold(strings.TrimSpace(cfg.Type), "ollama") {
+		base := cfg.BaseURL
+		if strings.TrimSpace(base) == "" {
+			base = config.Get().OllamaBaseURL
+		}
+		if issue := ollamaBaseURLIssue(base); issue != "" {
+			return issue
+		}
+	}
 	switch registryID {
 	case "vertex_ai":
 		if strings.TrimSpace(cfg.Project) == "" {

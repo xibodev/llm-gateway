@@ -85,6 +85,36 @@ func TestAnonymousAPIKeyRecognizesSentinels(t *testing.T) {
 	}
 }
 
+func TestZenModeClassificationSeparatesAccessAndRequestIntent(t *testing.T) {
+	if got := zenAccessMode(true, true); got != zenAccessAnonymous {
+		t.Fatalf("anonymous access mode=%q", got)
+	}
+	if got := zenAccessMode(true, false); got != zenAccessKeyed {
+		t.Fatalf("keyed access mode=%q", got)
+	}
+	if got := zenAccessMode(false, true); got != "not_zen" {
+		t.Fatalf("non-Zen access mode=%q", got)
+	}
+
+	ordinary := []Message{{"role": "user", "content": "Explain this failure"}}
+	if got := zenChatRequestMode(ordinary); got != zenRequestOrdinary {
+		t.Fatalf("ordinary first turn mode=%q", got)
+	}
+	title := []Message{
+		{"role": "system", "content": "You are a title generator. Output one title."},
+		{"role": "user", "content": "Explain this failure"},
+	}
+	if got := zenChatRequestMode(title); got != zenRequestTitle {
+		t.Fatalf("explicit title turn mode=%q", got)
+	}
+	if got := zenResponsesRequestMode(map[string]any{"input": "Explain this failure"}); got != zenRequestOrdinary {
+		t.Fatalf("ordinary Responses mode=%q", got)
+	}
+	if got := zenResponsesRequestMode(map[string]any{"instructions": "You are a title generator"}); got != zenRequestTitle {
+		t.Fatalf("title Responses mode=%q", got)
+	}
+}
+
 func TestAnonymousZenCatalogUsesActiveZeroCostMetadata(t *testing.T) {
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/models" {

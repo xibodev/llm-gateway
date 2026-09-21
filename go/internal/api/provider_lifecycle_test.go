@@ -142,6 +142,28 @@ func TestProviderVerificationAcceptsTextPartAcknowledgement(t *testing.T) {
 	}
 }
 
+func TestProviderEvidenceDoesNotPromoteCatalogDiscoveryToCompletion(t *testing.T) {
+	for _, scenario := range []struct {
+		name                        string
+		models                      int
+		attempted                   bool
+		succeeded                   bool
+		wantCatalog, wantCompletion string
+	}{
+		{name: "empty catalog", wantCatalog: "empty", wantCompletion: "not_probed"},
+		{name: "catalog only", models: 2, wantCatalog: "discovered", wantCompletion: "not_probed"},
+		{name: "completion failed", models: 2, attempted: true, wantCatalog: "discovered", wantCompletion: "failed"},
+		{name: "completion verified", models: 2, attempted: true, succeeded: true, wantCatalog: "discovered", wantCompletion: "verified"},
+	} {
+		t.Run(scenario.name, func(t *testing.T) {
+			evidence := providers.ClassifyProviderEvidence(nil, scenario.models, scenario.attempted, scenario.succeeded)
+			if evidence.Authentication != "accepted" || evidence.Catalog != scenario.wantCatalog || evidence.Completion != scenario.wantCompletion {
+				t.Fatalf("evidence=%+v", evidence)
+			}
+		})
+	}
+}
+
 func TestGoogleVerificationDoesNotStarveThinkingOutputBudget(t *testing.T) {
 	t.Setenv("LLMGW_STATE_DIR", t.TempDir())
 	iam.ResetForTests()
@@ -324,7 +346,9 @@ func TestProviderProbeRecordsCatalogFailureAndAccountRecovery(t *testing.T) {
 
 	catalogMode.Store(1)
 	empty := runProviderProbe("fixture", "repair", principal)
-	if empty["success"] != false || empty["failure_code"] != "catalog_empty" {
+	if empty["success"] != false || empty["failure_code"] != "catalog_empty" ||
+		empty["authentication_state"] != "accepted" || empty["catalog_evidence"] != "empty" ||
+		empty["completion_evidence"] != "not_probed" {
 		t.Fatalf("empty probe=%+v", empty)
 	}
 	state, found, err = iam.ProviderAccountStateByConnection(connection.ID)
@@ -335,7 +359,9 @@ func TestProviderProbeRecordsCatalogFailureAndAccountRecovery(t *testing.T) {
 
 	catalogMode.Store(2)
 	recovered := runProviderProbe("fixture", "repair", principal)
-	if recovered["success"] != true || recovered["model_count"] != 1 {
+	if recovered["success"] != true || recovered["model_count"] != 1 ||
+		recovered["authentication_state"] != "accepted" || recovered["catalog_evidence"] != "discovered" ||
+		recovered["completion_evidence"] != "not_probed" {
 		t.Fatalf("recovered probe=%+v", recovered)
 	}
 	state, found, err = iam.ProviderAccountStateByConnection(connection.ID)

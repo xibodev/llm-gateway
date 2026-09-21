@@ -7,6 +7,8 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+
+	"llmgw/internal/config"
 )
 
 func TestOllamaStreamNormalAndOversizedRecords(t *testing.T) {
@@ -45,5 +47,43 @@ func TestOllamaStreamNormalAndOversizedRecords(t *testing.T) {
 				t.Fatalf("unsafe error = %#v", sizeErr)
 			}
 		})
+	}
+}
+
+func TestOllamaNativeRootDiagnostics(t *testing.T) {
+	for _, scenario := range []struct {
+		base, wantIssue string
+	}{
+		{base: "http://127.0.0.1:11434"},
+		{base: "http://host.docker.internal:11434"},
+		{base: "http://127.0.0.1:11434/v1", wantIssue: "not the OpenAI-compatible /v1 URL"},
+		{base: "http://127.0.0.1:11434/api", wantIssue: "with no path"},
+		{base: "127.0.0.1:11434", wantIssue: "must be an http(s)"},
+	} {
+		t.Run(scenario.base, func(t *testing.T) {
+			issue := ollamaBaseURLIssue(scenario.base)
+			if scenario.wantIssue == "" && issue != "" || scenario.wantIssue != "" && !strings.Contains(issue, scenario.wantIssue) {
+				t.Fatalf("issue=%q", issue)
+			}
+		})
+	}
+	if guidance := ollamaProcessBoundaryGuidance("http://localhost:11434"); !strings.Contains(guidance, "container") || !strings.Contains(guidance, "host.docker.internal") {
+		t.Fatalf("loopback guidance=%q", guidance)
+	}
+	if guidance := ollamaProcessBoundaryGuidance("http://ollama:11434"); guidance != "" {
+		t.Fatalf("non-loopback guidance=%q", guidance)
+	}
+}
+
+func TestOllamaConfigurationIssueRejectsOpenAICompatiblePath(t *testing.T) {
+	oldProviders := config.Get().Providers
+	config.Update(func(s *config.Settings) {
+		s.Providers = map[string]*config.ProviderConfig{
+			"ollama-fixture": {Type: "ollama", BaseURL: "http://127.0.0.1:11434/v1"},
+		}
+	})
+	t.Cleanup(func() { config.Update(func(s *config.Settings) { s.Providers = oldProviders }) })
+	if issue := ProviderConfigurationIssue("ollama-fixture"); !strings.Contains(issue, "remove /v1") {
+		t.Fatalf("configuration issue=%q", issue)
 	}
 }

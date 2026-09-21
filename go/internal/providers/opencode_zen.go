@@ -8,6 +8,42 @@ import (
 	"strings"
 )
 
+const (
+	zenAccessAnonymous = "anonymous"
+	zenAccessKeyed     = "keyed"
+	zenRequestOrdinary = "ordinary_assistant"
+	zenRequestTitle    = "title_generation"
+)
+
+func zenAccessMode(isZen, anonymous bool) string {
+	if !isZen {
+		return "not_zen"
+	}
+	if anonymous {
+		return zenAccessAnonymous
+	}
+	return zenAccessKeyed
+}
+
+func zenChatRequestMode(messages []Message) string {
+	for _, message := range messages {
+		role, _ := message["role"].(string)
+		content, _ := message["content"].(string)
+		if (role == "system" || role == "developer") && strings.Contains(content, "You are a title generator") {
+			return zenRequestTitle
+		}
+	}
+	return zenRequestOrdinary
+}
+
+func zenResponsesRequestMode(payload map[string]any) string {
+	instructions, _ := payload["instructions"].(string)
+	if strings.Contains(instructions, "You are a title generator") {
+		return zenRequestTitle
+	}
+	return zenRequestOrdinary
+}
+
 const openCodeModelsDevURL = "https://models.dev/api.json"
 
 type openCodeModelsDevProvider struct {
