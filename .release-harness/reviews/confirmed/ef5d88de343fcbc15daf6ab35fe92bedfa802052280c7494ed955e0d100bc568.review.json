@@ -1,0 +1,107 @@
+{
+  "schema_version": "1.0.0",
+  "mode": "baseline",
+  "contract": {
+    "digest": "31b393ab3e80162226619c441694573993ac618382d74642101484a0bf2e9c80"
+  },
+  "authoring_provenance": {
+    "status": "established",
+    "path": ".release-harness/drafts/llm-gateway.record.json",
+    "digest": "6732ddf3dc8236b974e2aae5f81b546d89c2a466b6fb0a368d76620955bf981e"
+  },
+  "sources": [
+    {
+      "source_id": "primary",
+      "status": "established",
+      "repository_identity": "https://github.com/xibodev/llm-gateway.git",
+      "head_commit": "987ff821384870599feebd9a8b33d25fcd1a9926",
+      "head_tree": "a30a2cf25647d24e92fbc9bacb35b4f514fbd305",
+      "reviewed_source_digest": "3892b812b5ce146fd777e49e03a93d1491efa0bff641345e792970ba0a49534f",
+      "changed_paths": []
+    }
+  ],
+  "facts": [
+    {
+      "id": "provider-connection-lifecycle",
+      "claim": "Provider onboarding now separates authentication, catalog discovery, inference verification, typed model capabilities, and exact target publication while preserving existing public data-plane paths.",
+      "status": "observed",
+      "evidence": {
+        "source": "go/internal/providers/provider_orchestrator.go; go/internal/api/provider_status.go; go/internal/api/models.go"
+      }
+    },
+    {
+      "id": "translation-routing-safety",
+      "claim": "Cross-protocol dispatch rejects material conversion loss, filters known-incompatible targets, stops on definitive errors, and bounds failover duration.",
+      "status": "observed",
+      "evidence": {
+        "source": "go/internal/router/failover.go; go/internal/providers/openai.go; go/internal/providers/anthropic.go"
+      }
+    },
+    {
+      "id": "console-models-workflow",
+      "claim": "The console Models workflow owns provider connection state, catalogs, inference tests, Playground handoff, and explicit disconnect while legacy credential URLs redirect safely.",
+      "status": "observed",
+      "evidence": {
+        "source": "go/internal/web/console/src/pages/ProviderDetail.tsx; go/internal/web/console/src/App.tsx"
+      }
+    },
+    {
+      "id": "external-key-source",
+      "claim": "Optional external key sources preserve existing administrator and IAM key behavior while adding strict atomic snapshots, last-known-good state, expiry, project policy, and staleness enforcement.",
+      "status": "observed",
+      "evidence": {
+        "source": "go/internal/iam/external_keys.go; go/internal/iam/external_keys_test.go"
+      }
+    }
+  ],
+  "impact": {
+    "assertions": [
+      {
+        "id": "A1",
+        "impact": "unchanged",
+        "supported_by": [
+          "provider-connection-lifecycle",
+          "translation-routing-safety"
+        ]
+      },
+      {
+        "id": "A2",
+        "impact": "unchanged",
+        "supported_by": [
+          "provider-connection-lifecycle",
+          "translation-routing-safety"
+        ]
+      },
+      {
+        "id": "A3",
+        "impact": "unchanged",
+        "supported_by": [
+          "provider-connection-lifecycle",
+          "console-models-workflow",
+          "external-key-source"
+        ]
+      },
+      {
+        "id": "A4",
+        "impact": "unchanged",
+        "supported_by": [
+          "provider-connection-lifecycle",
+          "console-models-workflow",
+          "external-key-source"
+        ]
+      }
+    ],
+    "requires": [],
+    "possible_binding_changes": []
+  },
+  "questions": [],
+  "conclusion": {
+    "action": "reuse_contract",
+    "summary": "The staging changes strengthen provider onboarding, translation safety, routing evidence, and key loading without changing the accepted CLI health/version or public model-list contract assertions."
+  },
+  "proposed": {
+    "by": "agent-session",
+    "at": "2026-09-21T05:08:30.885Z"
+  },
+  "digest": "ef5d88de343fcbc15daf6ab35fe92bedfa802052280c7494ed955e0d100bc568"
+}
