@@ -115,6 +115,15 @@ test("browser acceptance selects the message composer rather than tool editors",
   assert.doesNotMatch(source, /locator\("\.chat-composer textarea"\)/);
 });
 
+test("human-like UAT uses a gateway-visible mock and syncs catalogs before routes", async () => {
+  const source = await import("node:fs/promises").then(({ readFile }) =>
+    readFile(new URL("../uat-browser-journey.mjs", import.meta.url), "utf8"),
+  );
+  assert.match(source, /LLMGW_UAT_MOCK_BASE_URL/);
+  assert.match(source, /providers\/opencode-zen\/refresh/);
+  assert.match(source, /textarea\[placeholder\^=\"Send a message\"\]/);
+});
+
 test("release policy requires execution but tolerates external outages", () => {
   const required = ["docker-health", "model-sweep-completeness", "model-sweep-evidence", "api-evidence", "route-evidence", "playground-evidence", "restart-persistence", "restart-api-evidence", "cleanup"];
   const base = { schema, mode: "deterministic", execution: { started: true, completed: true, commit: "abc" }, checks: required.map((name) => ({ name, required: true, status: "passed" })), model_sweep: [] };
