@@ -216,6 +216,11 @@ WHERE provider_id=? AND scope_key!=''`, providerID); err != nil {
 			return err
 		}
 		_, err := tx.Exec("DELETE FROM provider_checks WHERE provider_id=?", providerID)
+		if err != nil {
+			return err
+		}
+		_, err = tx.Exec(`UPDATE provider_model_evidence
+SET state='stale' WHERE provider_id=?`, providerID)
 		return err
 	}
 	if _, err := tx.Exec(`
@@ -228,6 +233,13 @@ ON CONFLICT(provider_id,scope_key) DO UPDATE SET generation=generation+1`,
 	}
 	_, err := tx.Exec(
 		"DELETE FROM provider_checks WHERE provider_id=? AND scope_key=?",
+		providerID, scopeKey,
+	)
+	if err != nil {
+		return err
+	}
+	_, err = tx.Exec(
+		"UPDATE provider_model_evidence SET state='stale' WHERE provider_id=? AND scope_key=?",
 		providerID, scopeKey,
 	)
 	return err

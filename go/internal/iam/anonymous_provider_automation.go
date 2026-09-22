@@ -9,6 +9,42 @@ import (
 
 const anonymousProviderAutomationOverrideKey = "anonymous_provider_automation.override"
 
+func AnonymousProviderManaged(providerID string) (bool, error) {
+	db, err := DB()
+	if err != nil {
+		return false, err
+	}
+	key := "anonymous_provider_automation.managed." + strings.TrimSpace(providerID)
+	var count int
+	err = db.QueryRow(`
+SELECT COUNT(*) FROM control_metadata WHERE key=?
+`, key).Scan(&count)
+	return count > 0, err
+}
+
+func MarkAnonymousProviderManaged(providerID string) error {
+	db, err := DB()
+	if err != nil {
+		return err
+	}
+	key := "anonymous_provider_automation.managed." + strings.TrimSpace(providerID)
+	_, err = db.Exec(`
+INSERT INTO control_metadata(key,value,updated_at) VALUES(?,?,?)
+ON CONFLICT(key) DO UPDATE SET value=excluded.value,updated_at=excluded.updated_at`,
+		key, "true", time.Now().Unix())
+	return err
+}
+
+func ClearAnonymousProviderManaged(providerID string) error {
+	db, err := DB()
+	if err != nil {
+		return err
+	}
+	key := "anonymous_provider_automation.managed." + strings.TrimSpace(providerID)
+	_, err = db.Exec("DELETE FROM control_metadata WHERE key=?", key)
+	return err
+}
+
 func AnonymousProviderAutomationOverride() (string, bool, error) {
 	db, err := DB()
 	if err != nil {

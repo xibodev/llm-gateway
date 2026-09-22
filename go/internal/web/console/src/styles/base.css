@@ -673,6 +673,9 @@ tbody tr:last-child td { border-bottom: 0; }
 .chat-turn > header { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; margin-bottom: 5px; color: #5d6673; font-size: 0.7rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; }
 .chat-turn > header small { text-transform: none; letter-spacing: 0; font-weight: 400; color: #7b8490; }
 .chat-turn p { margin: 0; color: #2f3945; font-size: 0.85rem; line-height: 1.55; white-space: pre-wrap; overflow-wrap: anywhere; }
+.chat-turn__detail { margin-top: 9px; color: #68727e; font-size: 0.74rem; }
+.chat-turn__detail summary { cursor: pointer; font-weight: 650; }
+.chat-turn__detail pre { max-height: 180px; margin: 7px 0 0; overflow: auto; white-space: pre-wrap; }
 .chat-thread__clear { align-self: flex-start; }
 .chat-composer { display: flex; flex-direction: column; gap: 9px; }
 .chat-composer textarea { resize: vertical; }

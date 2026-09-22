@@ -1,6 +1,7 @@
 package api
 
 import (
+	"encoding/base64"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -12,6 +13,8 @@ import (
 	"llmgw/internal/iam"
 	"llmgw/internal/providers"
 	"llmgw/internal/router"
+
+	anthropicauth "github.com/xibodev/llm-provider-auth/anthropic"
 )
 
 func TestAdminCreatesProviderFromRegistry(t *testing.T) {
@@ -105,6 +108,221 @@ func TestAdminCreatesProviderFromRegistry(t *testing.T) {
 	if !strings.Contains(string(serialized), `"project":"project-a"`) ||
 		!strings.Contains(string(serialized), `"location":"global"`) {
 		t.Fatalf("provider state omitted safe Vertex setup fields: %s", serialized)
+	}
+}
+
+func TestProviderUpsertRejectsEndpointNameCollision(t *testing.T) {
+	t.Setenv("LLMGW_STATE_DIR", t.TempDir())
+	old := *config.Get()
+	t.Cleanup(func() { config.Update(func(settings *config.Settings) { *settings = old }) })
+	config.Update(func(settings *config.Settings) {
+		settings.APIKey = "admin-secret"
+		settings.Providers = map[string]*config.ProviderConfig{}
+		settings.Endpoints = map[string]*config.EndpointConfig{
+			"Coding": {Failover: []config.EndpointMember{{Provider: "echo", Model: "echo-default"}}},
+		}
+	})
+	server := httptest.NewServer(NewServer())
+	defer server.Close()
+	status, body := jsonRequest(t, server.URL+"/admin/api/providers", http.MethodPost, "admin-secret", map[string]any{
+		"id": "coding", "type": "edge_tts",
+	})
+	if status != http.StatusConflict || body["error"] == nil || config.Get().Providers["coding"] != nil {
+		t.Fatalf("status=%d body=%+v providers=%+v", status, body, config.Get().Providers)
+	}
+}
+
+func TestOAuthProviderCreationRejectsEndpointNameCollision(t *testing.T) {
+	t.Setenv("LLMGW_STATE_DIR", t.TempDir())
+	old := *config.Get()
+	t.Cleanup(func() { config.Update(func(settings *config.Settings) { *settings = old }) })
+	config.Update(func(settings *config.Settings) {
+		settings.Providers = map[string]*config.ProviderConfig{}
+		settings.Endpoints = map[string]*config.EndpointConfig{
+			"CODEX": {Failover: []config.EndpointMember{{Provider: "echo", Model: "echo-default"}}},
+		}
+	})
+	if err := ensureOAuthProviderConfig("codex", "openai_codex"); err == nil {
+		t.Fatal("OAuth setup accepted a provider colliding with an endpoint")
+	}
+	if _, exists := config.Provider("codex"); exists {
+		t.Fatal("OAuth setup created a provider colliding with an endpoint")
+	}
+}
+
+func TestProviderUpsertAcceptsAndPreservesPublicOAuthClientID(t *testing.T) {
+	t.Setenv("LLMGW_STATE_DIR", t.TempDir())
+	t.Setenv("LLMGW_CREDENTIAL_ENCRYPTION_KEY", base64.RawURLEncoding.EncodeToString(make([]byte, 32)))
+	iam.ResetForTests()
+	t.Cleanup(iam.ResetForTests)
+	config.Update(func(s *config.Settings) {
+		s.APIKey = "admin-secret"
+		s.CredentialEncryptionKey = base64.RawURLEncoding.EncodeToString(make([]byte, 32))
+		s.Providers = map[string]*config.ProviderConfig{}
+	})
+	if _, err := iam.Initialize(); err != nil {
+		t.Fatal(err)
+	}
+	server := httptest.NewServer(NewServer())
+	defer server.Close()
+
+	status, body := jsonRequest(t, server.URL+"/admin/api/providers", http.MethodPost, "admin-secret", map[string]any{
+		"registry_id": "google_antigravity", "public_oauth_client_id": "public-client",
+	})
+	if status != http.StatusOK {
+		t.Fatalf("create status=%d body=%+v", status, body)
+	}
+	status, body = jsonRequest(t, server.URL+"/admin/api/providers", http.MethodPost, "admin-secret", map[string]any{
+		"id": "google-antigravity", "registry_id": "google_antigravity", "region": "updated-region",
+	})
+	if status != http.StatusOK {
+		t.Fatalf("update status=%d body=%+v", status, body)
+	}
+	provider := config.Get().Providers["google-antigravity"]
+	if provider == nil || provider.PublicOAuthClientID != "public-client" || provider.Region != "updated-region" {
+		t.Fatalf("provider=%+v", provider)
+	}
+	if reloaded := config.Load().Providers["google-antigravity"]; reloaded == nil || reloaded.PublicOAuthClientID != "public-client" {
+		t.Fatalf("reloaded provider=%+v", reloaded)
+	}
+	owner, err := iam.CreatePrincipal("human", "fixture:oauth-client-clear", "", "OAuth client clear")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := iam.PutOAuthProviderConnection(iam.OAuthConnectionCreate{
+		PrincipalID: owner.ID, ProviderID: "google-antigravity", Kind: "google_antigravity_oauth",
+		AccessToken: "fixture-access", RefreshToken: "fixture-refresh", OAuthClientID: "public-client",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	config.Update(func(settings *config.Settings) { settings.APIKey = "admin-secret" })
+	clear := true
+	status, body = jsonRequest(t, server.URL+"/admin/api/providers", http.MethodPost, "admin-secret", map[string]any{
+		"id": "google-antigravity", "registry_id": "google_antigravity",
+		"clear_public_oauth_client_id": clear,
+	})
+	if status != http.StatusConflict {
+		t.Fatalf("bound clear status=%d body=%+v", status, body)
+	}
+	connections, err := iam.ListProviderConnections(owner.ID, "google-antigravity")
+	if err != nil || len(connections) != 1 {
+		t.Fatalf("connections=%+v err=%v", connections, err)
+	}
+	current, stored, ok, err := iam.OAuthProviderConnectionSecret(owner.ID, "google-antigravity", connections[0].Name)
+	if err != nil || !ok {
+		t.Fatalf("load OAuth connection: ok=%v err=%v", ok, err)
+	}
+	if _, err := iam.ReplaceOAuthProviderConnectionIfCurrent(stored, current, iam.OAuthConnectionCreate{
+		PrincipalID: owner.ID, ProviderID: "google-antigravity", Name: stored.Name, Kind: stored.Kind,
+		AccessToken: current.AccessToken, RefreshToken: current.RefreshToken, Status: "active",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	status, body = jsonRequest(t, server.URL+"/admin/api/providers", http.MethodPost, "admin-secret", map[string]any{
+		"id": "google-antigravity", "registry_id": "google_antigravity",
+		"clear_public_oauth_client_id": clear,
+	})
+	if status != http.StatusConflict {
+		t.Fatalf("legacy bound clear status=%d body=%+v", status, body)
+	}
+	connections, err = iam.ListProviderConnections(owner.ID, "google-antigravity")
+	if err := iam.RevokeProviderConnection(owner.ID, connections[0].ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := iam.PutProviderCredential(owner.ID, "google-antigravity", "google_antigravity_oauth", "legacy-access"); err != nil {
+		t.Fatal(err)
+	}
+	status, body = jsonRequest(t, server.URL+"/admin/api/providers", http.MethodPost, "admin-secret", map[string]any{
+		"id": "google-antigravity", "registry_id": "google_antigravity",
+		"clear_public_oauth_client_id": clear,
+	})
+	if status != http.StatusConflict {
+		t.Fatalf("legacy credential clear status=%d body=%+v", status, body)
+	}
+	if err := iam.RevokeProviderCredential(owner.ID, "google-antigravity"); err != nil {
+		t.Fatal(err)
+	}
+	status, body = jsonRequest(t, server.URL+"/admin/api/providers", http.MethodPost, "admin-secret", map[string]any{
+		"id": "google-antigravity", "registry_id": "google_antigravity",
+		"clear_public_oauth_client_id": clear,
+	})
+	if status != http.StatusOK {
+		t.Fatalf("clear status=%d body=%+v", status, body)
+	}
+	if provider := config.Get().Providers["google-antigravity"]; provider == nil || provider.PublicOAuthClientID != "" {
+		t.Fatalf("public OAuth client ID was not cleared: %+v", provider)
+	}
+}
+
+func TestAdminSetupTokenRequiresEncryptedStorageAndRemovesLegacySecret(t *testing.T) {
+	t.Setenv("LLMGW_STATE_DIR", t.TempDir())
+	iam.ResetForTests()
+	t.Cleanup(iam.ResetForTests)
+	config.Update(func(s *config.Settings) {
+		s.APIKey = "admin-secret"
+		s.CredentialEncryptionKey = ""
+		s.Providers = map[string]*config.ProviderConfig{}
+	})
+	if _, err := iam.Initialize(); err != nil {
+		t.Fatal(err)
+	}
+	server := httptest.NewServer(NewServer())
+	defer server.Close()
+	token := anthropicauth.SetupTokenPrefix + strings.Repeat("a", 80)
+	status, _ := jsonRequest(t, server.URL+"/admin/api/providers", http.MethodPost, "admin-secret", map[string]any{
+		"registry_id": "anthropic", "api_key": token,
+	})
+	if status != http.StatusBadRequest || config.Get().Providers["anthropic"] != nil {
+		t.Fatalf("setup token without encryption status=%d provider=%v", status, config.Get().Providers["anthropic"])
+	}
+	config.SaveSecret("anthropic", "legacy-api-key")
+	config.Update(func(s *config.Settings) {
+		s.CredentialEncryptionKey = base64.RawURLEncoding.EncodeToString(make([]byte, 32))
+	})
+	status, body := jsonRequest(t, server.URL+"/admin/api/providers", http.MethodPost, "admin-secret", map[string]any{
+		"registry_id": "anthropic", "api_key": token, "credential_kind": "api_key",
+	})
+	if status != http.StatusOK {
+		t.Fatalf("setup token status=%d body=%v", status, body)
+	}
+	if _, exists := config.LoadSecrets()["anthropic"]; exists {
+		t.Fatal("legacy Anthropic secret remained after setup-token rotation")
+	}
+	secret, connection, found, err := iam.SystemProviderConnectionSecret("anthropic")
+	if err != nil || !found {
+		t.Fatalf("encrypted setup-token connection found=%v err=%v", found, err)
+	}
+	if connection.Kind != string(anthropicauth.CredentialSetupToken) || secret != token {
+		t.Fatalf("stored connection kind=%q secret matches=%v", connection.Kind, secret == token)
+	}
+}
+
+func TestAdminRejectsSetupTokenLookingCredentialForNonAnthropicProvider(t *testing.T) {
+	t.Setenv("LLMGW_STATE_DIR", t.TempDir())
+	iam.ResetForTests()
+	t.Cleanup(iam.ResetForTests)
+	config.Update(func(s *config.Settings) {
+		s.APIKey = "admin-secret"
+		s.CredentialEncryptionKey = base64.RawURLEncoding.EncodeToString(make([]byte, 32))
+		s.Providers = map[string]*config.ProviderConfig{}
+	})
+	if _, err := iam.Initialize(); err != nil {
+		t.Fatal(err)
+	}
+	server := httptest.NewServer(NewServer())
+	defer server.Close()
+	token := anthropicauth.SetupTokenPrefix + strings.Repeat("a", 80)
+	status, _ := jsonRequest(t, server.URL+"/admin/api/providers", http.MethodPost, "admin-secret", map[string]any{
+		"registry_id": "gemini", "api_key": token,
+	})
+	if status != http.StatusBadRequest {
+		t.Fatalf("non-Anthropic setup token status=%d, want 400", status)
+	}
+	if config.Get().Providers["gemini"] != nil || config.LoadSecrets()["gemini"] != "" {
+		t.Fatal("rejected setup token changed Gemini provider or plaintext secrets")
+	}
+	if exists, err := iam.SystemProviderConnectionExists("gemini"); err != nil || exists {
+		t.Fatalf("rejected setup token encrypted connection exists=%v err=%v", exists, err)
 	}
 }
 

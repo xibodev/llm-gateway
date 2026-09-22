@@ -2,14 +2,156 @@ package providers
 
 import (
 	"context"
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
+	"net/url"
 	"strings"
 	"testing"
 
 	"llmgw/internal/config"
 	"llmgw/internal/iam"
 
+	antigravityauth "github.com/xibodev/llm-provider-auth/antigravity"
 	copilotauth "github.com/xibodev/llm-provider-auth/copilot"
 )
+
+func TestGoogleAntigravityBrowserOAuthUsesSharedFlowAndDiscoversProject(t *testing.T) {
+	tokenServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/load" {
+			if r.Header.Get("Authorization") != "Bearer access-token" {
+				t.Fatalf("authorization=%q", r.Header.Get("Authorization"))
+			}
+			_ = json.NewEncoder(w).Encode(map[string]any{"cloudaicompanionProject": "project-id", "paidTier": map[string]any{"id": "paid-tier"}})
+			return
+		}
+		if err := r.ParseForm(); err != nil {
+			t.Fatal(err)
+		}
+		if r.Form.Get("client_id") != "client-id" || r.Form.Get("client_secret") != "client-secret" || r.Form.Get("code_verifier") == "" {
+			t.Fatalf("token form=%v", r.Form)
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"access_token": "access-token", "refresh_token": "refresh-token", "expires_in": 3600,
+		})
+	}))
+	defer tokenServer.Close()
+	oauth := antigravityauth.Config{
+		ClientID: "client-id", ClientSecret: "client-secret", ClientAuthMode: antigravityauth.ClientAuthModeClientSecretPost, HTTPClient: tokenServer.Client(),
+		Endpoints: antigravityauth.Endpoints{
+			AuthorizeURL: tokenServer.URL + "/authorize", TokenURL: tokenServer.URL + "/token",
+			LoadCodeAssistURL: tokenServer.URL + "/load",
+		},
+	}
+	adapter := googleAntigravityAuthAdapter{oauth: &oauth}
+	start, err := adapter.StartBrowser(context.Background(), "https://gateway.example.test/oauth/callback/google_antigravity")
+	if err != nil {
+		t.Fatal(err)
+	}
+	authorizationURL, _ := url.Parse(start.AuthorizationURL)
+	if authorizationURL.Query().Get("code_challenge") == "" || authorizationURL.Query().Get("state") == "" {
+		t.Fatalf("authorization URL=%s", start.AuthorizationURL)
+	}
+	var private map[string]string
+	if json.Unmarshal([]byte(start.PrivateState), &private) != nil {
+		t.Fatal("private state is not JSON")
+	}
+	private["redirect_uri"] = "https://gateway.example.test/oauth/callback/google_antigravity"
+	raw, _ := json.Marshal(private)
+	result, err := adapter.CompleteBrowser(context.Background(), "authorization-code", string(raw))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.AccessToken != "access-token" || result.AccountID != "" || result.AccountLabel != "" || result.ProjectID != "project-id" || result.OAuthProfile != antigravityOAuthProfileRuntimeSecret || result.OAuthClientID != "client-id" {
+		t.Fatalf("result=%+v", result)
+	}
+}
+
+func TestGoogleAntigravityBrowserOAuthPersistsNoFallbackProject(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/load" {
+			_, _ = w.Write([]byte(`{"currentTier":{"id":"free-tier"}}`))
+			return
+		}
+		_, _ = w.Write([]byte(`{"access_token":"access-token","expires_in":3600}`))
+	}))
+	defer server.Close()
+	oauth := antigravityauth.Config{
+		ClientID: "client-id", ClientSecret: "client-secret", ClientAuthMode: antigravityauth.ClientAuthModeClientSecretPost, HTTPClient: server.Client(),
+		Endpoints: antigravityauth.Endpoints{AuthorizeURL: server.URL + "/authorize", TokenURL: server.URL + "/token", LoadCodeAssistURL: server.URL + "/load"},
+	}
+	adapter := googleAntigravityAuthAdapter{oauth: &oauth}
+	start, err := adapter.StartBrowser(context.Background(), "https://gateway.example.test/oauth/callback/google_antigravity")
+	if err != nil {
+		t.Fatal(err)
+	}
+	private := map[string]string{}
+	_ = json.Unmarshal([]byte(start.PrivateState), &private)
+	private["redirect_uri"] = "https://gateway.example.test/oauth/callback/google_antigravity"
+	raw, _ := json.Marshal(private)
+	result, err := adapter.CompleteBrowser(context.Background(), "authorization-code", string(raw))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.ProjectID != "" {
+		t.Fatalf("fallback project=%q", result.ProjectID)
+	}
+}
+
+func TestGoogleAntigravityPublicPKCEProfileUsesConfiguredProviderClient(t *testing.T) {
+	oldProviders := config.Get().Providers
+	t.Cleanup(func() { config.Update(func(s *config.Settings) { s.Providers = oldProviders }) })
+	config.Update(func(s *config.Settings) {
+		s.Providers = map[string]*config.ProviderConfig{
+			"antigravity": {Type: "google_antigravity", PublicOAuthClientID: "public-client"},
+		}
+	})
+	adapter := googleAntigravityAuthAdapter{providerID: "antigravity"}
+	oauth := adapter.config("https://gateway.example.test/oauth/callback/google_antigravity")
+	if oauth.ClientID != "public-client" || oauth.ClientSecret != "" || oauth.ClientAuthMode != antigravityauth.ClientAuthModePublicPKCE {
+		t.Fatalf("public OAuth config=%+v", oauth)
+	}
+}
+
+func TestGoogleAntigravityRuntimeClientUsesClientSecretPost(t *testing.T) {
+	oldClientID := config.Get().GoogleAntigravityClientID
+	oldSecret := config.Get().GoogleAntigravityClientSecret
+	t.Cleanup(func() {
+		config.Update(func(s *config.Settings) {
+			s.GoogleAntigravityClientID, s.GoogleAntigravityClientSecret = oldClientID, oldSecret
+		})
+	})
+	config.Update(func(s *config.Settings) {
+		s.GoogleAntigravityClientID = "runtime-client"
+		s.GoogleAntigravityClientSecret = "runtime-secret"
+	})
+	oauth := (googleAntigravityAuthAdapter{}).config("https://gateway.example.test/oauth/callback/google_antigravity")
+	if oauth.ClientID != "runtime-client" || oauth.ClientSecret != "runtime-secret" || oauth.ClientAuthMode != antigravityauth.ClientAuthModeClientSecretPost {
+		t.Fatalf("runtime OAuth config=%+v", oauth)
+	}
+}
+
+func TestGoogleAntigravityBrowserOAuthRejectsChangedClientProfile(t *testing.T) {
+	oauth := antigravityauth.Config{
+		ClientID: "client-a", ClientSecret: "secret-a", ClientAuthMode: antigravityauth.ClientAuthModeClientSecretPost,
+		RedirectURI: "https://gateway.example.test/oauth/callback/google_antigravity",
+	}
+	adapter := googleAntigravityAuthAdapter{oauth: &oauth}
+	start, err := adapter.StartBrowser(context.Background(), oauth.RedirectURI)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var private map[string]string
+	if err := json.Unmarshal([]byte(start.PrivateState), &private); err != nil {
+		t.Fatal(err)
+	}
+	private["redirect_uri"] = oauth.RedirectURI
+	oauth.ClientID = "client-b"
+	raw, _ := json.Marshal(private)
+	if _, err := adapter.CompleteBrowser(context.Background(), "authorization-code", string(raw)); err == nil || !strings.Contains(err.Error(), "profile") {
+		t.Fatalf("changed profile error=%v", err)
+	}
+}
 
 type fixtureProviderAuthAdapter struct{}
 

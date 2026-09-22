@@ -16,8 +16,13 @@ export type CatalogModel = {
   emulatedSurfaces: string[];
   tools: string;
   streaming: string;
+  statefulResponses: string;
   discoveredAt: string;
   verifiedAt: string;
+  publicationState: string;
+  published: boolean;
+  disabled: boolean;
+  failureCode: string;
 };
 
 // Capability names the console reasons about. A model may carry several; the
@@ -34,17 +39,32 @@ export const capabilityLabels: Record<Capability, string> = {
   vision: "Vision",
 };
 
-// capabilitiesFor derives a model's modalities from catalog metadata, falling
-// back to chat only when the catalog declares nothing that says otherwise.
+export function modelOptionLabel(id: string, displayName: string): string {
+  const name = displayName.replace(/\s+/g, " ").trim();
+  return name && name !== id && name.length <= 64 ? `${id} — ${name}` : id;
+}
+
+// capabilitiesFor derives only modalities the catalog affirmatively declares.
+// Missing metadata is unknown, not evidence that a chat or media control works.
 export function capabilitiesFor(row: JSONRecord): string[] {
   const declared = Object.entries(asRecord(row.capabilities))
     .filter(([, value]) => value !== false)
     .map(([key]) => key.toLowerCase());
+  const typed = asRecord(row.typed_capabilities);
+  const operations = asRecord(typed.operations);
+  const typedSurfaces = asRecord(typed.surfaces);
+  const inputs = asRecord(typed.inputs);
   // supported_surfaces is canonical; supported_endpoints is the pre-rename
   // key, kept as a fallback so this still works against a server that has
   // not been updated yet.
   const surfaces = asList(row.supported_surfaces ?? row.supported_endpoints).map((value) => String(value).toLowerCase());
   const out = new Set<string>();
+  if (operations.chat === "supported" || typedSurfaces.chat_completions === "supported" || typedSurfaces.responses === "supported" || typedSurfaces.messages === "supported") out.add("chat");
+  if (operations.image === "supported") out.add("image");
+  if (operations.video === "supported") out.add("video");
+  if (operations.audio_in === "supported") out.add("transcription");
+  if (operations.audio_out === "supported") out.add("tts");
+  if (inputs.image === "supported") out.add("vision");
   for (const name of declared) {
     if (name === "tts" || name === "speech") out.add("tts");
     else if (name === "transcription" || name === "stt" || name === "asr") out.add("transcription");
@@ -60,8 +80,6 @@ export function capabilitiesFor(row: JSONRecord): string[] {
     if (surface.includes("/videos/generations")) out.add("video");
     if (surface.includes("/chat/completions") || surface.includes("/messages") || surface.includes("/responses")) out.add("chat");
   }
-  // A row that declares no modality at all is a chat model by convention.
-  if (!out.size) out.add("chat");
   // Generation-only rows (speech, transcription, image, video) must not
   // masquerade as chat models.
   if ((out.has("tts") || out.has("transcription") || out.has("image") || out.has("video")) && !declared.includes("chat") &&
@@ -90,10 +108,22 @@ export function catalogModels(payload: JSONRecord | null): CatalogModel[] {
       emulatedSurfaces: asList(row.emulated_surfaces).map(String),
       tools: stringValue(typed.tools, "unknown"),
       streaming: stringValue(typed.streaming, "unknown"),
+      statefulResponses: stringValue(typed.stateful_responses, "unknown"),
       discoveredAt: stringValue(freshness.discovered_at),
       verifiedAt: stringValue(freshness.verified_at),
+      publicationState: stringValue(row.publication_state),
+      published: row.published !== false,
+      disabled: row.disabled === true,
+      failureCode: stringValue(row.failure_code),
     };
   }).filter((row) => row.id);
+}
+
+export function transportForSurface(model: CatalogModel | undefined, surface: string): "native" | "translated" | "unknown" {
+  const normalized = surface.replace(/^\/v1/, "");
+  if (model?.nativeSurfaces.some((candidate) => candidate.replace(/^\/v1/, "") === normalized)) return "native";
+  if (model?.emulatedSurfaces.some((candidate) => candidate.replace(/^\/v1/, "") === normalized)) return "translated";
+  return "unknown";
 }
 
 export type ModelFilterState = { provider: string; capability: string; search: string };
@@ -168,7 +198,7 @@ export function ModelCombo({ models, filter, value, onChange, label = "Model", l
   const [query, setQuery] = useState("");
   const [open, setOpen] = useState(false);
   const [active, setActive] = useState(0);
-  const pool = filterModels(models, filter);
+  const pool = filterModels(models, filter).filter((model) => !model.disabled);
   const needle = query.trim().toLowerCase();
   const suggestions = (needle
     ? pool.filter((model) => `${model.id} ${model.label}`.toLowerCase().includes(needle))
@@ -209,7 +239,7 @@ export function ModelCombo({ models, filter, value, onChange, label = "Model", l
                   <strong class="technical">{model.id}</strong>
                   {isFree ? <span class="status-pill status-pill--success" style={{ fontSize: "10px", padding: "1px 5px", lineHeight: "14px" }}>Free</span> : null}
                 </div>
-                {model.label !== model.id ? <small>{model.label}</small> : null}
+                {model.label !== model.id && model.label.length <= 64 ? <small>{model.label}</small> : null}
               </button>
             </li>
           );
@@ -229,13 +259,13 @@ export function ModelSelect({ models, filter, value, onChange, label = "Model", 
   label?: string;
   emptyHint?: string;
 }) {
-  const visible = filterModels(models, filter);
+  const visible = filterModels(models, filter).filter((model) => !model.disabled);
   if (!visible.length) {
     return <label>{label}<select disabled><option>{emptyHint}</option></select></label>;
   }
   return <label>{label}<select value={value} onInput={(event) => onChange((event.currentTarget as HTMLSelectElement).value)}>
     {!visible.some((model) => model.id === value) ? <option value="">Select a model</option> : null}
-    {visible.map((model) => <option value={model.id} key={model.id}>{model.id}{model.label !== model.id ? ` — ${model.label}` : ""}</option>)}
+    {visible.map((model) => <option value={model.id} key={model.id}>{modelOptionLabel(model.id, model.label)}</option>)}
   </select></label>;
 }
 

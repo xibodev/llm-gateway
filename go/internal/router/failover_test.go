@@ -291,6 +291,20 @@ func TestCompatibilityFilterExcludesOnlyKnownUnsupported(t *testing.T) {
 	}
 }
 
+func TestCompatibilityFilterAllowsZenChatFacadeToResponsesModel(t *testing.T) {
+	setupEcho(t)
+	config.Update(func(settings *config.Settings) {
+		settings.Providers["zen"] = &config.ProviderConfig{Type: "openai_compatible", BaseURL: "https://opencode.ai/zen/v1"}
+	})
+	capabilities := providers.AdaptModelCapabilities(map[string]any{"chat": false}, []string{"/responses"}, time.Now(), time.Time{})
+	capabilities.Operations.Chat = core.SupportUnsupported
+	capabilities.Surfaces.ChatCompletions = core.SupportUnsupported
+	request := CompatibilityRequest{Surface: core.ModelSurfaceChatCompletions}
+	if modelCompatible(capabilities, request) || !chatToResponsesCompatible(Target{Provider: "zen", Model: "muse-spark-fixture"}, capabilities, request) {
+		t.Fatal("Responses-native Zen adapter was rejected")
+	}
+}
+
 func TestAffinitySelectsDeterministicStart(t *testing.T) {
 	setupEcho(t)
 	targets := []Target{{Provider: "echo", Model: "echo-small"}, {Provider: "echo", Model: "echo-strong"}, {Provider: "echo", Model: "echo-deep"}}
@@ -543,6 +557,21 @@ func TestTargetCompatibilityPreservesClientControls(t *testing.T) {
 		"parallel_tool_calls": false,
 	}); err == nil {
 		t.Fatal("Anthropic fallback silently accepted parallel_tool_calls")
+	}
+}
+
+func TestPrivateRouteRequiresCallerScopedCatalogMembership(t *testing.T) {
+	setupEcho(t)
+	iam.ResetForTests()
+	t.Cleanup(iam.ResetForTests)
+	config.Update(func(settings *config.Settings) {
+		settings.Providers["private"] = &config.ProviderConfig{Type: "openai_compatible", RegistryID: "openai_codex"}
+		settings.Endpoints["private-route"] = &config.EndpointConfig{Failover: []config.EndpointMember{{Provider: "private", Model: "model"}}}
+	})
+	providers.ResetProviders()
+	principal := &config.Principal{PrincipalID: "owner", PrincipalKind: "human"}
+	if _, err := ResolveForPrincipal("private-route", principal); err == nil {
+		t.Fatal("private route resolved without caller-scoped catalog membership")
 	}
 }
 

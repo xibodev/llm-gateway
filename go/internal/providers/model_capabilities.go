@@ -79,6 +79,49 @@ func AdaptModelCapabilities(
 	return capabilities
 }
 
+func ModelSupportsImageInput(model ModelInfo) bool {
+	if model.TypedCapabilities != nil {
+		return model.TypedCapabilities.Inputs.Image == core.SupportSupported
+	}
+	vision, _ := model.Capabilities["vision"].(bool)
+	return vision
+}
+
+func ModelSupportsOperation(model ModelInfo, operation core.ModelOperation) bool {
+	return ModelOperationSupport(model, operation) == core.SupportSupported
+}
+
+func ModelOperationSupport(model ModelInfo, operation core.ModelOperation) core.Support {
+	if model.TypedCapabilities != nil {
+		switch operation {
+		case core.ModelOperationImage:
+			return model.TypedCapabilities.Operations.Image
+		case core.ModelOperationVideo:
+			return model.TypedCapabilities.Operations.Video
+		case core.ModelOperationEmbeddings:
+			return model.TypedCapabilities.Operations.Embeddings
+		case core.ModelOperationAudioIn:
+			return model.TypedCapabilities.Operations.AudioIn
+		case core.ModelOperationAudioOut:
+			return model.TypedCapabilities.Operations.AudioOut
+		}
+	}
+	key := map[core.ModelOperation]string{
+		core.ModelOperationImage:      "image",
+		core.ModelOperationVideo:      "video",
+		core.ModelOperationEmbeddings: "embedding",
+		core.ModelOperationAudioIn:    "transcription",
+		core.ModelOperationAudioOut:   "tts",
+	}[operation]
+	if supported, found := model.Capabilities[key].(bool); found {
+		if supported {
+			return core.SupportSupported
+		}
+		return core.SupportUnsupported
+	}
+	return core.SupportUnknown
+}
+
 func legacySupport(values map[string]any, keys ...string) core.Support {
 	foundUnsupported := false
 	for _, key := range keys {

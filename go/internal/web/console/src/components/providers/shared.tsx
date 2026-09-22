@@ -2,27 +2,46 @@ import { useState } from "preact/hooks";
 import { sendJSON, type JSONRecord } from "../../lib/api";
 import { asList, asRecord, numberValue, stringValue } from "../../lib/records";
 
-export type ActionResult = { title: string; success: boolean; detail: string } | null;
+export type ActionResult = {
+  title: string;
+  success: boolean;
+  detail: string;
+} | null;
 
-export function boolValue(value: unknown): boolean { return value === true; }
+export function boolValue(value: unknown): boolean {
+  return value === true;
+}
 
 export function connectionChoices(entry: JSONRecord): string[] {
   const id = stringValue(entry.id);
   if (id === "openai_codex") return ["Personal subscription · device OAuth"];
-  return asList(entry.auth_methods).map(String).map((method) => ({
-    oauth_device: "Personal account · device OAuth",
-    api_key: id === "opencode_zen" ? "Optional personal API key" : "API key",
-    none: id === "opencode_zen" ? "Anonymous access · no key" : "No credential",
-    gcp_service_account: "Google Cloud service account",
-  }[method] ?? method.replaceAll("_", " ")));
+  return asList(entry.auth_methods)
+    .map(String)
+    .map(
+      (method) =>
+        ({
+          oauth_device: "Personal account · device OAuth",
+          oauth_browser: "Personal account · browser OAuth",
+          api_key: id === "opencode_zen" ? "Optional personal API key" : "API key",
+          setup_token: "Anthropic setup token",
+          none: id === "opencode_zen" ? "Anonymous access · no key" : "No credential",
+          gcp_service_account: "Google Cloud service account",
+        })[method] ?? method.replaceAll("_", " "),
+    );
 }
 
 export function evidenceLabel(kind: "authentication" | "catalog" | "completion", value: unknown): string {
   const state = stringValue(value, "unknown");
   const labels: Record<string, string> = {
-    configured: "Configured · not tested", accepted: "Accepted", rejected: "Rejected",
-    discovered: "Models discovered", empty: "Reached · no models", not_probed: "Not tested",
-    verified: "Inference verified", failed: "Failed", unknown: "Unknown",
+    configured: "Configured · not tested",
+    accepted: "Accepted",
+    rejected: "Rejected",
+    discovered: "Models discovered",
+    empty: "Reached · no models",
+    not_probed: "Not tested",
+    verified: "Inference verified",
+    failed: "Failed",
+    unknown: "Unknown",
   };
   if (kind === "catalog" && state === "failed") return "Catalog failed";
   return labels[state] ?? state.replaceAll("_", " ");
@@ -39,17 +58,22 @@ export function groupFor(entry: JSONRecord): string {
 // Status vocabulary is deliberately honest: "configured" means only that a
 // credential exists; nothing is called healthy until a check has proven it.
 export function statusLabel(status: string): string {
-  return {
-    configured: "Configured · unverified",
-    misconfigured: "Setup incomplete",
-    catalog_synced: "Catalog synced",
-    verified: "Verified",
-    check_failed: "Check failed",
-    disabled: "Disabled",
-    needs_credentials: "Needs credentials",
-    not_configured: "Not configured", client_setup: "Client setup", unavailable: "Unavailable",
-    instances_ready: "All instances ready", instances_attention: "An instance needs attention",
-  }[status] ?? status.replaceAll("_", " ");
+  return (
+    {
+      configured: "Configured · unverified",
+      misconfigured: "Setup incomplete",
+      catalog_synced: "Catalog synced",
+      verified: "Verified",
+      check_failed: "Check failed",
+      disabled: "Disabled",
+      needs_credentials: "Needs credentials",
+      not_configured: "Not configured",
+      client_setup: "Client setup",
+      unavailable: "Unavailable",
+      instances_ready: "All instances ready",
+      instances_attention: "An instance needs attention",
+    }[status] ?? status.replaceAll("_", " ")
+  );
 }
 
 // A tile aggregates instances rather than being one. With a single instance
@@ -76,7 +100,12 @@ export function StatusBadge({ status }: { status: string }) {
 
 export function ResultNotice({ result }: { result: ActionResult }) {
   if (!result) return null;
-  return <section class={`action-notice ${result.success ? "action-notice--success" : "action-notice--warning"}`} role="status"><strong>{result.title}</strong><span>{result.detail}</span></section>;
+  return (
+    <section class={`action-notice ${result.success ? "action-notice--success" : "action-notice--warning"}`} role="status">
+      <strong>{result.title}</strong>
+      <span>{result.detail}</span>
+    </section>
+  );
 }
 
 // Every configured row — curated tile or custom provider — carries the ids of
@@ -90,8 +119,11 @@ export function configuredProviderIDs(entry: JSONRecord): string[] {
 export function configuredProviderConfig(entry: JSONRecord, data: JSONRecord): JSONRecord {
   const providerIDs = configuredProviderIDs(entry);
   if (!providerIDs.length) return {};
-  return asList(data.providers).map(asRecord)
-    .find((provider) => providerIDs.includes(stringValue(provider.id))) ?? {};
+  return (
+    asList(data.providers)
+      .map(asRecord)
+      .find((provider) => providerIDs.includes(stringValue(provider.id))) ?? {}
+  );
 }
 
 export type LifecycleOperation = "test" | "repair" | "refresh" | "verify" | "delete";
@@ -125,14 +157,20 @@ export function useProviderLifecycle(ownerID: string, onChanged: () => Promise<v
     if (operation === "delete" && !window.confirm(`Revoke and remove ${stringValue(entry.label, providerID)}? Existing routes may need repair.`)) return;
     setBusy(`${providerID}-${operation}`);
     try {
-      const payload = operation === "delete"
-        ? await sendJSON<JSONRecord>("admin", `/providers/${encodeURIComponent(providerID)}`, "DELETE")
-        : await sendJSON<JSONRecord>("admin", `/providers/${encodeURIComponent(providerID)}/${operation}${queryText}`, "POST", {});
+      const payload = operation === "delete" ? await sendJSON<JSONRecord>("admin", `/providers/${encodeURIComponent(providerID)}`, "DELETE") : await sendJSON<JSONRecord>("admin", `/providers/${encodeURIComponent(providerID)}/${operation}${queryText}`, "POST", {});
       const success = operation === "delete" ? boolValue(payload.ok) : boolValue(payload.success);
-      setResult({ title: `${stringValue(entry.label, providerID)} ${operationLabels[operation]}`, success, detail: stringValue(payload.details, success ? "Operation completed." : "Operation did not complete.") });
+      setResult({
+        title: `${stringValue(entry.label, providerID)} ${operationLabels[operation]}`,
+        success,
+        detail: stringValue(payload.details, success ? "Operation completed." : "Operation did not complete."),
+      });
       await onChanged();
     } catch (cause) {
-      setResult({ title: `${stringValue(entry.label, providerID)} ${operationLabels[operation]}`, success: false, detail: cause instanceof Error ? cause.message : "Operation failed." });
+      setResult({
+        title: `${stringValue(entry.label, providerID)} ${operationLabels[operation]}`,
+        success: false,
+        detail: cause instanceof Error ? cause.message : "Operation failed.",
+      });
     } finally {
       setBusy("");
     }

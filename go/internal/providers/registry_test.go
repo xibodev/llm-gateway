@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"slices"
 	"testing"
+
+	"llmgw/internal/config"
 )
 
 func TestProviderRegistryIsUniqueAndRunnable(t *testing.T) {
@@ -31,8 +33,32 @@ func TestProviderRegistryIsUniqueAndRunnable(t *testing.T) {
 			}
 		}
 	}
-	if len(seen) != 24 {
-		t.Fatalf("embedded registry has %d entries, want 24", len(seen))
+	if len(seen) != 25 {
+		t.Fatalf("embedded registry has %d entries, want 25", len(seen))
+	}
+}
+
+func TestAnthropicAndAntigravityRegistryContracts(t *testing.T) {
+	anthropic, ok := RegistryProviderByID("anthropic")
+	if !ok || !slices.Contains(anthropic.AuthMethods, "api_key") || !slices.Contains(anthropic.AuthMethods, "setup_token") {
+		t.Fatalf("anthropic registry=%+v", anthropic)
+	}
+	antigravity, ok := RegistryProvider("google-antigravity")
+	if !ok || antigravity.ID != "google_antigravity" || !slices.Equal(antigravity.AuthMethods, []string{"oauth_browser"}) || antigravity.ConnectionScope != ConnectionScopePersonal || antigravity.RiskLevel != "red" || antigravity.RiskNotice == "" {
+		t.Fatalf("antigravity registry=%+v", antigravity)
+	}
+}
+
+func TestAntigravityCatalogRequiresPrivatePrincipal(t *testing.T) {
+	old := config.Get().Providers
+	config.Update(func(settings *config.Settings) {
+		settings.Providers = map[string]*config.ProviderConfig{
+			"antigravity": {Type: "google_antigravity", RegistryID: "google_antigravity"},
+		}
+	})
+	t.Cleanup(func() { config.Update(func(settings *config.Settings) { settings.Providers = old }) })
+	if !CatalogRequiresPrincipal("antigravity") {
+		t.Fatal("Antigravity catalog was not principal scoped")
 	}
 }
 

@@ -104,7 +104,8 @@ func handleAdminModels(w http.ResponseWriter, r *http.Request) {
 		writeError(w, 400, err.Error())
 		return
 	}
-	response, err := buildModelList(principal)
+	includeUnpublished := r.URL.Query().Get("diagnostics") == "1"
+	response, err := buildModelListWithDiagnostics(principal, includeUnpublished)
 	if err != nil {
 		writeError(w, 500, "Model catalog unavailable.")
 		return
@@ -112,7 +113,10 @@ func handleAdminModels(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 200, response)
 }
 
-var catalogModelsForPrincipal = providers.CatalogModelsForPrincipal
+var catalogModelsForPrincipal = func(providerID string, principal *config.Principal) []providers.ModelInfo {
+	return providers.ReadCachedCatalogForPrincipal(providerID, principal).Models
+}
+var catalogRefreshedAtForPrincipal = providers.CatalogRefreshedAtForPrincipal
 
 func hasEndpointCaseFold(endpoints map[string]*config.EndpointConfig, name string) bool {
 	for ep := range endpoints {
@@ -124,6 +128,10 @@ func hasEndpointCaseFold(endpoints map[string]*config.EndpointConfig, name strin
 }
 
 func buildModelList(principal *config.Principal) (map[string]any, error) {
+	return buildModelListWithDiagnostics(principal, false)
+}
+
+func buildModelListWithDiagnostics(principal *config.Principal, includeUnpublished bool) (map[string]any, error) {
 	data := []any{}
 	seen := map[string]bool{}
 	s := config.Get()
@@ -162,13 +170,31 @@ func buildModelList(principal *config.Principal) (map[string]any, error) {
 		}
 		eligibleProviders[providerID] = true
 		rows := append([]providers.ModelInfo(nil), catalogModelsForPrincipal(providerID, principal)...)
-		discoveredAt := providers.CatalogRefreshedAtForPrincipal(providerID, principal)
+		publicationEvidence := map[string]iam.ProviderModelEvidence{}
+		automationManaged, automationErr := providers.AutomationManagedAnonymousProvider(providerID)
+		if automationErr != nil {
+			return nil, automationErr
+		}
+		if automationManaged {
+			var err error
+			publicationEvidence, err = iam.ProviderModelEvidenceFor(providerID, "")
+			if err != nil {
+				return nil, err
+			}
+		}
+		discoveredAt := catalogRefreshedAtForPrincipal(providerID, principal)
 		sort.Slice(rows, func(i, j int) bool { return rows[i].ID < rows[j].ID })
 		for _, row := range rows {
 			if row.ID == "" {
 				continue
 			}
+			modelSnapshot[providerID] = append(modelSnapshot[providerID], row)
 			if principal != nil && principal.RoutesOnly {
+				continue
+			}
+			publication := publicationEvidence[row.ID]
+			published := !automationManaged || publication.State == "verified"
+			if !published && !includeUnpublished {
 				continue
 			}
 			namespaced := providerID + "/" + row.ID
@@ -179,13 +205,30 @@ func buildModelList(principal *config.Principal) (map[string]any, error) {
 			if !modelAllowed(principal, projectPolicy, namespaced, row.ID, aliasID) {
 				continue
 			}
-			modelSnapshot[providerID] = append(modelSnapshot[providerID], row)
 			if seen[namespaced] {
 				continue
 			}
 			seen[namespaced] = true
 			capabilities, surfaces := modelPresentationMetadata(providerID, row)
+			verifiedAt := modelVerifiedAt(row.ID, verificationChecks[providerID])
 			entry := map[string]any{"id": namespaced, "object": "model", "owned_by": providerID}
+			if automationManaged && includeUnpublished {
+				state := publication.State
+				if state == "" {
+					state = "unverified"
+				}
+				entry["publication_state"] = state
+				entry["published"] = published
+				entry["disabled"] = !published
+				entry["admin_unverified_opt_in"] = false
+				if publication.ObservedAt > 0 {
+					entry["observed_at"] = time.Unix(publication.ObservedAt, 0).UTC().Format(time.RFC3339)
+					entry["latency_ms"] = publication.LatencyMS
+				}
+				if publication.FailureCode != "" {
+					entry["failure_code"] = publication.FailureCode
+				}
+			}
 			if row.Free {
 				entry["free"] = true
 			}
@@ -196,16 +239,21 @@ func buildModelList(principal *config.Principal) (map[string]any, error) {
 				entry["capabilities"] = capabilities
 			}
 			setSurfaces(entry, surfaces)
-			native, emulated := modelTransportSurfaces(providerID, principal, capabilities, surfaces)
+			native, emulated, unknown := modelTransportSurfaces(
+				providerID, principal, row, discoveredAt, capabilities, surfaces, time.Now(),
+			)
 			if len(native) > 0 {
 				entry["native_surfaces"] = native
 			}
 			if len(emulated) > 0 {
 				entry["emulated_surfaces"] = emulated
 			}
+			if len(unknown) > 0 {
+				entry["unknown_surfaces"] = unknown
+			}
 			entry["typed_capabilities"] = providers.AdaptModelCapabilities(
 				capabilities, surfaces, modelDiscoveredAt(row, discoveredAt),
-				modelVerifiedAt(row.ID, verificationChecks[providerID]),
+				verifiedAt,
 			)
 			data = append(data, entry)
 		}
@@ -242,7 +290,12 @@ func buildModelList(principal *config.Principal) (map[string]any, error) {
 		fo := []any{}
 		presentationMembers := []config.EndpointMember{}
 		for _, m := range cat.Failover {
-			if eligibleProviders[m.Provider] &&
+			evidence, published, publicationErr := providers.AnonymousModelPublication(m.Provider, m.Model)
+			routePublished := published || (m.AllowUnverified && evidence.State == iam.ModelEvidenceUnverified)
+			if providers.CatalogRequiresPrincipal(m.Provider) && !catalogSnapshotContains(modelSnapshot[m.Provider], m.Model) {
+				continue
+			}
+			if publicationErr == nil && routePublished && eligibleProviders[m.Provider] &&
 				modelAllowed(principal, projectPolicy, name, m.Provider+"/"+m.Model, m.Model) {
 				fo = append(fo, map[string]any{"provider": m.Provider, "model": m.Model})
 				presentationMembers = append(presentationMembers, m)
@@ -320,6 +373,15 @@ func buildModelList(principal *config.Principal) (map[string]any, error) {
 	return map[string]any{"object": "list", "data": data}, nil
 }
 
+func catalogSnapshotContains(rows []providers.ModelInfo, model string) bool {
+	for _, row := range rows {
+		if row.ID == model {
+			return true
+		}
+	}
+	return false
+}
+
 func modelDiscoveredAt(row providers.ModelInfo, fallback time.Time) time.Time {
 	if row.TypedCapabilities != nil && row.TypedCapabilities.Freshness.DiscoveredAt != nil {
 		return *row.TypedCapabilities.Freshness.DiscoveredAt
@@ -339,34 +401,6 @@ func modelVerifiedAt(model string, checks []iam.ProviderCheck) time.Time {
 		}
 	}
 	return verified
-}
-
-func modelTransportSurfaces(providerID string, principal *config.Principal, capabilities map[string]any, surfaces []string) ([]string, []string) {
-	native := append([]string(nil), surfaces...)
-	has := func(wanted string) bool {
-		for _, surface := range native {
-			if strings.EqualFold(strings.TrimSpace(surface), wanted) {
-				return true
-			}
-		}
-		return false
-	}
-	emulated := []string{}
-	chat, _ := capabilities["chat"].(bool)
-	if chat || has("/v1/chat/completions") || has("/v1/responses") || has("/v1/messages") {
-		if !has("/v1/responses") && !has("/responses") {
-			emulated = append(emulated, "/v1/responses")
-		}
-		if !has("/v1/messages") && !has("/messages") {
-			emulated = append(emulated, "/v1/messages")
-		}
-	}
-	// OpenCode Zen's anonymous transport is intentionally bespoke adaptation,
-	// not an authentic client-to-provider surface.
-	if anonymous, _ := providers.AnonymousZenForPrincipal(providerID, principal); anonymous {
-		return nil, append(emulated, native...)
-	}
-	return native, emulated
 }
 
 func nativeAliasKey(id string) string {
@@ -546,9 +580,10 @@ func commonCategoryPresentationMetadata(
 			}
 		}
 	}
-	for _, modality := range []string{"transcription", "tts", "image", "video", "embedding"} {
+	for _, modality := range []string{"chat", "transcription", "tts", "image", "video", "embedding"} {
 		if shared[modality] {
 			surface := map[string]string{
+				"chat":          "/v1/chat/completions",
 				"transcription": "/v1/audio/transcriptions",
 				"tts":           "/v1/audio/speech",
 				"image":         "/v1/images/generations",
@@ -580,6 +615,8 @@ func modalitySet(
 			out["video"] = true
 		case "embedding", "embeddings":
 			out["embedding"] = true
+		case "chat", "completion", "tools":
+			out["chat"] = true
 		}
 	}
 	for _, surface := range surfaces {
@@ -594,6 +631,8 @@ func modalitySet(
 			out["video"] = true
 		case strings.Contains(surface, "/embeddings"):
 			out["embedding"] = true
+		case strings.Contains(surface, "/chat/completions"), strings.Contains(surface, "/responses"), strings.Contains(surface, "/messages"):
+			out["chat"] = true
 		}
 	}
 	return out

@@ -215,7 +215,7 @@ func TestProviderProbeUsesSelectedCodexOwnerCatalog(t *testing.T) {
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		modelCalls++
 		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"data":[{"id":"gpt-5-codex"}]}`))
+		_, _ = w.Write([]byte(`{"data":[{"id":"gpt-5-codex","supported_in_api":true,"visibility":"list"}]}`))
 	}))
 	defer upstream.Close()
 	oldModels := codexauth.ModelsURL

@@ -23,6 +23,7 @@ const (
 )
 
 var anonymousAutomationWake = make(chan struct{}, 1)
+var anonymousProviderMutationMu sync.Mutex
 
 type anonymousProviderAutomationSetting struct {
 	Override                string `json:"override"`
@@ -250,6 +251,15 @@ func runAnonymousProviderAutomationProfiles(
 func connectAnonymousProvider(
 	ctx context.Context, orchestrator *core.ProviderOrchestrator, profile providers.AnonymousProviderProfile,
 ) map[string]any {
+	generation, generationErr := iam.ProviderCheckGeneration(profile.ProviderID, "")
+	if generationErr != nil {
+		return map[string]any{
+			"provider_id": profile.ProviderID, "operation": "verify", "success": false,
+			"status": "failed", "failure_code": "evidence_unavailable",
+			"catalog_evidence": "not_probed", "completion_evidence": "not_probed",
+		}
+	}
+	ctx = providers.WithProviderEvidenceGeneration(ctx, generation)
 	connection := core.ProviderConnection{
 		ProviderID: profile.ProviderID, Kind: core.ProviderConnectionAnonymous, AuthKind: core.ProviderAuthAnonymous,
 	}
@@ -264,20 +274,31 @@ func connectAnonymousProvider(
 	if connectErr != nil {
 		item["failure_code"] = providerHealthFailureCode(result.Health, true)
 		item["details"] = connectErr.Error()
-		recordOrchestratorChecks(profile.ProviderID, result)
+		recordOrchestratorChecks(profile.ProviderID, generation, result)
 		return item
 	}
 	if len(result.Probes) == 0 {
 		item["failure_code"] = "model_unavailable"
 		item["details"] = "No reviewed anonymous model was available for verification."
-		recordOrchestratorChecks(profile.ProviderID, result)
+		recordOrchestratorChecks(profile.ProviderID, generation, result)
 		return item
 	}
-	probe := result.Probes[0]
-	item["model"] = probe.Target.Model
-	item["completion_evidence"] = string(probe.Status)
-	item["latency_ms"] = probe.Latency.Milliseconds()
-	if probe.Status == core.CompletionVerified {
+	item["targets"] = coreTargetsForWire(result.Targets)
+	item["published"] = len(result.Targets)
+	item["probed"] = len(result.Probes)
+	verified := 0
+	failed := 0
+	for _, probe := range result.Probes {
+		if probe.Status == core.CompletionVerified {
+			verified++
+		} else {
+			failed++
+		}
+	}
+	item["verified"] = verified
+	item["failed"] = failed
+	item["completion_evidence"] = map[bool]string{true: "verified", false: "failed"}[failed == 0]
+	if verified > 0 {
 		item["success"] = true
 		item["status"] = "passed"
 		item["authentication_state"] = "accepted"
@@ -290,8 +311,16 @@ func connectAnonymousProvider(
 	if result.Health.RetryAfter > 0 {
 		item["retry_after"] = strconv.FormatInt(int64(result.Health.RetryAfter/time.Second), 10)
 	}
-	recordOrchestratorChecks(profile.ProviderID, result)
+	recordOrchestratorChecks(profile.ProviderID, generation, result)
 	return item
+}
+
+func coreTargetsForWire(targets []core.Target) []map[string]string {
+	out := make([]map[string]string, 0, len(targets))
+	for _, target := range targets {
+		out = append(out, map[string]string{"provider": target.Provider, "model": target.Model})
+	}
+	return out
 }
 
 func authenticationState(health core.ProviderHealthEvidence) string {
@@ -314,11 +343,7 @@ func providerHealthFailureCode(health core.ProviderHealthEvidence, catalog bool)
 	return "verification_failed"
 }
 
-func recordOrchestratorChecks(providerID string, result core.ProviderConnectResult) {
-	generation, err := iam.ProviderCheckGeneration(providerID, "")
-	if err != nil {
-		return
-	}
+func recordOrchestratorChecks(providerID string, generation int64, result core.ProviderConnectResult) {
 	catalogSuccess := result.Catalog.Status == core.CatalogDiscovered
 	_ = iam.RecordProviderCheck(iam.ProviderCheck{
 		ProviderID: providerID, Operation: iam.CheckCatalogSync, Generation: generation, Success: catalogSuccess,
@@ -329,21 +354,47 @@ func recordOrchestratorChecks(providerID string, result core.ProviderConnectResu
 	})
 	for _, probe := range result.Probes {
 		success := probe.Status == core.CompletionVerified
+		failureCode := ""
+		if !success {
+			failureCode = strings.TrimSpace(probe.FailureCode)
+			if failureCode == "" || failureCode == string(core.ProviderErrorNone) {
+				failureCode = "verification_failed"
+			}
+		}
 		_ = iam.RecordProviderCheck(iam.ProviderCheck{
 			ProviderID: providerID, Operation: iam.CheckVerify, Generation: generation, Success: success,
-			Detail: providerCheckDetail(success, map[bool]string{true: "", false: "verification_failed"}[success]),
+			Detail: providerCheckDetail(success, failureCode),
 			Model:  probe.Target.Model, LatencyMS: probe.Latency.Milliseconds(),
 		})
+		if probe.Status == core.CompletionVerified || probe.Status == core.CompletionFailed {
+			state := "failed"
+			if success {
+				state = "verified"
+			}
+			_ = iam.RecordProviderModelEvidence(iam.ProviderModelEvidence{
+				ProviderID: providerID, Model: probe.Target.Model,
+				Operation: iam.ModelEvidenceCompletion, State: state,
+				ObservedAt: probe.ObservedAt.Unix(), LatencyMS: probe.Latency.Milliseconds(),
+				FailureCode: failureCode, Generation: generation,
+			})
+		}
 		recordAnonymousAutomationCheck(providerID, "verify", map[string]any{
 			"success": success, "model": probe.Target.Model,
-			"failure_code": map[bool]string{true: "", false: "verification_failed"}[success],
+			"failure_code": failureCode,
 		})
 	}
 }
 
 func ensureAnonymousProvider(profile providers.AnonymousProviderProfile) (string, string) {
+	anonymousProviderMutationMu.Lock()
+	defer anonymousProviderMutationMu.Unlock()
+	endpointMutationMu.Lock()
+	defer endpointMutationMu.Unlock()
 	if current, exists := config.Provider(profile.ProviderID); exists {
 		return classifyAnonymousProvider(profile, current)
+	}
+	if providerEndpointCollision(profile.ProviderID) != nil {
+		return profile.ProviderID, "collision"
 	}
 	connectionExists, err := iam.ActiveProviderConnectionExists(profile.ProviderID)
 	if err != nil {
@@ -352,10 +403,22 @@ func ensureAnonymousProvider(profile providers.AnonymousProviderProfile) (string
 	if connectionExists {
 		return profile.ProviderID, "credential_collision"
 	}
-	added, err := config.AddProviderIfMissing(profile.ProviderID, &config.ProviderConfig{
-		Type: profile.RuntimeType, RegistryID: profile.RegistryID, BaseURL: profile.BaseURL,
+	if err := iam.MarkAnonymousProviderManaged(profile.ProviderID); err != nil {
+		return profile.ProviderID, "credential_store_unavailable"
+	}
+	added := false
+	_, err = config.UpdateAndSave(func(s *config.Settings) error {
+		if s.Providers[profile.ProviderID] != nil {
+			return nil
+		}
+		added = true
+		s.Providers[profile.ProviderID] = &config.ProviderConfig{
+			Type: profile.RuntimeType, RegistryID: profile.RegistryID, BaseURL: profile.BaseURL,
+		}
+		return nil
 	})
 	if err != nil {
+		_ = iam.ClearAnonymousProviderManaged(profile.ProviderID)
 		log.Printf("anonymous provider automation: add %s: %v", profile.ProviderID, err)
 		return profile.ProviderID, "save_failed"
 	}
@@ -369,6 +432,7 @@ func ensureAnonymousProvider(profile providers.AnonymousProviderProfile) (string
 		})
 	}
 	if !added {
+		_ = iam.ClearAnonymousProviderManaged(profile.ProviderID)
 		if current, exists := config.Provider(profile.ProviderID); exists {
 			return classifyAnonymousProvider(profile, current)
 		}
@@ -381,6 +445,13 @@ func classifyAnonymousProvider(profile providers.AnonymousProviderProfile, curre
 	connectionExists, err := iam.ActiveProviderConnectionExists(profile.ProviderID)
 	if err != nil {
 		return profile.ProviderID, "credential_store_unavailable"
+	}
+	managed, err := iam.AnonymousProviderManaged(profile.ProviderID)
+	if err != nil {
+		return profile.ProviderID, "credential_store_unavailable"
+	}
+	if !managed {
+		return profile.ProviderID, "collision"
 	}
 	if providers.EffectiveRegistryID(profile.ProviderID, current.RegistryID, current.Type) == profile.RegistryID &&
 		strings.EqualFold(strings.TrimSpace(current.Type), profile.RuntimeType) &&
@@ -410,5 +481,7 @@ func recordAnonymousAutomationCheck(providerID, operation string, result map[str
 }
 
 func runProviderVerifyContext(ctx context.Context, providerID, model string, principal *config.Principal) map[string]any {
-	return runProviderVerifyWithContext(ctx, providerID, model, principal, true)
+	// A non-empty completion proves inference availability. Requiring an exact
+	// acknowledgement conflates instruction-following quality with reachability.
+	return runProviderVerifyWithContext(ctx, providerID, model, principal, false)
 }

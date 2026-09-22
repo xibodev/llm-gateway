@@ -9,6 +9,7 @@ import (
 	"llmgw/internal/iam"
 	"llmgw/internal/providers"
 
+	anthropicauth "github.com/xibodev/llm-provider-auth/anthropic"
 	gcpauth "github.com/xibodev/llm-provider-auth/gcp"
 )
 
@@ -252,6 +253,18 @@ func createPersonalProviderConnection(
 			PrincipalID: principalID, ProviderID: providerID, Name: body.Name,
 			Kind: kind, Secret: body.Secret, Source: source,
 			MakeDefault: bool(body.MakeDefault),
+		})
+	}
+	if kind == string(anthropicauth.CredentialSetupToken) {
+		if !strings.EqualFold(strings.TrimSpace(providerConfig.Type), "anthropic") {
+			return iam.ProviderConnection{}, &providers.ConfigError{Msg: "an Anthropic setup token is accepted only by an anthropic provider"}
+		}
+		if err := anthropicauth.ValidateSetupToken(body.Secret); err != nil {
+			return iam.ProviderConnection{}, &providers.ConfigError{Msg: err.Error()}
+		}
+		return iam.PutProviderConnection(iam.ProviderConnectionCreate{
+			PrincipalID: principalID, ProviderID: providerID, Name: body.Name,
+			Kind: kind, Secret: body.Secret, Source: source, MakeDefault: bool(body.MakeDefault),
 		})
 	}
 	if kind != "api_key" {

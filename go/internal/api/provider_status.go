@@ -12,6 +12,8 @@ import (
 	"llmgw/internal/iam"
 	"llmgw/internal/providers"
 	"llmgw/internal/router"
+
+	core "github.com/xibodev/llmgw-core"
 )
 
 type configuredProviderSnapshot struct {
@@ -328,7 +330,7 @@ func providerStatusSnapshots(
 				credentialPresent = true
 			}
 		}
-		if reg, ok := providers.RegistryProvider(providerConfig.RegistryID); ok && !reg.RequiresAPIKey {
+		if reg, ok := providers.RegistryProvider(providerConfig.RegistryID); ok && !reg.RequiresAPIKey && contains(reg.AuthMethods, "none") {
 			credentialPresent = true
 		}
 		status, lastCheck, lastVerify := providerStatus(credentialPresent, len(models), allChecks[providerID])
@@ -764,6 +766,8 @@ func providerCheckDetail(success bool, failureCode string) string {
 	switch failureCode {
 	case "catalog_empty":
 		return "Provider catalog returned no models."
+	case "catalog_no_usable_models":
+		return "Provider catalog returned no API-eligible visible models."
 	case "model_unavailable":
 		return "No model was available for verification."
 	case "verification_failed":
@@ -850,12 +854,29 @@ func runProviderVerifyWithContext(
 	var verificationObservation *iam.ProviderAccountObservation
 	verificationObservation = activeProviderObservation(principal, providerID)
 	initialVerificationObservation := verificationObservation
+	publicationManaged, publicationManagedErr := providers.AutomationManagedAnonymousProvider(providerID)
+	publicationGeneration := int64(0)
+	if publicationManagedErr == nil && publicationManaged {
+		publicationGeneration, publicationManagedErr = iam.ProviderCheckGeneration(providerID, "")
+	}
+	recordModelEvidence := func(state, failureCode string, latency int64) {
+		model = strings.TrimSpace(model)
+		if model == "" || publicationManagedErr != nil || !publicationManaged {
+			return
+		}
+		_ = iam.RecordProviderModelEvidence(iam.ProviderModelEvidence{
+			ProviderID: providerID, Model: model, Operation: iam.ModelEvidenceCompletion,
+			State: state, ObservedAt: time.Now().Unix(), LatencyMS: latency,
+			FailureCode: failureCode, Generation: publicationGeneration,
+		})
+	}
 	fail := func(detail, failureCode string) map[string]any {
 		latency := time.Since(started).Milliseconds()
 		detail = providers.SanitizeDiagnosticTextLimit(detail, 2048)
 		if strings.TrimSpace(failureCode) == "" {
 			failureCode = "verification_failed"
 		}
+		recordModelEvidence("failed", failureCode, latency)
 		check := iam.ProviderCheck{
 			ProviderID: providerID, Operation: iam.CheckVerify,
 			ScopeKey: checkScope, Generation: checkGeneration, Success: false,
@@ -875,6 +896,9 @@ func runProviderVerifyWithContext(
 			"completion_evidence": "failed",
 		}
 		return result
+	}
+	if publicationManagedErr != nil {
+		return fail("Model publication evidence is unavailable.", "evidence_unavailable")
 	}
 
 	provider, err := providers.GetProviderForPrincipal(providerID, principal)
@@ -950,6 +974,13 @@ func runProviderVerifyWithContext(
 			)
 		}
 	}
+	if publicationManaged {
+		if err := iam.BeginProviderModelProbes(
+			providerID, "", iam.ModelEvidenceCompletion, []string{model}, publicationGeneration,
+		); err != nil {
+			return fail("Model publication evidence could not be prepared.", "evidence_unavailable")
+		}
+	}
 
 	messages := []providers.Message{{"role": "user", "content": "Reply with the single word: ok"}}
 	preCompletionObservation := verificationObservation
@@ -959,6 +990,9 @@ func runProviderVerifyWithContext(
 		registry, _ := providers.RegistryProviderByID(registryID)
 		if registry.AnonymousAutomation {
 			verifyKw["max_tokens"] = 512
+			if row, found := providers.CatalogCachedLookupForPrincipal(providerID, model, principal); found && modelHasSurface(row, "/responses") {
+				verifyKw["max_tokens"] = 2048
+			}
 		} else {
 			switch providerConfig.Type {
 			case "ai_studio", "vertex_ai":
@@ -966,8 +1000,8 @@ func runProviderVerifyWithContext(
 			}
 		}
 	}
-	response, completionObservation, err := providers.CompleteProviderContextWithObservation(
-		ctx, provider, model, messages, verifyKw,
+	response, completionObservation, err := runVerificationCompletion(
+		ctx, providerID, provider, model, principal, messages, verifyKw,
 	)
 	if completionObservation != nil {
 		verificationObservation = completionObservation
@@ -978,11 +1012,15 @@ func runProviderVerifyWithContext(
 	}
 	latency := time.Since(started).Milliseconds()
 	if err != nil {
+		failureCode := "verification_failed"
+		status := providers.UpstreamStatus(err)
+		if status == http.StatusUnauthorized || status == http.StatusForbidden {
+			failureCode = "authentication_rejected"
+		}
 		result := fail(
 			fmt.Sprintf("Test completion against %q failed: %v", model, err),
-			"verification_failed",
+			failureCode,
 		)
-		status := providers.UpstreamStatus(err)
 		if status != 0 {
 			result["upstream_status"] = status
 		}
@@ -1012,6 +1050,7 @@ func runProviderVerifyWithContext(
 	if checkGenerationErr == nil {
 		_ = iam.RecordProviderCheck(check)
 	}
+	recordModelEvidence("verified", "", latency)
 	inputTokens, outputTokens := responseUsage(response)
 	usagePrincipal := &config.Principal{}
 	if principal != nil {
@@ -1035,14 +1074,70 @@ func runProviderVerifyWithContext(
 	}
 }
 
+func runVerificationCompletion(
+	ctx context.Context,
+	providerID string,
+	provider providers.Provider,
+	model string,
+	principal *config.Principal,
+	messages []providers.Message,
+	kwargs providers.Kwargs,
+) (map[string]any, *iam.ProviderAccountObservation, error) {
+	row, found := providers.CatalogCachedLookupForPrincipal(providerID, model, principal)
+	return runVerificationCompletionForCatalogModel(
+		ctx, providerID, provider, model, messages, kwargs, row, found,
+	)
+}
+
+func runVerificationCompletionForCatalogModel(
+	ctx context.Context,
+	providerID string,
+	provider providers.Provider,
+	model string,
+	messages []providers.Message,
+	kwargs providers.Kwargs,
+	row providers.ModelInfo,
+	found bool,
+) (map[string]any, *iam.ProviderAccountObservation, error) {
+	if found && row.TypedCapabilities != nil &&
+		row.TypedCapabilities.Surfaces.Responses == core.SupportSupported &&
+		row.TypedCapabilities.Surfaces.ChatCompletions == core.SupportUnsupported &&
+		providers.PreservesWireNativeSurface(provider, model, core.ModelSurfaceResponses) {
+		payload := map[string]any{
+			"model": model,
+			"input": []any{map[string]any{
+				"role": "user", "content": "Reply with the single word: ok",
+			}},
+			"stream": false,
+		}
+		if cfg, ok := config.Provider(providerID); !ok ||
+			providers.EffectiveRegistryID(providerID, cfg.RegistryID, cfg.Type) != "openai_codex" {
+			payload["max_output_tokens"] = kwargs["max_tokens"]
+		}
+		return providers.CompleteResponsesContext(ctx, provider, model, payload)
+	}
+	return providers.CompleteProviderContextWithObservation(
+		ctx, provider, model, messages, kwargs,
+	)
+}
+
 func verificationReplyOK(response map[string]any, requireAcknowledgement bool) bool {
 	choices, _ := response["choices"].([]any)
-	if len(choices) == 0 {
-		return false
+	content := ""
+	if len(choices) > 0 {
+		choice, _ := choices[0].(map[string]any)
+		message, _ := choice["message"].(map[string]any)
+		content = messageText(message["content"])
+	} else {
+		output, _ := response["output"].([]any)
+		for _, raw := range output {
+			item, _ := raw.(map[string]any)
+			if item["type"] != "message" {
+				continue
+			}
+			content += messageText(item["content"])
+		}
 	}
-	choice, _ := choices[0].(map[string]any)
-	message, _ := choice["message"].(map[string]any)
-	content := messageText(message["content"])
 	if strings.TrimSpace(content) == "" {
 		return false
 	}
@@ -1051,6 +1146,15 @@ func verificationReplyOK(response map[string]any, requireAcknowledgement bool) b
 	}
 	content = strings.Trim(strings.TrimSpace(content), " .,!?:;`*\"'")
 	return strings.EqualFold(content, "ok")
+}
+
+func modelHasSurface(model providers.ModelInfo, surface string) bool {
+	for _, candidate := range model.SupportedSurfaces {
+		if candidate == surface || candidate == "/v1"+surface {
+			return true
+		}
+	}
+	return false
 }
 
 func messageText(value any) string {

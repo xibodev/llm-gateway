@@ -1,17 +1,21 @@
 package providers
 
 import (
+	"context"
 	"errors"
-	"fmt"
+	"io"
 	"net/http"
-	"net/url"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
 
 	"llmgw/internal/iam"
 
+	providerauth "github.com/xibodev/llm-provider-auth"
 	codexauth "github.com/xibodev/llm-provider-auth/codex"
+	core "github.com/xibodev/llmgw-core"
+	coreproviders "github.com/xibodev/llmgw-core/providers"
 )
 
 // codexAuth supplies owner-private official Codex credentials to the common
@@ -153,7 +157,11 @@ func (a codexAuth) refreshConnection(initial iam.OAuthTokenEnvelope, initialConn
 		return nil
 	}
 
-	tokens, err := codexauth.Refresh(a.clientID, envelope.RefreshToken)
+	clientID, err := codexOAuthClientIDForEnvelope(envelope)
+	if err != nil {
+		return &ConfigError{Msg: "openai_codex: " + err.Error()}
+	}
+	tokens, err := codexauth.Refresh(clientID, envelope.RefreshToken)
 	if err != nil {
 		var refreshError *codexauth.RefreshError
 		if errors.As(err, &refreshError) && shouldRevokeCodexRefresh(strings.ToLower(refreshError.Code)) {
@@ -194,6 +202,8 @@ func (a codexAuth) refreshConnection(initial iam.OAuthTokenEnvelope, initialConn
 			Source: connection.Source, MakeDefault: connection.IsDefault, AccessToken: tokens.AccessToken,
 			RefreshToken: refreshToken, IDToken: idToken, TokenType: tokenType, ExpiresAt: expiresAt,
 			AccountID: accountID, AccountLabel: accountLabel, Status: "active",
+			ProjectID: envelope.ProjectID, OAuthProfile: envelope.OAuthProfile,
+			OAuthClientID: envelope.OAuthClientID,
 		},
 	)
 	if errors.Is(err, iam.ErrOAuthProviderConnectionChanged) {
@@ -227,14 +237,11 @@ func codexAccountMismatch(expected, actual string) bool {
 // Explicit console refreshes must not bypass its lock, account pin, or
 // compare-before-write checks.
 func RefreshCodexOAuthConnection(
-	principalID, providerID, connectionName, clientID string,
+	principalID, providerID, connectionName string,
 ) (iam.OAuthTokenEnvelope, iam.ProviderConnection, error) {
-	if clientID == "" {
-		clientID = EffectiveCodexClientID()
-	}
 	auth := codexAuth{
 		principalID: principalID, providerID: providerID,
-		connectionName: connectionName, clientID: clientID,
+		connectionName: connectionName,
 	}
 	if err := auth.Refresh(); err != nil {
 		return iam.OAuthTokenEnvelope{}, iam.ProviderConnection{}, err
@@ -253,6 +260,13 @@ func RefreshCodexOAuthConnection(
 	return envelope, connection, nil
 }
 
+func codexOAuthClientIDForEnvelope(envelope iam.OAuthTokenEnvelope) (string, error) {
+	if strings.TrimSpace(envelope.OAuthProfile) != codexOAuthProfileDevice || strings.TrimSpace(envelope.OAuthClientID) == "" {
+		return "", errors.New("OAuth client profile is unavailable; reauthorize this connection")
+	}
+	return strings.TrimSpace(envelope.OAuthClientID), nil
+}
+
 func sameCodexRefreshState(left, right iam.OAuthTokenEnvelope) bool {
 	return left.AccessToken == right.AccessToken && left.RefreshToken == right.RefreshToken
 }
@@ -266,14 +280,107 @@ func shouldRevokeCodexRefresh(code string) bool {
 	}
 }
 
-// CodexProvider always uses the verified Responses path rather than the chat
-// completions path. The shared OpenAI provider implementation supplies exactly
-// one refresh and bounded retry after a 401 through OpenAIAuth.
+const codexInstructions = "Follow the caller's request."
+
+// codexCatalogClientVersion is the catalog schema compatibility contract this
+// gateway has verified, not an attempt to impersonate an installed Codex CLI.
+const codexCatalogClientVersion = "0.155.1"
+
+// CodexProvider keeps gateway IAM and legacy interfaces around the shared Codex
+// catalog, request, and streaming transport.
 type CodexProvider struct {
-	inner OpenAIProvider
+	inner *coreproviders.CodexProvider
+	auth  codexAuth
+}
+
+func newCodexProvider(auth codexAuth, timeout float64, client *http.Client, clientVersion string) (CodexProvider, error) {
+	transport := http.DefaultTransport
+	if client != nil && client.Transport != nil {
+		transport = client.Transport
+	}
+	if client == nil {
+		client = httpClient(timeout)
+	} else {
+		client = &http.Client{Transport: client.Transport, Timeout: client.Timeout}
+	}
+	if strings.TrimSpace(clientVersion) == "" {
+		clientVersion = codexCatalogClientVersion
+	}
+	client.Transport = codexRefreshTransport{auth: auth, inner: transport}
+	inner, err := coreproviders.NewCodexProvider(coreproviders.CodexProviderConfig{
+		SessionSource: codexSessionSource{auth: auth},
+		Instructions:  codexInstructions,
+		ResponsesURL:  strings.TrimRight(codexauth.ResponsesBaseURL, "/") + "/responses",
+		ModelsURL:     codexauth.ModelsURL,
+		ClientVersion: clientVersion,
+		Client:        client,
+	})
+	if err != nil {
+		return CodexProvider{}, &ConfigError{Msg: "openai_codex: initialize shared transport: " + err.Error()}
+	}
+	return CodexProvider{inner: inner, auth: auth}, nil
+}
+
+type codexSessionSource struct{ auth codexAuth }
+
+func (s codexSessionSource) Session(context.Context) (coreproviders.CodexSession, error) {
+	_, headers, _, err := s.auth.PrepareObserved()
+	if err != nil {
+		return coreproviders.CodexSession{}, err
+	}
+	authorization := strings.TrimSpace(headers.Get("Authorization"))
+	tokenType, accessToken, ok := strings.Cut(authorization, " ")
+	if !ok || strings.TrimSpace(accessToken) == "" {
+		return coreproviders.CodexSession{}, invocation("openai_codex: active connection has no access token")
+	}
+	return coreproviders.CodexSession{
+		Token:     &providerauth.Token{AccessToken: strings.TrimSpace(accessToken), TokenType: strings.TrimSpace(tokenType)},
+		AccountID: headers.Get("ChatGPT-Account-ID"),
+	}, nil
+}
+
+// codexRefreshTransport supplies the one gateway-owned behavior intentionally
+// outside the shared transport: rotate the private IAM session after a 401 and
+// replay the request once with the CAS-protected replacement.
+type codexRefreshTransport struct {
+	auth  codexAuth
+	inner http.RoundTripper
+}
+
+func (t codexRefreshTransport) RoundTrip(request *http.Request) (*http.Response, error) {
+	response, err := t.inner.RoundTrip(request)
+	if err != nil || response.StatusCode != http.StatusUnauthorized {
+		return response, err
+	}
+	response.Body.Close()
+	if err := t.auth.Refresh(); err != nil {
+		return nil, err
+	}
+	_, headers, _, err := t.auth.PrepareObserved()
+	if err != nil {
+		return nil, err
+	}
+	retry := request.Clone(request.Context())
+	if request.GetBody != nil {
+		retry.Body, err = request.GetBody()
+		if err != nil {
+			return nil, err
+		}
+	}
+	for _, name := range []string{"Authorization", "ChatGPT-Account-ID", "OpenAI-Beta", "originator"} {
+		if value := headers.Get(name); value != "" {
+			retry.Header.Set(name, value)
+		} else {
+			retry.Header.Del(name)
+		}
+	}
+	return t.inner.RoundTrip(retry)
 }
 
 func (p CodexProvider) IsStub() bool { return false }
+func (p CodexProvider) PreservesWireNativeSurface(_ string, surface core.ModelSurface) bool {
+	return surface == core.ModelSurfaceResponses
+}
 func (p CodexProvider) Complete(model string, messages []Message, kw Kwargs) (map[string]any, error) {
 	response, _, err := p.CompleteWithObservation(model, messages, kw)
 	return response, err
@@ -281,28 +388,20 @@ func (p CodexProvider) Complete(model string, messages []Message, kw Kwargs) (ma
 func (p CodexProvider) CompleteWithObservation(
 	model string, messages []Message, kw Kwargs,
 ) (map[string]any, *iam.ProviderAccountObservation, error) {
-	return p.inner.completeViaResponsesWithObservation(model, messages, kw)
+	return p.CompleteContextWithObservation(context.Background(), model, messages, kw)
 }
 func (p CodexProvider) CompleteResponses(
 	model string, payload map[string]any,
 ) (map[string]any, *iam.ProviderAccountObservation, error) {
-	request := cloneMap(payload)
-	request["model"] = model
-	request["stream"] = false
-	delete(request, "force_api_support")
-	return p.inner.callResponsesPayloadWithObservation(request)
+	return p.CompleteResponsesContext(context.Background(), model, payload)
 }
 func (p CodexProvider) StreamResponses(
 	model string, payload map[string]any,
 ) (StreamIter, *iam.ProviderAccountObservation, error) {
-	request := cloneMap(payload)
-	request["model"] = model
-	request["stream"] = true
-	delete(request, "force_api_support")
-	return p.inner.streamResponsesPayload(request)
+	return p.StreamResponsesContext(context.Background(), model, payload)
 }
 func (p CodexProvider) Stream(model string, messages []Message, kw Kwargs) (StreamIter, error) {
-	return p.inner.streamViaResponses(model, messages, kw)
+	return p.StreamContext(context.Background(), model, messages, kw)
 }
 
 func (p CodexProvider) ListModels() []ModelInfo {
@@ -313,7 +412,7 @@ func (p CodexProvider) ListModels() []ModelInfo {
 func (p CodexProvider) ListModelsWithError() (
 	[]ModelInfo, *iam.ProviderAccountObservation, error,
 ) {
-	_, headers, observation, err := prepareOpenAIAuth(p.inner.auth)
+	observation, err := p.observation()
 	if err != nil {
 		return nil, observation, catalogError(
 			"catalog_authentication_failed",
@@ -321,101 +420,181 @@ func (p CodexProvider) ListModelsWithError() (
 			0,
 		)
 	}
-	modelsURL, err := url.Parse(codexauth.ModelsURL)
+	models, err := p.inner.ListModels(context.Background(), nil)
 	if err != nil {
+		return nil, observation, codexCatalogError(err)
+	}
+	observation = p.currentObservation(observation)
+	rows := make([]ModelInfo, 0, len(models))
+	for _, model := range models {
+		if model.APIEligible == nil || !*model.APIEligible || model.APIVisibility != "list" {
+			continue
+		}
+		rows = append(rows, ModelInfo{
+			ID: model.ID, Vendor: model.OwnedBy, Label: model.Description,
+			TypedCapabilities: model.Capabilities, SupportedSurfaces: model.SupportedAPIs,
+		})
+	}
+	if len(rows) == 0 {
 		return nil, observation, catalogError(
-			"catalog_provider_unavailable",
-			"Provider catalog endpoint is invalid.",
+			"catalog_no_usable_models",
+			"Provider catalog returned no API-eligible visible models.",
 			0,
 		)
-	}
-	query := modelsURL.Query()
-	query.Set("client_version", codexauth.ClientVersion)
-	modelsURL.RawQuery = query.Encode()
-	get := func(h http.Header) (*http.Response, error) {
-		request, _ := http.NewRequest(http.MethodGet, modelsURL.String(), nil)
-		request.Header = h
-		return httpClient(p.inner.Timeout).Do(request)
-	}
-	response, err := get(headers)
-	if err != nil {
-		return nil, observation, catalogError(
-			"catalog_transport_error",
-			"Provider catalog request could not reach the upstream service.",
-			0,
-		)
-	}
-	if response.StatusCode == http.StatusUnauthorized && p.inner.auth.CanRefresh() {
-		response.Body.Close()
-		if p.inner.auth.Refresh() != nil {
-			return nil, observation, catalogError(
-				"catalog_refresh_failed",
-				"Provider credential refresh failed.",
-				http.StatusUnauthorized,
-			)
-		}
-		_, headers, observation, err = prepareOpenAIAuth(p.inner.auth)
-		if err != nil {
-			return nil, observation, catalogError(
-				"catalog_authentication_failed",
-				"Provider authentication failed after credential refresh.",
-				http.StatusUnauthorized,
-			)
-		}
-		response, err = get(headers)
-		if err != nil {
-			return nil, observation, catalogError(
-				"catalog_transport_error",
-				"Provider catalog retry could not reach the upstream service.",
-				0,
-			)
-		}
-	}
-	if response.StatusCode >= 400 {
-		response.Body.Close()
-		return nil, observation, catalogError(
-			"catalog_http_error",
-			fmt.Sprintf("Provider catalog returned HTTP %d.", response.StatusCode),
-			response.StatusCode,
-		)
-	}
-	payload, err := decodeCatalogResponse(response, "data", "id", "name")
-	if err != nil {
-		return nil, observation, err
-	}
-	entries := payload["data"].([]any)
-	rows := make([]ModelInfo, 0, len(entries))
-	for _, value := range entries {
-		entry := value.(map[string]any)
-		id, _ := entry["id"].(string)
-		id = strings.TrimSpace(id)
-		if id == "" {
-			id, _ = entry["name"].(string)
-			id = strings.TrimSpace(id)
-		}
-		vendor, _ := entry["vendor"].(string)
-		if vendor == "" {
-			vendor, _ = entry["owned_by"].(string)
-		}
-		row := ModelInfo{ID: id, Vendor: vendor}
-		if label, _ := entry["display_name"].(string); label != "" && label != id {
-			row.Label = label
-		} else if label, _ := entry["name"].(string); label != "" && label != id {
-			row.Label = label
-		}
-		if caps := extractCapabilities(entry["capabilities"]); len(caps) > 0 {
-			row.Capabilities = caps
-		}
-		// "supported_endpoints" here is the OpenAI Codex backend's own field
-		// name in its catalog response — an upstream vendor contract we do not
-		// control, unrelated to this gateway's supported_surfaces rename.
-		if surfaces := stringList(entry["supported_endpoints"]); len(surfaces) > 0 {
-			row.SupportedSurfaces = surfaces
-		}
-		rows = append(rows, row)
 	}
 	return rows, observation, nil
 }
 
 var _ OpenAIAuth = codexAuth{}
 var _ Provider = CodexProvider{}
+
+func (p CodexProvider) observation() (*iam.ProviderAccountObservation, error) {
+	if p.auth.providerID == "" {
+		return nil, nil
+	}
+	_, _, observation, err := p.auth.PrepareObserved()
+	return observation, err
+}
+
+func (p CodexProvider) currentObservation(fallback *iam.ProviderAccountObservation) *iam.ProviderAccountObservation {
+	if p.auth.providerID == "" {
+		return fallback
+	}
+	_, _, observation, ok, err := iam.OAuthProviderConnectionSecretWithObservation(
+		p.auth.principalID, p.auth.providerID, p.auth.connectionName,
+	)
+	if err == nil && ok {
+		return &observation
+	}
+	return fallback
+}
+
+func codexCatalogError(err error) error {
+	var catalog *coreproviders.CatalogError
+	if !errors.As(err, &catalog) {
+		return catalogError("catalog_failed", "Provider catalog failed.", 0)
+	}
+	var refreshErr *InvocationError
+	if errors.As(catalog.Cause, &refreshErr) {
+		return catalogError("catalog_refresh_failed", "Provider credential refresh failed.", http.StatusUnauthorized)
+	}
+	if catalog.Status == http.StatusUnauthorized || catalog.Status == http.StatusForbidden {
+		return catalogError("catalog_authentication_failed", "Provider authentication failed during catalog access.", catalog.Status)
+	}
+	switch catalog.Code {
+	case "authentication_failed":
+		return catalogError("catalog_authentication_failed", "Provider authentication failed before catalog access.", catalog.Status)
+	case "transport_error":
+		return catalogError("catalog_transport_error", "Provider catalog request could not reach the upstream service.", catalog.Status)
+	case "invalid_response":
+		detail := "Provider catalog response was invalid."
+		if catalog.Cause != nil && strings.Contains(catalog.Cause.Error(), "exceeds size limit") {
+			detail = "Provider catalog response exceeded the size limit."
+		}
+		return catalogError("catalog_not_discoverable", detail, catalog.Status)
+	default:
+		return catalogError("catalog_http_error", "Provider catalog returned HTTP "+strconv.Itoa(catalog.Status)+".", catalog.Status)
+	}
+}
+
+type codexCoreStream struct {
+	inner core.StreamIter
+	err   error
+}
+
+func (s *codexCoreStream) Next() (string, bool) {
+	for {
+		frame, err := s.inner.Next()
+		if err != nil {
+			if !errors.Is(err, io.EOF) {
+				s.err = codexInvocationError(err)
+			}
+			return "", false
+		}
+		data := strings.TrimSpace(string(frame))
+		data = strings.TrimSpace(strings.TrimPrefix(data, "data:"))
+		if data == "" || data == "[DONE]" {
+			continue
+		}
+		return data, true
+	}
+}
+
+func (s *codexCoreStream) Err() error   { return s.err }
+func (s *codexCoreStream) Close() error { return s.inner.Close() }
+
+func codexInvocationError(err error) error {
+	if err == nil || IsInvocation(err) || IsConfig(err) || errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+		return err
+	}
+	var invocationErr *coreproviders.InvocationError
+	if !errors.As(err, &invocationErr) {
+		return invocation("openai_codex: shared transport failed")
+	}
+	retryAfter := ""
+	if invocationErr.RetryAfter > 0 {
+		retryAfter = strconv.FormatInt(int64(invocationErr.RetryAfter/time.Second), 10)
+	}
+	return &InvocationError{
+		Msg: "openai_codex: " + invocationErr.Error(), Status: invocationErr.Status,
+		RetryAfter: retryAfter, Retryable: invocationErr.Retryable,
+		FailoverEligible: invocationErr.FailoverEligible, CircuitFailure: invocationErr.CircuitFailure,
+	}
+}
+
+func codexChatPayload(model string, messages []Message, kw Kwargs) map[string]any {
+	payload := map[string]any{"model": model, "messages": messages}
+	if tools := kw["tools"]; tools != nil {
+		payload["tools"] = tools
+	}
+	if cacheKey, _ := kw["prompt_cache_key"].(string); cacheKey != "" {
+		payload["prompt_cache_key"] = cacheKey
+	}
+	return payload
+}
+
+func (p CodexProvider) CompleteContext(ctx context.Context, model string, messages []Message, kw Kwargs) (map[string]any, error) {
+	response, _, err := p.CompleteContextWithObservation(ctx, model, messages, kw)
+	return response, err
+}
+
+func (p CodexProvider) CompleteContextWithObservation(ctx context.Context, model string, messages []Message, kw Kwargs) (map[string]any, *iam.ProviderAccountObservation, error) {
+	observation, err := p.observation()
+	if err != nil {
+		return nil, observation, err
+	}
+	response, err := p.inner.Complete(ctx, model, codexChatPayload(model, messages, kw), nil)
+	return response, p.currentObservation(observation), codexInvocationError(err)
+}
+
+func (p CodexProvider) StreamContext(ctx context.Context, model string, messages []Message, kw Kwargs) (StreamIter, error) {
+	if _, err := p.observation(); err != nil {
+		return nil, err
+	}
+	stream, err := p.inner.Stream(ctx, model, codexChatPayload(model, messages, kw), nil)
+	if err != nil {
+		return nil, codexInvocationError(err)
+	}
+	return &codexCoreStream{inner: stream}, nil
+}
+
+func (p CodexProvider) CompleteResponsesContext(ctx context.Context, model string, payload map[string]any) (map[string]any, *iam.ProviderAccountObservation, error) {
+	observation, err := p.observation()
+	if err != nil {
+		return nil, observation, err
+	}
+	response, err := p.inner.CompleteResponses(ctx, model, payload, nil)
+	return response, p.currentObservation(observation), codexInvocationError(err)
+}
+
+func (p CodexProvider) StreamResponsesContext(ctx context.Context, model string, payload map[string]any) (StreamIter, *iam.ProviderAccountObservation, error) {
+	observation, err := p.observation()
+	if err != nil {
+		return nil, observation, err
+	}
+	stream, err := p.inner.StreamResponses(ctx, model, payload, nil)
+	if err != nil {
+		return nil, p.currentObservation(observation), codexInvocationError(err)
+	}
+	return &codexCoreStream{inner: stream}, p.currentObservation(observation), nil
+}

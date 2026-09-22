@@ -10,6 +10,7 @@ import (
 	"llmgw/internal/config"
 	"llmgw/internal/iam"
 
+	anthropicauth "github.com/xibodev/llm-provider-auth/anthropic"
 	gcpauth "github.com/xibodev/llm-provider-auth/gcp"
 )
 
@@ -23,7 +24,7 @@ var (
 // (echo is an internal test stub, intentionally not listed.)
 var ProviderTypes = []string{
 	"openai_compatible", "anthropic", "bedrock", "github_copilot", "ollama", "litellm", "edge_tts",
-	"ai_studio", "vertex_ai", "azure_openai",
+	"ai_studio", "vertex_ai", "azure_openai", "google_antigravity",
 }
 
 func instantiate(
@@ -63,10 +64,9 @@ func instantiate(
 				return nil, &ConfigError{Msg: "openai_codex: a human principal private connection is required"}
 			}
 			clientID := EffectiveCodexClientID()
-			return CodexProvider{inner: OpenAIProvider{
-				auth:    codexAuth{principalID: principal.PrincipalID, providerID: providerID, clientID: clientID},
-				Timeout: timeout, providerID: providerID, principal: principal,
-			}}, nil
+			return newCodexProvider(codexAuth{
+				principalID: principal.PrincipalID, providerID: providerID, clientID: clientID,
+			}, timeout, nil, "")
 		}
 		apiKey, observation, err := resolveAPIKeyObserved(providerID, cfg, principal)
 		if err != nil {
@@ -108,11 +108,23 @@ func instantiate(
 			observation: observation,
 		}, nil
 	case "anthropic":
-		apiKey, err := resolveAPIKey(providerID, cfg, principal)
+		credential, kind, _, err := resolveCredentialObserved(providerID, cfg, principal)
 		if err != nil {
 			return nil, err
 		}
-		return AnthropicNativeProvider{BaseURL: cfg.BaseURL, APIKey: apiKey, Timeout: cfg.TimeoutOr(0)}, nil
+		if strings.TrimSpace(credential) == "" {
+			return AnthropicNativeProvider{BaseURL: cfg.BaseURL, Timeout: cfg.TimeoutOr(0)}, nil
+		}
+		if kind != CredentialKindAPIKey && kind != string(anthropicauth.CredentialSetupToken) {
+			return nil, &ConfigError{Msg: fmt.Sprintf("provider '%s': connection kind %q is not usable for anthropic", providerID, kind)}
+		}
+		auth, err := anthropicauth.NewHeaderSource(credential)
+		if err != nil {
+			return nil, &ConfigError{Msg: fmt.Sprintf("provider '%s': %v", providerID, err)}
+		}
+		return AnthropicNativeProvider{BaseURL: cfg.BaseURL, Auth: auth, Timeout: cfg.TimeoutOr(0)}, nil
+	case "google_antigravity":
+		return newAntigravityProvider(providerID, principal)
 	case "bedrock":
 		apiKey, observation, err := resolveAPIKeyObserved(providerID, cfg, principal)
 		if err != nil {
@@ -404,15 +416,18 @@ func ProviderCredentialAuthorized(
 	if !ok {
 		return true, nil
 	}
-	if !strings.EqualFold(cfg.Type, "github_copilot") ||
-		principal == nil || principal.PrincipalID == "" {
+	privateCatalog := CatalogRequiresPrincipal(providerID)
+	if !strings.EqualFold(cfg.Type, "github_copilot") && !privateCatalog {
 		return true, nil
+	}
+	if principal == nil || principal.PrincipalID == "" {
+		return !privateCatalog, nil
 	}
 	_, _, found, err := iam.ResolveProviderOAuthCredentialSecretWithObservation(
 		principal, providerID,
 	)
 	if err != nil {
-		return false, nil
+		return false, err
 	}
 	return found, nil
 }

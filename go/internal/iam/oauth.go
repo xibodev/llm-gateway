@@ -16,44 +16,62 @@ var ErrOAuthProviderConnectionChanged = errors.New("OAuth provider connection ch
 // connection payload. Its token fields are deliberately excluded from JSON so an
 // accidental API serialization cannot expose them.
 type OAuthTokenEnvelope struct {
-	AccessToken  string `json:"-"`
-	RefreshToken string `json:"-"`
-	IDToken      string `json:"-"`
-	TokenType    string `json:"token_type,omitempty"`
-	ExpiresAt    int64  `json:"expires_at,omitempty"`
-	AccountID    string `json:"account_id,omitempty"`
-	AccountLabel string `json:"account_label,omitempty"`
-	Status       string `json:"status,omitempty"`
+	AccessToken       string `json:"-"`
+	RefreshToken      string `json:"-"`
+	IDToken           string `json:"-"`
+	TokenType         string `json:"token_type,omitempty"`
+	ExpiresAt         int64  `json:"expires_at,omitempty"`
+	AccountID         string `json:"account_id,omitempty"`
+	AccountLabel      string `json:"account_label,omitempty"`
+	ProjectID         string `json:"project_id,omitempty"`
+	OAuthProfile      string `json:"oauth_profile,omitempty"`
+	OAuthClientID     string `json:"oauth_client_id,omitempty"`
+	OAuthClientMode   string `json:"oauth_client_mode,omitempty"`
+	OAuthRedirectURI  string `json:"oauth_redirect_uri,omitempty"`
+	OAuthClientSecret string `json:"-"`
+	Status            string `json:"status,omitempty"`
 }
 
 type storedOAuthEnvelope struct {
-	AccessToken  string `json:"access_token"`
-	RefreshToken string `json:"refresh_token,omitempty"`
-	IDToken      string `json:"id_token,omitempty"`
-	TokenType    string `json:"token_type,omitempty"`
-	ExpiresAt    int64  `json:"expires_at,omitempty"`
-	AccountID    string `json:"account_id,omitempty"`
-	AccountLabel string `json:"account_label,omitempty"`
-	Status       string `json:"status,omitempty"`
+	AccessToken       string `json:"access_token"`
+	RefreshToken      string `json:"refresh_token,omitempty"`
+	IDToken           string `json:"id_token,omitempty"`
+	TokenType         string `json:"token_type,omitempty"`
+	ExpiresAt         int64  `json:"expires_at,omitempty"`
+	AccountID         string `json:"account_id,omitempty"`
+	AccountLabel      string `json:"account_label,omitempty"`
+	ProjectID         string `json:"project_id,omitempty"`
+	OAuthProfile      string `json:"oauth_profile,omitempty"`
+	OAuthClientID     string `json:"oauth_client_id,omitempty"`
+	OAuthClientMode   string `json:"oauth_client_mode,omitempty"`
+	OAuthRedirectURI  string `json:"oauth_redirect_uri,omitempty"`
+	OAuthClientSecret string `json:"oauth_client_secret,omitempty"`
+	Status            string `json:"status,omitempty"`
 }
 
 // OAuthConnectionCreate supplies a complete official OAuth token envelope for
 // one human-owned provider connection. It is never returned from an API.
 type OAuthConnectionCreate struct {
-	PrincipalID  string
-	ProviderID   string
-	Name         string
-	Kind         string
-	Source       string
-	MakeDefault  bool
-	AccessToken  string
-	RefreshToken string
-	IDToken      string
-	TokenType    string
-	ExpiresAt    int64
-	AccountID    string
-	AccountLabel string
-	Status       string
+	PrincipalID       string
+	ProviderID        string
+	Name              string
+	Kind              string
+	Source            string
+	MakeDefault       bool
+	AccessToken       string
+	RefreshToken      string
+	IDToken           string
+	TokenType         string
+	ExpiresAt         int64
+	AccountID         string
+	AccountLabel      string
+	ProjectID         string
+	OAuthProfile      string
+	OAuthClientID     string
+	OAuthClientMode   string
+	OAuthRedirectURI  string
+	OAuthClientSecret string
+	Status            string
 }
 
 // PutOAuthProviderConnection encrypts an official OAuth envelope in the
@@ -74,7 +92,10 @@ func PutOAuthProviderConnection(input OAuthConnectionCreate) (ProviderConnection
 		AccessToken: input.AccessToken, RefreshToken: strings.TrimSpace(input.RefreshToken),
 		IDToken: strings.TrimSpace(input.IDToken), TokenType: strings.TrimSpace(input.TokenType),
 		ExpiresAt: input.ExpiresAt, AccountID: strings.TrimSpace(input.AccountID),
-		AccountLabel: strings.TrimSpace(input.AccountLabel), Status: strings.TrimSpace(input.Status),
+		AccountLabel: strings.TrimSpace(input.AccountLabel), ProjectID: strings.TrimSpace(input.ProjectID),
+		OAuthProfile: strings.TrimSpace(input.OAuthProfile), OAuthClientID: strings.TrimSpace(input.OAuthClientID),
+		OAuthClientMode: strings.TrimSpace(input.OAuthClientMode), OAuthRedirectURI: strings.TrimSpace(input.OAuthRedirectURI),
+		OAuthClientSecret: input.OAuthClientSecret, Status: strings.TrimSpace(input.Status),
 	})
 	if err != nil {
 		return ProviderConnection{}, fmt.Errorf("encode OAuth envelope: %w", err)
@@ -93,7 +114,7 @@ func PutOAuthProviderConnection(input OAuthConnectionCreate) (ProviderConnection
 	}
 	applyOAuthMetadata(&connection, OAuthTokenEnvelope{
 		TokenType: input.TokenType, ExpiresAt: input.ExpiresAt, AccountID: input.AccountID,
-		AccountLabel: input.AccountLabel, Status: input.Status,
+		AccountLabel: input.AccountLabel, ProjectID: input.ProjectID, Status: input.Status,
 	})
 	return connection, nil
 }
@@ -133,7 +154,10 @@ func ReplaceOAuthProviderConnectionIfCurrent(
 		AccessToken: input.AccessToken, RefreshToken: strings.TrimSpace(input.RefreshToken),
 		IDToken: strings.TrimSpace(input.IDToken), TokenType: strings.TrimSpace(input.TokenType),
 		ExpiresAt: input.ExpiresAt, AccountID: strings.TrimSpace(input.AccountID),
-		AccountLabel: strings.TrimSpace(input.AccountLabel), Status: strings.TrimSpace(input.Status),
+		AccountLabel: strings.TrimSpace(input.AccountLabel), ProjectID: strings.TrimSpace(input.ProjectID),
+		OAuthProfile: strings.TrimSpace(input.OAuthProfile), OAuthClientID: strings.TrimSpace(input.OAuthClientID),
+		OAuthClientMode: strings.TrimSpace(input.OAuthClientMode), OAuthRedirectURI: strings.TrimSpace(input.OAuthRedirectURI),
+		OAuthClientSecret: input.OAuthClientSecret, Status: strings.TrimSpace(input.Status),
 	})
 	if err != nil {
 		return ProviderConnection{}, fmt.Errorf("encode OAuth envelope: %w", err)
@@ -229,7 +253,7 @@ WHERE id=? AND principal_id=? AND status='active' AND ciphertext=? AND nonce=?`,
 	}
 	applyOAuthMetadata(&connection, OAuthTokenEnvelope{
 		TokenType: input.TokenType, ExpiresAt: input.ExpiresAt, AccountID: input.AccountID,
-		AccountLabel: input.AccountLabel, Status: input.Status,
+		AccountLabel: input.AccountLabel, ProjectID: input.ProjectID, Status: input.Status,
 	})
 	return connection, nil
 }
@@ -329,7 +353,12 @@ func sameOAuthEnvelopeState(left, right OAuthTokenEnvelope) bool {
 	return bytes.Equal([]byte(left.AccessToken), []byte(right.AccessToken)) &&
 		bytes.Equal([]byte(left.RefreshToken), []byte(right.RefreshToken)) &&
 		bytes.Equal([]byte(left.IDToken), []byte(right.IDToken)) &&
-		strings.TrimSpace(left.AccountID) == strings.TrimSpace(right.AccountID)
+		strings.TrimSpace(left.AccountID) == strings.TrimSpace(right.AccountID) &&
+		strings.TrimSpace(left.OAuthProfile) == strings.TrimSpace(right.OAuthProfile) &&
+		strings.TrimSpace(left.OAuthClientID) == strings.TrimSpace(right.OAuthClientID) &&
+		strings.TrimSpace(left.OAuthClientMode) == strings.TrimSpace(right.OAuthClientMode) &&
+		strings.TrimSpace(left.OAuthRedirectURI) == strings.TrimSpace(right.OAuthRedirectURI) &&
+		bytes.Equal([]byte(left.OAuthClientSecret), []byte(right.OAuthClientSecret))
 }
 
 // OAuthProviderConnectionSecret decrypts the internal OAuth envelope for a
@@ -368,7 +397,10 @@ func encodeOAuthEnvelope(envelope OAuthTokenEnvelope) (string, error) {
 	raw, err := json.Marshal(storedOAuthEnvelope{
 		AccessToken: envelope.AccessToken, RefreshToken: envelope.RefreshToken, IDToken: envelope.IDToken,
 		TokenType: envelope.TokenType, ExpiresAt: envelope.ExpiresAt, AccountID: envelope.AccountID,
-		AccountLabel: envelope.AccountLabel, Status: envelope.Status,
+		AccountLabel: envelope.AccountLabel, ProjectID: envelope.ProjectID, Status: envelope.Status,
+		OAuthProfile: envelope.OAuthProfile, OAuthClientID: envelope.OAuthClientID,
+		OAuthClientMode: envelope.OAuthClientMode, OAuthRedirectURI: envelope.OAuthRedirectURI,
+		OAuthClientSecret: envelope.OAuthClientSecret,
 	})
 	return string(raw), err
 }
@@ -383,7 +415,10 @@ func decodeOAuthEnvelope(raw string) (OAuthTokenEnvelope, error) {
 		return OAuthTokenEnvelope{
 			AccessToken: stored.AccessToken, RefreshToken: stored.RefreshToken, IDToken: stored.IDToken,
 			TokenType: stored.TokenType, ExpiresAt: stored.ExpiresAt, AccountID: stored.AccountID,
-			AccountLabel: stored.AccountLabel, Status: stored.Status,
+			AccountLabel: stored.AccountLabel, ProjectID: stored.ProjectID, Status: stored.Status,
+			OAuthProfile: stored.OAuthProfile, OAuthClientID: stored.OAuthClientID,
+			OAuthClientMode: stored.OAuthClientMode, OAuthRedirectURI: stored.OAuthRedirectURI,
+			OAuthClientSecret: stored.OAuthClientSecret,
 		}, nil
 	}
 	// v7 copied pre-envelope OAuth credentials as their original raw token. Keep
@@ -399,6 +434,7 @@ func applyOAuthMetadata(connection *ProviderConnection, envelope OAuthTokenEnvel
 	connection.OAuthExpiresAt = envelope.ExpiresAt
 	connection.OAuthAccountID = envelope.AccountID
 	connection.OAuthAccountLabel = envelope.AccountLabel
+	connection.OAuthProjectID = envelope.ProjectID
 	status := strings.TrimSpace(envelope.Status)
 	if status == "" {
 		status = "active"

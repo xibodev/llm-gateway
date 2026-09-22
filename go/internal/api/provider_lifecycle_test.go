@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"encoding/base64"
 	"encoding/json"
 	"net/http"
@@ -14,7 +15,43 @@ import (
 	"llmgw/internal/iam"
 	"llmgw/internal/providers"
 	"llmgw/internal/router"
+
+	core "github.com/xibodev/llmgw-core"
 )
+
+type responsesOnlyVerificationProvider struct {
+	chatCalls      int
+	responsesCalls int
+	payload        map[string]any
+}
+
+func (p *responsesOnlyVerificationProvider) Complete(string, []providers.Message, providers.Kwargs) (map[string]any, error) {
+	p.chatCalls++
+	return nil, nil
+}
+
+func (*responsesOnlyVerificationProvider) Stream(string, []providers.Message, providers.Kwargs) (providers.StreamIter, error) {
+	return nil, providers.ErrResponsesUnsupported
+}
+
+func (*responsesOnlyVerificationProvider) ListModels() []providers.ModelInfo { return nil }
+func (*responsesOnlyVerificationProvider) IsStub() bool                      { return false }
+func (*responsesOnlyVerificationProvider) PreservesWireNativeSurface(_ string, surface core.ModelSurface) bool {
+	return surface == core.ModelSurfaceResponses
+}
+
+func (p *responsesOnlyVerificationProvider) CompleteResponsesContext(
+	_ context.Context, _ string, payload map[string]any,
+) (map[string]any, *iam.ProviderAccountObservation, error) {
+	p.responsesCalls++
+	p.payload = payload
+	return map[string]any{
+		"object": "response", "status": "completed",
+		"output": []any{map[string]any{
+			"type": "message", "content": []any{map[string]any{"type": "output_text", "text": "ok"}},
+		}},
+	}, nil, nil
+}
 
 func TestProviderStatusLadder(t *testing.T) {
 	cases := []struct {
@@ -140,6 +177,81 @@ func TestProviderVerificationAcceptsTextPartAcknowledgement(t *testing.T) {
 		"message": map[string]any{"content": "quota exceeded"},
 	}}}, true) {
 		t.Fatal("automatic verification accepted a soft-error message")
+	}
+}
+
+func TestProviderVerificationUsesNativeResponsesForResponsesOnlyModel(t *testing.T) {
+	t.Setenv("LLMGW_STATE_DIR", t.TempDir())
+	config.Update(func(s *config.Settings) {
+		s.Providers = map[string]*config.ProviderConfig{"codex": {Type: "openai_compatible", RegistryID: "openai_codex"}}
+	})
+	providers.ResetProviders()
+	t.Cleanup(providers.ResetProviders)
+	capabilities := &core.ModelCapabilities{}
+	capabilities.Surfaces.Responses = core.SupportSupported
+	capabilities.Surfaces.ChatCompletions = core.SupportUnsupported
+	provider := &responsesOnlyVerificationProvider{}
+	response, _, err := runVerificationCompletionForCatalogModel(
+		context.Background(), "codex", provider, "responses-model",
+		[]providers.Message{{"role": "user", "content": "ok"}},
+		providers.Kwargs{"max_tokens": 16},
+		providers.ModelInfo{ID: "responses-model", TypedCapabilities: capabilities}, true,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if provider.responsesCalls != 1 || provider.chatCalls != 0 {
+		t.Fatalf("responses calls=%d chat calls=%d", provider.responsesCalls, provider.chatCalls)
+	}
+	if provider.payload["max_output_tokens"] != nil || !verificationReplyOK(response, true) {
+		t.Fatalf("payload=%+v response=%+v", provider.payload, response)
+	}
+	if input, ok := provider.payload["input"].([]any); !ok || len(input) != 1 {
+		t.Fatalf("verification input is not a Responses item list: %+v", provider.payload)
+	}
+}
+
+func TestProviderVerificationKeepsOutputLimitForOtherResponsesProviders(t *testing.T) {
+	config.Update(func(s *config.Settings) {
+		s.Providers = map[string]*config.ProviderConfig{"fixture": {Type: "openai_compatible"}}
+	})
+	capabilities := &core.ModelCapabilities{}
+	capabilities.Surfaces.Responses = core.SupportSupported
+	capabilities.Surfaces.ChatCompletions = core.SupportUnsupported
+	provider := &responsesOnlyVerificationProvider{}
+	_, _, err := runVerificationCompletionForCatalogModel(
+		context.Background(), "fixture", provider, "responses-model",
+		[]providers.Message{{"role": "user", "content": "ok"}},
+		providers.Kwargs{"max_tokens": 16},
+		providers.ModelInfo{ID: "responses-model", TypedCapabilities: capabilities}, true,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if provider.payload["max_output_tokens"] != 16 {
+		t.Fatalf("payload=%+v", provider.payload)
+	}
+}
+
+func TestProviderVerificationFailureAuditIsNotSuccess(t *testing.T) {
+	t.Setenv("LLMGW_STATE_DIR", t.TempDir())
+	iam.ResetForTests()
+	t.Cleanup(iam.ResetForTests)
+	if _, err := iam.Initialize(); err != nil {
+		t.Fatal(err)
+	}
+	request := httptest.NewRequest(http.MethodPost, "/admin/api/providers/fixture/verify", nil)
+	setAdminActor(request, adminActor{Source: "static-admin-key"})
+	auditAdminResult(
+		request, "provider.verify", "provider", "fixture", "failure",
+		map[string]any{"model": "fixture-model"},
+	)
+	events, err := iam.ListAudit(1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(events) != 1 || events[0].Action != "provider.verify" || events[0].Result != "failure" {
+		t.Fatalf("audit events=%+v", events)
 	}
 }
 
@@ -654,6 +766,36 @@ func TestWriteUpstreamErrorPreservesDirectInvocationStatus(t *testing.T) {
 			message, _ := envelope["message"].(string)
 			if strings.Contains(message, secret) || strings.Contains(message, "direct-owner@example.test") {
 				t.Fatalf("upstream response exposed diagnostic detail: %q", message)
+			}
+		})
+	}
+}
+
+func TestWriteUpstreamErrorSafelyPreservesRetryAfter(t *testing.T) {
+	for _, test := range []struct {
+		name, supplied, want string
+	}{
+		{name: "delta seconds", supplied: " 17 ", want: "17"},
+		{name: "HTTP date", supplied: "Wed, 21 Oct 2015 07:28:00 GMT", want: "Wed, 21 Oct 2015 07:28:00 GMT"},
+		{name: "invalid", supplied: "quota project=private", want: ""},
+		{name: "negative", supplied: "-1", want: ""},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			recorder := httptest.NewRecorder()
+			writeUpstreamError(recorder, &providers.InvocationError{
+				Msg: "upstream body must not be exposed", Status: http.StatusTooManyRequests, RetryAfter: test.supplied,
+			})
+			if recorder.Code != http.StatusTooManyRequests || recorder.Header().Get("Retry-After") != test.want {
+				t.Fatalf("status=%d Retry-After=%q", recorder.Code, recorder.Header().Get("Retry-After"))
+			}
+			var response map[string]any
+			if err := json.Unmarshal(recorder.Body.Bytes(), &response); err != nil {
+				t.Fatal(err)
+			}
+			envelope, _ := response["error"].(map[string]any)
+			if envelope["code"] != "429" || envelope["message"] != "Upstream provider request failed." ||
+				strings.Contains(recorder.Body.String(), "body must not be exposed") || strings.Contains(recorder.Body.String(), "private") {
+				t.Fatalf("unsafe or unstructured response: %s", recorder.Body.String())
 			}
 		})
 	}

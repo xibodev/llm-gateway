@@ -8,13 +8,19 @@ export class APIError extends Error {
   readonly status: number;
   readonly detail: unknown;
   readonly code: string;
+  readonly retryAfter: string;
+  readonly retryable: boolean | null;
+  readonly action: string;
 
-  constructor(status: number, message: string, detail: unknown, code = "") {
+  constructor(status: number, message: string, detail: unknown, code = "", retryAfter = "", retryable: boolean | null = null, action = "") {
     super(message);
     this.name = "APIError";
     this.status = status;
     this.detail = detail;
     this.code = code;
+    this.retryAfter = retryAfter;
+    this.retryable = retryable;
+    this.action = action;
   }
 }
 
@@ -103,12 +109,21 @@ export async function requestJSON<T>(mode: ConsoleMode, path: string, init: Requ
   if (!response.ok) {
     const detail = typeof payload === "object" && payload !== null ? payload : {};
     const errorValue = typeof detail === "object" && "error" in detail ? (detail as JSONRecord).error : undefined;
+    const errorRecord = typeof errorValue === "object" && errorValue !== null ? errorValue as JSONRecord : {};
     const message = typeof errorValue === "string"
       ? errorValue
-      : typeof errorValue === "object" && errorValue !== null && "message" in errorValue
-        ? String((errorValue as JSONRecord).message)
+      : "message" in errorRecord
+        ? String(errorRecord.message)
         : `Request failed with status ${response.status}.`;
-    throw new APIError(response.status, message, payload);
+    throw new APIError(
+      response.status,
+      message,
+      payload,
+      String(errorRecord.code ?? ""),
+      response.headers.get("Retry-After") ?? "",
+      typeof errorRecord.retryable === "boolean" ? errorRecord.retryable : null,
+      typeof errorRecord.action === "string" ? errorRecord.action : "",
+    );
   }
   if (!contentType.includes("application/json")) {
     if (contentType.includes("text/html")) {

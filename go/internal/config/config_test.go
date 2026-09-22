@@ -132,7 +132,7 @@ func TestSaveLoadRoundTrip(t *testing.T) {
 		}
 		s.OpenAICodexClientID = "codex-client"
 		s.Endpoints = map[string]*EndpointConfig{
-			"smart": {Failover: []EndpointMember{{Provider: "br", Model: "m1"}}},
+			"smart": {Failover: []EndpointMember{{Provider: "br", Model: "m1", AllowUnverified: true}}},
 		}
 	})
 	if err := Save(); err != nil {
@@ -159,8 +159,67 @@ func TestSaveLoadRoundTrip(t *testing.T) {
 		t.Fatalf("codex client id did not round-trip: %q", reloaded.OpenAICodexClientID)
 	}
 	ep, ok := reloaded.Endpoints["smart"]
-	if !ok || len(ep.Failover) != 1 || ep.Failover[0].Provider != "br" {
+	if !ok || len(ep.Failover) != 1 || ep.Failover[0].Provider != "br" || !ep.Failover[0].AllowUnverified {
 		t.Fatalf("endpoint round-trip wrong: %+v", ep)
+	}
+}
+
+func TestAntigravityOAuthClientConfigurationIsRuntimeOnly(t *testing.T) {
+	t.Setenv("LLMGW_GOOGLE_ANTIGRAVITY_CLIENT_ID", "fixture-client-id")
+	t.Setenv("LLMGW_GOOGLE_ANTIGRAVITY_CLIENT_SECRET", "fixture-client-secret")
+	t.Setenv("LLMGW_GOOGLE_ANTIGRAVITY_OAUTH_PROFILE", "consumer_manual")
+	t.Setenv("LLMGW_GOOGLE_ANTIGRAVITY_CLIENT_MODE", "confidential")
+	t.Setenv("LLMGW_GOOGLE_ANTIGRAVITY_REDIRECT_URI", "https://callback.example.test/oauth")
+	settings := Defaults()
+	applyEnv(settings)
+	if settings.GoogleAntigravityClientID != "fixture-client-id" || settings.GoogleAntigravityClientSecret != "fixture-client-secret" ||
+		settings.GoogleAntigravityOAuthProfile != "consumer_manual" || settings.GoogleAntigravityClientMode != "confidential" ||
+		settings.GoogleAntigravityRedirectURI != "https://callback.example.test/oauth" {
+		t.Fatalf("runtime OAuth configuration was not loaded")
+	}
+	payload := configPayload(settings)
+	if _, ok := payload["google_antigravity_client_id"]; ok {
+		t.Fatal("Antigravity client ID entered persisted config")
+	}
+	if _, ok := payload["google_antigravity_client_secret"]; ok {
+		t.Fatal("Antigravity client secret entered persisted config")
+	}
+	for _, field := range []string{"google_antigravity_oauth_profile", "google_antigravity_client_mode", "google_antigravity_redirect_uri"} {
+		if _, ok := payload[field]; ok {
+			t.Fatalf("Antigravity runtime OAuth field %q entered persisted config", field)
+		}
+	}
+}
+
+func TestAntigravityPublicOAuthClientIDPersistsWithProvider(t *testing.T) {
+	settings := Defaults()
+	settings.Providers["antigravity"] = &ProviderConfig{
+		Type: "google_antigravity", PublicOAuthClientID: "fixture-public-client",
+	}
+	payload := configPayload(settings)
+	provider := payload["providers"].(map[string]any)["antigravity"].(map[string]any)
+	if provider["public_oauth_client_id"] != "fixture-public-client" {
+		t.Fatalf("provider payload=%+v", provider)
+	}
+}
+
+func TestPublicOAuthClientIDLoadsAndRoundTrips(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("LLMGW_STATE_DIR", dir)
+	t.Setenv("LLMGW_CONFIG", filepath.Join(dir, "config.yaml"))
+	if err := os.WriteFile(ConfigFilePath(), []byte("providers:\n  antigravity:\n    type: google_antigravity\n    public_oauth_client_id: fixture-public-client\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	loaded := Load()
+	if loaded.Providers["antigravity"].PublicOAuthClientID != "fixture-public-client" {
+		t.Fatalf("loaded provider=%+v", loaded.Providers["antigravity"])
+	}
+	if err := Save(); err != nil {
+		t.Fatal(err)
+	}
+	reloaded := Load()
+	if reloaded.Providers["antigravity"].PublicOAuthClientID != "fixture-public-client" {
+		t.Fatalf("reloaded provider=%+v", reloaded.Providers["antigravity"])
 	}
 }
 
@@ -431,5 +490,26 @@ categories:
 	}
 	if strings.Contains(out, "categories:") {
 		t.Fatalf("serialised config still has the legacy categories: key, save did not migrate it:\n%s", out)
+	}
+}
+
+func TestUpdateAndSaveFailurePreservesMemory(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("LLMGW_STATE_DIR", dir)
+	t.Setenv("LLMGW_CONFIG", filepath.Join(dir, "missing", "config.yaml"))
+	old := current
+	current = Defaults()
+	current.Endpoints["existing"] = &EndpointConfig{Failover: []EndpointMember{{Provider: "echo", Model: "old"}}}
+	t.Cleanup(func() { current = old })
+
+	restore, err := UpdateAndSave(func(next *Settings) error {
+		next.Endpoints["new"] = &EndpointConfig{Failover: []EndpointMember{{Provider: "echo", Model: "new"}}}
+		return nil
+	})
+	if err == nil || restore != nil {
+		t.Fatalf("restore=%v err=%v", restore != nil, err)
+	}
+	if current.Endpoints["new"] != nil || current.Endpoints["existing"].Failover[0].Model != "old" {
+		t.Fatalf("failed save changed memory: %+v", current.Endpoints)
 	}
 }

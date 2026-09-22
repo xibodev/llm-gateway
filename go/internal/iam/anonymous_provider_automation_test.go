@@ -1,6 +1,7 @@
 package iam
 
 import (
+	"encoding/json"
 	"testing"
 	"time"
 
@@ -14,6 +15,43 @@ func setupAnonymousProviderAutomationTest(t *testing.T) {
 	t.Cleanup(ResetForTests)
 	if _, err := Initialize(); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestManagedMarkerIsBackfilledAndSurvivesAuditRetention(t *testing.T) {
+	setupAnonymousProviderAutomationTest(t)
+	db, err := DB()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`DELETE FROM schema_migrations WHERE version=18`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`DELETE FROM control_metadata WHERE key=?`,
+		"anonymous_provider_automation.managed.legacy"); err != nil {
+		t.Fatal(err)
+	}
+	detail, _ := json.Marshal(map[string]any{"source": "automation"})
+	if _, err := db.Exec(`INSERT INTO audit_events(ts,action,target_type,target_id,result,detail_json)
+VALUES(1,'provider_automation.connect','provider','legacy','success',?)`, string(detail)); err != nil {
+		t.Fatal(err)
+	}
+	if err := applyMigrations(db); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`DELETE FROM audit_events`); err != nil {
+		t.Fatal(err)
+	}
+	managed, err := AnonymousProviderManaged("legacy")
+	if err != nil || !managed {
+		t.Fatalf("managed=%v err=%v", managed, err)
+	}
+	if err := ClearAnonymousProviderManaged("legacy"); err != nil {
+		t.Fatal(err)
+	}
+	managed, err = AnonymousProviderManaged("legacy")
+	if err != nil || managed {
+		t.Fatalf("cleared managed=%v err=%v", managed, err)
 	}
 }
 

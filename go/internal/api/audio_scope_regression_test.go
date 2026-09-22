@@ -8,6 +8,8 @@ import (
 
 	"llmgw/internal/config"
 	"llmgw/internal/iam"
+
+	core "github.com/xibodev/llmgw-core"
 )
 
 type scopeSpeechSynthesizer struct{ voice string }
@@ -52,7 +54,7 @@ func TestNativeSpeechPinsScopedVoice(t *testing.T) {
 			}
 			p := tc.key
 			p.Token, p.ProjectID = "synthetic-key", project.ID
-			provider, model, status, message := resolveAudioTarget(&p, "speech")
+			provider, model, status, message := resolveAudioTarget(&p, "speech", core.ModelOperationAudioOut)
 			if status != 0 || model != "voice-a" {
 				t.Fatalf("resolve: %s %d %s", model, status, message)
 			}

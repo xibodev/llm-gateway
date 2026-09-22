@@ -6,12 +6,15 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"llmgw/internal/config"
 	"llmgw/internal/iam"
 	"llmgw/internal/providers"
 	"llmgw/internal/router"
+
+	anthropicauth "github.com/xibodev/llm-provider-auth/anthropic"
 )
 
 func TestAdminProviderConnectionLifecycle(t *testing.T) {
@@ -109,6 +112,50 @@ func TestAdminProviderConnectionLifecycle(t *testing.T) {
 	}
 	if cachedAfterCreate == cachedAfterRevoke {
 		t.Fatal("credential revocation reused a stale provider instance")
+	}
+}
+
+func TestAnthropicSetupTokenConnectionIsValidatedAndWriteOnly(t *testing.T) {
+	t.Setenv("LLMGW_STATE_DIR", t.TempDir())
+	iam.ResetForTests()
+	providers.ResetProviders()
+	t.Cleanup(func() { iam.ResetForTests(); providers.ResetProviders() })
+	key := make([]byte, 32)
+	config.Update(func(s *config.Settings) {
+		s.APIKey = "admin-secret"
+		s.CredentialEncryptionKey = base64.RawURLEncoding.EncodeToString(key)
+		s.Providers = map[string]*config.ProviderConfig{"anthropic": {Type: "anthropic", RegistryID: "anthropic"}}
+	})
+	if _, err := iam.Initialize(); err != nil {
+		t.Fatal(err)
+	}
+	human, err := iam.CreatePrincipal("human", "authentik:setup-token", "", "Setup Token")
+	if err != nil {
+		t.Fatal(err)
+	}
+	server := httptest.NewServer(NewServer())
+	defer server.Close()
+
+	status, rejected := jsonRequest(t, server.URL+"/admin/api/principals/"+human.ID+"/connections", http.MethodPost, "admin-secret", map[string]any{
+		"provider_id": "anthropic", "credential_kind": "setup_token", "secret": anthropicauth.SetupTokenPrefix + "short",
+	})
+	if status != http.StatusBadRequest || rejected["error"] == nil {
+		t.Fatalf("status=%d response=%v", status, rejected)
+	}
+	token := anthropicauth.SetupTokenPrefix + strings.Repeat("a", 80)
+	status, created := jsonRequest(t, server.URL+"/admin/api/principals/"+human.ID+"/connections", http.MethodPost, "admin-secret", map[string]any{
+		"provider_id": "anthropic", "connection_name": "personal", "credential_kind": "setup_token", "secret": token,
+	})
+	if status != http.StatusCreated {
+		t.Fatalf("status=%d response=%v", status, created)
+	}
+	connection := created["connection"].(map[string]any)
+	if connection["credential_kind"] != "setup_token" || connection["secret"] != nil {
+		t.Fatalf("connection=%v", connection)
+	}
+	stored, _, ok, err := iam.ProviderConnectionSecret(human.ID, "anthropic", "personal")
+	if err != nil || !ok || stored != token {
+		t.Fatalf("stored=%v ok=%v err=%v", stored == token, ok, err)
 	}
 }
 

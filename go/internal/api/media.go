@@ -3,6 +3,8 @@ package api
 import (
 	"encoding/base64"
 	"encoding/json"
+	"fmt"
+	"mime"
 	"net/http"
 	"strings"
 	"time"
@@ -10,6 +12,8 @@ import (
 	"llmgw/internal/config"
 	"llmgw/internal/providers"
 	"llmgw/internal/router"
+
+	core "github.com/xibodev/llmgw-core"
 )
 
 const videoOperationHandlePrefix = "llmgw.video.v1."
@@ -22,7 +26,7 @@ const videoOperationHandlePrefix = "llmgw.video.v1."
 type imageRequest struct {
 	Model          string `json:"model"`
 	Prompt         string `json:"prompt"`
-	N              int    `json:"n"`
+	N              *int   `json:"n"`
 	ResponseFormat string `json:"response_format"`
 }
 
@@ -99,7 +103,7 @@ func resolveVideoOperation(value, provider, model string) (string, int, string) 
 
 // resolveMediaTarget maps a requested model to one provider/model pair under
 // the caller's key policy, mirroring resolveAudioTarget.
-func resolveMediaTarget(principal *config.Principal, model string) (string, string, int, string) {
+func resolveMediaTarget(principal *config.Principal, model string, operation core.ModelOperation) (string, string, int, string) {
 	model = strings.TrimSpace(model)
 	if model == "" {
 		return "", "", http.StatusBadRequest, "'model' is required"
@@ -118,7 +122,23 @@ func resolveMediaTarget(principal *config.Principal, model string) (string, stri
 	if len(targets) == 0 {
 		return "", "", http.StatusNotFound, "no routable target for '" + model + "'"
 	}
-	return targets[0].Provider, targets[0].Model, 0, ""
+	for _, target := range targets {
+		row, found := providers.CatalogCachedLookupForPrincipal(target.Provider, target.Model, principal)
+		if found && !providers.ModelSupportsOperation(row, operation) {
+			continue
+		}
+		switch operation {
+		case core.ModelOperationImage:
+			if _, supported := imageGeneratorFor(target.Provider, principal); supported {
+				return target.Provider, target.Model, 0, ""
+			}
+		case core.ModelOperationVideo:
+			if _, supported := videoGeneratorFor(target.Provider, principal); supported {
+				return target.Provider, target.Model, 0, ""
+			}
+		}
+	}
+	return "", "", http.StatusBadRequest, "no route member supports the requested media operation"
 }
 
 // POST /v1/images/generations — OpenAI-shaped image generation.
@@ -144,7 +164,16 @@ func handleImageGenerations(w http.ResponseWriter, r *http.Request) {
 		writeError(w, 400, "only response_format 'b64_json' is supported; generated images are returned inline")
 		return
 	}
-	providerID, upstreamModel, status, message := resolveMediaTarget(principal, body.Model)
+	count := 1
+	if body.N != nil {
+		if *body.N <= 0 {
+			recordFailureUsage("openai.images", body.Model, principal, http.StatusBadRequest, "invalid_count", started)
+			writeError(w, http.StatusBadRequest, "'n' must be greater than zero")
+			return
+		}
+		count = *body.N
+	}
+	providerID, upstreamModel, status, message := resolveMediaTarget(principal, body.Model, core.ModelOperationImage)
 	if status != 0 {
 		recordFailureUsage("openai.images", body.Model, principal, status, "policy_or_route", started)
 		writeError(w, status, message)
@@ -155,10 +184,6 @@ func handleImageGenerations(w http.ResponseWriter, r *http.Request) {
 		recordFailureUsage("openai.images", body.Model, principal, 400, "image_unsupported", started)
 		writeError(w, 400, "provider '"+providerID+"' does not generate images")
 		return
-	}
-	count := body.N
-	if count <= 0 {
-		count = 1
 	}
 	var images []providers.GeneratedImage
 	var usage map[string]any
@@ -172,6 +197,11 @@ func handleImageGenerations(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		recordFailureUsage("openai.images", body.Model, principal, upstreamErrorStatus(err), "upstream", started)
 		writeUpstreamError(w, err)
+		return
+	}
+	if err := validateGeneratedImages(images); err != nil {
+		recordFailureUsage("openai.images", body.Model, principal, http.StatusBadGateway, "invalid_upstream_response", started)
+		writeError(w, http.StatusBadGateway, err.Error())
 		return
 	}
 	inputTokens, outputTokens := googleModalityUsage(usage)
@@ -194,6 +224,24 @@ func handleImageGenerations(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+func validateGeneratedImages(images []providers.GeneratedImage) error {
+	if len(images) == 0 {
+		return fmt.Errorf("upstream provider returned no image data")
+	}
+	for _, image := range images {
+		mediaType, _, err := mime.ParseMediaType(strings.TrimSpace(image.MimeType))
+		if err != nil || len(image.Data) == 0 {
+			return fmt.Errorf("upstream provider returned invalid image data")
+		}
+		switch strings.ToLower(mediaType) {
+		case "image/png", "image/jpeg", "image/webp":
+		default:
+			return fmt.Errorf("upstream provider returned an unsupported image type")
+		}
+	}
+	return nil
+}
+
 // POST /v1/videos/generations — start a generation, or poll one by passing
 // "operation". Video takes minutes, so the gateway never blocks on it.
 func handleVideoGenerations(w http.ResponseWriter, r *http.Request) {
@@ -208,7 +256,7 @@ func handleVideoGenerations(w http.ResponseWriter, r *http.Request) {
 		writeError(w, 422, "invalid request body")
 		return
 	}
-	providerID, upstreamModel, status, message := resolveMediaTarget(principal, body.Model)
+	providerID, upstreamModel, status, message := resolveMediaTarget(principal, body.Model, core.ModelOperationVideo)
 	if status != 0 {
 		recordFailureUsage("openai.videos", body.Model, principal, status, "policy_or_route", started)
 		writeError(w, status, message)

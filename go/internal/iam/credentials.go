@@ -209,6 +209,20 @@ FROM provider_credentials`
 	return out, rows.Err()
 }
 
+func ActiveLegacyOAuthProviderCredentialExists(providerID string) (bool, error) {
+	credentials, err := ListProviderCredentials("")
+	if err != nil {
+		return false, err
+	}
+	for _, credential := range credentials {
+		if credential.ProviderID == strings.TrimSpace(providerID) && credential.Status == "active" &&
+			isOAuthCredentialKind(credential.Kind) {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
 func RevokeProviderCredential(principalID, providerID string) error {
 	db, err := DB()
 	if err != nil {

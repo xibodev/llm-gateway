@@ -14,6 +14,8 @@ import (
 	"llmgw/internal/iam"
 	"llmgw/internal/providers"
 	"llmgw/internal/router"
+
+	core "github.com/xibodev/llmgw-core"
 )
 
 func TestOwnerPlaygroundUsesRealRouteAndRecordsKeylessProjectUsage(t *testing.T) {
@@ -315,5 +317,121 @@ func TestSafePlaygroundValueRedactsCredentialsAndPreservesTokenUsage(t *testing.
 		if strings.Contains(string(raw), secret) {
 			t.Fatalf("credential value leaked: %s", raw)
 		}
+	}
+}
+
+func TestPlaygroundTextSurfaceRoutes(t *testing.T) {
+	t.Setenv("LLMGW_STATE_DIR", t.TempDir())
+	iam.ResetForTests()
+	providers.ResetProviders()
+	router.ResetSavingsState()
+	router.ResetTelemetryState()
+	oldProviders, oldEndpoints := config.Get().Providers, config.Get().Endpoints
+	oldSSO, oldSecret, oldAuto := config.Get().SSOEnabled, config.Get().SSOSharedSecret, config.Get().SSOAutoProvision
+	t.Cleanup(func() {
+		iam.ResetForTests()
+		providers.ResetProviders()
+		router.ResetSavingsState()
+		router.ResetTelemetryState()
+		config.Update(func(s *config.Settings) {
+			s.Providers, s.Endpoints = oldProviders, oldEndpoints
+			s.SSOEnabled, s.SSOSharedSecret, s.SSOAutoProvision = oldSSO, oldSecret, oldAuto
+		})
+	})
+	config.Update(func(s *config.Settings) {
+		s.SSOEnabled, s.SSOSharedSecret, s.SSOAutoProvision = true, "proxy-secret", true
+		s.Providers = map[string]*config.ProviderConfig{"echo": {Type: "echo"}}
+		s.Endpoints = map[string]*config.EndpointConfig{}
+	})
+	if _, err := iam.Initialize(); err != nil {
+		t.Fatal(err)
+	}
+	owner, _ := iam.EnsurePrincipalBySubject("human", "authentik:surface-owner", "", "Surface Owner")
+	project, _ := iam.CreateProject("surface-project", "Surface Project")
+	_ = iam.SetMembership(project.ID, owner.ID, "owner")
+	server := httptest.NewServer(NewServer())
+	defer server.Close()
+	status, response := ssoConnectionRequest(t, server.URL, "surface-owner", http.MethodPost, "/user/api/playground/v1/messages", map[string]any{
+		"project_id": project.ID, "model": "echo/echo-default", "messages": []map[string]any{{"role": "user", "content": "missing limit"}},
+	})
+	if status != http.StatusBadRequest || response["error"] == nil {
+		t.Fatalf("missing Messages max_tokens status=%d response=%+v", status, response)
+	}
+
+	tests := []struct {
+		name, path, surface string
+		body                map[string]any
+	}{
+		{"chat", "/user/api/playground/v1/chat/completions", "/v1/chat/completions", map[string]any{"messages": []map[string]any{{"role": "user", "content": "chat"}}}},
+		{"responses", "/user/api/playground/v1/responses", "/v1/responses", map[string]any{"input": "responses"}},
+		{"messages", "/user/api/playground/v1/messages", "/v1/messages", map[string]any{"messages": []map[string]any{{"role": "user", "content": "messages"}}, "max_tokens": 32}},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			test.body["project_id"] = project.ID
+			test.body["model"] = "echo/echo-default"
+			status, response := ssoConnectionRequest(t, server.URL, "surface-owner", http.MethodPost, test.path, test.body)
+			if status != http.StatusOK {
+				t.Fatalf("status=%d response=%+v", status, response)
+			}
+			if response["surface"] != test.surface || response["raw_response"] == nil {
+				t.Fatalf("surface response=%+v", response)
+			}
+			served := response["served"].(map[string]any)
+			if served["provider"] != "echo" || response["transport_mode"] == nil {
+				t.Fatalf("metadata response=%+v", response)
+			}
+		})
+	}
+}
+
+func TestValidateGeneratedImagesRejectsUnsafeAndIncompleteResults(t *testing.T) {
+	valid := providers.GeneratedImage{Data: []byte("image"), MimeType: "image/png"}
+	if err := validateGeneratedImages([]providers.GeneratedImage{valid}); err != nil {
+		t.Fatal(err)
+	}
+	for _, test := range []struct {
+		name   string
+		images []providers.GeneratedImage
+	}{
+		{name: "empty"},
+		{name: "active content", images: []providers.GeneratedImage{{Data: []byte("<svg/>"), MimeType: "image/svg+xml"}}},
+		{name: "empty bytes", images: []providers.GeneratedImage{{MimeType: "image/png"}}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			if err := validateGeneratedImages(test.images); err == nil {
+				t.Fatal("unsafe image result was accepted")
+			}
+		})
+	}
+}
+
+func TestPlaygroundPayloadIsMultimodalBySurface(t *testing.T) {
+	responses := map[string]any{"input": []any{map[string]any{"role": "user", "content": []any{map[string]any{"type": "input_image", "image_url": "data:image/png;base64,fixture"}}}}}
+	if !playgroundPayloadIsMultimodal(core.ModelSurfaceResponses, responses) {
+		t.Fatal("Responses image input was not detected")
+	}
+	chat := map[string]any{"messages": []any{map[string]any{
+		"role": "user", "content": []any{map[string]any{
+			"type": "image_url", "image_url": map[string]any{"url": "data:image/png;base64,fixture"},
+		}},
+	}}}
+	if !playgroundPayloadIsMultimodal(core.ModelSurfaceChatCompletions, chat) {
+		t.Fatal("Chat image input was not detected")
+	}
+}
+
+func TestImageGenerationsRejectsExplicitInvalidCountBeforeRouting(t *testing.T) {
+	oldUnauthenticated := config.Get().AllowUnauthenticatedAPI
+	config.Update(func(settings *config.Settings) { settings.AllowUnauthenticatedAPI = true })
+	t.Cleanup(func() {
+		config.Update(func(settings *config.Settings) { settings.AllowUnauthenticatedAPI = oldUnauthenticated })
+	})
+	request := httptest.NewRequest(http.MethodPost, "/v1/images/generations", strings.NewReader(`{"model":"missing","prompt":"draw","n":0}`))
+	request.Header.Set("Content-Type", "application/json")
+	response := httptest.NewRecorder()
+	handleImageGenerations(response, request)
+	if response.Code != http.StatusBadRequest || !strings.Contains(response.Body.String(), "greater than zero") {
+		t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
 	}
 }

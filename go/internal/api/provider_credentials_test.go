@@ -60,13 +60,13 @@ func TestServiceProviderCredentialControlsModelsAndRoutes(t *testing.T) {
 	writeCopilotSession(t, filepath.Join(stateDir, "cache"), "human-secret", upstream.URL)
 
 	credential, _ := iam.PutGatewayProviderCredential("copilot", "github_oauth", "shared-secret")
-	authorizedToken := issueProviderTestKey(
+	authorizedToken, authorizedPrincipal := issueProviderTestKey(
 		t, "authorized", "service:authorized", "service", credential.ID, true,
 	)
-	unauthorizedToken := issueProviderTestKey(
+	unauthorizedToken, _ := issueProviderTestKey(
 		t, "unauthorized", "service:unauthorized", "service", credential.ID, false,
 	)
-	humanToken := issueHumanProviderTestKey(t, "human-secret")
+	humanToken, humanPrincipal := issueHumanProviderTestKey(t, "human-secret")
 	server := httptest.NewServer(NewServer())
 	defer server.Close()
 
@@ -79,6 +79,12 @@ func TestServiceProviderCredentialControlsModelsAndRoutes(t *testing.T) {
 	}
 	if chatRequests.Load() != 0 {
 		t.Fatal("unbound service reached provider route")
+	}
+	if rows := providers.RefreshCatalogForPrincipal("copilot", authorizedPrincipal); len(rows) != 2 {
+		t.Fatalf("service project refresh returned %+v", rows)
+	}
+	if rows := providers.RefreshCatalogForPrincipal("copilot", humanPrincipal); len(rows) != 2 {
+		t.Fatalf("human refresh returned %+v", rows)
 	}
 
 	assertModelIDs(t, server.URL, authorizedToken, []string{"copilot/model-a"})
@@ -199,11 +205,14 @@ func TestServiceBindingPreservesUnrelatedHumanCatalog(t *testing.T) {
 	providers.ResetProviders()
 	t.Cleanup(providers.ResetProviders)
 	writeCopilotSession(t, filepath.Join(stateDir, "cache"), "human-secret", upstream.URL)
-	humanToken := issueHumanProviderTestKeyForModels(
+	humanToken, humanPrincipal := issueHumanProviderTestKeyForModels(
 		t, "human-secret", []string{"copilot/existing-human-model"},
 	)
 	server := httptest.NewServer(NewServer())
 	defer server.Close()
+	if rows := providers.RefreshCatalogForPrincipal("copilot", humanPrincipal); len(rows) != 1 {
+		t.Fatalf("human refresh returned %+v", rows)
+	}
 	assertModelIDs(t, server.URL, humanToken, []string{"copilot/existing-human-model"})
 	upstreamAvailable.Store(false)
 
@@ -262,7 +271,7 @@ func setupProviderCredentialAPI(t *testing.T, stateDir string) {
 
 func issueProviderTestKey(
 	t *testing.T, slug, subject, kind, credentialID string, bind bool,
-) string {
+) (string, *config.Principal) {
 	t.Helper()
 	principal, _ := iam.CreatePrincipal(kind, subject, "", slug)
 	project, _ := iam.CreateProject(slug, slug)
@@ -280,16 +289,19 @@ func issueProviderTestKey(
 	if err != nil {
 		t.Fatal(err)
 	}
-	return issued.Token
+	return issued.Token, &config.Principal{
+		PrincipalID: principal.ID, PrincipalKind: principal.Kind,
+		ProjectID: project.ID, Project: project.Slug,
+	}
 }
 
-func issueHumanProviderTestKey(t *testing.T, secret string) string {
+func issueHumanProviderTestKey(t *testing.T, secret string) (string, *config.Principal) {
 	return issueHumanProviderTestKeyForModels(t, secret, []string{"copilot/model-a"})
 }
 
 func issueHumanProviderTestKeyForModels(
 	t *testing.T, secret string, models []string,
-) string {
+) (string, *config.Principal) {
 	t.Helper()
 	human, _ := iam.CreatePrincipal("human", "authentik:human-provider", "", "Human")
 	project, _ := iam.CreateProject("human-provider", "Human")
@@ -307,7 +319,10 @@ func issueHumanProviderTestKeyForModels(
 	if err != nil {
 		t.Fatal(err)
 	}
-	return issued.Token
+	return issued.Token, &config.Principal{
+		PrincipalID: human.ID, PrincipalKind: human.Kind,
+		ProjectID: project.ID, Project: project.Slug,
+	}
 }
 
 func writeCopilotSession(t *testing.T, cacheDir, oauth, baseURL string) {

@@ -480,6 +480,53 @@ ON outbox_events(delivered_at) WHERE status='delivered';
 		version: 16,
 		sql:     `ALTER TABLE api_keys ADD COLUMN scope_json TEXT NOT NULL DEFAULT '{}';`,
 	},
+	{
+		version: 17,
+		sql: `
+CREATE TABLE provider_model_evidence (
+    provider_id TEXT NOT NULL,
+    scope_key TEXT NOT NULL DEFAULT '',
+    model TEXT NOT NULL,
+    operation TEXT NOT NULL CHECK (operation IN ('completion')),
+    state TEXT NOT NULL CHECK (state IN ('verified','failed','unverified','stale')),
+    observed_at INTEGER NOT NULL,
+    latency_ms INTEGER NOT NULL DEFAULT 0,
+    failure_code TEXT NOT NULL DEFAULT '',
+    connection_id TEXT NOT NULL DEFAULT '',
+    credential_revision INTEGER NOT NULL DEFAULT 0 CHECK (credential_revision >= 0),
+    generation INTEGER NOT NULL DEFAULT 0 CHECK (generation >= 0),
+    PRIMARY KEY (provider_id, scope_key, model, operation)
+);
+CREATE INDEX idx_provider_model_evidence_provider
+ON provider_model_evidence(provider_id,scope_key,state);
+	`,
+	},
+	{
+		version: 18,
+		sql: `
+INSERT INTO control_metadata(key,value,updated_at)
+SELECT 'anonymous_provider_automation.managed.' || target_id, 'true', MAX(ts)
+FROM audit_events
+WHERE action='provider_automation.connect' AND target_type='provider'
+  AND result='success' AND target_id IS NOT NULL AND target_id!=''
+GROUP BY target_id
+ON CONFLICT(key) DO NOTHING;
+	`,
+	},
+	{
+		version: 19,
+		sql: `
+CREATE TABLE oauth_client_profiles (
+    provider_id TEXT NOT NULL,
+    profile TEXT NOT NULL,
+    ciphertext BLOB NOT NULL,
+    nonce BLOB NOT NULL,
+    key_version INTEGER NOT NULL DEFAULT 1,
+    updated_at INTEGER NOT NULL,
+    PRIMARY KEY (provider_id, profile)
+);
+`,
+	},
 }
 
 func SchemaVersion() int { return len(migrations) }

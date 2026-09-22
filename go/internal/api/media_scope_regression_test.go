@@ -11,7 +11,37 @@ import (
 	"llmgw/internal/config"
 	"llmgw/internal/iam"
 	"llmgw/internal/providers"
+
+	core "github.com/xibodev/llmgw-core"
 )
+
+func TestResolveMediaTargetSkipsIneligibleRouteMembers(t *testing.T) {
+	old := *config.Get()
+	t.Cleanup(func() {
+		config.Update(func(settings *config.Settings) { *settings = old })
+		providers.ResetProviders()
+	})
+	config.Update(func(settings *config.Settings) {
+		settings.AllowUnauthenticatedAPI = true
+		settings.Providers = map[string]*config.ProviderConfig{
+			"text":  {Type: "echo"},
+			"media": {Type: "ai_studio", APIKey: "synthetic-key"},
+		}
+		settings.Endpoints = map[string]*config.EndpointConfig{
+			"images": {Failover: []config.EndpointMember{{Provider: "text", Model: "text-model"}, {Provider: "media", Model: "image-model"}}},
+			"videos": {Failover: []config.EndpointMember{{Provider: "text", Model: "text-model"}, {Provider: "media", Model: "video-model"}}},
+		}
+	})
+	providers.ResetProviders()
+	providerID, model, status, message := resolveMediaTarget(nil, "images", core.ModelOperationImage)
+	if status != 0 || providerID != "media" || model != "image-model" {
+		t.Fatalf("image target=%s/%s status=%d message=%q", providerID, model, status, message)
+	}
+	providerID, model, status, message = resolveMediaTarget(nil, "videos", core.ModelOperationVideo)
+	if status != 0 || providerID != "media" || model != "video-model" {
+		t.Fatalf("video target=%s/%s status=%d message=%q", providerID, model, status, message)
+	}
+}
 
 func TestVideoPollingEnforcesResolvedRouteTarget(t *testing.T) {
 	for _, surface := range []string{"ai_studio", "vertex_ai"} {

@@ -19,7 +19,8 @@ func TestOAuthConnectionsEncryptTokensAndExposeOnlySafeMetadata(t *testing.T) {
 		PrincipalID: human.ID, ProviderID: "copilot", Name: "personal", Kind: "github_oauth",
 		Source: ConnectionSourceUser, MakeDefault: true, AccessToken: "fake-access-token",
 		RefreshToken: "fake-refresh-token", IDToken: "fake-id-token", ExpiresAt: expiresAt,
-		AccountID: "account-123", AccountLabel: "Owner account", Status: "active",
+		AccountID: "account-123", AccountLabel: "Owner account", OAuthProfile: "public_pkce",
+		OAuthClientID: "fixture-public-client", Status: "active",
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -43,7 +44,7 @@ func TestOAuthConnectionsEncryptTokensAndExposeOnlySafeMetadata(t *testing.T) {
 	}
 
 	envelope, _, ok, err := OAuthProviderConnectionSecret(human.ID, "copilot", "personal")
-	if err != nil || !ok || envelope.AccessToken != "fake-access-token" || envelope.RefreshToken != "fake-refresh-token" {
+	if err != nil || !ok || envelope.AccessToken != "fake-access-token" || envelope.RefreshToken != "fake-refresh-token" || envelope.OAuthProfile != "public_pkce" || envelope.OAuthClientID != "fixture-public-client" {
 		t.Fatalf("envelope=%+v ok=%v err=%v", envelope, ok, err)
 	}
 	db, err := DB()
@@ -124,5 +125,29 @@ func TestOAuthCompareAndSwapDoesNotOverwriteOrRevokeReauthorization(t *testing.T
 	current, _, ok, err := OAuthProviderConnectionSecret(human.ID, "codex", "")
 	if err != nil || !ok || current.AccessToken != "replacement-access" || current.AccountID != "account-b" {
 		t.Fatalf("current=%+v ok=%v err=%v", current, ok, err)
+	}
+}
+
+func TestOAuthClientProfileEncryptsConfidentialSecret(t *testing.T) {
+	setupConnectionTest(t)
+	profile := OAuthClientProfile{
+		ProviderID: "google_antigravity", Profile: "consumer_manual",
+		ClientID: "fixture-client", ClientSecret: "fixture-secret",
+		ClientMode: "confidential", RedirectURI: "https://callback.example.test/oauth",
+	}
+	if err := PutOAuthClientProfile(profile); err != nil {
+		t.Fatal(err)
+	}
+	stored, ok, err := OAuthClientProfileByName(profile.ProviderID, profile.Profile)
+	if err != nil || !ok || stored != profile {
+		t.Fatalf("stored=%+v ok=%v err=%v", stored, ok, err)
+	}
+	db, _ := DB()
+	var ciphertext []byte
+	if err := db.QueryRow("SELECT ciphertext FROM oauth_client_profiles WHERE provider_id=? AND profile=?", profile.ProviderID, profile.Profile).Scan(&ciphertext); err != nil {
+		t.Fatal(err)
+	}
+	if bytes.Contains(ciphertext, []byte(profile.ClientSecret)) || bytes.Contains(ciphertext, []byte(profile.ClientID)) || bytes.Contains(ciphertext, []byte(profile.RedirectURI)) {
+		t.Fatal("OAuth client profile was stored in plaintext")
 	}
 }

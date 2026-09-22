@@ -9,9 +9,140 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	"llmgw/internal/config"
+
+	anthropicauth "github.com/xibodev/llm-provider-auth/anthropic"
+	core "github.com/xibodev/llmgw-core"
 )
+
+func TestAnthropicDeclaresOnlyMessagesWireNative(t *testing.T) {
+	provider := AnthropicNativeProvider{}
+	if !PreservesWireNativeSurface(provider, "claude-fixture", core.ModelSurfaceMessages) {
+		t.Fatal("Anthropic Messages was not declared wire-native")
+	}
+	if PreservesWireNativeSurface(provider, "claude-fixture", core.ModelSurfaceChatCompletions) {
+		t.Fatal("Anthropic Chat translation was declared wire-native")
+	}
+}
+
+func TestAnthropicCredentialHeadersAcrossRequestSurfaces(t *testing.T) {
+	setupToken := anthropicauth.SetupTokenPrefix + strings.Repeat("a", 80)
+	for _, tc := range []struct {
+		name, credential, wantHeader, wantValue string
+		wantBeta                                bool
+	}{
+		{name: "api key", credential: "fixture-key", wantHeader: "x-api-key", wantValue: "fixture-key"},
+		{name: "setup token", credential: setupToken, wantHeader: "Authorization", wantValue: "Bearer " + setupToken, wantBeta: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			source, err := anthropicauth.NewHeaderSource(tc.credential)
+			if err != nil {
+				t.Fatal(err)
+			}
+			calls := 0
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				calls++
+				if got := r.Header.Get(tc.wantHeader); got != tc.wantValue {
+					t.Fatalf("%s=%q", tc.wantHeader, got)
+				}
+				if got := strings.Contains(strings.Join(r.Header.Values("anthropic-beta"), ","), anthropicauth.OAuthBeta); got != tc.wantBeta {
+					t.Fatalf("oauth beta=%v", got)
+				}
+				switch r.URL.Path {
+				case "/v1/models":
+					_, _ = w.Write([]byte(`{"data":[]}`))
+				case "/v1/messages/count_tokens":
+					_, _ = w.Write([]byte(`{"input_tokens":1}`))
+				default:
+					var request map[string]any
+					_ = json.NewDecoder(r.Body).Decode(&request)
+					if request["stream"] == true {
+						_, _ = fmt.Fprint(w, "data: {\"type\":\"message_start\",\"message\":{\"content\":[]}}\n\ndata: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"end_turn\"}}\n\ndata: {\"type\":\"message_stop\"}\n\n")
+					} else {
+						_, _ = w.Write([]byte(`{"content":[]}`))
+					}
+				}
+			}))
+			defer server.Close()
+			provider := AnthropicNativeProvider{BaseURL: server.URL, Auth: source}
+			if _, err := provider.Complete("model", []Message{{"role": "user", "content": "hi"}}, nil); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := provider.CompleteAnthropicMessages("model", map[string]any{"messages": []any{}}); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := provider.CountAnthropicTokens("model", map[string]any{"messages": []any{}}, "", nil); err != nil {
+				t.Fatal(err)
+			}
+			if _, _, err := provider.ListModelsWithError(); err != nil {
+				t.Fatal(err)
+			}
+			if calls != 4 {
+				t.Fatalf("calls=%d", calls)
+			}
+		})
+	}
+}
+
+func TestAnthropicSetupTokenCompleteAccumulatesNativeStream(t *testing.T) {
+	token := anthropicauth.SetupTokenPrefix + strings.Repeat("a", 80)
+	source, err := anthropicauth.NewHeaderSource(token)
+	if err != nil {
+		t.Fatal(err)
+	}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var request map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+			t.Fatal(err)
+		}
+		if request["stream"] != true {
+			t.Fatalf("stream=%v", request["stream"])
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = fmt.Fprint(w, "data: {\"type\":\"message_start\",\"message\":{\"id\":\"msg_1\",\"model\":\"model\",\"role\":\"assistant\",\"content\":[],\"usage\":{\"input_tokens\":2}}}\n\n")
+		_, _ = fmt.Fprint(w, "data: {\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"text\",\"text\":\"\"}}\n\n")
+		_, _ = fmt.Fprint(w, "data: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"text_delta\",\"text\":\"hello\"}}\n\n")
+		_, _ = fmt.Fprint(w, "data: {\"type\":\"content_block_stop\",\"index\":0}\n\n")
+		_, _ = fmt.Fprint(w, "data: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"end_turn\"},\"usage\":{\"output_tokens\":1}}\n\n")
+		_, _ = fmt.Fprint(w, "data: {\"type\":\"message_stop\"}\n\n")
+	}))
+	defer server.Close()
+	provider := AnthropicNativeProvider{BaseURL: server.URL, Auth: source}
+	response, err := provider.Complete("model", []Message{{"role": "user", "content": "hi"}}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	message := response["choices"].([]any)[0].(map[string]any)["message"].(map[string]any)
+	if message["content"] != "hello" {
+		t.Fatalf("response=%v", response)
+	}
+}
+
+func TestAnthropicSetupTokenRejectsIncompleteOrMalformedStream(t *testing.T) {
+	token := anthropicauth.SetupTokenPrefix + strings.Repeat("a", 80)
+	source, err := anthropicauth.NewHeaderSource(token)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, response := range []string{
+		"data: {\"type\":\"message_start\",\"message\":{\"content\":[]}}\n\n",
+		"data: not-json\n\n",
+		"data: {\"type\":\"message_stop\"}\n\ndata: {\"type\":\"message_start\",\"message\":{\"content\":[]}}\n\n",
+	} {
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			w.Header().Set("Content-Type", "text/event-stream")
+			_, _ = fmt.Fprint(w, response)
+		}))
+		provider := AnthropicNativeProvider{BaseURL: server.URL, Auth: source}
+		_, err := provider.Complete("model", []Message{{"role": "user", "content": "hi"}}, nil)
+		server.Close()
+		if err == nil {
+			t.Fatalf("response %q was accepted", response)
+		}
+	}
+}
 
 func TestAnthropicNativePayloadPreservesThinkingAndOutputConfig(t *testing.T) {
 	p := AnthropicNativeProvider{}
@@ -97,13 +228,26 @@ func TestAnthropicStreamNormalAndOversizedRecords(t *testing.T) {
 }
 
 func TestAnthropicListModelsDeclaresMessagesSurface(t *testing.T) {
+	discoveredAt := time.Date(2026, time.September, 21, 12, 0, 0, 0, time.UTC)
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		_, _ = w.Write([]byte(`{"data":[{"id":"claude-test","display_name":"Claude Test"}]}`))
 	}))
 	defer server.Close()
-	models := (AnthropicNativeProvider{BaseURL: server.URL}).ListModels()
+	models := (AnthropicNativeProvider{BaseURL: server.URL, Now: func() time.Time { return discoveredAt }}).ListModels()
 	if len(models) != 1 || len(models[0].SupportedSurfaces) != 1 || models[0].SupportedSurfaces[0] != "/v1/messages" {
 		t.Fatalf("models=%+v", models)
+	}
+	capabilities := models[0].TypedCapabilities
+	if capabilities == nil || capabilities.Operations.Chat != core.SupportSupported ||
+		capabilities.Surfaces.Messages != core.SupportSupported ||
+		capabilities.Surfaces.ChatCompletions != core.SupportUnsupported ||
+		capabilities.Surfaces.Responses != core.SupportUnsupported ||
+		capabilities.Streaming != core.SupportSupported ||
+		capabilities.Provenance.Source != core.ModelCapabilitySourceRegistryStatic ||
+		capabilities.Provenance.Confidence != core.ModelCapabilityConfidenceHigh ||
+		capabilities.Freshness.DiscoveredAt == nil || !capabilities.Freshness.DiscoveredAt.Equal(discoveredAt) ||
+		capabilities.Freshness.ExpiresAt == nil || !capabilities.Freshness.ExpiresAt.Equal(discoveredAt.Add(anthropicCatalogTTL)) {
+		t.Fatalf("capability evidence=%+v", capabilities)
 	}
 }
 

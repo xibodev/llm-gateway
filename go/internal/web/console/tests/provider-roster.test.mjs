@@ -95,6 +95,15 @@ test("free filters require explicit offer and auth; unavailable entries stay ins
   }
 });
 
+test("Official sign-in includes only official device and browser OAuth", () => {
+  assert.deepEqual(ui.discoveryFilters.find(([filter]) => filter === "official"), ["official", "Official sign-in"]);
+  assert.equal(ui.discoveryFilters.some(([filter]) => filter === "device"), false);
+  assert.equal(ui.matchesDiscoveryFilter({ auth_methods: ["oauth_device"] }, "official"), true);
+  assert.equal(ui.matchesDiscoveryFilter({ auth_methods: ["oauth_browser"] }, "official"), true);
+  assert.equal(ui.matchesDiscoveryFilter({ auth_methods: ["api_key", "none"] }, "official"), false);
+  assert.equal(ui.matchesDiscoveryFilter({ auth_methods: ["oauth"] }, "official"), false);
+});
+
 test("portal cannot refresh even through callback; admin can refresh with auto-refresh off", async () => {
   for (const mode of ["portal", "admin"]) {
     const slots = []; let cursor = 0; let effect; let firstRender = true;

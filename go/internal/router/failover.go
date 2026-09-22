@@ -85,7 +85,7 @@ func FilterCompatibleTargets(targets []Target, principal *config.Principal, requ
 			compatible = append(compatible, target)
 			continue
 		}
-		if modelCompatible(model.TypedCapabilities, request) {
+		if modelCompatible(model.TypedCapabilities, request) || chatToResponsesCompatible(target, model.TypedCapabilities, request) {
 			compatible = append(compatible, target)
 		}
 	}
@@ -93,6 +93,32 @@ func FilterCompatibleTargets(targets []Target, principal *config.Principal, requ
 		return nil, &providers.ConfigError{Msg: "no route member supports the requested operation and capabilities"}
 	}
 	return compatible, nil
+}
+
+func chatToResponsesCompatible(target Target, capabilities *core.ModelCapabilities, request CompatibilityRequest) bool {
+	if request.Surface != core.ModelSurfaceChatCompletions || capabilities == nil ||
+		capabilities.Surfaces.Responses != core.SupportSupported {
+		return false
+	}
+	providerConfig := config.Get().Providers[target.Provider]
+	if providerConfig == nil {
+		return false
+	}
+	registryID := providers.EffectiveRegistryID(target.Provider, providerConfig.RegistryID, providerConfig.Type)
+	baseURL := strings.ToLower(strings.TrimSpace(providerConfig.BaseURL))
+	if registryID != "opencode_zen" &&
+		!strings.HasPrefix(baseURL, "https://opencode.ai/zen") &&
+		!strings.HasPrefix(baseURL, "http://opencode.ai/zen") {
+		return false
+	}
+	// The caller asks for Chat, but this provider deliberately adapts that
+	// facade to the model's native Responses surface. Native Chat operation
+	// support is therefore irrelevant; only the requested semantic features
+	// and the Responses transport need to be supported.
+	return capabilities.Surfaces.Responses != core.SupportUnsupported &&
+		(!request.Tools || capabilities.Tools != core.SupportUnsupported) &&
+		(!request.Vision || capabilities.Inputs.Image != core.SupportUnsupported) &&
+		(!request.Streaming || capabilities.Streaming != core.SupportUnsupported)
 }
 
 func modelCompatible(capabilities *core.ModelCapabilities, request CompatibilityRequest) bool {
@@ -252,6 +278,13 @@ func ResolveForPrincipal(
 			if cfg := config.Get().Providers[m.Provider]; cfg != nil && cfg.Disabled {
 				continue
 			}
+			published, err := routeMemberPublished(m, principal)
+			if err != nil {
+				return Resolution{}, err
+			}
+			if !published {
+				continue
+			}
 			out = append(out, Target{Provider: m.Provider, Model: m.Model})
 		}
 		if len(out) == 0 {
@@ -259,8 +292,18 @@ func ResolveForPrincipal(
 			// In a mixed route, disabled members must not mask an enabled
 			// member's provider-policy or credential denial.
 			for _, m := range cat.Failover {
+				published, err := routeMemberPublished(m, principal)
+				if err != nil {
+					return Resolution{}, err
+				}
+				if !published {
+					continue
+				}
 				out = append(out, Target{Provider: m.Provider, Model: m.Model})
 			}
+		}
+		if len(out) == 0 {
+			return Resolution{}, &ModelNotFoundError{Requested: name, Unavailable: true}
 		}
 		return Resolution{Targets: out, Category: categoryName}, nil
 	}
@@ -269,6 +312,21 @@ func ResolveForPrincipal(
 	}
 	if head, tail, ok := strings.Cut(name, "/"); ok {
 		if _, exists := config.Get().Providers[head]; exists && tail != "" {
+			if providers.CatalogRequiresPrincipal(head) {
+				authorized, err := providers.ProviderCredentialAuthorized(head, principal)
+				if err != nil {
+					return Resolution{}, err
+				}
+				if !authorized {
+					return Resolution{}, &ModelNotFoundError{Requested: name, Unavailable: true}
+				}
+				if _, found := providers.CatalogCachedLookupForPrincipal(head, tail, principal); !found {
+					return Resolution{}, &ModelNotFoundError{Requested: name, Unavailable: true}
+				}
+			}
+			if _, published, evidenceErr := providers.AnonymousModelPublication(head, tail); evidenceErr != nil || !published {
+				return Resolution{}, &ModelNotFoundError{Requested: name, Unavailable: true}
+			}
 			return Resolution{Targets: []Target{{Provider: head, Model: tail}}}, nil
 		}
 	}
@@ -278,6 +336,26 @@ func ResolveForPrincipal(
 		return Resolution{Targets: []Target{t}}, nil
 	}
 	return Resolution{}, &ModelNotFoundError{Requested: name}
+}
+
+func routeMemberPublished(member config.EndpointMember, principal *config.Principal) (bool, error) {
+	if providers.CatalogRequiresPrincipal(member.Provider) {
+		authorized, err := providers.ProviderCredentialAuthorized(member.Provider, principal)
+		if err != nil {
+			return false, err
+		}
+		if !authorized {
+			return false, nil
+		}
+		if _, found := providers.CatalogCachedLookupForPrincipal(member.Provider, member.Model, principal); !found {
+			return false, nil
+		}
+	}
+	evidence, published, err := providers.AnonymousModelPublication(member.Provider, member.Model)
+	if err != nil {
+		return false, err
+	}
+	return published || (member.AllowUnverified && evidence.State == iam.ModelEvidenceUnverified), nil
 }
 
 // nativeKey canonicalises a model name for loose matching: lowercased with
@@ -366,6 +444,9 @@ func NativeAliasCandidates(principal *config.Principal) (map[string][]Target, er
 		models := append([]providers.ModelInfo(nil), providers.CatalogModelsForPrincipal(pid, principal)...)
 		sort.Slice(models, func(i, j int) bool { return models[i].ID < models[j].ID })
 		for _, m := range models {
+			if _, published, evidenceErr := providers.AnonymousModelPublication(pid, m.ID); evidenceErr != nil || !published {
+				continue
+			}
 			aliases := aliasIDs(m.ID, s.AnthropicDiscoveryAllModels)
 			policyCandidates := append([]string{pid + "/" + m.ID, m.ID}, aliases...)
 			if principal != nil && (!aliasModelAllowed(principal.AllowedModels, policyCandidates...) ||
@@ -728,10 +809,10 @@ func anthropicFallbackCompatibility(target Target, principal *config.Principal, 
 		return nil
 	}
 	model, ok := providers.CatalogLookupForPrincipal(target.Provider, target.Model, principal)
-	if !ok || model.Capabilities == nil {
+	if !ok {
 		return &providers.ConfigError{Msg: "Anthropic image adaptation requires verified model vision capability"}
 	}
-	if vision, _ := model.Capabilities["vision"].(bool); !vision {
+	if !providers.ModelSupportsImageInput(model) {
 		return &providers.ConfigError{Msg: "Anthropic image adaptation target is not vision-capable"}
 	}
 	return nil
@@ -958,12 +1039,12 @@ func responsesFallbackCompatibility(
 			model, ok := providers.CatalogLookupForPrincipal(
 				target.Provider, target.Model, principal,
 			)
-			if !ok || model.Capabilities == nil {
+			if !ok {
 				return &providers.ConfigError{
 					Msg: "image fallback requires verified model capability metadata",
 				}
 			}
-			if vision, _ := model.Capabilities["vision"].(bool); !vision {
+			if !providers.ModelSupportsImageInput(model) {
 				return &providers.ConfigError{
 					Msg: "selected Chat fallback model is not vision-capable",
 				}

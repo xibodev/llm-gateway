@@ -1,6 +1,7 @@
 package api
 
 import (
+	"encoding/json"
 	"errors"
 	"net/http"
 	"strings"
@@ -25,6 +26,97 @@ type playgroundBody struct {
 	ReasoningEffort any              `json:"reasoning_effort"`
 	Tools           any              `json:"tools"`
 	ToolChoice      any              `json:"tool_choice"`
+}
+
+func handleUserPlaygroundChat(w http.ResponseWriter, r *http.Request) {
+	handleUserPlaygroundSurface(w, r, core.ModelSurfaceChatCompletions)
+}
+
+func handleUserPlaygroundResponses(w http.ResponseWriter, r *http.Request) {
+	handleUserPlaygroundSurface(w, r, core.ModelSurfaceResponses)
+}
+
+func handleUserPlaygroundMessages(w http.ResponseWriter, r *http.Request) {
+	handleUserPlaygroundSurface(w, r, core.ModelSurfaceMessages)
+}
+
+func handleAdminPlaygroundChat(w http.ResponseWriter, r *http.Request) {
+	handleAdminPlaygroundSurface(w, r, core.ModelSurfaceChatCompletions)
+}
+
+func handleAdminPlaygroundResponses(w http.ResponseWriter, r *http.Request) {
+	handleAdminPlaygroundSurface(w, r, core.ModelSurfaceResponses)
+}
+
+func handleAdminPlaygroundMessages(w http.ResponseWriter, r *http.Request) {
+	handleAdminPlaygroundSurface(w, r, core.ModelSurfaceMessages)
+}
+
+func decodePlaygroundPayload(w http.ResponseWriter, r *http.Request) (map[string]any, playgroundBody, bool) {
+	var payload map[string]any
+	decoder := json.NewDecoder(r.Body)
+	decoder.UseNumber()
+	if decoder.Decode(&payload) != nil {
+		writeError(w, http.StatusBadRequest, "invalid playground request")
+		return nil, playgroundBody{}, false
+	}
+	raw, _ := json.Marshal(payload)
+	var body playgroundBody
+	if json.Unmarshal(raw, &body) != nil {
+		writeError(w, http.StatusBadRequest, "invalid playground request")
+		return nil, playgroundBody{}, false
+	}
+	return payload, body, true
+}
+
+func handleUserPlaygroundSurface(w http.ResponseWriter, r *http.Request, surface core.ModelSurface) {
+	owner, ok := requireSSOUser(w, r)
+	if !ok {
+		return
+	}
+	payload, body, ok := decodePlaygroundPayload(w, r)
+	if !ok {
+		return
+	}
+	principal, project, status, message := resolvePlaygroundPrincipal(owner, body.ProjectID)
+	if status != 0 {
+		writeError(w, status, message)
+		return
+	}
+	executePlaygroundSurface(w, r, payload, body, principal, project, "self-service", surface)
+}
+
+func handleAdminPlaygroundSurface(w http.ResponseWriter, r *http.Request, surface core.ModelSurface) {
+	if !adminAuthed(w, r) {
+		return
+	}
+	payload, body, ok := decodePlaygroundPayload(w, r)
+	if !ok {
+		return
+	}
+	principalID := strings.TrimSpace(body.PrincipalID)
+	if principalID == "" {
+		principalID = getAdminActor(r).PrincipalID
+	}
+	if principalID == "" {
+		writeError(w, http.StatusBadRequest, "principal_id is required for static-admin playground requests")
+		return
+	}
+	owner, found, err := iam.PrincipalByID(principalID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "Identity store unavailable.")
+		return
+	}
+	if !found || owner.Kind != "human" {
+		writeError(w, http.StatusBadRequest, "playground requires an active human principal")
+		return
+	}
+	principal, project, status, message := resolvePlaygroundPrincipal(owner, body.ProjectID)
+	if status != 0 {
+		writeError(w, status, message)
+		return
+	}
+	executePlaygroundSurface(w, r, payload, body, principal, project, "admin", surface)
 }
 
 func handleUserPlayground(w http.ResponseWriter, r *http.Request) {
@@ -131,7 +223,7 @@ func executePlayground(w http.ResponseWriter, r *http.Request, body playgroundBo
 		return
 	}
 	targets, err = router.FilterCompatibleTargets(targets, principal, router.CompatibilityRequest{
-		Surface: core.ModelSurfaceChatCompletions, Tools: requestHasTools(body.Tools),
+		Surface: core.ModelSurfaceChatCompletions, Tools: requestHasTools(body.Tools), Vision: requestIsMultimodal(body.Messages),
 	})
 	if err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
@@ -166,6 +258,135 @@ func executePlayground(w http.ResponseWriter, r *http.Request, body playgroundBo
 		"fallback_trace": trace, "raw_response": safePlaygroundValue(response),
 		"transport_mode": targetTransportMode(*served, principal, "/v1/chat/completions"),
 	})
+}
+
+func executePlaygroundSurface(w http.ResponseWriter, r *http.Request, payload map[string]any, body playgroundBody, principal *config.Principal, project iam.Project, source string, surface core.ModelSurface) {
+	if body.Stream {
+		writeError(w, http.StatusBadRequest, "Streaming is not available in the playground yet. Use a non-streaming request.")
+		return
+	}
+	if strings.TrimSpace(body.Model) == "" {
+		writeError(w, http.StatusBadRequest, "model is required")
+		return
+	}
+	if surface == core.ModelSurfaceMessages && payload["max_tokens"] == nil {
+		writeError(w, http.StatusBadRequest, "max_tokens is required for Anthropic Messages")
+		return
+	}
+	started := time.Now()
+	resolution, err := router.ResolveForPrincipal(body.Model, principal)
+	if err != nil {
+		if _, missing := err.(*router.ModelNotFoundError); missing {
+			writeError(w, http.StatusNotFound, err.Error())
+		} else {
+			writeError(w, http.StatusInternalServerError, "Gateway route configuration is unavailable.")
+		}
+		return
+	}
+	targets, status, message := enforcePlaygroundPolicy(principal, body.Model, resolution.Category, resolution.Targets)
+	if status != 0 {
+		writeError(w, status, message)
+		return
+	}
+	if surface == core.ModelSurfaceResponses && responsesRequestHasProviderState(payload) {
+		if !isExactProviderModelResolution(body.Model, resolution) {
+			writeError(w, http.StatusBadRequest, "Stateful Responses requests require an exact provider/model target.")
+			return
+		}
+		private, privateErr := iam.HasResolvablePrivateProviderConnection(principal.PrincipalID, resolution.Targets[0].Provider)
+		if privateErr != nil || !private {
+			writeError(w, http.StatusForbidden, "Stateful Responses requests require a private human provider connection.")
+			return
+		}
+	}
+	targets, err = router.FilterCompatibleTargets(targets, principal, router.CompatibilityRequest{
+		Surface: surface, Tools: requestHasTools(payload["tools"]), Vision: playgroundPayloadIsMultimodal(surface, payload),
+	})
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	delete(payload, "project_id")
+	delete(payload, "principal_id")
+	delete(payload, "stream")
+
+	var response map[string]any
+	var served *router.Target
+	var trace []router.AttemptTrace
+	switch surface {
+	case core.ModelSurfaceResponses:
+		response, served, err = router.ExecuteResponsesContext(r.Context(), targets, payload, body.Model, principal)
+	case core.ModelSurfaceMessages:
+		response, served, err = router.ExecuteAnthropicMessagesContext(r.Context(), targets, payload, body.Model, principal)
+	default:
+		var request chatRequest
+		raw, _ := json.Marshal(payload)
+		_ = json.Unmarshal(raw, &request)
+		if len(request.Messages) == 0 {
+			writeError(w, http.StatusBadRequest, "at least one message is required")
+			return
+		}
+		response, served, trace, err = router.ExecuteCompleteWithTraceContext(r.Context(), targets, providerMessages(request.Messages), body.Model, principal, chatKwargs(&request))
+		if err == nil {
+			response["model"] = served.Model
+			normalizeChatResponseEnvelope(response)
+		}
+	}
+	latency := time.Since(started).Milliseconds()
+	endpoint := "playground." + playgroundSurfaceName(surface)
+	if err != nil {
+		if r.Context().Err() != nil {
+			return
+		}
+		router.RecordUsage(router.UsageRecord{Endpoint: endpoint, RequestedModel: body.Model, Project: project.Slug, Key: "playground", ProjectID: project.ID, PrincipalID: principal.PrincipalID, StatusCode: upstreamErrorStatus(err), LatencyMS: latency, ErrorCode: "upstream"})
+		_ = iam.RecordAudit(iam.AuditEvent{ActorPrincipalID: principal.PrincipalID, Action: "playground.execute", TargetType: "project", TargetID: project.ID, Result: "failure", Detail: map[string]any{"model": body.Model, "surface": playgroundSurfacePath(surface), "source": source}})
+		writeUpstreamError(w, err)
+		return
+	}
+	inputTokens, outputTokens := responseUsage(response)
+	router.RecordUsage(router.UsageRecord{Endpoint: endpoint, RequestedModel: body.Model, RoutedModel: served.Model, Provider: served.Provider, Project: project.Slug, Key: "playground", ProjectID: project.ID, PrincipalID: principal.PrincipalID, InputTokens: inputTokens, OutputTokens: outputTokens, StatusCode: http.StatusOK, LatencyMS: latency, IsStub: playgroundStub(served.Provider, principal)})
+	_ = iam.RecordAudit(iam.AuditEvent{ActorPrincipalID: principal.PrincipalID, Action: "playground.execute", TargetType: "project", TargetID: project.ID, Result: "success", Detail: map[string]any{"model": body.Model, "surface": playgroundSurfacePath(surface), "served_provider": served.Provider, "served_model": served.Model, "source": source}})
+	writeJSON(w, http.StatusOK, map[string]any{
+		"project_id": project.ID, "principal_id": principal.PrincipalID,
+		"served":     map[string]any{"provider": served.Provider, "model": served.Model},
+		"latency_ms": latency, "usage": safePlaygroundValue(response["usage"]),
+		"fallback_trace": trace, "raw_response": safePlaygroundValue(response),
+		"transport_mode": targetTransportMode(*served, principal, playgroundSurfacePath(surface)),
+		"surface":        playgroundSurfacePath(surface),
+	})
+}
+
+func playgroundPayloadIsMultimodal(surface core.ModelSurface, payload map[string]any) bool {
+	if surface == core.ModelSurfaceResponses {
+		return responsesRequestIsMultimodal(payload)
+	}
+	messages, _ := payload["messages"].([]any)
+	converted := make([]map[string]any, 0, len(messages))
+	for _, raw := range messages {
+		if message, ok := raw.(map[string]any); ok {
+			converted = append(converted, message)
+		}
+	}
+	return requestIsMultimodal(converted)
+}
+
+func playgroundSurfaceName(surface core.ModelSurface) string {
+	switch surface {
+	case core.ModelSurfaceResponses:
+		return "responses"
+	case core.ModelSurfaceMessages:
+		return "messages"
+	default:
+		return "chat"
+	}
+}
+
+func playgroundSurfacePath(surface core.ModelSurface) string {
+	return map[core.ModelSurface]string{
+		core.ModelSurfaceChatCompletions: "/v1/chat/completions",
+		core.ModelSurfaceResponses:       "/v1/responses",
+		core.ModelSurfaceMessages:        "/v1/messages",
+	}[surface]
 }
 
 func enforcePlaygroundPolicy(principal *config.Principal, requestedModel, resolvedCategory string, targets []router.Target) ([]router.Target, int, string) {

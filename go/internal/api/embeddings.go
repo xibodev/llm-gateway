@@ -10,6 +10,8 @@ import (
 	"llmgw/internal/config"
 	"llmgw/internal/providers"
 	"llmgw/internal/router"
+
+	core "github.com/xibodev/llmgw-core"
 )
 
 // POST /v1/embeddings — text -> vector. Reverse-proxied to the resolved
@@ -87,7 +89,7 @@ func handleEmbeddings(w http.ResponseWriter, r *http.Request) {
 	// function: it resolves provider/model or a category to ONE target and runs
 	// the key policy over it. Duplicating it here would mean two copies of the
 	// policy call that could drift apart.
-	provider, upstreamModel, status, msg := resolveAudioTarget(principal, req.Model)
+	provider, upstreamModel, status, msg := resolveAudioTarget(principal, req.Model, core.ModelOperationEmbeddings)
 	if status != 0 {
 		if status == 400 && strings.TrimSpace(req.Model) == "" {
 			msg = "'model' is required (e.g. llama-embed/qwen3-embedding-0.6b)"

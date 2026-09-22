@@ -175,6 +175,10 @@ test("official OAuth onboarding auto-opens, polls, tests, and reports the result
   assert.match(oauth, /testConnection/);
   assert.match(oauth, /Connected and tested/);
   assert.match(oauth, /Try in playground/);
+  assert.match(oauth, /numberValue\(result\.model_count\) > 0/);
+  assert.match(oauth, /Failure code/);
+  assert.match(oauth, /probe\.failure_code/);
+  assert.match(oauth, /stage !== "error" \|\| !probe/);
   assert.match(oauth, /const closePopup = useCallback/);
   assert.match(oauth, /useEffect\(\(\) => closePopup/);
   assert.match(oauth, /closePopup\(\);\s+setStage\("error"\)/);
@@ -188,6 +192,30 @@ test("official OAuth onboarding auto-opens, polls, tests, and reports the result
   assert.match(hub, /Add or replace account/);
 });
 
+test("Anthropic setup tokens and Antigravity browser OAuth are explicit choices", () => {
+  const hub = readFileSync(resolve(root, "src/components/providers/ProviderHub.tsx"), "utf8");
+  const oauth = readFileSync(resolve(root, "src/components/providers/OAuthConnectDialog.tsx"), "utf8");
+  const roster = readFileSync(resolve(root, "src/components/providers/ProviderRoster.tsx"), "utf8");
+  assert.match(hub, /const SETUP_TOKEN_KIND = "setup_token"/);
+  assert.match(hub, /Setup token/);
+  assert.match(oauth, /authorization_url/);
+  assert.match(oauth, /flow_id/);
+  assert.match(roster, /"Experimental"/);
+  assert.doesNotMatch(hub, /client_secret/);
+  assert.match(oauth, /client_secret: clientSecret/);
+  assert.match(oauth, /type="password"/);
+});
+
+test("Antigravity manual-code OAuth opens the browser and completes from pasted input", () => {
+  const oauth = readFileSync(resolve(root, "src/components/providers/OAuthConnectDialog.tsx"), "utf8");
+  assert.match(oauth, /value="consumer_manual"/);
+  assert.match(oauth, /Authorization code or full redirect URL/);
+  assert.match(oauth, /endpoint\("complete"\)/);
+  assert.match(oauth, /authorization_response: authorizationResponse\.trim\(\)/);
+  assert.match(oauth, /client_mode: clientMode/);
+  assert.match(oauth, /type="password"/);
+});
+
 
 test("admin catalog actions select an owner principal", () => {
   const routes = readFileSync(resolve(root, "src/pages/Routes.tsx"), "utf8");
@@ -199,6 +227,24 @@ test("admin catalog actions select an owner principal", () => {
   assert.match(hub, /useProviderLifecycle\(ownerID, onChanged\)/);
   assert.match(hub, /Catalog owner/);
   assert.match(hub, /supportsOAuth && !ownerID/);
+});
+
+test("anonymous model diagnostics stay admin-visible but runnable pickers exclude disabled rows", () => {
+  const models = readFileSync(resolve(root, "src/pages/ModelsEndpoints.tsx"), "utf8");
+  const picker = readFileSync(resolve(root, "src/components/ModelPicker.tsx"), "utf8");
+  assert.match(models, /diagnostics=1/);
+  assert.match(models, /Disabled for public routing/);
+  assert.match(models, /publication_state/);
+  assert.match(picker, /filter\(\(model\) => !model\.disabled\)/);
+});
+
+test("route creation requires a visible admin opt-in for unverified anonymous targets", () => {
+  const routes = readFileSync(resolve(root, "src/pages/Routes.tsx"), "utf8");
+  assert.match(routes, /diagnostics=1/);
+  assert.match(routes, /unverified, admin opt-in/);
+  assert.match(routes, /allow_unverified/);
+  assert.match(routes, /without successful verification/);
+  assert.match(routes, /Failed and stale targets cannot be selected/);
 });
 
 test("provider onboarding renders required setup fields and editable configuration", () => {
@@ -237,6 +283,8 @@ test("playground uses typed capabilities and does not expose portal media routes
   assert.match(picker, /typed_capabilities/);
   assert.match(picker, /native_surfaces/);
   assert.match(picker, /emulated_surfaces/);
+  assert.match(picker, /export function transportForSurface/);
+  assert.match(playground, /transportForSurface\(selected, selectedSurface\)/);
   assert.match(playground, /mode === "portal"/);
   assert.match(playground, /row\.capabilities\.includes\("chat"\)/);
   assert.match(playground, /Catalog freshness/);
@@ -244,6 +292,9 @@ test("playground uses typed capabilities and does not expose portal media routes
   assert.match(playground, /Transport mode/);
   assert.match(playground, /Tool definitions \(JSON array\)/);
   assert.match(playground, /toolsUnsupported/);
+  assert.match(playground, /query\.set\("diagnostics", "1"\)/);
+  assert.match(playground, /Capabilities unknown/);
+  assert.match(playground, /Published by administrator opt-in/);
 });
 
 test("access page manages principals, projects, and memberships over the IAM API", () => {
@@ -312,6 +363,15 @@ test("provider detail scopes its catalog to the selected owner and explains empt
   assert.match(detail, /Select a catalog owner/);
   assert.match(detail, /create one on the Access page/);
   assert.match(detail, /No models synced yet/);
+});
+
+test("OAuth onboarding carries the selected owner into catalog verification and playground", () => {
+  const oauth = readFileSync(resolve(root, "src/components/providers/OAuthConnectDialog.tsx"), "utf8");
+  const providers = readFileSync(resolve(root, "src/pages/Providers.tsx"), "utf8");
+  assert.match(oauth, /test\?principal_id=\$\{encodeURIComponent\(ownerID\)\}/);
+  assert.match(oauth, /onOpenPlayground\?\.\(model\.includes\("\/"\)/);
+  assert.match(oauth, /disabled=\{!onOpenPlayground \|\| !stringValue\(asList\(probe\?\.sample\)\[0\]\)\}/);
+  assert.match(providers, /new URLSearchParams\(\{ model: modelID, provider: providerID, owner: ownerID \}\)/);
 });
 
 test("provider status vocabulary distinguishes configured, synced, and verified", () => {
@@ -555,7 +615,7 @@ test("playground is a chat surface with multi-turn history", () => {
   assert.match(playground, /event.key !== "Enter" \|\| event.shiftKey/);
   assert.match(playground, /event\.preventDefault\(\);\s*if \(executionPending\.current\) return;/);
   assert.match(playground, /sendChat\(event, \(event.currentTarget as HTMLTextAreaElement\).value\)/);
-  assert.match(playground, /messages: history.map/);
+  assert.match(playground, /requestHistory\(textSurface, history\)/);
   assert.match(playground, /Clear conversation/);
   assert.match(playground, /Raw gateway response/);
 });
@@ -564,13 +624,13 @@ test("playground keeps failed requests out of conversation history", () => {
   const playground = readFileSync(resolve(root, "src/pages/Playground.tsx"), "utf8");
   assert.doesNotMatch(playground, /isError\?: boolean/);
   assert.doesNotMatch(playground, /setTurns\(\[\.\.\.history, \{\s*role: "assistant",\s*content: msg/s);
-  assert.match(playground, /setTurns\(turns\);\s*setDraft\(\(current\) => current \|\| text\);\s*setError\(cause instanceof Error/);
+  assert.match(playground, /setTurns\(turns\);\s*setDraft\(\(current\) => current \|\| text\);\s*reportError\(cause\)/);
   assert.match(playground, /const executionRequest = useRef\(0\)/);
   assert.match(playground, /const executionPending = useRef\(false\)/);
   assert.match(playground, /const executionAbort = useRef<AbortController \| null>\(null\)/);
-  assert.match(playground, /\[model, projectID, scopedPrincipalID\]/);
+  assert.match(playground, /\[model, projectID, scopedPrincipalID, textSurface\]/);
   assert.match(playground, /onClear=\{\(\) => \{ executionAbort\.current\?\.abort\(\); executionAbort\.current = null; executionRequest\.current \+= 1;/);
-  assert.match(playground, /setResult\(null\);\s*setError\(cause instanceof Error/);
+  assert.match(playground, /setResult\(null\);\s*reportError\(cause/);
   assert.match(playground, /Catalog discovery does not guarantee current inference availability/);
 });
 
@@ -581,7 +641,7 @@ test("playground invalidates stale presets and video polls", () => {
   assert.match(playground, /if \(!preset\) \{\s*appliedPreset\.current = "";/);
   assert.match(playground, /const presetScope = `\$\{scopedPrincipalID\}\|\$\{projectID\}\|\$\{preset\}`/);
   assert.match(playground, /if \(appliedPreset\.current === presetScope \|\| !models\.length\) return;/);
-  assert.match(playground, /if \(models\.some\(\(row\) => row\.id === preset\)\) \{\s*appliedPreset\.current = presetScope;/);
+  assert.match(playground, /if \(models\.some\(\(row\) => row\.id === preset && !row\.disabled\)\) \{\s*appliedPreset\.current = presetScope;/);
   assert.match(playground, /if \(preset && appliedPreset\.current !== presetScope\) return;/);
   assert.ok((playground.match(/if \(executionPending\.current\) return;/g) ?? []).length >= 5);
   assert.match(playground, /const payload = await sendJSON<JSONRecord>\(mode, "\/playground\/video", "POST", pollBody, controller\.signal\);\s*if \(attempt !== videoPoll\.current\) return;/);
@@ -598,6 +658,20 @@ test("playground switches surface by model capability", () => {
   assert.match(playground, /<audio controls src=\{audioURL\}/);
   assert.match(playground, /playground-settings__toggle/);
   assert.match(playground, /accept="audio\/\*"/);
+});
+
+test("playground selects and builds each supported text surface", () => {
+  const playground = readFileSync(resolve(root, "src/pages/Playground.tsx"), "utf8");
+  assert.match(playground, /defaultTextSurface/);
+  assert.match(playground, /transportForSurface\(model, surface\) === "native"/);
+  assert.match(playground, /transportForSurface\(model, surface\) === "translated"/);
+  assert.match(playground, /`\/playground\$\{textSurface\}`/);
+  assert.match(playground, /body\.input = statefulResponses \? text : requestHistory/);
+  assert.match(playground, /body\.previous_response_id = previousResponseID/);
+  assert.match(playground, /body\.max_tokens = 1024/);
+  assert.match(playground, /function parseTextResponse/);
+  assert.match(playground, /Reasoning/);
+  assert.match(playground, /Tool calls/);
 });
 
 test("form data uploads keep their own multipart boundary", () => {
@@ -669,6 +743,19 @@ test("playground exercises image and video as their own surfaces", () => {
   assert.match(playground, /<video controls src=\{videoURL\}/);
 });
 
+test("playground surfaces safe image rate-limit metadata", () => {
+  const api = readFileSync(resolve(root, "src/lib/api.ts"), "utf8");
+  const playground = readFileSync(resolve(root, "src/pages/Playground.tsx"), "utf8");
+  assert.match(api, /readonly retryAfter: string/);
+  assert.match(api, /response\.headers\.get\("Retry-After"\)/);
+  assert.match(playground, /playgroundFailure/);
+  assert.match(playground, /<dt>Status<\/dt>/);
+  assert.match(playground, /<dt>Code<\/dt>/);
+  assert.match(playground, /<dt>Retry<\/dt>/);
+  assert.match(playground, /<dt>Action<\/dt>/);
+  assert.match(playground, /void refreshEvidence\(\)/);
+});
+
 test("video polling is cancellable and does not block the request", () => {
   const playground = readFileSync(resolve(root, "src/pages/Playground.tsx"), "utf8");
   assert.match(playground, /const attempt = \+\+videoPoll.current/);
@@ -693,7 +780,7 @@ test("provider detail rows render each instance's own catalog data", () => {
 test("provider tiles show instance composition rather than one rolled-up status", () => {
   const hub = readFileSync(resolve(root, "src/components/providers/ProviderHub.tsx"), "utf8");
   assert.match(hub, /instance_status_counts/);
-  assert.match(hub, /instance\{.*=== 1 \? "" : "s"\}/);
+  assert.match(hub, /instanceCount === 1 \? "" : "s"/);
 });
 
 test("credential and lifecycle actions name an explicit instance", () => {
@@ -717,7 +804,9 @@ test("official OAuth account binding also names an explicit instance", () => {
   assert.match(oauth, /function OAuthConnectDialog\(\{\s*entry,\s*providerID,/);
   assert.doesNotMatch(oauth, /configuredProviderIDs/);
   assert.match(hub, /<OAuthConnectDialog entry=\{oauthEntry\.entry\} providerID=\{oauthEntry\.providerID\}/);
-  assert.match(detail, /<OAuthConnectDialog entry=\{entry\} providerID=\{oauthProviderID\}/);
+  assert.match(detail, /<OAuthConnectDialog entry=\{entry\} providerID=\{oauthProviderID\} ownerID=\{ownerID\}/);
+  assert.match(hub, /<OAuthConnectDialog entry=\{oauthEntry\.entry\} providerID=\{oauthEntry\.providerID\} ownerID=\{ownerID\}/);
+  assert.doesNotMatch(oauth, /useState\(stringValue\(owners\[0\]\?\.id\)\)/);
 });
 
 test("connect dialog allows creating an additional instance of a configured type", () => {
@@ -758,7 +847,7 @@ test("add instance appears only where a credential-based create can succeed", ()
   // registry id, which the server answers with a 400.
   assert.match(hub, /const CREDENTIAL_AUTH_METHODS = new Set/);
   assert.match(hub, /const canAddInstance = registryIDs\.has\(id\) && methods\.some/);
-  assert.match(hub, /\{canAddInstance \? <button[^>]*title="Configure another instance/);
+  assert.match(hub, /\{canAddInstance \? \([\s\S]*?<button[^>]*title="Configure another instance/);
 });
 
 test("the create dialog never claims a key from another instance", () => {

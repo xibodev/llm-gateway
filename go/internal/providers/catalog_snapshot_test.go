@@ -40,12 +40,14 @@ func TestCatalogInvalidationRejectsInFlightStaleWrite(t *testing.T) {
 	catMu.Lock()
 	catData = nil
 	catGeneration = nil
+	catPersistenceGeneration = nil
 	catLoaded = false
 	catMu.Unlock()
 	t.Cleanup(func() {
 		catMu.Lock()
 		catData = nil
 		catGeneration = nil
+		catPersistenceGeneration = nil
 		catLoaded = false
 		catMu.Unlock()
 	})
@@ -60,6 +62,49 @@ func TestCatalogInvalidationRejectsInFlightStaleWrite(t *testing.T) {
 		"copilot", &config.Principal{PrincipalID: "owner", PrincipalKind: "human"},
 	); len(models) != 0 {
 		t.Fatalf("stale catalog was restored: %+v", models)
+	}
+}
+
+func TestCatalogProviderPersistenceRebasesWithoutWeakeningHardFence(t *testing.T) {
+	t.Setenv("LLMGW_STATE_DIR", t.TempDir())
+	catMu.Lock()
+	catData = nil
+	catGeneration = nil
+	catPersistenceGeneration = nil
+	catLoaded = false
+	catMu.Unlock()
+	t.Cleanup(func() {
+		catMu.Lock()
+		catData = nil
+		catGeneration = nil
+		catPersistenceGeneration = nil
+		catLoaded = false
+		catMu.Unlock()
+	})
+
+	key := "antigravity@owner"
+	revision := catalogRevisionFor(key)
+	forgetCatalogAfterProviderPersistence("antigravity", "owner")
+	if !storeEntryIfRevision(key, []ModelInfo{{ID: "fresh"}}, revision) {
+		t.Fatal("credential refresh fenced the operation that performed it")
+	}
+
+	for _, mutation := range []struct {
+		name       string
+		invalidate func()
+	}{
+		{name: "revoke", invalidate: func() { ForgetCatalogForPrincipal("antigravity", "owner") }},
+		{name: "reauthorization", invalidate: func() { ForgetCatalogForPrincipal("antigravity", "owner") }},
+		{name: "provider config", invalidate: func() { ForgetCatalog("antigravity") }},
+	} {
+		t.Run(mutation.name, func(t *testing.T) {
+			revision := catalogRevisionFor(key)
+			forgetCatalogAfterProviderPersistence("antigravity", "owner")
+			mutation.invalidate()
+			if storeEntryIfRevision(key, []ModelInfo{{ID: "stale"}}, revision) {
+				t.Fatal("hard invalidation was mistaken for in-operation provider persistence")
+			}
+		})
 	}
 }
 

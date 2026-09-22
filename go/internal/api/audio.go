@@ -16,6 +16,8 @@ import (
 	"llmgw/internal/iam"
 	"llmgw/internal/providers"
 	"llmgw/internal/router"
+
+	core "github.com/xibodev/llmgw-core"
 )
 
 var audioClient = &http.Client{
@@ -27,7 +29,7 @@ const proxyErrorBodyLimit = 64 << 10
 
 // resolveAudioTarget maps a request model (provider/model or category) to a
 // single upstream (provider, model), applying key-policy allowlists.
-func resolveAudioTarget(principal *config.Principal, model string) (provider, upstreamModel string, status int, msg string) {
+func resolveAudioTarget(principal *config.Principal, model string, operation core.ModelOperation) (provider, upstreamModel string, status int, msg string) {
 	model = strings.TrimSpace(model)
 	if model == "" {
 		return "", "", 400, "'model' is required (e.g. localai/whisper-base)"
@@ -46,7 +48,21 @@ func resolveAudioTarget(principal *config.Principal, model string) (provider, up
 	if len(targets) == 0 {
 		return "", "", 404, "no routable target for '" + model + "'"
 	}
-	return targets[0].Provider, targets[0].Model, 0, ""
+	for _, target := range targets {
+		row, found := providers.CatalogCachedLookupForPrincipal(target.Provider, target.Model, principal)
+		if found && providers.ModelOperationSupport(row, operation) == core.SupportUnsupported {
+			continue
+		}
+		if operation == core.ModelOperationAudioOut {
+			if _, native := providers.SpeechSynthesizerForPrincipal(target.Provider, principal); native {
+				return target.Provider, target.Model, 0, ""
+			}
+		}
+		if _, _, ok := providers.ProviderHTTPTarget(target.Provider, principal); ok {
+			return target.Provider, target.Model, 0, ""
+		}
+	}
+	return "", "", http.StatusBadRequest, "no route member supports the requested operation"
 }
 
 func copyAuthHeaders(dst *http.Request, headers http.Header, skipContentType bool) {
@@ -118,7 +134,7 @@ func handleTranscriptions(w http.ResponseWriter, r *http.Request) {
 		writeError(w, 400, "invalid multipart form")
 		return
 	}
-	provider, upstreamModel, status, msg := resolveAudioTarget(principal, r.FormValue("model"))
+	provider, upstreamModel, status, msg := resolveAudioTarget(principal, r.FormValue("model"), core.ModelOperationAudioIn)
 	if status != 0 {
 		recordFailureUsage("openai.transcriptions", r.FormValue("model"), principal, status, "policy_or_route", started)
 		writeError(w, status, msg)
@@ -189,7 +205,7 @@ func handleSpeech(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	reqModel, _ := body["model"].(string)
-	provider, upstreamModel, status, msg := resolveAudioTarget(principal, reqModel)
+	provider, upstreamModel, status, msg := resolveAudioTarget(principal, reqModel, core.ModelOperationAudioOut)
 	if status != 0 {
 		recordFailureUsage("openai.speech", reqModel, principal, status, "policy_or_route", started)
 		writeError(w, status, msg)

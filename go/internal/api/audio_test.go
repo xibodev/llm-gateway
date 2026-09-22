@@ -13,6 +13,8 @@ import (
 	"llmgw/internal/config"
 	"llmgw/internal/iam"
 	"llmgw/internal/providers"
+
+	core "github.com/xibodev/llmgw-core"
 )
 
 type roundTripFunc func(*http.Request) (*http.Response, error)
@@ -50,9 +52,45 @@ func TestResolveAudioTargetSanitizesAmbiguousCategoryErrors(t *testing.T) {
 		}
 	})
 
-	_, _, status, message := resolveAudioTarget(nil, "SmArT")
+	_, _, status, message := resolveAudioTarget(nil, "SmArT", core.ModelOperationAudioIn)
 	if status != 500 || message != "Gateway is not configured for the requested model." {
 		t.Fatalf("ambiguous route status=%d message=%q", status, message)
+	}
+}
+
+func TestResolveAudioTargetSkipsIneligibleRouteMembers(t *testing.T) {
+	oldProviders, oldEndpoints := config.Get().Providers, config.Get().Endpoints
+	t.Cleanup(func() {
+		config.Update(func(settings *config.Settings) {
+			settings.Providers, settings.Endpoints = oldProviders, oldEndpoints
+		})
+		providers.ResetProviders()
+	})
+	config.Update(func(settings *config.Settings) {
+		settings.Providers = map[string]*config.ProviderConfig{
+			"text":  {Type: "echo"},
+			"audio": {Type: "openai_compatible", BaseURL: "https://audio.example.test/v1", APIKey: "none"},
+		}
+		settings.Endpoints = map[string]*config.EndpointConfig{
+			"speech": {Failover: []config.EndpointMember{{Provider: "text", Model: "text"}, {Provider: "audio", Model: "voice"}}},
+			"stt":    {Failover: []config.EndpointMember{{Provider: "text", Model: "text"}, {Provider: "audio", Model: "whisper"}}},
+			"embed":  {Failover: []config.EndpointMember{{Provider: "text", Model: "text"}, {Provider: "audio", Model: "embedding"}}},
+		}
+	})
+	providers.ResetProviders()
+	for _, test := range []struct {
+		model     string
+		operation core.ModelOperation
+		wantModel string
+	}{
+		{model: "speech", operation: core.ModelOperationAudioOut, wantModel: "voice"},
+		{model: "stt", operation: core.ModelOperationAudioIn, wantModel: "whisper"},
+		{model: "embed", operation: core.ModelOperationEmbeddings, wantModel: "embedding"},
+	} {
+		providerID, model, status, message := resolveAudioTarget(nil, test.model, test.operation)
+		if status != 0 || providerID != "audio" || model != test.wantModel {
+			t.Fatalf("%s target=%s/%s status=%d message=%q", test.model, providerID, model, status, message)
+		}
 	}
 }
 

@@ -6,7 +6,7 @@ const models = String(process.env.MODELS || "model").split(",").map((value) => v
 createServer((request, response) => {
   response.setHeader("Content-Type", "application/json");
   if (request.url?.includes("/models")) {
-    response.end(JSON.stringify({ data: models.map((id) => ({ id })) }));
+    response.end(JSON.stringify({ data: models.map((id) => ({ id, supported_endpoints: ["/v1/chat/completions"] })) }));
     return;
   }
   if (status !== 200) {

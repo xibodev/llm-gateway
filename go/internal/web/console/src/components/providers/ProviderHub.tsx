@@ -1,15 +1,5 @@
 import { useMemo, useRef, useState } from "preact/hooks";
-import {
-  Compass,
-  LoaderCircle,
-  Plug,
-  RefreshCw,
-  Search,
-  ShieldCheck,
-  Trash2,
-  X,
-  Zap,
-} from "lucide-preact";
+import { Compass, LoaderCircle, Plug, RefreshCw, Search, ShieldCheck, Trash2, X, Zap } from "lucide-preact";
 import { sendForm, sendJSON, type JSONRecord } from "../../lib/api";
 import type { ConsoleMode } from "../../lib/mode";
 import { asList, asRecord, numberValue, stringValue } from "../../lib/records";
@@ -19,17 +9,7 @@ import { useDialogFocus } from "../useDialogFocus";
 import { OAuthConnectDialog } from "./OAuthConnectDialog";
 import { discoveryFilters, matchesDiscoveryFilter, mergeProviderRoster, providerShelves, RosterMark, RosterMetadata, RosterStatus, rosterCandidateSetup, rosterSetupEntry, rosterSetupUnavailableReason, safeRosterURL, shelfFor, useProviderRoster } from "./ProviderRoster";
 import "./provider-hub.css";
-import {
-  type ActionResult,
-  ResultNotice,
-  StatusBadge,
-  boolValue,
-  configuredProviderConfig,
-  configuredProviderIDs,
-  connectionChoices,
-  tileStatus,
-  useProviderLifecycle,
-} from "./shared";
+import { type ActionResult, ResultNotice, StatusBadge, boolValue, configuredProviderConfig, configuredProviderIDs, connectionChoices, tileStatus, useProviderLifecycle } from "./shared";
 
 export function ConnectDialog({ entry, onClose, onConfigured, mode = "create", takenIDs = [] }: { entry: JSONRecord; onClose: () => void; onConfigured: (message?: string) => Promise<void>; mode?: "create" | "edit"; takenIDs?: string[] }) {
   const providerConfig = asRecord(entry.provider_config);
@@ -54,9 +34,7 @@ export function ConnectDialog({ entry, onClose, onConfigured, mode = "create", t
   const [region, setRegion] = useState(stringValue(providerConfig.region) || stringValue(entry.default_region));
   const [project, setProject] = useState(stringValue(providerConfig.project));
   const [location, setLocation] = useState(stringValue(providerConfig.location) || stringValue(entry.default_location));
-  const [forceApiSupport, setForceApiSupport] = useState(
-    boolValue(providerConfig.force_api_support) || stringValue(entry.runtime_type) === "github_copilot" || stringValue(entry.id) === "github_copilot"
-  );
+  const [forceApiSupport, setForceApiSupport] = useState(boolValue(providerConfig.force_api_support) || stringValue(entry.runtime_type) === "github_copilot" || stringValue(entry.id) === "github_copilot");
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
   // Some providers, notably Zen, advertise api_key as an optional onboarding
@@ -68,21 +46,47 @@ export function ConnectDialog({ entry, onClose, onConfigured, mode = "create", t
   // key, and skipped the guard, so the operator submitted blank and got a 400.
   const apiKeySet = mode === "edit" && boolValue(providerConfig.api_key_set);
   const takesServiceAccount = new Set(asList(entry.auth_methods).map(String)).has(SERVICE_ACCOUNT_KIND);
+  const takesSetupToken = new Set(asList(entry.auth_methods).map(String)).has(SETUP_TOKEN_KIND);
   const usingServiceAccount = takesServiceAccount && credentialKind === SERVICE_ACCOUNT_KIND;
+  const usingSetupToken = takesSetupToken && credentialKind === SETUP_TOKEN_KIND;
   const fields = new Set(asList(entry.onboarding_fields).map(String));
   const label = stringValue(entry.label, "Provider");
   const dialogRef = useDialogFocus(onClose);
-  const credentialFile = useCredentialFileRead((text) => { setAPIKey(text); setError(""); });
+  const credentialFile = useCredentialFileRead((text) => {
+    setAPIKey(text);
+    setError("");
+  });
 
   const submit = async (event: Event) => {
     event.preventDefault();
-    if (!providerID.trim()) { setError("Provider ID is required."); return; }
-    if (mode === "create" && taken.has(providerID.trim())) { setError("That provider ID is already configured. Choose a new ID to keep the existing instance unchanged."); return; }
-    if (requiresKey && !apiKey.trim() && !apiKeySet) { setError(usingServiceAccount ? "A service account key is required." : "An API key is required for this connection mode."); return; }
-    if (usingServiceAccount && apiKey.trim() && !isServiceAccountJSON(apiKey)) { setError("That does not look like a service account key. Choose the whole service account JSON file, including its \"type\": \"service_account\" field."); return; }
-    if (fields.has("base_url") && boolValue(entry.requires_base_url) && !baseURL.trim()) { setError("A base URL is required for this integration."); return; }
-    if (fields.has("project") && !project.trim()) { setError("A Google Cloud project ID is required."); return; }
-    if (fields.has("location") && !location.trim()) { setError("A provider location is required."); return; }
+    if (!providerID.trim()) {
+      setError("Provider ID is required.");
+      return;
+    }
+    if (mode === "create" && taken.has(providerID.trim())) {
+      setError("That provider ID is already configured. Choose a new ID to keep the existing instance unchanged.");
+      return;
+    }
+    if (requiresKey && !apiKey.trim() && !apiKeySet) {
+      setError(usingServiceAccount ? "A service account key is required." : usingSetupToken ? "A setup token is required." : "An API key is required for this connection mode.");
+      return;
+    }
+    if (usingServiceAccount && apiKey.trim() && !isServiceAccountJSON(apiKey)) {
+      setError('That does not look like a service account key. Choose the whole service account JSON file, including its "type": "service_account" field.');
+      return;
+    }
+    if (fields.has("base_url") && boolValue(entry.requires_base_url) && !baseURL.trim()) {
+      setError("A base URL is required for this integration.");
+      return;
+    }
+    if (fields.has("project") && !project.trim()) {
+      setError("A Google Cloud project ID is required.");
+      return;
+    }
+    if (fields.has("location") && !location.trim()) {
+      setError("A provider location is required.");
+      return;
+    }
     setBusy(true);
     setError("");
     try {
@@ -109,6 +113,7 @@ export function ConnectDialog({ entry, onClose, onConfigured, mode = "create", t
           project: project.trim(),
           location: location.trim(),
           force_api_support: forceApiSupport,
+          credential_kind: credentialKind,
         });
       }
       credentialFile.invalidate();
@@ -126,16 +131,132 @@ export function ConnectDialog({ entry, onClose, onConfigured, mode = "create", t
     }
   };
 
-  return <div class="dialog-backdrop" role="presentation"><section ref={dialogRef} class="dialog" role="dialog" aria-modal="true" aria-labelledby="connect-provider-title" tabIndex={-1}><header><div><p class="eyebrow">Guided onboarding</p><h2 id="connect-provider-title">{mode === "edit" ? "Edit" : "Connect"} {label}</h2></div><button class="icon-button" type="button" aria-label="Close dialog" onClick={onClose}><X size={18} /></button></header><form class="form-stack" onSubmit={submit}><p class="muted-copy">Credential input is write-only. The console does not display or retrieve the value after setup.</p><label>Gateway provider ID<input value={providerID} disabled={mode === "edit"} onInput={(event) => setProviderID((event.currentTarget as HTMLInputElement).value)} autoComplete="off" /></label>{requiresKey ? <>{takesServiceAccount ? <label>Credential type<select value={credentialKind} onChange={(event) => { credentialFile.invalidate(); setCredentialKind((event.currentTarget as HTMLSelectElement).value); setAPIKey(""); setSelectedFile(null); setError(""); }}><option value="api_key">API key</option><option value={SERVICE_ACCOUNT_KIND}>Google Cloud service account key</option></select></label> : null}<label>{usingServiceAccount ? "Service account key (JSON file)" : "API key"}{apiKeySet ? " (leave blank to keep the current key)" : ""}{usingServiceAccount ? <input type="file" accept="application/json,.json" onChange={(event) => { const file = (event.currentTarget as HTMLInputElement).files?.[0]; if (!file) { credentialFile.invalidate(); setAPIKey(""); setSelectedFile(null); return; } setSelectedFile(file); credentialFile.read(file); }} /> : <input type="password" value={apiKey} onInput={(event) => setAPIKey((event.currentTarget as HTMLInputElement).value)} autoComplete="off" />}</label>{usingServiceAccount ? <p class="form-help">The key is exchanged for short-lived access tokens. Its project is read from the key itself.</p> : null}</> : <p class="form-help">This integration does not require an API key. Confirm the local or self-hosted endpoint is reachable before continuing.</p>}{fields.has("base_url") ? <label>Base URL<input value={baseURL} onInput={(event) => setBaseURL((event.currentTarget as HTMLInputElement).value)} autoComplete="url" /></label> : null}{fields.has("region") ? <label>Region<input value={region} onInput={(event) => setRegion((event.currentTarget as HTMLInputElement).value)} autoComplete="off" /></label> : null}{fields.has("project") ? <label>Google Cloud project ID<input value={project} onInput={(event) => setProject((event.currentTarget as HTMLInputElement).value)} autoComplete="off" /></label> : null}{fields.has("location") ? <label>Location<input value={location} onInput={(event) => setLocation((event.currentTarget as HTMLInputElement).value)} placeholder="global" autoComplete="off" /></label> : null}<label class="key-scope__check" style={{ marginTop: "8px", marginBottom: "8px" }}><input type="checkbox" checked={forceApiSupport} onChange={(event) => setForceApiSupport((event.currentTarget as HTMLInputElement).checked)} /><span>Enable API adaptation <small>Auto-route Responses API models (e.g. GPT-5.5, GPT-5.6 Sol/Luna) through wire translation.</small></span></label>{error ? <p class="form-error" role="alert">{error}</p> : null}<footer><button class="button button--secondary" type="button" onClick={onClose}>Cancel</button><button class="button button--primary" type="submit" disabled={busy}>{busy ? <LoaderCircle class="spin" size={16} /> : <ShieldCheck size={16} />} {mode === "edit" ? "Save configuration" : "Connect provider"}</button></footer></form></section></div>;
+  return (
+    <div class="dialog-backdrop" role="presentation">
+      <section ref={dialogRef} class="dialog" role="dialog" aria-modal="true" aria-labelledby="connect-provider-title" tabIndex={-1}>
+        <header>
+          <div>
+            <p class="eyebrow">Guided onboarding</p>
+            <h2 id="connect-provider-title">
+              {mode === "edit" ? "Edit" : "Connect"} {label}
+            </h2>
+          </div>
+          <button class="icon-button" type="button" aria-label="Close dialog" onClick={onClose}>
+            <X size={18} />
+          </button>
+        </header>
+        <form class="form-stack" onSubmit={submit}>
+          <p class="muted-copy">Credential input is write-only. The console does not display or retrieve the value after setup.</p>
+          <label>
+            Gateway provider ID
+            <input value={providerID} disabled={mode === "edit"} onInput={(event) => setProviderID((event.currentTarget as HTMLInputElement).value)} autoComplete="off" />
+          </label>
+          {requiresKey ? (
+            <>
+              {takesServiceAccount || takesSetupToken ? (
+                <label>
+                  Credential type
+                  <select
+                    value={credentialKind}
+                    onChange={(event) => {
+                      credentialFile.invalidate();
+                      setCredentialKind((event.currentTarget as HTMLSelectElement).value);
+                      setAPIKey("");
+                      setSelectedFile(null);
+                      setError("");
+                    }}
+                  >
+                    <option value="api_key">API key</option>
+                    {takesSetupToken ? <option value={SETUP_TOKEN_KIND}>Setup token</option> : null}
+                    {takesServiceAccount ? <option value={SERVICE_ACCOUNT_KIND}>Google Cloud service account key</option> : null}
+                  </select>
+                </label>
+              ) : null}
+              <label>
+                {usingServiceAccount ? "Service account key (JSON file)" : usingSetupToken ? "Setup token" : "API key"}
+                {apiKeySet ? " (leave blank to keep the current credential)" : ""}
+                {usingServiceAccount ? (
+                  <input
+                    type="file"
+                    accept="application/json,.json"
+                    onChange={(event) => {
+                      const file = (event.currentTarget as HTMLInputElement).files?.[0];
+                      if (!file) {
+                        credentialFile.invalidate();
+                        setAPIKey("");
+                        setSelectedFile(null);
+                        return;
+                      }
+                      setSelectedFile(file);
+                      credentialFile.read(file);
+                    }}
+                  />
+                ) : (
+                  <input type="password" value={apiKey} onInput={(event) => setAPIKey((event.currentTarget as HTMLInputElement).value)} autoComplete="off" />
+                )}
+              </label>
+              {usingServiceAccount ? <p class="form-help">The key is exchanged for short-lived access tokens. Its project is read from the key itself.</p> : usingSetupToken ? <p class="form-help">The setup token is validated, encrypted, and never returned.</p> : null}
+            </>
+          ) : (
+            <p class="form-help">This integration does not require an API key. Confirm the local or self-hosted endpoint is reachable before continuing.</p>
+          )}
+          {fields.has("base_url") ? (
+            <label>
+              Base URL
+              <input value={baseURL} onInput={(event) => setBaseURL((event.currentTarget as HTMLInputElement).value)} autoComplete="url" />
+            </label>
+          ) : null}
+          {fields.has("region") ? (
+            <label>
+              Region
+              <input value={region} onInput={(event) => setRegion((event.currentTarget as HTMLInputElement).value)} autoComplete="off" />
+            </label>
+          ) : null}
+          {fields.has("project") ? (
+            <label>
+              Google Cloud project ID
+              <input value={project} onInput={(event) => setProject((event.currentTarget as HTMLInputElement).value)} autoComplete="off" />
+            </label>
+          ) : null}
+          {fields.has("location") ? (
+            <label>
+              Location
+              <input value={location} onInput={(event) => setLocation((event.currentTarget as HTMLInputElement).value)} placeholder="global" autoComplete="off" />
+            </label>
+          ) : null}
+          <label class="key-scope__check" style={{ marginTop: "8px", marginBottom: "8px" }}>
+            <input type="checkbox" checked={forceApiSupport} onChange={(event) => setForceApiSupport((event.currentTarget as HTMLInputElement).checked)} />
+            <span>
+              Enable API adaptation <small>Auto-route Responses API models (e.g. GPT-5.5, GPT-5.6 Sol/Luna) through wire translation.</small>
+            </span>
+          </label>
+          {error ? (
+            <p class="form-error" role="alert">
+              {error}
+            </p>
+          ) : null}
+          <footer>
+            <button class="button button--secondary" type="button" onClick={onClose}>
+              Cancel
+            </button>
+            <button class="button button--primary" type="submit" disabled={busy}>
+              {busy ? <LoaderCircle class="spin" size={16} /> : <ShieldCheck size={16} />} {mode === "edit" ? "Save configuration" : "Connect provider"}
+            </button>
+          </footer>
+        </form>
+      </section>
+    </div>
+  );
 }
 
 // SERVICE_ACCOUNT_KIND matches gcpauth.CredentialKind on the server.
 const SERVICE_ACCOUNT_KIND = "gcp_service_account";
+const SETUP_TOKEN_KIND = "setup_token";
 
 // The auth methods ConnectDialog can actually collect. An oauth_device tile has
 // no credential to type in and a gateway_client tile is not an upstream at all,
 // so neither has a credential-based create path to offer.
-const CREDENTIAL_AUTH_METHODS = new Set(["api_key", "none", SERVICE_ACCOUNT_KIND]);
+const CREDENTIAL_AUTH_METHODS = new Set(["api_key", "none", SERVICE_ACCOUNT_KIND, SETUP_TOKEN_KIND]);
 
 // useCredentialFileRead reads a chosen credential file and applies the result
 // only while nothing has superseded the read. file.text() resolves
@@ -148,11 +269,15 @@ const CREDENTIAL_AUTH_METHODS = new Set(["api_key", "none", SERVICE_ACCOUNT_KIND
 // one guard so they cannot drift apart.
 function useCredentialFileRead(apply: (text: string) => void) {
   const token = useRef(0);
-  const invalidate = () => { token.current += 1; };
+  const invalidate = () => {
+    token.current += 1;
+  };
   const read = (file: File) => {
     invalidate();
     const started = token.current;
-    void file.text().then((text) => { if (started === token.current) apply(text); });
+    void file.text().then((text) => {
+      if (started === token.current) apply(text);
+    });
   };
   return { read, invalidate };
 }
@@ -172,22 +297,33 @@ export function PrivateAPIKeyDialog({ entry, providerID, onClose, onConfigured }
   const authMethods = new Set(asList(entry.auth_methods).map(String));
   const allowsServiceAccount = authMethods.has(SERVICE_ACCOUNT_KIND);
   const allowsAPIKey = authMethods.has("api_key");
+  const allowsSetupToken = authMethods.has(SETUP_TOKEN_KIND);
   const [name, setName] = useState("personal");
-  const [kind, setKind] = useState(allowsAPIKey ? "api_key" : SERVICE_ACCOUNT_KIND);
+  const [kind, setKind] = useState(allowsAPIKey ? "api_key" : allowsSetupToken ? SETUP_TOKEN_KIND : SERVICE_ACCOUNT_KIND);
   const [secret, setSecret] = useState("");
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
   const usingServiceAccount = kind === SERVICE_ACCOUNT_KIND;
+  const usingSetupToken = kind === SETUP_TOKEN_KIND;
   const label = stringValue(entry.label, providerID);
   const dialogRef = useDialogFocus(onClose);
-  const credentialFile = useCredentialFileRead((text) => { setSecret(text); setError(""); });
+  const credentialFile = useCredentialFileRead((text) => {
+    setSecret(text);
+    setError("");
+  });
   const submit = async (event: Event) => {
     event.preventDefault();
-    if (!providerID) { setError("An administrator must configure this provider before you add a private credential."); return; }
-    if (!secret.trim()) { setError(usingServiceAccount ? "A service account key is required." : "An API key is required."); return; }
+    if (!providerID) {
+      setError("An administrator must configure this provider before you add a private credential.");
+      return;
+    }
+    if (!secret.trim()) {
+      setError(usingServiceAccount ? "A service account key is required." : usingSetupToken ? "A setup token is required." : "An API key is required.");
+      return;
+    }
     if (usingServiceAccount && !isServiceAccountJSON(secret)) {
-      setError("That does not look like a service account key. Paste the whole JSON file, including its \"type\": \"service_account\" field.");
+      setError('That does not look like a service account key. Paste the whole JSON file, including its "type": "service_account" field.');
       return;
     }
     setBusy(true);
@@ -204,7 +340,11 @@ export function PrivateAPIKeyDialog({ entry, providerID, onClose, onConfigured }
         await sendForm<JSONRecord>("portal", "/connections", form);
       } else {
         await sendJSON<JSONRecord>("portal", "/connections", "POST", {
-          provider_id: providerID, connection_name: name, credential_kind: kind, secret, make_default: true,
+          provider_id: providerID,
+          connection_name: name,
+          credential_kind: kind,
+          secret,
+          make_default: true,
         });
       }
       credentialFile.invalidate();
@@ -217,12 +357,93 @@ export function PrivateAPIKeyDialog({ entry, providerID, onClose, onConfigured }
       setSecret("");
       setSelectedFile(null);
       setError(cause instanceof Error ? cause.message : "Private connection could not be stored.");
-    } finally { setBusy(false); }
+    } finally {
+      setBusy(false);
+    }
   };
-  return <div class="dialog-backdrop" role="presentation"><section ref={dialogRef} class="dialog" role="dialog" aria-modal="true" aria-labelledby="private-key-title" tabIndex={-1}><header><div><p class="eyebrow">Private API key</p><h2 id="private-key-title">Connect {label}</h2></div><button class="icon-button" type="button" aria-label="Close dialog" onClick={onClose}><X size={18} /></button></header><form class="form-stack" onSubmit={submit}><p class="muted-copy">This credential is encrypted for the signed-in human. It is write-only and is never returned to browser state.</p><label>Connection name<input value={name} onInput={(event) => setName((event.currentTarget as HTMLInputElement).value)} /></label>{allowsServiceAccount && allowsAPIKey ? <label>Credential type<select value={kind} onChange={(event) => { credentialFile.invalidate(); setKind((event.currentTarget as HTMLSelectElement).value); setSecret(""); setSelectedFile(null); setError(""); }}><option value="api_key">API key</option><option value={SERVICE_ACCOUNT_KIND}>Google Cloud service account key</option></select></label> : null}{usingServiceAccount ? <label>Service account key (JSON file)<input type="file" accept="application/json,.json" onChange={(event) => { const file = (event.currentTarget as HTMLInputElement).files?.[0]; if (!file) { credentialFile.invalidate(); setSecret(""); setSelectedFile(null); return; } setSelectedFile(file); credentialFile.read(file); }} /></label> : <label>API key<input type="password" value={secret} onInput={(event) => setSecret((event.currentTarget as HTMLInputElement).value)} autoComplete="off" /></label>}{usingServiceAccount ? <p class="form-help">The key is exchanged for short-lived access tokens. Its project is read from the key itself.</p> : null}{error ? <p class="form-error" role="alert">{error}</p> : null}<footer><button class="button button--secondary" type="button" onClick={onClose}>Cancel</button><button class="button button--primary" type="submit" disabled={busy}>{busy ? <LoaderCircle class="spin" size={16} /> : <ShieldCheck size={16} />} Save private connection</button></footer></form></section></div>;
+  return (
+    <div class="dialog-backdrop" role="presentation">
+      <section ref={dialogRef} class="dialog" role="dialog" aria-modal="true" aria-labelledby="private-key-title" tabIndex={-1}>
+        <header>
+          <div>
+            <p class="eyebrow">Private credential</p>
+            <h2 id="private-key-title">Connect {label}</h2>
+          </div>
+          <button class="icon-button" type="button" aria-label="Close dialog" onClick={onClose}>
+            <X size={18} />
+          </button>
+        </header>
+        <form class="form-stack" onSubmit={submit}>
+          <p class="muted-copy">This credential is encrypted for the signed-in human. It is write-only and is never returned to browser state.</p>
+          <label>
+            Connection name
+            <input value={name} onInput={(event) => setName((event.currentTarget as HTMLInputElement).value)} />
+          </label>
+          {[allowsAPIKey, allowsSetupToken, allowsServiceAccount].filter(Boolean).length > 1 ? (
+            <label>
+              Credential type
+              <select
+                value={kind}
+                onChange={(event) => {
+                  credentialFile.invalidate();
+                  setKind((event.currentTarget as HTMLSelectElement).value);
+                  setSecret("");
+                  setSelectedFile(null);
+                  setError("");
+                }}
+              >
+                {allowsAPIKey ? <option value="api_key">API key</option> : null}
+                {allowsSetupToken ? <option value={SETUP_TOKEN_KIND}>Setup token</option> : null}
+                {allowsServiceAccount ? <option value={SERVICE_ACCOUNT_KIND}>Google Cloud service account key</option> : null}
+              </select>
+            </label>
+          ) : null}
+          {usingServiceAccount ? (
+            <label>
+              Service account key (JSON file)
+              <input
+                type="file"
+                accept="application/json,.json"
+                onChange={(event) => {
+                  const file = (event.currentTarget as HTMLInputElement).files?.[0];
+                  if (!file) {
+                    credentialFile.invalidate();
+                    setSecret("");
+                    setSelectedFile(null);
+                    return;
+                  }
+                  setSelectedFile(file);
+                  credentialFile.read(file);
+                }}
+              />
+            </label>
+          ) : (
+            <label>
+              {usingSetupToken ? "Setup token" : "API key"}
+              <input type="password" value={secret} onInput={(event) => setSecret((event.currentTarget as HTMLInputElement).value)} autoComplete="off" />
+            </label>
+          )}
+          {usingServiceAccount ? <p class="form-help">The key is exchanged for short-lived access tokens. Its project is read from the key itself.</p> : usingSetupToken ? <p class="form-help">The setup token is validated, encrypted, and never returned.</p> : null}
+          {error ? (
+            <p class="form-error" role="alert">
+              {error}
+            </p>
+          ) : null}
+          <footer>
+            <button class="button button--secondary" type="button" onClick={onClose}>
+              Cancel
+            </button>
+            <button class="button button--primary" type="submit" disabled={busy}>
+              {busy ? <LoaderCircle class="spin" size={16} /> : <ShieldCheck size={16} />} Save private connection
+            </button>
+          </footer>
+        </form>
+      </section>
+    </div>
+  );
 }
 
-export function ProviderHub({ data, mode, onChanged, onOpenDetail }: { data: JSONRecord; mode: ConsoleMode; onChanged: () => Promise<void>; onOpenDetail: (entryID: string) => void }) {
+export function ProviderHub({ data, mode, onChanged, onOpenDetail, onOpenPlayground }: { data: JSONRecord; mode: ConsoleMode; onChanged: () => Promise<void>; onOpenDetail: (entryID: string) => void; onOpenPlayground?: (modelID: string, providerID: string, ownerID: string) => void }) {
   const [search, setSearch] = useState("");
   const [filter, setFilter] = useState("all");
   const [expanded, setExpanded] = useState("");
@@ -233,29 +454,46 @@ export function ProviderHub({ data, mode, onChanged, onOpenDetail }: { data: JSO
     setExpanded("");
     trigger?.focus();
   };
-  const [connectEntry, setConnectEntry] = useState<{ entry: JSONRecord; mode: "create" | "edit" } | null>(null);
-  const [privateKeyEntry, setPrivateKeyEntry] = useState<{ entry: JSONRecord; providerID: string } | null>(null);
-  const [oauthEntry, setOAuthEntry] = useState<{ entry: JSONRecord; providerID: string } | null>(null);
+  const [connectEntry, setConnectEntry] = useState<{
+    entry: JSONRecord;
+    mode: "create" | "edit";
+  } | null>(null);
+  const [privateKeyEntry, setPrivateKeyEntry] = useState<{
+    entry: JSONRecord;
+    providerID: string;
+  } | null>(null);
+  const [oauthEntry, setOAuthEntry] = useState<{
+    entry: JSONRecord;
+    providerID: string;
+  } | null>(null);
   const [detectBusy, setDetectBusy] = useState(false);
   const [detectResult, setDetectResult] = useState<ActionResult>(null);
   const [localCandidates, setLocalCandidates] = useState<JSONRecord[]>([]);
-  const owners = asList(data.principals).map(asRecord).filter((principal) => stringValue(principal.kind) === "human" && stringValue(principal.status, "active") === "active");
+  const owners = asList(data.principals)
+    .map(asRecord)
+    .filter((principal) => stringValue(principal.kind) === "human" && stringValue(principal.status, "active") === "active");
   const [ownerID, setOwnerID] = useState(stringValue(owners[0]?.id));
   const { busy, setBusy, result, setResult, runLifecycle } = useProviderLifecycle(ownerID, onChanged);
   const registry = asList(data.provider_registry).map(asRecord);
   const statuses = asList(data.provider_statuses).map(asRecord);
   // Tile-independent: the upsert route is keyed on the provider id alone, so a
   // suggested id must avoid every configured provider, not only this tile's.
-  const allProviderIDs = asList(data.providers).map(asRecord).map((provider) => stringValue(provider.id)).filter(Boolean);
+  const allProviderIDs = asList(data.providers)
+    .map(asRecord)
+    .map((provider) => stringValue(provider.id))
+    .filter(Boolean);
   // Only a registry-tile row may dress a curated tile. A configured provider is
   // free to be named after a registry id it does not implement, and keying the
   // map on id alone let that provider's row overwrite the curated entry's status
   // — the OpenAI tile then wore an unrelated provider's data.
   const statusByID = new Map(statuses.filter((status) => !boolValue(status.custom)).map((status) => [stringValue(status.id), status]));
-  const privateProviderIDs = new Set(asList(data.provider_connections).map(asRecord)
-    .filter((connection) => stringValue(connection.status, "active") === "active")
-    .map((connection) => stringValue(connection.provider_id))
-    .filter(Boolean));
+  const privateProviderIDs = new Set(
+    asList(data.provider_connections)
+      .map(asRecord)
+      .filter((connection) => stringValue(connection.status, "active") === "active")
+      .map((connection) => stringValue(connection.provider_id))
+      .filter(Boolean),
+  );
 
   const registryIDs = new Set(registry.map((entry) => stringValue(entry.id)));
 
@@ -294,15 +532,29 @@ export function ProviderHub({ data, mode, onChanged, onOpenDetail }: { data: JSO
       const payload = await sendJSON<JSONRecord>("admin", "/detect", "POST", {});
       const candidates = asList(payload.candidates).map(asRecord);
       setLocalCandidates(candidates);
-      setDetectResult({ title: "Local detection", success: true, detail: candidates.length ? `${candidates.length} candidate${candidates.length === 1 ? "" : "s"} found. Nothing was configured automatically.` : "No local providers were found. Nothing was configured automatically." });
+      setDetectResult({
+        title: "Local detection",
+        success: true,
+        detail: candidates.length ? `${candidates.length} candidate${candidates.length === 1 ? "" : "s"} found. Nothing was configured automatically.` : "No local providers were found. Nothing was configured automatically.",
+      });
     } catch (cause) {
-      setDetectResult({ title: "Local detection", success: false, detail: cause instanceof Error ? cause.message : "Local detection failed." });
-    } finally { setDetectBusy(false); }
+      setDetectResult({
+        title: "Local detection",
+        success: false,
+        detail: cause instanceof Error ? cause.message : "Local detection failed.",
+      });
+    } finally {
+      setDetectBusy(false);
+    }
   };
 
   const connect = (entry: JSONRecord, connectMode: "create" | "edit" = "create") => {
     if (boolValue(entry.client_only)) {
-      setResult({ title: "Gateway client setup", success: true, detail: "Claude Code uses the documented Anthropic gateway protocol. Configure an Anthropic API key or supported gateway credential; no personal Claude OAuth is offered." });
+      setResult({
+        title: "Gateway client setup",
+        success: true,
+        detail: "Claude Code uses the documented Anthropic gateway protocol. Configure an Anthropic API key or supported gateway credential; no personal Claude OAuth is offered.",
+      });
       return;
     }
     const methods = asList(entry.auth_methods).map(String);
@@ -311,16 +563,27 @@ export function ProviderHub({ data, mode, onChanged, onOpenDetail }: { data: JSO
       // A multi-instance tile has no per-instance OAuth binder yet; refuse
       // rather than silently bind the new account to instance [0].
       if (oauthProviderIDs.length > 1) {
-        setResult({ title: "Official OAuth", success: false, detail: "Multiple instances are configured for this integration. Resolve to a single instance before adding an OAuth account." });
+        setResult({
+          title: "Official OAuth",
+          success: false,
+          detail: "Multiple instances are configured for this integration. Resolve to a single instance before adding an OAuth account.",
+        });
         return;
       }
-      setOAuthEntry({ entry, providerID: oauthProviderIDs[0] ?? stringValue(entry.id) });
+      setOAuthEntry({
+        entry,
+        providerID: oauthProviderIDs[0] ?? stringValue(entry.id),
+      });
       return;
     }
     if (mode === "portal") {
       const providerIDs = configuredProviderIDs(entry);
       if (!providerIDs.length) {
-        setResult({ title: "Private connection", success: false, detail: "Administrator setup is required before a private API key can be added." });
+        setResult({
+          title: "Private connection",
+          success: false,
+          detail: "Administrator setup is required before a private API key can be added.",
+        });
         return;
       }
       // A tile with several instances has no per-instance picker here yet; send
@@ -333,7 +596,13 @@ export function ProviderHub({ data, mode, onChanged, onOpenDetail }: { data: JSO
       setPrivateKeyEntry({ entry, providerID: providerIDs[0] });
       return;
     }
-    setConnectEntry({ entry: { ...entry, provider_config: configuredProviderConfig(entry, data) }, mode: connectMode });
+    setConnectEntry({
+      entry: {
+        ...entry,
+        provider_config: configuredProviderConfig(entry, data),
+      },
+      mode: connectMode,
+    });
   };
 
   const quickConnectAnon = async (setup: JSONRecord, candidateEntries?: JSONRecord[]) => {
@@ -341,10 +610,7 @@ export function ProviderHub({ data, mode, onChanged, onOpenDetail }: { data: JSO
     const label = stringValue(setup.label, pid);
     setBusy(`${pid}-connect`);
 
-    const candidateURLs = [
-      stringValue(setup.default_base_url),
-      ...(candidateEntries ?? []).map((e) => stringValue(e.base_url)),
-    ].filter(Boolean);
+    const candidateURLs = [stringValue(setup.default_base_url), ...(candidateEntries ?? []).map((e) => stringValue(e.base_url))].filter(Boolean);
     const uniqueURLs = Array.from(new Set(candidateURLs));
 
     let workingURL = uniqueURLs[0] || "";
@@ -353,7 +619,10 @@ export function ProviderHub({ data, mode, onChanged, onOpenDetail }: { data: JSO
     for (const url of uniqueURLs) {
       try {
         const pingURL = url.endsWith("/models") ? url : url.replace(/\/+$/, "") + "/models";
-        const resp = await fetch(pingURL, { method: "GET", headers: { Accept: "application/json" } });
+        const resp = await fetch(pingURL, {
+          method: "GET",
+          headers: { Accept: "application/json" },
+        });
         if (resp.ok) {
           workingURL = url;
           break;
@@ -376,15 +645,13 @@ export function ProviderHub({ data, mode, onChanged, onOpenDetail }: { data: JSO
       setResult({
         title: label,
         success: true,
-        detail: count > 0
-          ? `${label} connected successfully! ${count} models discovered.`
-          : `${label} connected successfully using ${workingURL}.`,
+        detail: count > 0 ? `${label} connected successfully! ${count} models discovered.` : `${label} connected successfully using ${workingURL}.`,
       });
     } catch (cause) {
       setResult({
         title: label,
         success: false,
-        detail: cause instanceof Error ? cause.message : (lastError || "Failed to connect provider."),
+        detail: cause instanceof Error ? cause.message : lastError || "Failed to connect provider.",
       });
     } finally {
       setBusy("");
@@ -417,118 +684,334 @@ export function ProviderHub({ data, mode, onChanged, onOpenDetail }: { data: JSO
   };
 
   return (
-    <div class="page-stack provider-hub" ref={shelfRef} onKeyDown={(event) => { if (event.key === "Escape" && expanded && !connectEntry && !privateKeyEntry && !oauthEntry) { event.preventDefault(); closeExpansion(); } }}>
-      <PageHeading eyebrow="Provider hub" title="Providers" detail="Find a provider. Expand its name to add an account or manage an instance." actions={mode === "admin" ? <><label class="owner-select">Catalog owner<select value={ownerID} onInput={(event) => setOwnerID((event.currentTarget as HTMLSelectElement).value)}><option value="">No private owner selected</option>{owners.map((owner) => <option value={stringValue(owner.id)} key={stringValue(owner.id)}>{stringValue(owner.display_name, stringValue(owner.email, stringValue(owner.id)))}</option>)}</select></label><button class="button button--secondary" type="button" disabled={autoConnectBusy} onClick={() => void autoConnectFree()}>{autoConnectBusy ? <LoaderCircle class="spin" size={16} /> : <Zap size={16} />} {autoConnectBusy ? "Connecting…" : "Auto-connect Free"}</button><button class="button button--secondary" type="button" disabled={detectBusy} onClick={() => void detectLocal()}><Compass size={16} /> Detect local</button><button class="button button--primary" type="button" onClick={() => { setSearch("custom"); setFilter("all"); setExpanded("custom_openai"); }}>+ Custom</button></> : undefined} />
+    <div
+      class="page-stack provider-hub"
+      ref={shelfRef}
+      onKeyDown={(event) => {
+        if (event.key === "Escape" && expanded && !connectEntry && !privateKeyEntry && !oauthEntry) {
+          event.preventDefault();
+          closeExpansion();
+        }
+      }}
+    >
+      <PageHeading
+        eyebrow="Provider hub"
+        title="Providers"
+        detail="Find a provider. Expand its name to add an account or manage an instance."
+        actions={
+          mode === "admin" ? (
+            <>
+              <label class="owner-select">
+                Catalog owner
+                <select value={ownerID} onInput={(event) => setOwnerID((event.currentTarget as HTMLSelectElement).value)}>
+                  <option value="">No private owner selected</option>
+                  {owners.map((owner) => (
+                    <option value={stringValue(owner.id)} key={stringValue(owner.id)}>
+                      {stringValue(owner.display_name, stringValue(owner.email, stringValue(owner.id)))}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <button class="button button--secondary" type="button" disabled={autoConnectBusy} onClick={() => void autoConnectFree()}>
+                {autoConnectBusy ? <LoaderCircle class="spin" size={16} /> : <Zap size={16} />} {autoConnectBusy ? "Connecting…" : "Auto-connect Free"}
+              </button>
+              <button class="button button--secondary" type="button" disabled={detectBusy} onClick={() => void detectLocal()}>
+                <Compass size={16} /> Detect local
+              </button>
+              <button
+                class="button button--primary"
+                type="button"
+                onClick={() => {
+                  setSearch("custom");
+                  setFilter("all");
+                  setExpanded("custom_openai");
+                }}
+              >
+                + Custom
+              </button>
+            </>
+          ) : undefined
+        }
+      />
       <section class="provider-toolbar surface" aria-label="Provider filters">
-        <label class="search-field"><Search size={17} /><span class="sr-only">Search providers</span><input value={search} onInput={(event) => { setSearch((event.currentTarget as HTMLInputElement).value); setExpanded(""); }} placeholder="Search name, API or instance ID" /></label>
+        <label class="search-field">
+          <Search size={17} />
+          <span class="sr-only">Search providers</span>
+          <input
+            value={search}
+            onInput={(event) => {
+              setSearch((event.currentTarget as HTMLInputElement).value);
+              setExpanded("");
+            }}
+            placeholder="Search name, API or instance ID"
+          />
+        </label>
         <div class="filter-row" role="group" aria-label="Integration filter">
-          {discoveryFilters.map(([value, label]) => <button class={`filter-chip ${filter === value ? "filter-chip--active" : ""}`} type="button" key={value} aria-pressed={filter === value} onClick={() => { setFilter(value); setExpanded(""); }}>{label}{value === "configured" ? ` (${entries.filter((entry) => boolValue(entry.configured)).length})` : ""}</button>)}
+          {discoveryFilters.map(([value, label]) => (
+            <button
+              class={`filter-chip ${filter === value ? "filter-chip--active" : ""}`}
+              type="button"
+              key={value}
+              aria-pressed={filter === value}
+              onClick={() => {
+                setFilter(value);
+                setExpanded("");
+              }}
+            >
+              {label}
+              {value === "configured" ? ` (${entries.filter((entry) => boolValue(entry.configured)).length})` : ""}
+            </button>
+          ))}
         </div>
       </section>
       <RosterStatus roster={roster} />
-      <p class="provider-hub__context">{filtered.length} providers · Grouped by upstream API and integration type. Click a name to expand setup.{["free", "no-key", "trial"].includes(filter) ? " Offers are source-reported and subject to provider terms." : ""}</p>
+      <p class="provider-hub__context">
+        {filtered.length} providers · Grouped by upstream API and integration type. Click a name to expand setup.
+        {["free", "no-key", "trial"].includes(filter) ? " Offers are source-reported and subject to provider terms." : ""}
+      </p>
       <ResultNotice result={result ?? detectResult} />
-      {localCandidates.length ? <section class="surface"><div class="section-heading"><div><p class="eyebrow">Local discovery</p><h2>Detected candidates</h2></div><span class="status-pill status-pill--muted">Confirmation required</span></div><div class="candidate-list">{localCandidates.map((candidate, index) => <div key={`${stringValue(candidate.id)}-${index}`}><strong>{stringValue(candidate.label, stringValue(candidate.id, "Local provider"))}</strong><span class="technical">{stringValue(candidate.base_url, stringValue(candidate.url))}</span><small>Detection did not change configuration.</small></div>)}</div></section> : null}
+      {localCandidates.length ? (
+        <section class="surface">
+          <div class="section-heading">
+            <div>
+              <p class="eyebrow">Local discovery</p>
+              <h2>Detected candidates</h2>
+            </div>
+            <span class="status-pill status-pill--muted">Confirmation required</span>
+          </div>
+          <div class="candidate-list">
+            {localCandidates.map((candidate, index) => (
+              <div key={`${stringValue(candidate.id)}-${index}`}>
+                <strong>{stringValue(candidate.label, stringValue(candidate.id, "Local provider"))}</strong>
+                <span class="technical">{stringValue(candidate.base_url, stringValue(candidate.url))}</span>
+                <small>Detection did not change configuration.</small>
+              </div>
+            ))}
+          </div>
+        </section>
+      ) : null}
       {filtered.length === 0 ? <EmptyState title="No matching provider" detail="Adjust the search or filter to inspect another registry integration." /> : null}
       {providerShelves.map((group) => {
         const groupEntries = filtered.filter((entry) => shelfFor(entry) === group);
         if (!groupEntries.length) return null;
-        return <section class="provider-group" key={group}><header><h2>{group}</h2><span>{groupEntries.length}</span></header><div class="provider-shelf">{groupEntries.map((entry) => {
-          const id = stringValue(entry.id);
-          const label = stringValue(entry.label, id);
-          return <button key={id} class={`provider-shelf__trigger ${expanded === id ? "provider-shelf__trigger--selected" : ""}`} type="button" data-provider-trigger={id} aria-expanded={expanded === id} aria-controls={`provider-expanded-${id}`} onClick={() => setExpanded(expanded === id ? "" : id)}><span aria-hidden="true">{boolValue(entry.remote_roster) ? <RosterMark entry={entry} /> : <ProviderMark id={id} label={label} />}</span><span>{label.replace("Custom OpenAI-compatible", "Custom OpenAI").replace("Custom Anthropic-compatible", "Custom Anthropic").replace("Vertex AI (Agent Platform)", "Vertex AI")}</span></button>;
-        })}{groupEntries.map((entry) => {
-          const id = stringValue(entry.id);
-          if (expanded !== id) return null;
-          const label = stringValue(entry.label, id);
-          const remoteEntries = asList(entry.roster_entries).map(asRecord);
-          if (boolValue(entry.remote_roster) && !boolValue(entry.configured)) {
-            const setup = rosterSetupEntry(entry, registry) || rosterCandidateSetup(entry, registry);
-            const isAnon = entry.auth === "none" || setup?.requires_api_key === false;
-            const pid = setup ? stringValue(setup.default_provider_id) : id;
-            const connecting = busy === `${pid}-connect`;
-            return <article class="provider-card provider-hub__expanded" id={`provider-expanded-${id}`} key={id} aria-label={`${label} setup`}>
-              <header><RosterMark entry={entry} /><div class="provider-hub__identity"><h2>{label}</h2><p>Remote candidate · {stringValue(entry.protocol, "unknown")} protocol</p></div><button class="icon-button" type="button" aria-label={`Close ${label} setup`} onClick={closeExpansion}><X size={18} /></button></header>
-              <RosterMetadata entries={remoteEntries} revision={roster.state.revision} />
-              <footer>
-                <button
-                  class="button button--primary"
-                  type="button"
-                  disabled={!setup || mode !== "admin" || connecting}
-                  onClick={() => {
-                    if (!setup || mode !== "admin") return;
-                    if (isAnon) {
-                      void quickConnectAnon(setup, remoteEntries);
-                    } else {
-                      setConnectEntry({ entry: setup, mode: "create" });
-                    }
-                  }}
-                >
-                  {connecting ? <LoaderCircle class="spin" size={15} /> : <Plug size={15} />}
-                  {connecting ? "Connecting…" : isAnon ? "Connect (No Key Required)" : "Connect with API Key"}
-                </button>
-                <p class="form-help">{!setup ? rosterSetupUnavailableReason(entry, registry) : mode === "portal" ? "An administrator must configure this candidate before you can add a private connection." : ""}</p>
-              </footer>
-            </article>;
-          }
-          const status = tileStatus(entry);
-          const configured = boolValue(entry.configured);
-          const isClient = boolValue(entry.client_only);
-          const unavailable = stringValue(entry.availability) !== "available" && !isClient;
-          const methods = asList(entry.auth_methods).map(String);
-          const supportsOAuth = methods.some((method) => method.startsWith("oauth"));
-          const providerIDs = configuredProviderIDs(entry);
-          const hasPrivateConnection = mode === "portal" && providerIDs.some((providerID) => privateProviderIDs.has(providerID));
-          const portalRequiresAdminSetup = mode === "portal" && !isClient && !supportsOAuth && providerIDs.length === 0;
-          const active = (operation: string) => busy === `${providerIDs[0] ?? id}-${operation}`;
-          const statusCounts = asRecord(entry.instance_status_counts);
-          const instanceCount = asList(entry.instances).length;
-          // Offer "Add instance" only where a credential-based create can
-          // succeed. ConnectDialog posts the tile id as registry_id, so a custom
-          // tile is a guaranteed 400; and on an OAuth-only tile the action fell
-          // through to the account flow, a mislabeled duplicate of "Add account"
-          // that adds no instance.
-          const canAddInstance = registryIDs.has(id) && methods.some((method) => CREDENTIAL_AUTH_METHODS.has(method));
-          // Composition, not a rollup: a tile is an aggregator, so it reports what
-          // its instances are rather than adopting one instance's status.
-          const compositionText = Object.entries(statusCounts)
-            .map(([state, count]) => `${numberValue(count)} ${state}`)
-            .join(" · ");
-          // The tile's configuration_issue is a space-join of every instance's
-          // message — the unreadable concatenation the per-instance field exists
-          // to replace. Keep it only where it is one instance's own words; the
-          // detail rows name the instance each message belongs to.
-          const tileConfigurationIssue = instanceCount > 1 ? "" : stringValue(entry.configuration_issue);
-          return <article class="provider-card provider-card--rich provider-hub__expanded" id={`provider-expanded-${id}`} key={id} aria-label={label}>
+        return (
+          <section class="provider-group" key={group}>
             <header>
-              {boolValue(entry.remote_roster) ? <RosterMark entry={entry} /> : <ProviderMark id={id} label={label} />}
-              <div class="provider-hub__identity">
-                <h2>{label}</h2>
-                <p>{configured ? `${instanceCount} instance${instanceCount === 1 ? "" : "s"}` : isClient ? "Gateway client" : "Not configured"}{boolValue(entry.custom) ? " · Custom integration" : ""}</p>
-              </div>
-              <StatusBadge status={status} />
-              <button class="provider-hub__detail-link" type="button" aria-label={`Open ${label} details`} onClick={() => onOpenDetail(id)}>Details</button>
-              <button class="icon-button" type="button" aria-label={`Close ${label} setup`} onClick={closeExpansion}><X size={18} /></button>
+              <h2>{group}</h2>
+              <span>{groupEntries.length}</span>
             </header>
-            <div class="provider-hub__details">
-              <p>{stringValue(entry.description, "Gateway integration.")}</p>
-              <dl>
-                <div><dt>Catalog</dt><dd>{stringValue(entry.catalog_state) === "not_discoverable" ? "Catalog not discoverable" : `${numberValue(entry.model_count)} model${numberValue(entry.model_count) === 1 ? "" : "s"} · ${stringValue(entry.catalog_state, "unknown")}`}</dd></div>
-                <div><dt>Connection</dt><dd>{numberValue(entry.connection_count)} private record{numberValue(entry.connection_count) === 1 ? "" : "s"}</dd></div>
-                <div><dt>Instances</dt><dd>{instanceCount} instance{instanceCount === 1 ? "" : "s"}{compositionText ? ` · ${compositionText}` : ""}</dd></div>
-                <div><dt>Protocol</dt><dd>{stringValue(entry.protocol, "gateway")}</dd></div>
-                <div><dt>Connection choices</dt><dd>{connectionChoices(entry).join(" · ") || "Gateway credential"}</dd></div>
-                <div><dt>Catalog freshness</dt><dd class="technical">{stringValue(entry.catalog_refreshed, "Catalog not synced")}</dd></div>
-              </dl>
-              {stringValue(entry.risk_notice) ? <p class="form-help">{stringValue(entry.risk_notice)}</p> : null}
-              {safeRosterURL(entry.docs_url) ? <a href={safeRosterURL(entry.docs_url)} target="_blank" rel="noopener noreferrer">Provider documentation ↗</a> : null}
+            <div class="provider-shelf">
+              {groupEntries.map((entry) => {
+                const id = stringValue(entry.id);
+                const label = stringValue(entry.label, id);
+                return (
+                  <button key={id} class={`provider-shelf__trigger ${expanded === id ? "provider-shelf__trigger--selected" : ""}`} type="button" data-provider-trigger={id} aria-expanded={expanded === id} aria-controls={`provider-expanded-${id}`} onClick={() => setExpanded(expanded === id ? "" : id)}>
+                    <span aria-hidden="true">{boolValue(entry.remote_roster) ? <RosterMark entry={entry} /> : <ProviderMark id={id} label={label} />}</span>
+                    <span>{label.replace("Custom OpenAI-compatible", "Custom OpenAI").replace("Custom Anthropic-compatible", "Custom Anthropic").replace("Vertex AI (Agent Platform)", "Vertex AI")}</span>
+                  </button>
+                );
+              })}
+              {groupEntries.map((entry) => {
+                const id = stringValue(entry.id);
+                if (expanded !== id) return null;
+                const label = stringValue(entry.label, id);
+                const remoteEntries = asList(entry.roster_entries).map(asRecord);
+                if (boolValue(entry.remote_roster) && !boolValue(entry.configured)) {
+                  const setup = rosterSetupEntry(entry, registry) || rosterCandidateSetup(entry, registry);
+                  const isAnon = entry.auth === "none" || setup?.requires_api_key === false;
+                  const pid = setup ? stringValue(setup.default_provider_id) : id;
+                  const connecting = busy === `${pid}-connect`;
+                  return (
+                    <article class="provider-card provider-hub__expanded" id={`provider-expanded-${id}`} key={id} aria-label={`${label} setup`}>
+                      <header>
+                        <RosterMark entry={entry} />
+                        <div class="provider-hub__identity">
+                          <h2>{label}</h2>
+                          <p>Remote candidate · {stringValue(entry.protocol, "unknown")} protocol</p>
+                        </div>
+                        <button class="icon-button" type="button" aria-label={`Close ${label} setup`} onClick={closeExpansion}>
+                          <X size={18} />
+                        </button>
+                      </header>
+                      <RosterMetadata entries={remoteEntries} revision={roster.state.revision} />
+                      <footer>
+                        <button
+                          class="button button--primary"
+                          type="button"
+                          disabled={!setup || mode !== "admin" || connecting}
+                          onClick={() => {
+                            if (!setup || mode !== "admin") return;
+                            if (isAnon) {
+                              void quickConnectAnon(setup, remoteEntries);
+                            } else {
+                              setConnectEntry({ entry: setup, mode: "create" });
+                            }
+                          }}
+                        >
+                          {connecting ? <LoaderCircle class="spin" size={15} /> : <Plug size={15} />}
+                          {connecting ? "Connecting…" : isAnon ? "Connect (No Key Required)" : "Connect with API Key"}
+                        </button>
+                        <p class="form-help">{!setup ? rosterSetupUnavailableReason(entry, registry) : mode === "portal" ? "An administrator must configure this candidate before you can add a private connection." : ""}</p>
+                      </footer>
+                    </article>
+                  );
+                }
+                const status = tileStatus(entry);
+                const configured = boolValue(entry.configured);
+                const isClient = boolValue(entry.client_only);
+                const unavailable = stringValue(entry.availability) !== "available" && !isClient;
+                const methods = asList(entry.auth_methods).map(String);
+                const supportsOAuth = methods.some((method) => method.startsWith("oauth"));
+                const providerIDs = configuredProviderIDs(entry);
+                const hasPrivateConnection = mode === "portal" && providerIDs.some((providerID) => privateProviderIDs.has(providerID));
+                const portalRequiresAdminSetup = mode === "portal" && !isClient && !supportsOAuth && providerIDs.length === 0;
+                const active = (operation: string) => busy === `${providerIDs[0] ?? id}-${operation}`;
+                const statusCounts = asRecord(entry.instance_status_counts);
+                const instanceCount = asList(entry.instances).length;
+                // Offer "Add instance" only where a credential-based create can
+                // succeed. ConnectDialog posts the tile id as registry_id, so a custom
+                // tile is a guaranteed 400; and on an OAuth-only tile the action fell
+                // through to the account flow, a mislabeled duplicate of "Add account"
+                // that adds no instance.
+                const canAddInstance = registryIDs.has(id) && methods.some((method) => CREDENTIAL_AUTH_METHODS.has(method));
+                // Composition, not a rollup: a tile is an aggregator, so it reports what
+                // its instances are rather than adopting one instance's status.
+                const compositionText = Object.entries(statusCounts)
+                  .map(([state, count]) => `${numberValue(count)} ${state}`)
+                  .join(" · ");
+                // The tile's configuration_issue is a space-join of every instance's
+                // message — the unreadable concatenation the per-instance field exists
+                // to replace. Keep it only where it is one instance's own words; the
+                // detail rows name the instance each message belongs to.
+                const tileConfigurationIssue = instanceCount > 1 ? "" : stringValue(entry.configuration_issue);
+                return (
+                  <article class="provider-card provider-card--rich provider-hub__expanded" id={`provider-expanded-${id}`} key={id} aria-label={label}>
+                    <header>
+                      {boolValue(entry.remote_roster) ? <RosterMark entry={entry} /> : <ProviderMark id={id} label={label} />}
+                      <div class="provider-hub__identity">
+                        <h2>{label}</h2>
+                        <p>
+                          {configured ? `${instanceCount} instance${instanceCount === 1 ? "" : "s"}` : isClient ? "Gateway client" : "Not configured"}
+                          {boolValue(entry.custom) ? " · Custom integration" : ""}
+                        </p>
+                      </div>
+                      <StatusBadge status={status} />
+                      <button class="provider-hub__detail-link" type="button" aria-label={`Open ${label} details`} onClick={() => onOpenDetail(id)}>
+                        Details
+                      </button>
+                      <button class="icon-button" type="button" aria-label={`Close ${label} setup`} onClick={closeExpansion}>
+                        <X size={18} />
+                      </button>
+                    </header>
+                    <div class="provider-hub__details">
+                      <p>{stringValue(entry.description, "Gateway integration.")}</p>
+                      <dl>
+                        <div>
+                          <dt>Catalog</dt>
+                          <dd>{stringValue(entry.catalog_state) === "not_discoverable" ? "Catalog not discoverable" : `${numberValue(entry.model_count)} model${numberValue(entry.model_count) === 1 ? "" : "s"} · ${stringValue(entry.catalog_state, "unknown")}`}</dd>
+                        </div>
+                        <div>
+                          <dt>Connection</dt>
+                          <dd>
+                            {numberValue(entry.connection_count)} private record
+                            {numberValue(entry.connection_count) === 1 ? "" : "s"}
+                          </dd>
+                        </div>
+                        <div>
+                          <dt>Instances</dt>
+                          <dd>
+                            {instanceCount} instance
+                            {instanceCount === 1 ? "" : "s"}
+                            {compositionText ? ` · ${compositionText}` : ""}
+                          </dd>
+                        </div>
+                        <div>
+                          <dt>Protocol</dt>
+                          <dd>{stringValue(entry.protocol, "gateway")}</dd>
+                        </div>
+                        <div>
+                          <dt>Connection choices</dt>
+                          <dd>{connectionChoices(entry).join(" · ") || "Gateway credential"}</dd>
+                        </div>
+                        <div>
+                          <dt>Catalog freshness</dt>
+                          <dd class="technical">{stringValue(entry.catalog_refreshed, "Catalog not synced")}</dd>
+                        </div>
+                      </dl>
+                      {stringValue(entry.risk_notice) ? <p class="form-help">{stringValue(entry.risk_notice)}</p> : null}
+                      {safeRosterURL(entry.docs_url) ? (
+                        <a href={safeRosterURL(entry.docs_url)} target="_blank" rel="noopener noreferrer">
+                          Provider documentation ↗
+                        </a>
+                      ) : null}
+                    </div>
+                    {remoteEntries.length ? <RosterMetadata entries={remoteEntries} revision={roster.state.revision} /> : null}
+                    {tileConfigurationIssue ? (
+                      <p class="form-error" role="alert">
+                        {tileConfigurationIssue}
+                      </p>
+                    ) : null}
+                    {isClient ? (
+                      <div class="provider-client-note">
+                        <ShieldCheck size={16} />
+                        <span>Client setup only. No provider OAuth action is available.</span>
+                      </div>
+                    ) : null}
+                    <footer>
+                      {configured && mode === "admin" ? (
+                        <div class="provider-actions">
+                          {canAddInstance ? (
+                            <button class="button button--secondary" type="button" title="Configure another instance of this integration" onClick={() => connect(entry, "create")}>
+                              <Plug size={15} /> Add instance
+                            </button>
+                          ) : null}
+                          {supportsOAuth ? (
+                            <button class="button button--primary" type="button" disabled={!ownerID || instanceCount > 1} title={instanceCount > 1 ? "Multiple instances are configured; add an OAuth account from an unambiguous single-instance tile" : undefined} onClick={() => connect(entry)}>
+                              <Plug size={15} /> Add account
+                            </button>
+                          ) : null}
+                          {instanceCount > 1 ? (
+                            <button class="button button--secondary" type="button" title="Grid actions are ambiguous across instances; manage each instance from its own row" onClick={() => onOpenDetail(id)}>
+                              <Plug size={15} /> Manage {instanceCount} instances
+                            </button>
+                          ) : (
+                            <>
+                              <button class="button button--secondary" type="button" title="Confirm the endpoint answers the catalog API — does not run a completion" disabled={active("test") || (supportsOAuth && !ownerID)} onClick={() => void runLifecycle(entry, "test")}>
+                                <Plug size={15} /> Check reachability
+                              </button>
+                              <button class="button button--secondary" type="button" title="Refresh this provider's model catalog" disabled={active("refresh") || (supportsOAuth && !ownerID)} onClick={() => void runLifecycle(entry, "refresh")}>
+                                <RefreshCw size={15} /> Sync catalog
+                              </button>
+                              <button class="button button--danger" type="button" disabled={active("delete")} title="Remove the configured provider and its system connection" onClick={() => void runLifecycle(entry, "delete")}>
+                                <Trash2 size={15} /> Remove
+                              </button>
+                            </>
+                          )}
+                        </div>
+                      ) : mode === "portal" && !isClient ? (
+                        unavailable ? (
+                          <span class="provider-card__meta">Integration not available</span>
+                        ) : portalRequiresAdminSetup ? (
+                          <span class="provider-card__meta">Administrator setup required</span>
+                        ) : (
+                          <button class="button button--primary" type="button" disabled={supportsOAuth && instanceCount > 1} title={supportsOAuth && instanceCount > 1 ? "Multiple instances are configured; add an OAuth account from an unambiguous single-instance tile" : undefined} onClick={() => connect(entry)}>
+                            <Plug size={16} /> {hasPrivateConnection ? "Add or replace account" : "Connect"}
+                          </button>
+                        )
+                      ) : !configured && !unavailable ? (
+                        <button class="button button--primary" type="button" onClick={() => connect(entry)}>
+                          <Plug size={16} /> {isClient ? "View setup" : "Connect"}
+                        </button>
+                      ) : (
+                        <span class="provider-card__meta">{unavailable ? "Integration not available" : "Connection managed privately"}</span>
+                      )}
+                    </footer>
+                  </article>
+                );
+              })}
             </div>
-            {remoteEntries.length ? <RosterMetadata entries={remoteEntries} revision={roster.state.revision} /> : null}
-            {tileConfigurationIssue ? <p class="form-error" role="alert">{tileConfigurationIssue}</p> : null}
-            {isClient ? <div class="provider-client-note"><ShieldCheck size={16} /><span>Client setup only. No provider OAuth action is available.</span></div> : null}
-            <footer>{configured && mode === "admin" ? <div class="provider-actions">{canAddInstance ? <button class="button button--secondary" type="button" title="Configure another instance of this integration" onClick={() => connect(entry, "create")}><Plug size={15} /> Add instance</button> : null}{supportsOAuth ? <button class="button button--primary" type="button" disabled={!ownerID || instanceCount > 1} title={instanceCount > 1 ? "Multiple instances are configured; add an OAuth account from an unambiguous single-instance tile" : undefined} onClick={() => connect(entry)}><Plug size={15} /> Add account</button> : null}{instanceCount > 1 ? <button class="button button--secondary" type="button" title="Grid actions are ambiguous across instances; manage each instance from its own row" onClick={() => onOpenDetail(id)}><Plug size={15} /> Manage {instanceCount} instances</button> : <><button class="button button--secondary" type="button" title="Confirm the endpoint answers the catalog API — does not run a completion" disabled={active("test") || (supportsOAuth && !ownerID)} onClick={() => void runLifecycle(entry, "test")}><Plug size={15} /> Check reachability</button><button class="button button--secondary" type="button" title="Refresh this provider's model catalog" disabled={active("refresh") || (supportsOAuth && !ownerID)} onClick={() => void runLifecycle(entry, "refresh")}><RefreshCw size={15} /> Sync catalog</button><button class="button button--danger" type="button" disabled={active("delete")} title="Remove the configured provider and its system connection" onClick={() => void runLifecycle(entry, "delete")}><Trash2 size={15} /> Remove</button></>}</div> : mode === "portal" && !isClient ? unavailable ? <span class="provider-card__meta">Integration not available</span> : portalRequiresAdminSetup ? <span class="provider-card__meta">Administrator setup required</span> : <button class="button button--primary" type="button" disabled={supportsOAuth && instanceCount > 1} title={supportsOAuth && instanceCount > 1 ? "Multiple instances are configured; add an OAuth account from an unambiguous single-instance tile" : undefined} onClick={() => connect(entry)}><Plug size={16} /> {hasPrivateConnection ? "Add or replace account" : "Connect"}</button> : !configured && !unavailable ? <button class="button button--primary" type="button" onClick={() => connect(entry)}><Plug size={16} /> {isClient ? "View setup" : "Connect"}</button> : <span class="provider-card__meta">{unavailable ? "Integration not available" : "Connection managed privately"}</span>}</footer>
-          </article>;
-        })}</div></section>;
+          </section>
+        );
       })}
       {connectEntry ? (
         <ConnectDialog
@@ -538,12 +1021,17 @@ export function ProviderHub({ data, mode, onChanged, onOpenDetail }: { data: JSO
           onClose={() => setConnectEntry(null)}
           onConfigured={async (msg) => {
             await onChanged();
-            if (msg) setResult({ title: stringValue(connectEntry.entry.label, "Provider"), success: true, detail: msg });
+            if (msg)
+              setResult({
+                title: stringValue(connectEntry.entry.label, "Provider"),
+                success: true,
+                detail: msg,
+              });
           }}
         />
       ) : null}
       {privateKeyEntry ? <PrivateAPIKeyDialog entry={privateKeyEntry.entry} providerID={privateKeyEntry.providerID} onClose={() => setPrivateKeyEntry(null)} onConfigured={onChanged} /> : null}
-      {oauthEntry ? <OAuthConnectDialog entry={oauthEntry.entry} providerID={oauthEntry.providerID} data={data} mode={mode} onClose={() => setOAuthEntry(null)} onComplete={onChanged} /> : null}
+      {oauthEntry ? <OAuthConnectDialog entry={oauthEntry.entry} providerID={oauthEntry.providerID} ownerID={ownerID} data={data} mode={mode} onClose={() => setOAuthEntry(null)} onComplete={onChanged} onOpenPlayground={(modelID, selectedOwnerID) => onOpenPlayground?.(modelID, stringValue(oauthEntry.entry.id), selectedOwnerID)} /> : null}
     </div>
   );
 }

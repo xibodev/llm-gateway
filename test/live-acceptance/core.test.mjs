@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
 import test from "node:test";
 import {
   buildRoutePlans,
@@ -113,6 +114,7 @@ test("browser acceptance selects the message composer rather than tool editors",
   );
   assert.match(source, /textarea\[placeholder\^=\"Send a message\"\]/);
   assert.doesNotMatch(source, /locator\("\.chat-composer textarea"\)/);
+  assert.match(source, /\/admin\/api\/playground\/v1\/chat\/completions/);
 });
 
 test("human-like UAT uses a gateway-visible mock and syncs catalogs before routes", async () => {
@@ -123,6 +125,11 @@ test("human-like UAT uses a gateway-visible mock and syncs catalogs before route
   assert.match(source, /providers\/opencode-zen\/refresh/);
   assert.match(source, /textarea\[placeholder\^=\"Send a message\"\]/);
   assert.match(source, /Expected 404 non-disclosure for out-of-scope route/);
+});
+
+test("deterministic fixture declares its proven Chat surface", async () => {
+	const source = await readFile(new URL("./fixture-server.mjs", import.meta.url), "utf8");
+	assert.match(source, /supported_endpoints: \["\/v1\/chat\/completions"\]/);
 });
 
 test("release policy requires execution but tolerates external outages", () => {

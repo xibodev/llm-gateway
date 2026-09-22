@@ -9,6 +9,7 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"llmgw/internal/buildinfo"
@@ -17,6 +18,7 @@ import (
 	"llmgw/internal/providers"
 	"llmgw/internal/router"
 
+	anthropicauth "github.com/xibodev/llm-provider-auth/anthropic"
 	copilotauth "github.com/xibodev/llm-provider-auth/copilot"
 	gcpauth "github.com/xibodev/llm-provider-auth/gcp"
 )
@@ -25,6 +27,8 @@ func persist() {
 	_ = config.Save()
 	providers.ResetProviders()
 }
+
+var endpointMutationMu sync.Mutex
 
 func copilotEnabled() bool {
 	if config.Get().AllowCopilotProxy {
@@ -322,15 +326,18 @@ func handleState(w http.ResponseWriter, r *http.Request) {
 }
 
 type providerBody struct {
-	ID              string   `json:"id"`
-	RegistryID      string   `json:"registry_id"`
-	Type            string   `json:"type"`
-	BaseURL         string   `json:"base_url"`
-	APIKey          string   `json:"api_key"`
-	Region          string   `json:"region"`
-	Project         string   `json:"project"`
-	Location        string   `json:"location"`
-	ForceApiSupport flexBool `json:"force_api_support"`
+	ID                  string   `json:"id"`
+	RegistryID          string   `json:"registry_id"`
+	Type                string   `json:"type"`
+	BaseURL             string   `json:"base_url"`
+	APIKey              string   `json:"api_key"`
+	CredentialKind      string   `json:"credential_kind"`
+	Region              string   `json:"region"`
+	Project             string   `json:"project"`
+	Location            string   `json:"location"`
+	PublicOAuthClientID string   `json:"public_oauth_client_id"`
+	ClearPublicOAuthID  *bool    `json:"clear_public_oauth_client_id"`
+	ForceApiSupport     flexBool `json:"force_api_support"`
 }
 
 // POST /admin/api/providers
@@ -338,6 +345,8 @@ func handleUpsertProvider(w http.ResponseWriter, r *http.Request) {
 	if !adminAuthed(w, r) {
 		return
 	}
+	endpointMutationMu.Lock()
+	defer endpointMutationMu.Unlock()
 	var body providerBody
 	if err := decodeBodyOrForm(w, r, &body); err != nil {
 		writeDecodeError(w, err)
@@ -398,6 +407,10 @@ func handleUpsertProvider(w http.ResponseWriter, r *http.Request) {
 		writeError(w, 400, "unknown provider type "+body.Type)
 		return
 	}
+	if err := providerEndpointCollision(pid); err != nil {
+		writeError(w, http.StatusConflict, err.Error())
+		return
+	}
 	systemConnection, err := iam.SystemProviderConnectionExists(pid)
 	if err != nil {
 		writeError(w, 500, "Credential store unavailable.")
@@ -408,12 +421,54 @@ func handleUpsertProvider(w http.ResponseWriter, r *http.Request) {
 		writeError(w, 400, "api_key is required for "+registryEntry.Label)
 		return
 	}
+	if body.ClearPublicOAuthID != nil && *body.ClearPublicOAuthID {
+		previous := config.Get().Providers[pid]
+		if previous != nil && strings.TrimSpace(previous.PublicOAuthClientID) != "" {
+			bound, err := providerOAuthClientIDInUse(pid, previous.PublicOAuthClientID)
+			if err != nil {
+				writeError(w, 500, "Credential store unavailable.")
+				return
+			}
+			if bound {
+				writeError(w, http.StatusConflict, "Revoke or reauthorize active OAuth connections before clearing the public OAuth client ID.")
+				return
+			}
+		}
+	}
+	credentialKind := strings.ToLower(strings.TrimSpace(body.CredentialKind))
+	if credentialKind == "" {
+		credentialKind = "api_key"
+	}
 	if raw := strings.TrimSpace(body.APIKey); raw != "" {
 		// A service account key is a JSON document, not an opaque secret. The
 		// dialog offers one credential field, so detect the document here:
 		// stored as an API key it would be sent as x-goog-api-key and rejected
 		// by Google, reporting a bad key when the real fault is the wrong kind.
-		credentialKind := "api_key"
+		setupTokenLooking := strings.HasPrefix(raw, "sk-ant-oat")
+		if setupTokenLooking && !strings.EqualFold(body.Type, "anthropic") {
+			writeError(w, 400, "an Anthropic setup token is only usable by an anthropic provider")
+			return
+		}
+		if strings.EqualFold(body.Type, "anthropic") && setupTokenLooking {
+			detectedKind, err := anthropicauth.Kind(body.APIKey)
+			if err != nil {
+				writeError(w, 400, err.Error())
+				return
+			}
+			credentialKind = string(detectedKind)
+		} else if credentialKind == string(anthropicauth.CredentialSetupToken) {
+			if !strings.EqualFold(body.Type, "anthropic") {
+				writeError(w, 400, "an Anthropic setup token is only usable by an anthropic provider")
+				return
+			}
+			if err := anthropicauth.ValidateSetupToken(body.APIKey); err != nil {
+				writeError(w, 400, err.Error())
+				return
+			}
+		} else if credentialKind != "api_key" && credentialKind != gcpauth.CredentialKind {
+			writeError(w, 400, "unsupported provider credential kind")
+			return
+		}
 		if gcpauth.LooksLikeServiceAccount(raw) {
 			if !strings.EqualFold(body.Type, "vertex_ai") {
 				writeError(w, 400,
@@ -426,27 +481,39 @@ func handleUpsertProvider(w http.ResponseWriter, r *http.Request) {
 			}
 			credentialKind = gcpauth.CredentialKind
 		}
-		if _, err := iam.PutSystemProviderConnection(
+		stored, err := iam.PutSystemProviderConnection(
 			pid, credentialKind, raw,
-		); err != nil {
+		)
+		if err != nil {
 			writeError(w, 500, "store encrypted system connection: "+err.Error())
 			return
+		}
+		if credentialKind == string(anthropicauth.CredentialSetupToken) && !stored {
+			writeError(w, 400, "LLMGW_CREDENTIAL_ENCRYPTION_KEY is required to store an Anthropic setup token")
+			return
+		}
+		if credentialKind == string(anthropicauth.CredentialSetupToken) {
+			config.DeleteSecret(pid)
 		}
 	}
 	config.Update(func(s *config.Settings) {
 		next := &config.ProviderConfig{
 			Type: body.Type, RegistryID: registryID, BaseURL: emptyNil(body.BaseURL),
 			Region: emptyNil(body.Region), Project: emptyNil(body.Project),
-			Location: emptyNil(body.Location), ForceApiSupport: bool(body.ForceApiSupport),
+			Location: emptyNil(body.Location), PublicOAuthClientID: strings.TrimSpace(body.PublicOAuthClientID),
+			ForceApiSupport: bool(body.ForceApiSupport),
 		}
 		if previous := s.Providers[pid]; previous != nil {
 			next.Timeout = previous.Timeout
 			next.DefaultVoice = previous.DefaultVoice
 			next.Disabled = previous.Disabled
+			if next.PublicOAuthClientID == "" && (body.ClearPublicOAuthID == nil || !*body.ClearPublicOAuthID) {
+				next.PublicOAuthClientID = previous.PublicOAuthClientID
+			}
 		}
 		s.Providers[pid] = next
 	})
-	if strings.TrimSpace(body.APIKey) != "" {
+	if strings.TrimSpace(body.APIKey) != "" && credentialKind != string(anthropicauth.CredentialSetupToken) {
 		config.SaveSecret(pid, strings.TrimSpace(body.APIKey))
 	}
 	providers.ForgetProvider(pid)
@@ -456,22 +523,105 @@ func handleUpsertProvider(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 200, map[string]any{"ok": true, "id": pid})
 }
 
+func providerOAuthClientIDInUse(providerID, clientID string) (bool, error) {
+	legacyBound, err := iam.ActiveLegacyOAuthProviderCredentialExists(providerID)
+	if err != nil || legacyBound {
+		return legacyBound, err
+	}
+	connections, err := iam.ListProviderConnections("", providerID)
+	if err != nil {
+		return false, err
+	}
+	for _, connection := range connections {
+		if connection.Status != "active" || !strings.Contains(strings.ToLower(connection.Kind), "oauth") {
+			continue
+		}
+		envelope, _, ok, err := iam.OAuthProviderConnectionSecret(connection.PrincipalID, providerID, connection.Name)
+		if err != nil {
+			return false, err
+		}
+		storedClientID := strings.TrimSpace(envelope.OAuthClientID)
+		profile := strings.TrimSpace(envelope.OAuthProfile)
+		if ok && (storedClientID == strings.TrimSpace(clientID) ||
+			(storedClientID == "" && (profile == "" || profile == "public_pkce"))) {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
 // DELETE /admin/api/providers/{id}
 func handleDeleteProvider(w http.ResponseWriter, r *http.Request) {
 	if !adminAuthed(w, r) {
 		return
 	}
+	anonymousProviderMutationMu.Lock()
+	defer anonymousProviderMutationMu.Unlock()
+	endpointMutationMu.Lock()
+	defer endpointMutationMu.Unlock()
 	pid := r.PathValue("id")
+	connections, err := iam.ListProviderConnections("", pid)
+	if err != nil {
+		writeError(w, 500, "Credential store unavailable.")
+		return
+	}
+	for _, connection := range connections {
+		if connection.Status == "active" && connection.PrincipalKind != "system" {
+			writeError(w, http.StatusConflict, "provider still has active connections; revoke them before deleting the provider")
+			return
+		}
+	}
+	for endpointName, endpoint := range config.Get().Endpoints {
+		if endpoint == nil {
+			continue
+		}
+		for _, member := range endpoint.Failover {
+			if member.Provider == pid {
+				writeError(w, http.StatusConflict, fmt.Sprintf("provider is still referenced by endpoint %q", endpointName))
+				return
+			}
+		}
+	}
+	wasAutomationManaged, err := iam.AnonymousProviderManaged(pid)
+	if err != nil {
+		writeError(w, 500, "read provider automation ownership: "+err.Error())
+		return
+	}
+	if err := iam.ClearAnonymousProviderManaged(pid); err != nil {
+		writeError(w, 500, "clear provider automation ownership: "+err.Error())
+		return
+	}
+	restoreConfig, err := config.UpdateAndSave(func(s *config.Settings) error {
+		delete(s.Providers, pid)
+		return nil
+	})
+	if err != nil {
+		if wasAutomationManaged {
+			if markerErr := iam.MarkAnonymousProviderManaged(pid); markerErr != nil {
+				writeError(w, 500, "Provider configuration could not be persisted and automation ownership could not be restored.")
+				return
+			}
+		}
+		writeError(w, 500, "Provider configuration could not be persisted.")
+		return
+	}
 	if err := iam.RevokeSystemProviderConnection(pid); err != nil {
+		restoreErr := restoreConfig()
+		markerErr := error(nil)
+		if wasAutomationManaged {
+			markerErr = iam.MarkAnonymousProviderManaged(pid)
+		}
+		if restoreErr != nil || markerErr != nil {
+			writeError(w, 500, "Provider credential revocation failed and provider configuration could not be fully restored.")
+			return
+		}
 		writeError(w, 500, "revoke system connection: "+err.Error())
 		return
 	}
-	config.Update(func(s *config.Settings) { delete(s.Providers, pid) })
 	config.DeleteSecret(pid)
 	providers.ForgetProvider(pid)
 	providers.ForgetCatalog(pid)
 	_ = iam.DeleteProviderChecks(pid)
-	persist()
 	writeJSON(w, 200, map[string]any{"ok": true})
 }
 
@@ -525,8 +675,13 @@ func handleVerifyProvider(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	model := strings.TrimSpace(r.URL.Query().Get("model"))
-	auditAdmin(r, "provider.verify", "provider", pid, map[string]any{"model": model})
-	writeJSON(w, 200, runProviderVerify(pid, model, principal))
+	result := runProviderVerify(pid, model, principal)
+	auditResult := "failure"
+	if success, _ := result["success"].(bool); success {
+		auditResult = "success"
+	}
+	auditAdminResult(r, "provider.verify", "provider", pid, auditResult, map[string]any{"model": model})
+	writeJSON(w, 200, result)
 }
 
 func selectedCatalogPrincipal(r *http.Request) (*config.Principal, error) {
@@ -595,7 +750,7 @@ func handleProviderModels(w http.ResponseWriter, r *http.Request) {
 		writeError(w, 400, err.Error())
 		return
 	}
-	result := providers.ReadCatalogForPrincipal(pid, principal)
+	result := providers.ReadCachedCatalogForPrincipal(pid, principal)
 	rows := result.Models
 	ids := []string{}
 	for _, row := range rows {
@@ -651,9 +806,42 @@ func handleProviderCatalog(w http.ResponseWriter, r *http.Request) {
 		writeError(w, 400, err.Error())
 		return
 	}
-	result := providers.ReadCatalogForPrincipal(pid, principal)
+	result := providers.ReadCachedCatalogForPrincipal(pid, principal)
+	rows := catalogRowsWithLegacySurfaces(result.Models)
+	automationManaged, automationErr := providers.AutomationManagedAnonymousProvider(pid)
+	if automationErr != nil {
+		writeError(w, 500, "Model publication evidence is unavailable.")
+		return
+	}
+	if automationManaged {
+		evidence, evidenceErr := iam.ProviderModelEvidenceFor(pid, "")
+		if evidenceErr != nil {
+			writeError(w, 500, "Model publication evidence is unavailable.")
+			return
+		}
+		for _, row := range rows {
+			model := strings.TrimSpace(fmt.Sprint(row["id"]))
+			current, found := evidence[model]
+			state := "unverified"
+			if found {
+				state = current.State
+			}
+			row["publication_state"] = state
+			published := state == "verified"
+			row["published"] = published
+			row["disabled"] = !published
+			row["admin_unverified_opt_in"] = false
+			if current.ObservedAt > 0 {
+				row["observed_at"] = time.Unix(current.ObservedAt, 0).UTC().Format(time.RFC3339)
+				row["latency_ms"] = current.LatencyMS
+			}
+			if current.FailureCode != "" {
+				row["failure_code"] = current.FailureCode
+			}
+		}
+	}
 	resp := map[string]any{
-		"models": catalogRowsWithLegacySurfaces(result.Models), "catalog": result.Diagnostics,
+		"models": rows, "catalog": result.Diagnostics,
 		"readiness": catalogReadiness(pid, principal, result),
 	}
 	if t := result.RefreshedAt; !t.IsZero() {
@@ -661,6 +849,8 @@ func handleProviderCatalog(w http.ResponseWriter, r *http.Request) {
 	}
 	writeJSON(w, 200, resp)
 }
+
+var catalogLookupForPrincipal = providers.CatalogLookupForPrincipal
 
 // POST /admin/api/providers/{id}/refresh â€” force a catalog refresh with an explicit result.
 func handleRefreshProvider(w http.ResponseWriter, r *http.Request) {
@@ -721,18 +911,34 @@ type endpointBody struct {
 	Failover []map[string]any `json:"failover"`
 }
 
-func storeEndpoint(name string, members []config.EndpointMember) error {
-	var collision error
-	config.Update(func(s *config.Settings) {
+func storeEndpoint(name string, members []config.EndpointMember) (func() error, error) {
+	return config.UpdateAndSave(func(s *config.Settings) error {
 		for existingName := range s.Endpoints {
 			if existingName != name && strings.EqualFold(existingName, name) {
-				collision = fmt.Errorf("endpoint name collides with existing endpoint %q; names are case-insensitive", existingName)
-				return
+				return fmt.Errorf("endpoint name collides with existing endpoint %q; names are case-insensitive", existingName)
 			}
 		}
 		s.Endpoints[name] = &config.EndpointConfig{Failover: members}
+		return nil
 	})
-	return collision
+}
+
+func endpointNameCollision(name string) error {
+	for existingName := range config.Get().Endpoints {
+		if existingName != name && strings.EqualFold(existingName, name) {
+			return fmt.Errorf("endpoint name collides with existing endpoint %q; names are case-insensitive", existingName)
+		}
+	}
+	return nil
+}
+
+func providerEndpointCollision(providerID string) error {
+	for endpointName := range config.Get().Endpoints {
+		if strings.EqualFold(endpointName, providerID) {
+			return fmt.Errorf("provider id collides with existing endpoint %q", endpointName)
+		}
+	}
+	return nil
 }
 
 // handleUpsertEndpoint backs both POST /admin/api/endpoints (canonical) and
@@ -742,6 +948,8 @@ func handleUpsertEndpoint(w http.ResponseWriter, r *http.Request) {
 	if !adminAuthed(w, r) {
 		return
 	}
+	endpointMutationMu.Lock()
+	defer endpointMutationMu.Unlock()
 	var body endpointBody
 	if !decodeBody(r, &body) {
 		writeError(w, 400, "invalid body")
@@ -752,8 +960,19 @@ func handleUpsertEndpoint(w http.ResponseWriter, r *http.Request) {
 		writeError(w, 400, "endpoint name required")
 		return
 	}
-	if _, isProvider := config.Get().Providers[name]; isProvider || strings.Contains(name, "/") {
+	isProvider := false
+	for providerID := range config.Get().Providers {
+		if strings.EqualFold(providerID, name) {
+			isProvider = true
+			break
+		}
+	}
+	if isProvider || strings.Contains(name, "/") {
 		writeError(w, 400, "endpoint name must not contain '/' or collide with a provider id")
+		return
+	}
+	if err := endpointNameCollision(name); err != nil {
+		writeError(w, 400, err.Error())
 		return
 	}
 	principal, err := selectedCatalogPrincipal(r)
@@ -779,22 +998,49 @@ func handleUpsertEndpoint(w http.ResponseWriter, r *http.Request) {
 			writeError(w, 400, "principal_id is required to validate this private OAuth provider")
 			return
 		}
-		if _, found := providers.CatalogLookupForPrincipal(providerID, modelID, principal); !found {
+		if _, found := catalogLookupForPrincipal(providerID, modelID, principal); !found {
 			writeError(w, 400, fmt.Sprintf("route member %d has unknown model %q for provider %q", index+1, modelID, providerID))
 			return
 		}
-		members = append(members, config.EndpointMember{Provider: providerID, Model: modelID})
+		_, published, publicationErr := providers.AnonymousModelPublication(providerID, modelID)
+		if publicationErr != nil {
+			writeError(w, 500, "Model publication evidence is unavailable.")
+			return
+		}
+		allowUnverified, _ := member["allow_unverified"].(bool)
+		if !published {
+			evidence, evidenceErr := iam.ProviderModelEvidenceFor(providerID, "")
+			if evidenceErr != nil {
+				writeError(w, 500, "Model publication evidence is unavailable.")
+				return
+			}
+			current := evidence[modelID]
+			if !allowUnverified || current.State != "unverified" {
+				writeError(w, 400, fmt.Sprintf("route member %d is %s and disabled for routing", index+1, modelPublicationState(current.State)))
+				return
+			}
+		} else {
+			allowUnverified = false
+		}
+		members = append(members, config.EndpointMember{Provider: providerID, Model: modelID, AllowUnverified: allowUnverified})
 	}
 	if len(members) == 0 {
 		writeError(w, 400, "a route requires at least one provider/model member")
 		return
 	}
-	if err := storeEndpoint(name, members); err != nil {
-		writeError(w, 400, err.Error())
+	if _, err := storeEndpoint(name, members); err != nil {
+		writeError(w, 500, "Route configuration could not be persisted.")
 		return
 	}
-	persist()
+	providers.ResetProviders()
 	writeJSON(w, 200, map[string]any{"ok": true, "name": name, "members": len(members)})
+}
+
+func modelPublicationState(state string) string {
+	if state == "" {
+		return "unverified"
+	}
+	return state
 }
 
 // handleDeleteEndpoint backs both DELETE /admin/api/endpoints/{name}
@@ -804,9 +1050,32 @@ func handleDeleteEndpoint(w http.ResponseWriter, r *http.Request) {
 	if !adminAuthed(w, r) {
 		return
 	}
+	endpointMutationMu.Lock()
+	defer endpointMutationMu.Unlock()
 	name := r.PathValue("name")
-	config.Update(func(s *config.Settings) { delete(s.Endpoints, name) })
-	persist()
+	if _, exact := config.Get().Endpoints[name]; !exact {
+		matches := []string{}
+		for existingName := range config.Get().Endpoints {
+			if strings.EqualFold(existingName, name) {
+				matches = append(matches, existingName)
+			}
+		}
+		if len(matches) > 1 {
+			writeError(w, http.StatusConflict, "endpoint name is ambiguous under case-insensitive matching")
+			return
+		}
+		if len(matches) == 1 {
+			name = matches[0]
+		}
+	}
+	if _, err := config.UpdateAndSave(func(s *config.Settings) error {
+		delete(s.Endpoints, name)
+		return nil
+	}); err != nil {
+		writeError(w, 500, "Endpoint configuration could not be persisted.")
+		return
+	}
+	providers.ResetProviders()
 	writeJSON(w, 200, map[string]any{"ok": true})
 }
 

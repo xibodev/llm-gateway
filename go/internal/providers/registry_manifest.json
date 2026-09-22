@@ -116,7 +116,7 @@
   {
     "id": "anthropic",
     "label": "Anthropic",
-    "description": "Native Anthropic Messages API using an Anthropic API key.",
+    "description": "Native Anthropic Messages API using an API key or a write-only setup token.",
     "categories": [
       "api-key",
       "direct"
@@ -125,7 +125,8 @@
     "protocol": "anthropic",
     "availability": "available",
     "auth_methods": [
-      "api_key"
+      "api_key",
+      "setup_token"
     ],
     "connection_scope": "system_or_personal",
     "default_provider_id": "anthropic",
@@ -133,10 +134,40 @@
     "requires_api_key": true,
     "supports_model_discovery": true,
     "onboarding_fields": [
-      "api_key"
+      "api_key",
+      "setup_token"
     ],
     "risk_level": "green",
     "docs_url": "https://docs.anthropic.com/en/api"
+  },
+  {
+    "id": "google_antigravity",
+    "aliases": [
+      "antigravity",
+      "google-antigravity"
+    ],
+    "label": "Google Antigravity",
+    "description": "Experimental personal browser OAuth access to Google's undocumented Cloud Code Assist surface.",
+    "categories": [
+      "experimental",
+      "coding",
+      "oauth"
+    ],
+    "runtime_type": "google_antigravity",
+    "protocol": "openai",
+    "availability": "available",
+    "auth_methods": [
+      "oauth_browser"
+    ],
+    "connection_scope": "personal",
+    "default_provider_id": "google-antigravity",
+    "supports_model_discovery": true,
+    "onboarding_fields": [
+      "human_owner"
+    ],
+    "auth_adapter": "google_antigravity",
+    "risk_level": "red",
+    "risk_notice": "Experimental and undocumented. Provider behavior, account eligibility, and terms may change without notice. Use only with an account you are authorized to connect. Streaming is not currently available."
   },
   {
     "id": "gemini",
