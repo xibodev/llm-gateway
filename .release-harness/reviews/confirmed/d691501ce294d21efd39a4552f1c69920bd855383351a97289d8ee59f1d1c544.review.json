@@ -1,0 +1,105 @@
+{
+  "schema_version": "1.0.0",
+  "mode": "change",
+  "contract": {
+    "digest": "31b393ab3e80162226619c441694573993ac618382d74642101484a0bf2e9c80"
+  },
+  "authoring_provenance": {
+    "status": "established",
+    "path": ".release-harness/drafts/llm-gateway.record.json",
+    "digest": "6732ddf3dc8236b974e2aae5f81b546d89c2a466b6fb0a368d76620955bf981e"
+  },
+  "sources": [
+    {
+      "source_id": "primary",
+      "status": "established",
+      "repository_identity": "https://github.com/xibodev/llm-gateway.git",
+      "base_ref": "44e554a",
+      "base_commit": "44e554a0b248fc1ff6038b0ae15d99db95d6b4a9",
+      "merge_base": "44e554a0b248fc1ff6038b0ae15d99db95d6b4a9",
+      "head_commit": "ca01dda7b7a0a19049957a060465513208044108",
+      "head_tree": "c0b23969b4a5e3cf22a39fe18c3ef7c896184c88",
+      "reviewed_source_digest": "6b6dfc6ebcfe66c5ffeee193320360fdd6e8c446646d6ad3a9dbe2ae64d44c2a",
+      "changed_paths": [
+        {
+          "status": "modified",
+          "path": "go/go.mod",
+          "old_blob": "54b165ad0bde0150ec790696f7db6c8c903b27dc",
+          "new_blob": "f319c0f92a8e740794de83943c02b6eacadcbf98"
+        },
+        {
+          "status": "modified",
+          "path": "go/go.sum",
+          "old_blob": "3bf63b031f823517ff3cf5d0150a1316a0a7d562",
+          "new_blob": "3f37cb9d680e168b2c35c018fd391570709bb0a0"
+        }
+      ]
+    }
+  ],
+  "facts": [
+    {
+      "id": "core-tag-equivalence",
+      "claim": "The llmgw-core v0.6.0 module tag resolves to merge commit 7f18d0fd8349f459ce209d43aa1e34c613b16b5d, whose reviewed feature parent is the previously pinned commit 39211fa457a5d1a416091778aaa2a7ca9a5cb54e.",
+      "status": "observed",
+      "evidence": {
+        "source": "go list -m -json github.com/xibodev/llmgw-core@v0.6.0; xibodev/llmgw-core pull request 1"
+      }
+    },
+    {
+      "id": "published-module-gates-pass",
+      "claim": "With GOWORK disabled and llmgw-core v0.6.0 resolved through Go module tooling, module verification, build, vet, full tests, vulnerability scan, console audit/lint/tests/dist, documentation checks, and deterministic acceptance pass.",
+      "status": "observed",
+      "evidence": {
+        "source": "go mod verify; GOWORK=off go build/vet/test/govulncheck; console audit/lint/test/check:dist; scripts/check-docs.mjs; deterministic acceptance PASS 3/3"
+      }
+    }
+  ],
+  "impact": {
+    "assertions": [
+      {
+        "id": "A1",
+        "impact": "unchanged",
+        "supported_by": [
+          "core-tag-equivalence",
+          "published-module-gates-pass"
+        ]
+      },
+      {
+        "id": "A2",
+        "impact": "unchanged",
+        "supported_by": [
+          "core-tag-equivalence",
+          "published-module-gates-pass"
+        ]
+      },
+      {
+        "id": "A3",
+        "impact": "unchanged",
+        "supported_by": [
+          "core-tag-equivalence",
+          "published-module-gates-pass"
+        ]
+      },
+      {
+        "id": "A4",
+        "impact": "unchanged",
+        "supported_by": [
+          "core-tag-equivalence",
+          "published-module-gates-pass"
+        ]
+      }
+    ],
+    "requires": [],
+    "possible_binding_changes": []
+  },
+  "questions": [],
+  "conclusion": {
+    "action": "reuse_contract",
+    "summary": "Replacing the reviewed llmgw-core pseudo-version with its immutable v0.6.0 release tag changes dependency identity only; the accepted CLI, health, and public model-list proposition remains appropriate."
+  },
+  "proposed": {
+    "by": "opencode-session",
+    "at": "2026-09-23T17:54:51.773Z"
+  },
+  "digest": "d691501ce294d21efd39a4552f1c69920bd855383351a97289d8ee59f1d1c544"
+}
