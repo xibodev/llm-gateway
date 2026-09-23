@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { execFile } from "node:child_process";
+import { execFile, spawn } from "node:child_process";
 import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { resolve } from "node:path";
@@ -75,6 +75,28 @@ async function command(file, args, options = {}) {
   return { stdout: result.stdout.trim(), stderr: result.stderr.trim() };
 }
 
+async function commandWithInput(file, args, input, options = {}) {
+  return new Promise((resolveCommand, rejectCommand) => {
+    const child = spawn(file, args, { cwd: repo, ...options, stdio: ["pipe", "pipe", "pipe"] });
+    const stdout = [];
+    const stderr = [];
+    const timer = options.timeout ? setTimeout(() => child.kill(), options.timeout) : null;
+    child.stdout.on("data", (chunk) => stdout.push(chunk));
+    child.stderr.on("data", (chunk) => stderr.push(chunk));
+    child.on("error", rejectCommand);
+    child.on("close", (code, signal) => {
+      if (timer) clearTimeout(timer);
+      const result = {
+        stdout: Buffer.concat(stdout).toString().trim(),
+        stderr: Buffer.concat(stderr).toString().trim(),
+      };
+      if (code === 0) resolveCommand(result);
+      else rejectCommand(Object.assign(new Error(`command exited with ${signal || code}`), result, { code, signal }));
+    });
+    child.stdin.end(input);
+  });
+}
+
 async function docker(...args) {
   let options = {};
   if (args.length && typeof args.at(-1) === "object") options = args.pop();
@@ -138,6 +160,13 @@ function anonymousProfile(provider) {
 function errorText(result) {
   if (result.status >= 200 && result.status < 300) return "";
   return result.error || result.json?.error?.message || result.json?.error || result.text;
+}
+
+function diagnosticExcerpt(value, limit = 500) {
+  const text = String(value || "").trim();
+  if (text.length <= limit) return text;
+  const half = Math.floor((limit - 5) / 2);
+  return `${text.slice(0, half)} ... ${text.slice(-half)}`;
 }
 
 function responseEvidence(result, expectedModel) {
@@ -517,17 +546,33 @@ async function testClaude(identity, healthy, plans) {
   await mkdir(claudeConfig, { recursive: true });
   await mkdir(claudeWorkspace, { recursive: true });
   await writeFile(resolve(claudeWorkspace, "fixture.txt"), "llmgw-live-acceptance\n");
-  const env = { ...process.env, CLAUDE_CONFIG_DIR: claudeConfig, ANTHROPIC_BASE_URL: baseURL, ANTHROPIC_API_KEY: identity.token, ANTHROPIC_AUTH_TOKEN: "", DISABLE_PROMPT_CACHING: "1" };
+  const env = {
+    ...process.env,
+    CLAUDE_CONFIG_DIR: claudeConfig,
+    ANTHROPIC_BASE_URL: baseURL,
+    ANTHROPIC_API_KEY: identity.token,
+    ANTHROPIC_AUTH_TOKEN: "",
+    DISABLE_PROMPT_CACHING: "1",
+    CLAUDE_CODE_DISABLE_UNKNOWN_MODEL_WINDOW_ENFORCEMENT: "1",
+  };
   const invoke = async (name, model, prompt, extra = [], persist = false) => {
     try {
       const persistence = persist ? [] : ["--no-session-persistence"];
-      const { stdout, stderr } = await command(claudeCommand, ["-p", "--bare", "--strict-mcp-config", "--mcp-config", '{"mcpServers":{}}', "--disable-slash-commands", "--no-chrome", "--model", model, ...persistence, "--permission-prompts", "none", ...extra, prompt], { cwd: claudeWorkspace, env, timeout: 120_000 });
+      const settings = {
+        modelOverrides: { "claude-sonnet-4-6": model },
+        alwaysThinkingEnabled: false,
+        showThinkingSummaries: false,
+        autoCompactEnabled: false,
+        env: { DISABLE_PROMPT_CACHING: "1", CLAUDE_CODE_DISABLE_THINKING: "1" },
+      };
+      const { stdout, stderr } = await commandWithInput(claudeCommand, ["-p", "--bare", "--settings", JSON.stringify(settings), "--strict-mcp-config", "--mcp-config", '{"mcpServers":{}}', "--disable-slash-commands", "--no-chrome", "--model", "claude-sonnet-4-6", ...persistence, "--permission-prompts", "none", ...extra], prompt, { cwd: claudeWorkspace, env, timeout: 120_000 });
       const text = stdout.trim();
       report.claude.push({ name, model, status: text ? "passed" : "failed", text: safeExcerpt(text), warning: safeExcerpt(stderr) });
       return { passed: Boolean(text), text, stderr };
     } catch (error) {
-      report.claude.push({ name, model, status: "failed", error: safeExcerpt(error.stderr || error.message) });
-      return { passed: false, text: "", stderr: error.stderr || error.message };
+      const detail = [error.stderr, error.stdout, error.message].filter(Boolean).join("\n");
+      report.claude.push({ name, model, status: "failed", error: diagnosticExcerpt(detail) });
+      return { passed: false, text: "", stderr: detail };
     }
   };
   const required = [];

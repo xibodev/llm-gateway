@@ -115,7 +115,13 @@ test("browser acceptance selects the message composer rather than tool editors",
   assert.match(source, /textarea\[placeholder\^=\"Send a message\"\]/);
   assert.doesNotMatch(source, /locator\("\.chat-composer textarea"\)/);
   assert.match(source, /\/admin\/api\/playground\/v1\/chat\/completions/);
-  assert.match(source, /\.\.\.extra, prompt\]/);
+  assert.match(source, /commandWithInput\(claudeCommand/);
+  assert.match(source, /child\.stdin\.end\(input\)/);
+  assert.match(source, /CLAUDE_CODE_DISABLE_UNKNOWN_MODEL_WINDOW_ENFORCEMENT: "1"/);
+  assert.match(source, /modelOverrides: \{ "claude-sonnet-4-6": model \}/);
+  assert.match(source, /"--settings", JSON\.stringify\(settings\)/);
+  assert.match(source, /alwaysThinkingEnabled: false/);
+  assert.match(source, /autoCompactEnabled: false/);
 });
 
 test("human-like UAT uses a gateway-visible mock and syncs catalogs before routes", async () => {
