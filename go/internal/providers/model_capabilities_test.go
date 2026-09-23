@@ -91,3 +91,18 @@ func TestCatalogModelsWithTypedCapabilitiesAddsDiscoverySnapshot(t *testing.T) {
 		t.Fatalf("persisted capability snapshot = %+v", capabilities)
 	}
 }
+
+func TestModelCapabilityHelpersPreferTypedEvidence(t *testing.T) {
+	model := ModelInfo{Capabilities: map[string]any{"vision": false, "image": false, "video": false}, TypedCapabilities: &core.ModelCapabilities{}}
+	model.TypedCapabilities.Inputs.Image = core.SupportSupported
+	model.TypedCapabilities.Operations.Image = core.SupportSupported
+	model.TypedCapabilities.Operations.Video = core.SupportSupported
+	if !ModelSupportsImageInput(model) || !ModelSupportsOperation(model, core.ModelOperationImage) || !ModelSupportsOperation(model, core.ModelOperationVideo) {
+		t.Fatalf("typed capability evidence was ignored: %+v", model.TypedCapabilities)
+	}
+	model.TypedCapabilities.Inputs.Image = core.SupportUnsupported
+	model.TypedCapabilities.Operations.Image = core.SupportUnsupported
+	if ModelSupportsImageInput(model) || ModelSupportsOperation(model, core.ModelOperationImage) {
+		t.Fatal("legacy metadata overrode typed unsupported evidence")
+	}
+}

@@ -17,6 +17,7 @@ import (
 	"llmgw/internal/router"
 
 	core "github.com/xibodev/llmgw-core"
+	corezen "github.com/xibodev/llmgw-core/providers/zen"
 )
 
 type chatRequest struct {
@@ -91,7 +92,12 @@ func fallbackContext(r *http.Request, timeout any, affinity string) context.Cont
 		affinity = header
 	}
 	milliseconds, _ := strconv.ParseInt(fmt.Sprint(timeout), 10, 64)
-	return router.WithFallbackOptions(r.Context(), time.Duration(milliseconds)*time.Millisecond, affinity)
+	ctx := router.WithFallbackOptions(r.Context(), time.Duration(milliseconds)*time.Millisecond, affinity)
+	identity, err := corezen.NewInvocationIdentity(r.Header, nil)
+	if err != nil {
+		return ctx
+	}
+	return corezen.WithInvocationIdentity(ctx, identity)
 }
 
 func providerMessages(messages []map[string]any) []providers.Message {
@@ -264,7 +270,8 @@ func chatDispatch(w http.ResponseWriter, r *http.Request, req *chatRequest, prin
 			return
 		}
 		kw["_force_api_support"] = false
-		response, providerErr := providers.CompleteProviderContext(r.Context(), provider, target.Model, msgs, kw)
+		ctx := fallbackContext(r, req.FallbackTimeoutMS, req.AffinityKey)
+		response, providerErr := providers.CompleteProviderContext(ctx, provider, target.Model, msgs, kw)
 		if providerErr != nil {
 			recordFailureUsage(endpoint, req.Model, principal, upstreamErrorStatus(providerErr), "upstream", started)
 			writeUpstreamError(w, providerErr)
@@ -308,18 +315,6 @@ func chatDispatch(w http.ResponseWriter, r *http.Request, req *chatRequest, prin
 	recordFromResponse(endpoint, req.Model, served, principal, response, time.Since(started).Milliseconds())
 	w.Header().Set(transportModeHeader, targetTransportMode(*served, principal, "/v1/chat/completions"))
 	writeJSON(w, 200, response)
-}
-
-func targetTransportMode(target router.Target, principal *config.Principal, surface string) string {
-	model, ok := providers.CatalogCachedLookupForPrincipal(target.Provider, target.Model, principal)
-	if ok {
-		for _, candidate := range model.SupportedSurfaces {
-			if strings.EqualFold(strings.TrimPrefix(strings.TrimSpace(candidate), "/v1"), strings.TrimPrefix(surface, "/v1")) {
-				return "native"
-			}
-		}
-	}
-	return "translated"
 }
 
 func normalizeChatResponseEnvelope(response map[string]any) {
@@ -372,6 +367,9 @@ func completeChatTool(id, name, arguments string) bool {
 // available, instead of masking every failure as a generic 502.
 func writeUpstreamError(w http.ResponseWriter, err error) {
 	status := upstreamErrorStatus(err)
+	if retryAfter := safeRetryAfter(providers.InvocationRetryAfter(err)); retryAfter != "" {
+		w.Header().Set("Retry-After", retryAfter)
+	}
 	var atf *router.AllTargetsFailed
 	if errors.As(err, &atf) && status >= 400 {
 		writeError(w, status, atf.Error())
@@ -382,6 +380,17 @@ func writeUpstreamError(w http.ResponseWriter, err error) {
 		return
 	}
 	writeError(w, status, "Upstream provider request failed.")
+}
+
+func safeRetryAfter(value string) string {
+	value = strings.TrimSpace(value)
+	if seconds, err := strconv.ParseUint(value, 10, 63); err == nil {
+		return strconv.FormatUint(seconds, 10)
+	}
+	if retryAt, err := http.ParseTime(value); err == nil {
+		return retryAt.UTC().Format(http.TimeFormat)
+	}
+	return ""
 }
 
 func upstreamErrorStatus(err error) int {

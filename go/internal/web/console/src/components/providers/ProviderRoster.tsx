@@ -6,15 +6,22 @@ import { asList, asRecord, numberValue, stringValue } from "../../lib/records";
 import { ProviderMark, hasProviderMark } from "../ProviderMark";
 import { boolValue } from "./shared";
 
-export const providerShelves = ["OpenAI-compatible", "Anthropic-compatible", "Google native & cloud", "Local & self-hosted", "Embeddings, speech & media", "Client setup", "Other candidates"];
+export const providerShelves = ["Experimental", "OpenAI-compatible", "Anthropic-compatible", "Google native & cloud", "Local & self-hosted", "Embeddings, speech & media", "Client setup", "Other candidates"];
 export const discoveryFilters = [
-  ["all", "All providers"], ["configured", "Your accounts"], ["free", "Free tiers"],
-  ["no-key", "Free · no key"], ["trial", "Trials"], ["device", "Device sign-in"],
-  ["local", "Local"], ["candidate", "New candidates"], ["unavailable", "Unavailable"],
+  ["all", "All providers"],
+  ["configured", "Your accounts"],
+  ["free", "Free tiers"],
+  ["no-key", "Free · no key"],
+  ["trial", "Trials"],
+  ["official", "Official sign-in"],
+  ["local", "Local"],
+  ["candidate", "New candidates"],
+  ["unavailable", "Unavailable"],
 ];
 
 export function shelfFor(entry: JSONRecord): string {
   const id = stringValue(entry.id);
+  if (asList(entry.categories).map(String).includes("experimental")) return "Experimental";
   if (boolValue(entry.client_only)) return "Client setup";
   if (["ollama", "localai"].includes(id) || stringValue(entry.category) === "local") return "Local & self-hosted";
   if (["gemini", "ai_studio", "vertex_ai", "bedrock", "azure_openai"].includes(id)) return "Google native & cloud";
@@ -27,7 +34,9 @@ export function safeRosterURL(value: unknown): string | undefined {
   try {
     const url = new URL(stringValue(value));
     return url.protocol === "https:" && !url.username && !url.password ? url.href : undefined;
-  } catch { return undefined; }
+  } catch {
+    return undefined;
+  }
 }
 
 function endpointIdentity(value: unknown): string {
@@ -40,7 +49,9 @@ function endpointIdentity(value: unknown): string {
     });
     // Match producer canonicalization: doubled slashes and reserved escapes select routes.
     return url.href.endsWith("//") ? url.href : url.href.replace(/\/$/, "");
-  } catch { return ""; }
+  } catch {
+    return "";
+  }
 }
 
 export function rosterUnavailable(entry: JSONRecord): boolean {
@@ -64,13 +75,16 @@ export function mergeProviderRoster(builtins: JSONRecord[], roster: JSONRecord[]
     // A familiar ID with a different endpoint remains a separate discovery option.
     const builtin = merged.find((entry) => {
       const base = endpointIdentity(entry.default_base_url);
-      return endpoint && base ? endpoint === base && (!protocol || protocol === "unknown" || protocol === stringValue(entry.protocol))
-        : !endpoint && id === stringValue(entry.id);
+      return endpoint && base ? endpoint === base && (!protocol || protocol === "unknown" || protocol === stringValue(entry.protocol)) : !endpoint && id === stringValue(entry.id);
     });
     if (builtin && !rosterUnavailable(remote)) {
       builtin.roster_entries.push(remote);
     } else {
-      const slug = stringValue(remote.name, id).toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 48);
+      const slug = stringValue(remote.name, id)
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, "-")
+        .replace(/^-+|-+$/g, "")
+        .slice(0, 48);
       const matchingInstance = allInstances.find((inst) => {
         const instEndpoint = endpointIdentity(inst.base_url);
         const instID = stringValue(inst.id).toLowerCase();
@@ -82,7 +96,7 @@ export function mergeProviderRoster(builtins: JSONRecord[], roster: JSONRecord[]
         id: isConfigured && matchingInstance ? stringValue(matchingInstance.id) : `roster:${id}`,
         roster_id: id,
         label: stringValue(remote.name, id),
-        protocol: isConfigured ? (stringValue(matchingInstance.protocol) || (stringValue(remote.protocol) === "unknown" ? "openai" : stringValue(remote.protocol, "openai"))) : stringValue(remote.protocol, "unknown"),
+        protocol: isConfigured ? stringValue(matchingInstance.protocol) || (stringValue(remote.protocol) === "unknown" ? "openai" : stringValue(remote.protocol, "openai")) : stringValue(remote.protocol, "unknown"),
         remote_roster: true,
         configured: isConfigured,
         status: isConfigured ? stringValue(matchingInstance.status, "configured") : "not_configured",
@@ -105,20 +119,30 @@ export function matchesDiscoveryFilter(entry: JSONRecord, filter: string): boole
   const unavailable = remote ? rosterUnavailable(entry) : !!stringValue(entry.availability) && stringValue(entry.availability) !== "available" && !boolValue(entry.client_only);
   if (filter === "unavailable") return unavailable;
   if (remote && unavailable) return false;
-  const offers = asList(entry.roster_entries).map(asRecord).filter((offer) => {
-    if (rosterUnavailable(offer)) return false;
-    const expires = stringValue(offer.offer_expires_at);
-    return !expires || (Number.isFinite(Date.parse(expires)) && Date.parse(expires) > Date.now());
-  });
+  const offers = asList(entry.roster_entries)
+    .map(asRecord)
+    .filter((offer) => {
+      if (rosterUnavailable(offer)) return false;
+      const expires = stringValue(offer.offer_expires_at);
+      return !expires || (Number.isFinite(Date.parse(expires)) && Date.parse(expires) > Date.now());
+    });
   switch (filter) {
-    case "configured": return boolValue(entry.configured);
-    case "free": return asList(entry.categories).includes("free") || offers.some((offer) => ["free_tier", "recurring_credit"].includes(stringValue(offer.offer)));
-    case "no-key": return (asList(entry.categories).includes("no-auth") && !boolValue(entry.requires_api_key)) || offers.some((offer) => offer.auth === "none" && ["free_tier", "recurring_credit"].includes(stringValue(offer.offer)));
-    case "trial": return offers.some((offer) => offer.offer === "trial");
-    case "device": return asList(entry.auth_methods).includes("oauth_device");
-    case "local": return shelfFor(entry) === "Local & self-hosted";
-    case "candidate": return remote;
-    default: return true;
+    case "configured":
+      return boolValue(entry.configured);
+    case "free":
+      return asList(entry.categories).includes("free") || offers.some((offer) => ["free_tier", "recurring_credit"].includes(stringValue(offer.offer)));
+    case "no-key":
+      return (asList(entry.categories).includes("no-auth") && !boolValue(entry.requires_api_key)) || offers.some((offer) => offer.auth === "none" && ["free_tier", "recurring_credit"].includes(stringValue(offer.offer)));
+    case "trial":
+      return offers.some((offer) => offer.offer === "trial");
+    case "official":
+      return asList(entry.auth_methods).some((method) => method === "oauth_device" || method === "oauth_browser");
+    case "local":
+      return shelfFor(entry) === "Local & self-hosted";
+    case "candidate":
+      return remote;
+    default:
+      return true;
   }
 }
 
@@ -135,8 +159,12 @@ export function rosterSetupUnavailableReason(entry: JSONRecord, registry: JSONRe
 export function rosterSetupEntry(entry: JSONRecord, registry: JSONRecord[]): JSONRecord | null {
   if (rosterSetupUnavailableReason(entry, registry)) return null;
   const protocol = stringValue(entry.protocol, "openai");
-  const slug = stringValue(entry.name, stringValue(entry.roster_id, stringValue(entry.id)))
-    .toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 48) || "roster-provider";
+  const slug =
+    stringValue(entry.name, stringValue(entry.roster_id, stringValue(entry.id)))
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, "-")
+      .replace(/^-+|-+$/g, "")
+      .slice(0, 48) || "roster-provider";
   const curated = registry.find((item) => stringValue(item.id) === slug.replace(/-/g, "_") || asList(item.aliases).includes(slug));
   const adapter = curated || registry.find((item) => item.id === `custom_${protocol}`) || registry.find((item) => item.id === "custom_openai");
   if (!adapter) return null;
@@ -162,8 +190,12 @@ export function rosterCandidateSetup(entry: JSONRecord, registry: JSONRecord[]):
   const protocol = stringValue(entry.protocol, "openai");
   const baseURL = safeRosterURL(entry.base_url);
   if (!baseURL) return null;
-  const slug = stringValue(entry.name, stringValue(entry.roster_id, stringValue(entry.id)))
-    .toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 48) || "roster-provider";
+  const slug =
+    stringValue(entry.name, stringValue(entry.roster_id, stringValue(entry.id)))
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, "-")
+      .replace(/^-+|-+$/g, "")
+      .slice(0, 48) || "roster-provider";
   const curated = registry.find((item) => stringValue(item.id) === slug.replace(/-/g, "_") || asList(item.aliases).includes(slug));
   const adapter = curated || registry.find((item) => item.id === `custom_${protocol}`) || registry.find((item) => item.id === "custom_openai");
   if (!adapter) return null;
@@ -191,18 +223,28 @@ export function useProviderRoster(mode: ConsoleMode) {
   const generation = useRef(0);
   useEffect(() => {
     const current = ++generation.current;
-    setState({}); setBusy(true); setError("");
-    void getJSON<JSONRecord>(mode, "/provider-roster").then((payload) => {
-      if (generation.current === current) setState(asRecord(payload));
-    }).catch(() => {
-      if (generation.current === current) setError("Remote roster unavailable. Built-in providers are ready to use.");
-    }).finally(() => { if (generation.current === current) setBusy(false); });
-    return () => { generation.current += 1; };
+    setState({});
+    setBusy(true);
+    setError("");
+    void getJSON<JSONRecord>(mode, "/provider-roster")
+      .then((payload) => {
+        if (generation.current === current) setState(asRecord(payload));
+      })
+      .catch(() => {
+        if (generation.current === current) setError("Remote roster unavailable. Built-in providers are ready to use.");
+      })
+      .finally(() => {
+        if (generation.current === current) setBusy(false);
+      });
+    return () => {
+      generation.current += 1;
+    };
   }, [mode]);
   const refresh = async () => {
     if (mode !== "admin" || busy) return;
     const current = generation.current;
-    setBusy(true); setError("");
+    setBusy(true);
+    setError("");
     try {
       await sendJSON<JSONRecord>(mode, "/provider-roster/refresh", "POST", {});
       const payload = await getJSON<JSONRecord>(mode, "/provider-roster");
@@ -213,21 +255,51 @@ export function useProviderRoster(mode: ConsoleMode) {
       try {
         const payload = await getJSON<JSONRecord>(mode, "/provider-roster");
         if (generation.current === current) setState(asRecord(payload));
-      } catch { /* Keep the last snapshot while the optional service is unavailable. */ }
-    } finally { if (generation.current === current) setBusy(false); }
+      } catch {
+        /* Keep the last snapshot while the optional service is unavailable. */
+      }
+    } finally {
+      if (generation.current === current) setBusy(false);
+    }
   };
-  return { state, entries: asList(state.entries).map(asRecord), busy, error, refresh, canRefresh: mode === "admin" };
+  return {
+    state,
+    entries: asList(state.entries).map(asRecord),
+    busy,
+    error,
+    refresh,
+    canRefresh: mode === "admin",
+  };
 }
 
 export function RosterStatus({ roster }: { roster: ReturnType<typeof useProviderRoster> }) {
   const { state, busy, error, refresh, canRefresh } = roster;
   const refreshFailed = !!stringValue(state.error);
-  const degradedSources = asList(state.sources).map(asRecord).filter((source) => !!stringValue(source.status) && source.status !== "ok");
+  const degradedSources = asList(state.sources)
+    .map(asRecord)
+    .filter((source) => !!stringValue(source.status) && source.status !== "ok");
   const recovery = canRefresh ? "An administrator can refresh the roster here." : "Only an administrator can refresh the roster.";
-  return <div class="provider-roster-status">
-    <div><p role="status">{error || (busy ? "Updating remote roster…" : state.configured === false ? "Remote roster is not configured. Built-in providers are available." : `Remote roster · Revision ${numberValue(state.revision)} · Auto-refresh ${boolValue(state.auto_refresh) ? "on" : "off"}${boolValue(state.stale) ? " · Stale snapshot" : ""}${refreshFailed ? " · Last refresh failed" : ""}`)}</p>{degradedSources.length ? <p>{degradedSources.length} discovery source{degradedSources.length === 1 ? " is" : "s are"} degraded. Some entries may be out of date.</p> : null}{!canRefresh || refreshFailed || boolValue(state.stale) || degradedSources.length ? <p>{recovery}</p> : null}{stringValue(state.last_success) ? <p>Last updated {stringValue(state.last_success)}</p> : null}</div>
-    {canRefresh ? <button class="button button--secondary" type="button" disabled={busy} onClick={() => void refresh()}><RefreshCw size={14} />{busy ? "Updating…" : "Refresh roster"}</button> : null}
-  </div>;
+  return (
+    <div class="provider-roster-status">
+      <div>
+        <p role="status">{error || (busy ? "Updating remote roster…" : state.configured === false ? "Remote roster is not configured. Built-in providers are available." : `Remote roster · Revision ${numberValue(state.revision)} · Auto-refresh ${boolValue(state.auto_refresh) ? "on" : "off"}${boolValue(state.stale) ? " · Stale snapshot" : ""}${refreshFailed ? " · Last refresh failed" : ""}`)}</p>
+        {degradedSources.length ? (
+          <p>
+            {degradedSources.length} discovery source
+            {degradedSources.length === 1 ? " is" : "s are"} degraded. Some entries may be out of date.
+          </p>
+        ) : null}
+        {!canRefresh || refreshFailed || boolValue(state.stale) || degradedSources.length ? <p>{recovery}</p> : null}
+        {stringValue(state.last_success) ? <p>Last updated {stringValue(state.last_success)}</p> : null}
+      </div>
+      {canRefresh ? (
+        <button class="button button--secondary" type="button" disabled={busy} onClick={() => void refresh()}>
+          <RefreshCw size={14} />
+          {busy ? "Updating…" : "Refresh roster"}
+        </button>
+      ) : null}
+    </div>
+  );
 }
 
 export function rosterLogoSource(value: unknown): string | undefined {
@@ -248,7 +320,11 @@ export function RosterMark({ entry }: { entry: JSONRecord }) {
   const local = <ProviderMark id={id} label={stringValue(entry.label, stringValue(entry.name))} baseURL={baseURL} />;
   if (hasProviderMark(id, baseURL)) return local;
   if (source && failed !== source) {
-    return <span class="provider-mark" aria-hidden="true"><img src={source} alt="" width="24" height="24" onError={() => setFailed(source)} /></span>;
+    return (
+      <span class="provider-mark" aria-hidden="true">
+        <img src={source} alt="" width="24" height="24" onError={() => setFailed(source)} />
+      </span>
+    );
   }
   const signup = safeRosterURL(entry.signup_url);
   const base = safeRosterURL(entry.base_url);
@@ -256,11 +332,17 @@ export function RosterMark({ entry }: { entry: JSONRecord }) {
     try {
       const u = new URL(signup || base || "");
       return u.hostname;
-    } catch { return ""; }
+    } catch {
+      return "";
+    }
   })();
   if (domain && failed !== domain) {
     const faviconURL = `https://www.google.com/s2/favicons?domain=${domain}&sz=64`;
-    return <span class="provider-mark" aria-hidden="true"><img src={faviconURL} alt="" width="24" height="24" onError={() => setFailed(domain)} /></span>;
+    return (
+      <span class="provider-mark" aria-hidden="true">
+        <img src={faviconURL} alt="" width="24" height="24" onError={() => setFailed(domain)} />
+      </span>
+    );
   }
   return local;
 }
@@ -271,11 +353,20 @@ export function rosterReportURL(entry: JSONRecord, revision: unknown): string {
     const url = new URL(issue);
     if (url.hostname === "github.com" && !url.port && /^\/xibodev\/llm-gateway\/issues\/\d+\/?$/.test(url.pathname)) return `${url.origin}${url.pathname}`;
   }
-  const params = new URLSearchParams({ title: `Provider roster report: ${stringValue(entry.id)}`, body: `### Roster entry ID\n\n${stringValue(entry.id)}\n\n### Roster revision\n\n${numberValue(revision)}\n\n### Problem\n\nDescribe the issue with this discovery entry.\n\n### Public evidence and reproduction\n\nInclude only public evidence. Reports are public: never include credentials, private endpoints, configuration, or personal information.` });
+  const params = new URLSearchParams({
+    title: `Provider roster report: ${stringValue(entry.id)}`,
+    body: `### Roster entry ID\n\n${stringValue(entry.id)}\n\n### Roster revision\n\n${numberValue(revision)}\n\n### Problem\n\nDescribe the issue with this discovery entry.\n\n### Public evidence and reproduction\n\nInclude only public evidence. Reports are public: never include credentials, private endpoints, configuration, or personal information.`,
+  });
   return `https://github.com/xibodev/llm-gateway/issues/new?${params}`;
 }
 
-const offerLabels: Record<string, string> = { free_tier: "Free tier", recurring_credit: "Recurring credit", trial: "Trial", paid: "Paid", unknown: "Offer unknown" };
+const offerLabels: Record<string, string> = {
+  free_tier: "Free tier",
+  recurring_credit: "Recurring credit",
+  trial: "Trial",
+  paid: "Paid",
+  unknown: "Offer unknown",
+};
 
 export function RosterMetadata({ entries, revision }: { entries: JSONRecord[]; revision?: unknown }) {
   const primary = entries[0];
@@ -287,27 +378,51 @@ export function RosterMetadata({ entries, revision }: { entries: JSONRecord[]; r
   return (
     <div class="provider-roster-metadata">
       <section key={stringValue(primary.id)} aria-label="Discovery details">
-        <div style={{ display: "flex", gap: "8px", alignItems: "center", marginBottom: "8px" }}>
-          <span class={`status-pill ${isAnonymous ? "status-pill--success" : "status-pill--muted"}`}>
-            {isAnonymous ? "Free · No API key needed" : "API key required"}
-          </span>
+        <div
+          style={{
+            display: "flex",
+            gap: "8px",
+            alignItems: "center",
+            marginBottom: "8px",
+          }}
+        >
+          <span class={`status-pill ${isAnonymous ? "status-pill--success" : "status-pill--muted"}`}>{isAnonymous ? "Free · No API key needed" : "API key required"}</span>
           <span class="status-pill status-pill--muted">{offerLabels[stringValue(primary.offer)] || "Free tier"}</span>
         </div>
         <dl>
           <div>
             <dt>{endpoints.length > 1 ? "Endpoints" : "Endpoint"}</dt>
             <dd class="technical">
-              {endpoints.length > 1
-                ? endpoints.map((ep) => <div key={ep}><code>{ep}</code></div>)
-                : <code>{endpoints[0] || "Not supplied"}</code>}
+              {endpoints.length > 1 ? (
+                endpoints.map((ep) => (
+                  <div key={ep}>
+                    <code>{ep}</code>
+                  </div>
+                ))
+              ) : (
+                <code>{endpoints[0] || "Not supplied"}</code>
+              )}
             </dd>
           </div>
-          <div><dt>Protocol</dt><dd>{stringValue(primary.protocol, "openai")}-compatible</dd></div>
+          <div>
+            <dt>Protocol</dt>
+            <dd>{stringValue(primary.protocol, "openai")}-compatible</dd>
+          </div>
         </dl>
         <div class="provider-roster-links">
-          {signup && !isAnonymous ? <a href={signup} target="_blank" rel="noopener noreferrer">Sign up / get a key ↗</a> : null}
-          {docs ? <a href={docs} target="_blank" rel="noopener noreferrer">Documentation ↗</a> : null}
-          <a href={rosterReportURL(primary, revision)} target="_blank" rel="noopener noreferrer">Report an issue ↗</a>
+          {signup && !isAnonymous ? (
+            <a href={signup} target="_blank" rel="noopener noreferrer">
+              Sign up / get a key ↗
+            </a>
+          ) : null}
+          {docs ? (
+            <a href={docs} target="_blank" rel="noopener noreferrer">
+              Documentation ↗
+            </a>
+          ) : null}
+          <a href={rosterReportURL(primary, revision)} target="_blank" rel="noopener noreferrer">
+            Report an issue ↗
+          </a>
         </div>
         <p class="form-help">Reports open a public GitHub issue.</p>
       </section>

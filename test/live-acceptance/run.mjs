@@ -448,7 +448,7 @@ async function testPlayground(identity, healthy, plans) {
       const composer = page.locator('.chat-composer textarea[placeholder^="Send a message"]');
       await composer.fill("hi");
       const [response] = await Promise.all([
-        page.waitForResponse((candidate) => candidate.request().method() === "POST" && candidate.url().endsWith("/admin/api/playground"), { timeout: 70_000 }),
+        page.waitForResponse((candidate) => candidate.request().method() === "POST" && candidate.url().endsWith("/admin/api/playground/v1/chat/completions"), { timeout: 70_000 }),
         page.getByRole("button", { name: /^Send$/ }).click(),
       ]);
       const payload = await response.json().catch(() => null);

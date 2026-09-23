@@ -1,8 +1,10 @@
 package providers
 
 import (
+	"context"
 	"encoding/base64"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -139,6 +141,102 @@ func TestCompleteTranslatesGeminiShape(t *testing.T) {
 	if usage["prompt_tokens"] != 7 || usage["total_tokens"] != 95 {
 		t.Fatalf("usage = %+v", usage)
 	}
+}
+
+func TestVertexRequestTypeHeaderIsExplicitAndInvocationOnly(t *testing.T) {
+	for _, testCase := range []struct {
+		name, mode, want string
+	}{
+		{name: "unset"},
+		{name: "default", mode: "default"},
+		{name: "paygo", mode: "paygo", want: "shared"},
+		{name: "dedicated", mode: "dedicated", want: "dedicated"},
+	} {
+		t.Run(testCase.name, func(t *testing.T) {
+			var got string
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				got = r.Header.Get("X-Vertex-AI-LLM-Request-Type")
+				w.Header().Set("Content-Type", "application/json")
+				_, _ = w.Write([]byte(`{"candidates":[{"content":{"parts":[{"text":"ok"}]}}]}`))
+			}))
+			defer server.Close()
+			provider := NewVertexAI(server.URL, "key", "project", "global", 5).withVertexRequestType(testCase.mode)
+			if _, err := provider.Complete("gemini-3.5-flash", []Message{{"role": "user", "content": "hi"}}, nil); err != nil {
+				t.Fatal(err)
+			}
+			if got != testCase.want {
+				t.Fatalf("request type header=%q, want %q", got, testCase.want)
+			}
+		})
+	}
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if got := r.Header.Get("X-Vertex-AI-LLM-Request-Type"); got != "" {
+			t.Fatalf("AI Studio received Vertex request header %q", got)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"candidates":[{"content":{"parts":[{"text":"ok"}]}}]}`))
+	}))
+	defer server.Close()
+	provider := NewAIStudio(server.URL, "key", 5).withVertexRequestType("dedicated")
+	if _, err := provider.Complete("gemini-3.5-flash", []Message{{"role": "user", "content": "hi"}}, nil); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestGoogleEmbeddingTransportsNormalizeOpenAIEnvelope(t *testing.T) {
+	t.Run("AI Studio", func(t *testing.T) {
+		var path string
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			path = r.URL.Path
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"embedding":{"values":[0.1,0.2,0.3]}}`))
+		}))
+		defer server.Close()
+		result, err := NewAIStudio(server.URL, "key", 5).Embed(context.Background(), "gemini-embedding-001", "hello")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if path != "/models/gemini-embedding-001:embedContent" || len(result["data"].([]any)[0].(map[string]any)["embedding"].([]any)) != 3 {
+			t.Fatalf("path=%q result=%+v", path, result)
+		}
+	})
+
+	t.Run("Vertex preserves input order", func(t *testing.T) {
+		calls := 0
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			calls++
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = fmt.Fprintf(w, `{"predictions":[{"embeddings":{"values":[%d,0.5],"statistics":{"token_count":%d}}}]}`, calls, calls+1)
+		}))
+		defer server.Close()
+		result, err := NewVertexAI(server.URL, "key", "project", "global", 5).Embed(context.Background(), "text-embedding-005", []any{"first", "second"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		data := result["data"].([]any)
+		usage := result["usage"].(map[string]any)
+		if calls != 2 || data[0].(map[string]any)["index"] != 0 || data[1].(map[string]any)["index"] != 1 || usage["prompt_tokens"] != 5 {
+			t.Fatalf("calls=%d result=%+v", calls, result)
+		}
+	})
+
+	t.Run("Vertex Gemini embedding 2 uses embedContent", func(t *testing.T) {
+		var path string
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			path = r.URL.Path
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"embedding":{"values":[0.1,0.2]},"usageMetadata":{"promptTokenCount":3}}`))
+		}))
+		defer server.Close()
+		result, err := NewVertexAI(server.URL, "key", "project", "global", 5).Embed(context.Background(), "gemini-embedding-2", "hello")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !strings.HasSuffix(path, "/gemini-embedding-2:embedContent") || result["usage"].(map[string]any)["prompt_tokens"] != 3 {
+			t.Fatalf("path=%q result=%+v", path, result)
+		}
+	})
 }
 
 func TestGenerateImagesDecodesInlineData(t *testing.T) {

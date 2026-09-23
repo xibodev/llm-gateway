@@ -215,3 +215,29 @@ func TestCatalogReadUsesDiagnosticSanitizer(t *testing.T) {
 		t.Fatalf("unsanitized detail: %s", result.Diagnostics.Detail)
 	}
 }
+
+func TestCachedCatalogReadNeverContactsUpstream(t *testing.T) {
+	var calls atomic.Int32
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls.Add(1)
+		_, _ = w.Write([]byte(`{"data":[{"id":"network-model"}]}`))
+	}))
+	defer upstream.Close()
+	setupCatalogReadTest(t, upstream.URL)
+
+	result := ReadCachedCatalogForPrincipal("catalog-read", nil)
+	if result.Err != nil || len(result.Models) != 0 || result.Diagnostics.Status != "not_synced" || !result.Diagnostics.FromCache {
+		t.Fatalf("empty cached read: %+v", result)
+	}
+	if calls.Load() != 0 {
+		t.Fatalf("cached read contacted upstream %d times", calls.Load())
+	}
+
+	if _, _, err := RefreshCatalogForPrincipalWithError("catalog-read", nil); err != nil {
+		t.Fatal(err)
+	}
+	result = ReadCachedCatalogForPrincipal("catalog-read", nil)
+	if len(result.Models) != 1 || result.Models[0].ID != "network-model" || calls.Load() != 1 {
+		t.Fatalf("synced cached read: calls=%d result=%+v", calls.Load(), result)
+	}
+}

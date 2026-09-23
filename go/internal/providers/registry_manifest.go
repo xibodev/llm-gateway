@@ -11,6 +11,7 @@ import (
 	"regexp"
 	"strings"
 
+	anthropicauth "github.com/xibodev/llm-provider-auth/anthropic"
 	gcpauth "github.com/xibodev/llm-provider-auth/gcp"
 )
 
@@ -65,6 +66,7 @@ func validateProviderRegistry(entries []RegistryEntry) error {
 	allowedAuth := map[string]bool{
 		"api_key": true, "gateway_client": true, "none": true, "oauth_browser": true,
 		"oauth_device": true, "token_import": true, gcpauth.CredentialKind: true,
+		string(anthropicauth.CredentialSetupToken): true,
 	}
 	allowedRisk := map[string]bool{"green": true, "yellow": true, "red": true}
 	claimedNames := map[string]string{}

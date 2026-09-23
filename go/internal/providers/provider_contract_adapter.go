@@ -24,11 +24,12 @@ func AdaptCoreProviderConnection(
 	}
 	registryID := EffectiveRegistryID(providerID, cfg.RegistryID, cfg.Type)
 	isCodex := registryID == "openai_codex"
+	isAntigravity := registryID == "google_antigravity"
 	out := core.ProviderConnection{ProviderID: providerID}
 
 	if connection == nil {
-		if isCodex {
-			return core.ProviderConnection{}, fmt.Errorf("codex requires a personal connection")
+		if isCodex || isAntigravity {
+			return core.ProviderConnection{}, fmt.Errorf("%s requires a personal connection", registryID)
 		}
 		if explicitlyAnonymousProvider(providerID, cfg, registryID) {
 			out.Kind = core.ProviderConnectionAnonymous
@@ -55,6 +56,9 @@ func AdaptCoreProviderConnection(
 	case isCodex:
 		out.Kind = core.ProviderConnectionPersonalSubscription
 		out.AuthKind = core.ProviderAuthOAuthDevice
+	case isAntigravity:
+		out.Kind = core.ProviderConnectionPersonalSubscription
+		out.AuthKind = core.ProviderAuthOAuthBrowser
 	case strings.Contains(strings.ToLower(connection.Kind), "oauth"):
 		out.AuthKind = core.ProviderAuthOAuthDevice
 	case strings.EqualFold(strings.TrimSpace(connection.Kind), CredentialKindAPIKey):

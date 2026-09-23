@@ -136,7 +136,8 @@ func responsesDispatch(
 			writeUpstreamError(w, providerErr)
 			return
 		}
-		response, _, providerErr := providers.CompleteResponsesContext(r.Context(), provider, target.Model, payload)
+		ctx := fallbackContext(r, request.FallbackTimeoutMS, request.AffinityKey)
+		response, _, providerErr := providers.CompleteResponsesContext(ctx, provider, target.Model, payload)
 		if providerErr != nil {
 			writeUpstreamError(w, providerErr)
 			return

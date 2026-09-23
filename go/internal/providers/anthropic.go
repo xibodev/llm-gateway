@@ -2,20 +2,25 @@ package providers
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
 	"strings"
+	"time"
 
 	"llmgw/internal/iam"
 
+	anthropicauth "github.com/xibodev/llm-provider-auth/anthropic"
 	"github.com/xibodev/llm-translate"
+	core "github.com/xibodev/llmgw-core"
 )
 
 const (
 	anthropicVersion     = "2023-06-01"
 	anthropicDefaultBase = "https://api.anthropic.com"
 	anthropicDefaultMax  = 4096
+	anthropicCatalogTTL  = time.Hour
 )
 
 // AnthropicNativeProvider forwards to the real Anthropic Messages API. It takes
@@ -23,10 +28,16 @@ const (
 type AnthropicNativeProvider struct {
 	BaseURL string
 	APIKey  string
+	Auth    anthropicauth.HeaderSource
 	Timeout float64
+	Now     func() time.Time
 }
 
 func (AnthropicNativeProvider) IsStub() bool { return false }
+
+func (AnthropicNativeProvider) PreservesWireNativeSurface(_ string, surface core.ModelSurface) bool {
+	return surface == core.ModelSurfaceMessages
+}
 
 func (p AnthropicNativeProvider) base() string {
 	if p.BaseURL != "" {
@@ -43,6 +54,14 @@ func (p AnthropicNativeProvider) headers() http.Header {
 		h.Set("x-api-key", p.APIKey)
 	}
 	return h
+}
+
+func (p AnthropicNativeProvider) applyHeaders(req *http.Request) error {
+	req.Header = p.headers()
+	if p.Auth.Kind() != "" {
+		return p.Auth.Apply(context.Background(), req)
+	}
+	return nil
 }
 
 func (p AnthropicNativeProvider) payload(model string, messages []Message, stream bool, kw Kwargs) (map[string]any, error) {
@@ -105,9 +124,23 @@ func (p AnthropicNativeProvider) Complete(model string, messages []Message, kw K
 	if err != nil {
 		return nil, err
 	}
+	if p.Auth.Kind() == anthropicauth.CredentialSetupToken {
+		payload["stream"] = true
+		anthropicResp, err := p.completeStreamingPayload(payload)
+		if err != nil {
+			return nil, err
+		}
+		converted := translate.AnthropicResponseToOpenAIWithReport(anthropicResp, model)
+		if err := converted.RejectMaterialLoss(); err != nil {
+			return nil, &ConfigError{Msg: err.Error()}
+		}
+		return converted.Value, nil
+	}
 	body, _ := json.Marshal(payload)
 	req, _ := http.NewRequest("POST", p.base()+"/v1/messages", bytes.NewReader(body))
-	req.Header = p.headers()
+	if err := p.applyHeaders(req); err != nil {
+		return nil, &ConfigError{Msg: err.Error()}
+	}
 	resp, err := httpClient(p.timeout()).Do(req)
 	if err != nil {
 		return nil, retryableInvocation("anthropic: upstream transport error: " + err.Error())
@@ -156,12 +189,18 @@ func (p AnthropicNativeProvider) CompleteAnthropicMessages(model string, payload
 			request["system"] = preamble
 		}
 	}
+	if p.Auth.Kind() == anthropicauth.CredentialSetupToken {
+		request["stream"] = true
+		return p.completeStreamingPayload(request)
+	}
 	body, err := json.Marshal(request)
 	if err != nil {
 		return nil, &ConfigError{Msg: "anthropic: invalid Messages request"}
 	}
 	req, _ := http.NewRequest("POST", p.base()+"/v1/messages", bytes.NewReader(body))
-	req.Header = p.headers()
+	if err := p.applyHeaders(req); err != nil {
+		return nil, &ConfigError{Msg: err.Error()}
+	}
 	resp, err := httpClient(p.timeout()).Do(req)
 	if err != nil {
 		return nil, retryableInvocation("anthropic: upstream transport error: " + err.Error())
@@ -186,6 +225,133 @@ func (p AnthropicNativeProvider) CompleteAnthropicMessages(model string, payload
 	return result, nil
 }
 
+func (p AnthropicNativeProvider) completeStreamingPayload(payload map[string]any) (map[string]any, error) {
+	body, err := json.Marshal(payload)
+	if err != nil {
+		return nil, &ConfigError{Msg: "anthropic: invalid Messages request"}
+	}
+	req, _ := http.NewRequest("POST", p.base()+"/v1/messages", bytes.NewReader(body))
+	if err := p.applyHeaders(req); err != nil {
+		return nil, &ConfigError{Msg: err.Error()}
+	}
+	resp, err := httpClient(p.timeout()).Do(req)
+	if err != nil {
+		return nil, retryableInvocation("anthropic: streaming transport error: " + err.Error())
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode >= 400 {
+		raw, _ := readInvocationResponseBody(resp, "anthropic")
+		return nil, invocationStatus(fmt.Sprintf("anthropic: upstream returned %d: %s", resp.StatusCode, extractError(raw)), resp.StatusCode)
+	}
+	reader := newSSERecordReader(resp.Body)
+	result := map[string]any{"content": []any{}}
+	blocks := map[int]map[string]any{}
+	partials := map[int]*strings.Builder{}
+	started := false
+	stopped := false
+	for payload, ok := reader.Next(); ok; payload, ok = reader.Next() {
+		if stopped {
+			return nil, circuitFailureInvocation("anthropic: data followed streamed Messages terminal event")
+		}
+		var event map[string]any
+		if json.Unmarshal([]byte(payload), &event) != nil {
+			return nil, circuitFailureInvocation("anthropic: invalid JSON in streamed Messages response")
+		}
+		switch event["type"] {
+		case "message_start":
+			if started {
+				return nil, circuitFailureInvocation("anthropic: duplicate streamed Messages start event")
+			}
+			if message, ok := event["message"].(map[string]any); ok {
+				started = true
+				for key, value := range message {
+					result[key] = value
+				}
+				result["content"] = []any{}
+			}
+		case "content_block_start":
+			index := intOf(event["index"])
+			if block, ok := event["content_block"].(map[string]any); ok {
+				copy := make(map[string]any, len(block))
+				for key, value := range block {
+					copy[key] = value
+				}
+				blocks[index] = copy
+				if copy["type"] == "tool_use" {
+					partials[index] = &strings.Builder{}
+				}
+			}
+		case "content_block_delta":
+			index := intOf(event["index"])
+			block := blocks[index]
+			delta, _ := event["delta"].(map[string]any)
+			if block == nil || delta == nil {
+				continue
+			}
+			switch delta["type"] {
+			case "text_delta":
+				block["text"] = stringOf(block["text"]) + stringOf(delta["text"])
+			case "thinking_delta":
+				block["thinking"] = stringOf(block["thinking"]) + stringOf(delta["thinking"])
+			case "signature_delta":
+				block["signature"] = stringOf(block["signature"]) + stringOf(delta["signature"])
+			case "input_json_delta":
+				if partials[index] != nil {
+					partials[index].WriteString(stringOf(delta["partial_json"]))
+				}
+			}
+		case "content_block_stop":
+			index := intOf(event["index"])
+			if block := blocks[index]; block != nil {
+				if partial := partials[index]; partial != nil {
+					var input any = map[string]any{}
+					if partial.Len() > 0 && json.Unmarshal([]byte(partial.String()), &input) != nil {
+						return nil, circuitFailureInvocation("anthropic: invalid streamed tool input")
+					}
+					block["input"] = input
+				}
+				result["content"] = append(result["content"].([]any), block)
+				delete(blocks, index)
+			}
+		case "message_delta":
+			if delta, ok := event["delta"].(map[string]any); ok {
+				for key, value := range delta {
+					result[key] = value
+				}
+			}
+			if usage, ok := event["usage"].(map[string]any); ok {
+				current, _ := result["usage"].(map[string]any)
+				if current == nil {
+					current = map[string]any{}
+				}
+				for key, value := range usage {
+					current[key] = value
+				}
+				result["usage"] = current
+			}
+		case "error":
+			return nil, circuitFailureInvocation("anthropic: streamed Messages response reported an error")
+		case "message_stop":
+			if !started || len(blocks) != 0 {
+				return nil, circuitFailureInvocation("anthropic: incomplete streamed Messages response")
+			}
+			stopped = true
+		}
+	}
+	if err := reader.Err(); err != nil {
+		return nil, retryableInvocation("anthropic: streaming response error: " + err.Error())
+	}
+	if !started || !stopped || len(blocks) != 0 {
+		return nil, circuitFailureInvocation("anthropic: incomplete streamed Messages response")
+	}
+	if _, ok := result["content"].([]any); !ok {
+		return nil, circuitFailureInvocation("anthropic: invalid streamed Messages response")
+	}
+	return result, nil
+}
+
+func stringOf(value any) string { text, _ := value.(string); return text }
+
 func (p AnthropicNativeProvider) CountAnthropicTokens(model string, payload map[string]any, version string, beta []string) (json.Number, error) {
 	request := make(map[string]any, len(payload))
 	for key, value := range payload {
@@ -197,7 +363,9 @@ func (p AnthropicNativeProvider) CountAnthropicTokens(model string, payload map[
 		return "", &ConfigError{Msg: "anthropic: invalid token-count request"}
 	}
 	req, _ := http.NewRequest("POST", p.base()+"/v1/messages/count_tokens", bytes.NewReader(body))
-	req.Header = p.headers()
+	if err := p.applyHeaders(req); err != nil {
+		return "", &ConfigError{Msg: err.Error()}
+	}
 	if validAnthropicHeader(version) {
 		req.Header.Set("anthropic-version", strings.TrimSpace(version))
 	}
@@ -261,7 +429,9 @@ func (p AnthropicNativeProvider) Stream(model string, messages []Message, kw Kwa
 	}
 	body, _ := json.Marshal(payload)
 	req, _ := http.NewRequest("POST", p.base()+"/v1/messages", bytes.NewReader(body))
-	req.Header = p.headers()
+	if err := p.applyHeaders(req); err != nil {
+		return nil, &ConfigError{Msg: err.Error()}
+	}
 	resp, err := httpClient(p.timeout()).Do(req)
 	if err != nil {
 		return nil, retryableInvocation("anthropic: streaming transport error: " + err.Error())
@@ -299,7 +469,9 @@ func (p AnthropicNativeProvider) ListModelsWithError() ([]ModelInfo, *iam.Provid
 	if err != nil {
 		return nil, nil, catalogError("catalog_transport_error", "Provider catalog request could not be created.", 0)
 	}
-	req.Header = p.headers()
+	if err := p.applyHeaders(req); err != nil {
+		return nil, nil, &ConfigError{Msg: err.Error()}
+	}
 	resp, err := httpClient(timeout).Do(req)
 	if err != nil {
 		return nil, nil, catalogError("catalog_transport_error", "Provider catalog request could not reach the upstream service.", 0)
@@ -309,6 +481,10 @@ func (p AnthropicNativeProvider) ListModelsWithError() ([]ModelInfo, *iam.Provid
 		return nil, nil, err
 	}
 	items := body["data"].([]any)
+	discoveredAt := time.Now().UTC()
+	if p.Now != nil {
+		discoveredAt = p.Now().UTC()
+	}
 	out := make([]ModelInfo, 0, len(items))
 	for _, entry := range items {
 		m := entry.(map[string]any)
@@ -317,9 +493,28 @@ func (p AnthropicNativeProvider) ListModelsWithError() ([]ModelInfo, *iam.Provid
 		out = append(out, ModelInfo{
 			ID: id, Vendor: "anthropic", Label: label,
 			SupportedSurfaces: []string{"/v1/messages"},
+			TypedCapabilities: anthropicModelCapabilities(discoveredAt),
 		})
 	}
 	return out, nil, nil
+}
+
+func anthropicModelCapabilities(discoveredAt time.Time) *core.ModelCapabilities {
+	expiresAt := discoveredAt.Add(anthropicCatalogTTL)
+	return &core.ModelCapabilities{
+		SchemaVersion: core.ModelCapabilitiesSchemaVersion,
+		Operations:    core.ModelOperationCapabilities{Chat: core.SupportSupported},
+		Surfaces: core.ModelSurfaceCapabilities{
+			ChatCompletions: core.SupportUnsupported,
+			Responses:       core.SupportUnsupported,
+			Messages:        core.SupportSupported,
+		},
+		Streaming: core.SupportSupported,
+		Provenance: core.ModelCapabilityProvenance{
+			Source: core.ModelCapabilitySourceRegistryStatic, Confidence: core.ModelCapabilityConfidenceHigh,
+		},
+		Freshness: core.ModelCapabilityFreshness{DiscoveredAt: &discoveredAt, ExpiresAt: &expiresAt},
+	}
 }
 
 // anthropicStreamIter reads the Anthropic SSE body and translates it to OpenAI

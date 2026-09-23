@@ -32,8 +32,6 @@ func TestCatalogPayloadValidationAndCache(t *testing.T) {
 			}},
 		{"openai", "data", "/models", `{"id":"fixture-model","owned_by":"fixture"}`, "id", `{"name":"fixture-model","future":{"nested":[null,17]}}`,
 			func(base string) Provider { return OpenAIProvider{auth: catalogFixtureAuth{base: base}, Timeout: 2} }},
-		{"codex", "data", "/models", `{"id":"fixture-model","owned_by":"fixture"}`, "id", `{"name":"fixture-model","future":{"nested":[null,17]}}`,
-			func(base string) Provider { return catalogFixtureCodex(t, base) }},
 	} {
 		t.Run(provider.name, func(t *testing.T) {
 			for _, tc := range []struct {
@@ -80,7 +78,7 @@ func TestCatalogPayloadValidationAndCache(t *testing.T) {
 				{"unavailable", `fixture-secret`, "catalog_http_error", 503, 0},
 			} {
 				t.Run(tc.name, func(t *testing.T) {
-					if (provider.name == "openai" || provider.name == "codex") && (tc.status == 401 || tc.status == 403) {
+					if provider.name == "openai" && (tc.status == 401 || tc.status == 403) {
 						tc.code = "catalog_http_error"
 					}
 					var calls atomic.Int32
@@ -146,6 +144,115 @@ func TestCatalogPayloadValidationAndCache(t *testing.T) {
 						t.Fatalf("legacy ListModels lost successful result: %+v", models)
 					}
 				})
+			}
+		})
+	}
+}
+
+func TestCodexCatalogPayloadValidationAndCache(t *testing.T) {
+	const maxCatalogBytes = 4 << 20
+	validAtLimit := `{"data":[{"id":"fixture-at-limit","supported_in_api":true,"visibility":"list"}]}`
+	validAtLimit += strings.Repeat(" ", maxCatalogBytes-len(validAtLimit))
+	oversized := validAtLimit + " "
+
+	for _, tc := range []struct {
+		name, body, code, detail string
+		status                   int
+		wantIDs                  []string
+	}{
+		{"empty-data", `{"data":[]}`, "catalog_no_usable_models", "Provider catalog returned no API-eligible visible models.", 0, nil},
+		{"empty-models", `{"models":[]}`, "catalog_no_usable_models", "Provider catalog returned no API-eligible visible models.", 0, nil},
+		{"data-id", `{"data":[{"id":"fixture-id","owned_by":"fixture","supported_in_api":true,"visibility":"list","future":{"nested":[null,17]}}]}`, "", "", 200, []string{"fixture-id"}},
+		{"models-slug-and-name", `{"models":[{"slug":"fixture-slug","supported_in_api":true,"visibility":"list"},{"name":"fixture-name","supported_in_api":true,"visibility":"list"}]}`, "", "", 200, []string{"fixture-slug", "fixture-name"}},
+		{"exact-identity-precedence", `{"data":[{"id":"fixture-id","slug":"fixture-slug","name":"fixture-name","supported_in_api":true,"visibility":"list"}]}`, "", "", 200, []string{"fixture-id"}},
+		{"exact-size-boundary", validAtLimit, "", "", 200, []string{"fixture-at-limit"}},
+		{"ambiguous-envelope", `{"data":[],"models":[]}`, "catalog_not_discoverable", "Provider catalog response was invalid.", 200, nil},
+		{"unknown-envelope", `{"items":[]}`, "catalog_not_discoverable", "Provider catalog response was invalid.", 200, nil},
+		{"null-envelope", `{"data":null}`, "catalog_not_discoverable", "Provider catalog response was invalid.", 200, nil},
+		{"object-envelope", `{"data":{}}`, "catalog_not_discoverable", "Provider catalog response was invalid.", 200, nil},
+		{"null-row", `{"data":[null]}`, "catalog_not_discoverable", "Provider catalog response was invalid.", 200, nil},
+		{"number-row", `{"data":[17]}`, "catalog_not_discoverable", "Provider catalog response was invalid.", 200, nil},
+		{"missing-identity", `{"data":[{"display_name":"fixture-secret"}]}`, "catalog_not_discoverable", "Provider catalog response was invalid.", 200, nil},
+		{"blank-id", `{"data":[{"id":" "}]}`, "catalog_not_discoverable", "Provider catalog response was invalid.", 200, nil},
+		{"inexact-id", `{"data":[{"id":" fixture-id "}]}`, "catalog_not_discoverable", "Provider catalog response was invalid.", 200, nil},
+		{"invalid-id-does-not-fall-back", `{"data":[{"id":false,"slug":"fixture-slug"}]}`, "catalog_not_discoverable", "Provider catalog response was invalid.", 200, nil},
+		{"duplicate-identity", `{"models":[{"id":"fixture-id"},{"name":"fixture-id"}]}`, "catalog_not_discoverable", "Provider catalog response was invalid.", 200, nil},
+		{"malformed-row-field", `{"data":[{"id":"fixture-id","supported_in_api":"yes"}]}`, "catalog_not_discoverable", "Provider catalog response was invalid.", 200, nil},
+		{"mixed-valid-invalid", `{"data":[{"id":"fixture-id"},null]}`, "catalog_not_discoverable", "Provider catalog response was invalid.", 200, nil},
+		{"malformed-json", `{"data":[`, "catalog_not_discoverable", "Provider catalog response was invalid.", 200, nil},
+		{"unauthorized", `{"error":"fixture-secret"}`, "catalog_authentication_failed", "Provider authentication failed during catalog access.", 401, nil},
+		{"forbidden", `{"error":"fixture-secret"}`, "catalog_authentication_failed", "Provider authentication failed during catalog access.", 403, nil},
+		{"limited", `{"error":"fixture-secret"}`, "catalog_http_error", "Provider catalog returned HTTP 429.", 429, nil},
+		{"oversized", oversized, "catalog_not_discoverable", "Provider catalog response exceeded the size limit.", 200, nil},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var calls atomic.Int32
+			upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				calls.Add(1)
+				if r.Method != http.MethodGet || r.URL.Path != "/models" {
+					t.Errorf("unexpected discovery request: %s %s", r.Method, r.URL.Path)
+				}
+				if tc.status != 0 {
+					w.WriteHeader(tc.status)
+				}
+				_, _ = w.Write([]byte(tc.body))
+			}))
+			defer upstream.Close()
+
+			setupCatalogReadTest(t, upstream.URL)
+			p := catalogFixtureCodex(t, upstream.URL)
+			cacheMu.Lock()
+			cache["catalog-read"] = p
+			cacheMu.Unlock()
+			stale := time.Now().Add(-2 * catalogTTL)
+			catMu.Lock()
+			catData["catalog-read"] = catalogEntry{
+				SchemaVersion: catalogSchemaVersion,
+				Models:        []ModelInfo{{ID: "old"}},
+				RefreshedAt:   stale,
+			}
+			catMu.Unlock()
+
+			result := ReadCatalogForPrincipal("catalog-read", nil)
+			cached, refreshed := CatalogCached("catalog-read")
+			if tc.code != "" {
+				code, detail, status := CatalogFailure(result.Err)
+				if result.Err == nil || code != tc.code || detail != tc.detail || status != tc.status ||
+					result.Diagnostics.Status != "error" || !result.Diagnostics.Stale || !result.Diagnostics.FromCache ||
+					len(result.Models) != 1 || result.Models[0].ID != "old" || !result.RefreshedAt.Equal(stale) ||
+					len(cached) != 1 || cached[0].ID != "old" || !refreshed.Equal(stale) {
+					t.Fatalf("failure lost diagnostics or stale cache: %+v, cache=%+v at %v", result, cached, refreshed)
+				}
+				raw, _ := json.Marshal(result.Diagnostics)
+				for _, text := range []string{detail, result.Err.Error(), string(raw)} {
+					if strings.Contains(text, "fixture-secret") {
+						t.Fatal("catalog error disclosed response data")
+					}
+				}
+				return
+			}
+
+			wantStatus := "synced"
+			if len(tc.wantIDs) == 0 {
+				wantStatus = "empty"
+			}
+			if result.Err != nil || result.Diagnostics.Status != wantStatus || result.Diagnostics.Stale || result.Diagnostics.FromCache ||
+				len(result.Models) != len(tc.wantIDs) || len(cached) != len(tc.wantIDs) ||
+				!result.RefreshedAt.After(stale) || !refreshed.Equal(result.RefreshedAt) {
+				t.Fatalf("success did not replace stale cache: %+v, cache=%+v", result, cached)
+			}
+			for i, id := range tc.wantIDs {
+				if result.Models[i].ID != id || cached[i].ID != id {
+					t.Fatalf("model identity changed: result=%+v cache=%+v", result.Models, cached)
+				}
+			}
+			second := ReadCatalogForPrincipal("catalog-read", nil)
+			if second.Err != nil || !second.Diagnostics.FromCache || second.Diagnostics.Status != wantStatus ||
+				len(second.Models) != len(tc.wantIDs) || calls.Load() != 1 {
+				t.Fatalf("success was not cached: %+v, calls=%d", second, calls.Load())
+			}
+			if models := p.ListModels(); len(models) != len(tc.wantIDs) {
+				t.Fatalf("legacy ListModels lost successful result: %+v", models)
 			}
 		})
 	}

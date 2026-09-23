@@ -53,6 +53,7 @@ Supported fields depend on the runtime type:
 | `region` | Provider region, used by Bedrock. |
 | `project` | Cloud project, used by Vertex AI. |
 | `location` | Cloud location, used by Vertex AI. |
+| `vertex_request_type` | Optional Vertex invocation mode: `default`, `paygo`, or `dedicated`. Unset preserves Google's default routing; `dedicated` requires matching provisioned throughput and does not fall back. |
 | `default_voice` | Default voice for speech providers. |
 | `disabled` | Keep the instance configured while removing it from routing. |
 | `force_api_support` | Opt the instance into experimental catalog-driven API adaptation. |
@@ -125,6 +126,28 @@ backups and pruned with the usage-retention window.
 | `LLMGW_GATEWAY_PREAMBLE` | unset | Optional gateway-owned system preamble. |
 | `LLMGW_ANONYMOUS_PROVIDER_AUTOMATION` | `false` | Deployment default for connecting and checking reviewed no-key providers. Admin Settings can override it. |
 
+An Antigravity provider may instead declare a caller-owned public OAuth client:
+
+```yaml
+providers:
+  antigravity:
+    type: google_antigravity
+    public_oauth_client_id: <registered-public-client-id>
+```
+
+This selects `public_pkce` and sends no client secret. Without this provider
+setting, the runtime client ID and secret select `client_secret_post`. The
+gateway stores the selected nonsecret profile identity with the OAuth token so
+refresh continues to use the same client and mode.
+
+Antigravity also supports the explicit `consumer_manual` profile for OAuth
+clients whose registered redirect cannot call the gateway. Configure it at
+runtime with the variables below, or enter the same values in the administrator
+OAuth dialog to store them encrypted. The gateway always generates PKCE, opens
+the authorization URL, and accepts a pasted code or full redirect URL. A full
+URL must carry the flow's matching state. The redirect URI is fixed by the
+configured profile and is reused exactly for exchange and refresh binding.
+
 ### Credential and identity boundary
 
 | Variable | Purpose |
@@ -135,6 +158,12 @@ backups and pruned with the usage-retention window.
 | `LLMGW_SSO_ADMIN_GROUP` | SSO group allowed to call admin APIs. |
 | `LLMGW_SSO_AUTO_PROVISION` | Provision verified human identities automatically. |
 | `LLMGW_OPENAI_CODEX_CLIENT_ID` | OAuth client ID the operator is authorized to use for owner-private Codex connections. |
+| `LLMGW_GOOGLE_ANTIGRAVITY_CLIENT_ID` | Confidential OAuth client ID used with explicit `client_secret_post` for experimental owner-private Antigravity connections. |
+| `LLMGW_GOOGLE_ANTIGRAVITY_CLIENT_SECRET` | Matching confidential-client secret; runtime-only and never written to gateway config. |
+| `LLMGW_GOOGLE_ANTIGRAVITY_OAUTH_PROFILE` | Set to `consumer_manual` to enable the manual-code profile from runtime configuration. |
+| `LLMGW_GOOGLE_ANTIGRAVITY_CLIENT_MODE` | Required manual profile mode: `public` or `confidential`. |
+| `LLMGW_GOOGLE_ANTIGRAVITY_REDIRECT_URI` | Exact registered redirect URI used by the manual profile. |
+| `LLMGW_OAUTH_PUBLIC_BASE_URL` | Public HTTP(S) origin used for browser OAuth callbacks; required outside loopback. Register `<origin>/oauth/callback/google_antigravity` as the exact redirect URI. |
 | `LLMGW_ALLOW_COPILOT_PROXY` | Enable the personal Copilot provider boundary. |
 | `LLMGW_EXPERIMENTAL_COPILOT_PROVIDER` | Compatibility enable flag for Copilot provider use. |
 | `LLMGW_GITHUB_COPILOT_CACHE_DIR` | Copilot session-cache location. |

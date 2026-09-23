@@ -13,6 +13,7 @@ import (
 	"llmgw/internal/iam"
 
 	"github.com/xibodev/llm-translate"
+	core "github.com/xibodev/llmgw-core"
 )
 
 // OpenAIProvider speaks the OpenAI wire standard (/chat/completions, /models)
@@ -37,6 +38,24 @@ type OpenAIProvider struct {
 }
 
 func (OpenAIProvider) IsStub() bool { return false }
+
+func (p OpenAIProvider) PreservesWireNativeSurface(model string, surface core.ModelSurface) bool {
+	if p.isAnonymousZen() {
+		return false
+	}
+	if p.isZen() {
+		native, ok := p.zenNativeSurface(model)
+		return ok && native == surface
+	}
+	switch surface {
+	case core.ModelSurfaceChatCompletions:
+		return true
+	case core.ModelSurfaceResponses:
+		return true
+	default:
+		return false
+	}
+}
 
 func buildOpenAIPayload(model string, messages []Message, stream bool, kw Kwargs) map[string]any {
 	payload := map[string]any{"model": model, "messages": messages, "stream": stream}
@@ -70,6 +89,12 @@ func (p OpenAIProvider) CompleteWithObservation(
 func (p OpenAIProvider) CompleteContextWithObservation(
 	ctx context.Context, model string, messages []Message, kw Kwargs,
 ) (map[string]any, *iam.ProviderAccountObservation, error) {
+	if p.isZen() {
+		var err error
+		if ctx, err = ensureZenInvocation(ctx); err != nil {
+			return nil, nil, err
+		}
+	}
 	kw = withOpenAIOutputLimit(kw)
 	if p.isAnonymousZen() {
 		messages, kw = adaptAnonymousZenChat(messages, kw)
@@ -93,6 +118,7 @@ func (p OpenAIProvider) CompleteContextWithObservation(
 	if err != nil {
 		return nil, observation, err
 	}
+	applyZenInvocation(ctx, headers)
 	applyVisionHeader(headers, messages)
 	buf := bytes.Buffer{}
 	enc := json.NewEncoder(&buf)
@@ -123,6 +149,7 @@ func (p OpenAIProvider) CompleteContextWithObservation(
 		if base, headers, observation, err = prepareOpenAIAuth(p.auth); err != nil {
 			return nil, observation, err
 		}
+		applyZenInvocation(ctx, headers)
 		applyVisionHeader(headers, messages)
 		if resp, err = do(base, headers); err != nil {
 			return nil, observation, retryableInvocation("openai: upstream transport error on retry: " + err.Error())
@@ -181,6 +208,12 @@ func (p OpenAIProvider) Stream(model string, messages []Message, kw Kwargs) (Str
 }
 
 func (p OpenAIProvider) StreamContext(ctx context.Context, model string, messages []Message, kw Kwargs) (StreamIter, error) {
+	if p.isZen() {
+		var err error
+		if ctx, err = ensureZenInvocation(ctx); err != nil {
+			return nil, err
+		}
+	}
 	kw = withOpenAIOutputLimit(kw)
 	if p.isAnonymousZen() {
 		messages, kw = adaptAnonymousZenChat(messages, kw)
@@ -201,6 +234,7 @@ func (p OpenAIProvider) StreamContext(ctx context.Context, model string, message
 	if err != nil {
 		return nil, err
 	}
+	applyZenInvocation(ctx, headers)
 	applyVisionHeader(headers, messages)
 	buf := bytes.Buffer{}
 	enc := json.NewEncoder(&buf)
@@ -228,6 +262,7 @@ func (p OpenAIProvider) StreamContext(ctx context.Context, model string, message
 		if base, headers, err = p.auth.Prepare(); err != nil {
 			return nil, err
 		}
+		applyZenInvocation(ctx, headers)
 		applyVisionHeader(headers, messages)
 		if resp, err = do(base, headers); err != nil {
 			return nil, retryableInvocation("openai: streaming transport error on retry: " + err.Error())
@@ -276,6 +311,10 @@ func (p OpenAIProvider) ListModels() []ModelInfo {
 func (p OpenAIProvider) ListModelsWithError() (
 	[]ModelInfo, *iam.ProviderAccountObservation, error,
 ) {
+	if p.isAnonymousZen() {
+		models, err := p.filterAnonymousZenModels(nil)
+		return models, nil, err
+	}
 	base, headers, observation, err := prepareOpenAIAuth(p.auth)
 	if err != nil {
 		return nil, observation, catalogError(
@@ -541,6 +580,10 @@ func (p OpenAIProvider) completeViaResponsesWithObservation(
 func (p OpenAIProvider) completeViaResponsesContextWithObservation(
 	ctx context.Context, model string, messages []Message, kw Kwargs,
 ) (map[string]any, *iam.ProviderAccountObservation, error) {
+	if p.isAnonymousZen() && strings.HasPrefix(strings.ToLower(strings.TrimSpace(model)), "muse-spark-") && kw["reasoning_effort"] == nil {
+		kw = cloneMap(kw)
+		kw["reasoning_effort"] = "minimal"
+	}
 	conversion := chatToResponsesWithReport(model, messages, kw)
 	if err := conversion.RejectMaterialLoss(); err != nil {
 		return nil, nil, &ConfigError{Msg: err.Error()}
@@ -811,14 +854,47 @@ func (p OpenAIProvider) baseURL() string {
 }
 
 func (p OpenAIProvider) isAnonymousZen() bool {
-	isZen := p.registryID == "opencode_zen" || isZenBaseURL(p.baseURL())
-	return isZen && p.anonymous
+	return p.isZen() && p.anonymous
 }
 
 func (p OpenAIProvider) zenUsesResponses(model string) bool {
-	isZen := p.registryID == "opencode_zen" || isZenBaseURL(p.baseURL())
-	return isZen &&
-		strings.HasPrefix(strings.ToLower(strings.TrimSpace(model)), "muse-spark-")
+	surface, ok := p.zenNativeSurface(model)
+	return ok && surface == core.ModelSurfaceResponses
+}
+
+func (p OpenAIProvider) isZen() bool {
+	return p.registryID == "opencode_zen" || isZenBaseURL(p.baseURL())
+}
+
+func (p OpenAIProvider) zenNativeSurface(model string) (core.ModelSurface, bool) {
+	if !p.isZen() {
+		return "", false
+	}
+	info, ok := CatalogCachedLookupForPrincipal(p.providerID, model, p.principal)
+	if !ok {
+		// v0.6.6's proven cold-cache contract identified Muse as Responses-native.
+		// Keep this narrow: any catalog evidence below takes precedence.
+		if strings.HasPrefix(strings.ToLower(strings.TrimSpace(model)), "muse-spark-") {
+			return core.ModelSurfaceResponses, true
+		}
+		return "", false
+	}
+	hasChat, hasResponses := false, false
+	for _, endpoint := range info.SupportedSurfaces {
+		switch strings.ToLower(strings.TrimSpace(endpoint)) {
+		case "/chat/completions", "/v1/chat/completions":
+			hasChat = true
+		case "/responses", "/v1/responses", "ws:/responses":
+			hasResponses = true
+		}
+	}
+	if hasChat == hasResponses {
+		return "", false
+	}
+	if hasResponses {
+		return core.ModelSurfaceResponses, true
+	}
+	return core.ModelSurfaceChatCompletions, true
 }
 
 func cloneMap(source map[string]any) map[string]any {
@@ -844,6 +920,12 @@ func (p OpenAIProvider) callResponsesPayload(
 func (p OpenAIProvider) callResponsesPayloadContext(
 	ctx context.Context, payload map[string]any, allowUnsupportedParameterRetry bool,
 ) (map[string]any, *iam.ProviderAccountObservation, error) {
+	if p.isZen() {
+		var err error
+		if ctx, err = ensureZenInvocation(ctx); err != nil {
+			return nil, nil, err
+		}
+	}
 	if p.isAnonymousZen() {
 		payload["stream"] = true
 		payload = adaptAnonymousZenResponsesPayload(payload)
@@ -852,6 +934,7 @@ func (p OpenAIProvider) callResponsesPayloadContext(
 	if err != nil {
 		return nil, observation, err
 	}
+	applyZenInvocation(ctx, headers)
 	headers.Set("Accept", "application/json")
 	applyResponsesVisionHeader(headers, payload)
 	post := func(b string, h http.Header) (*http.Response, error) {
@@ -883,6 +966,7 @@ func (p OpenAIProvider) callResponsesPayloadContext(
 		if base, headers, observation, err = prepareOpenAIAuth(p.auth); err != nil {
 			return nil, observation, err
 		}
+		applyZenInvocation(ctx, headers)
 		headers.Set("Accept", "application/json")
 		applyResponsesVisionHeader(headers, payload)
 		if resp, err = post(base, headers); err != nil {
@@ -941,33 +1025,48 @@ func extractFinalResponsesObject(raw []byte) map[string]any {
 			if resp, ok := item["response"].(map[string]any); ok && len(resp) > 0 {
 				lastResponse = resp
 			}
-			if d, ok := item["delta"].(string); ok && d != "" {
+			if item["type"] == "response.output_text.delta" {
+				d, _ := item["delta"].(string)
 				textBuilder.WriteString(d)
 			}
 		}
 	}
 	if lastResponse != nil {
-		if outList, ok := lastResponse["output"].([]any); !ok || len(outList) == 0 {
-			msgText := textBuilder.String()
-			if strings.TrimSpace(msgText) == "" {
-				return map[string]any{}
-			}
-			lastResponse["output"] = []any{
-				map[string]any{
-					"type":   "message",
-					"role":   "assistant",
-					"status": "completed",
-					"content": []any{
-						map[string]any{
-							"type": "output_text",
-							"text": msgText,
-						},
-					},
+		output, ok := lastResponse["output"].([]any)
+		if !ok {
+			output = []any{}
+		}
+		msgText := textBuilder.String()
+		if strings.TrimSpace(msgText) != "" && !responsesOutputHasText(output) {
+			output = append(output, map[string]any{
+				"type":   "message",
+				"role":   "assistant",
+				"status": "completed",
+				"content": []any{
+					map[string]any{"type": "output_text", "text": msgText},
 				},
+			})
+		}
+		lastResponse["output"] = output
+	}
+	return lastResponse
+}
+
+func responsesOutputHasText(output []any) bool {
+	for _, raw := range output {
+		item, _ := raw.(map[string]any)
+		if item["type"] != "message" {
+			continue
+		}
+		content, _ := item["content"].([]any)
+		for _, rawPart := range content {
+			part, _ := rawPart.(map[string]any)
+			if part["type"] == "output_text" && strings.TrimSpace(stringOf(part["text"])) != "" {
+				return true
 			}
 		}
 	}
-	return lastResponse
+	return false
 }
 
 func (p OpenAIProvider) streamResponsesPayload(
@@ -979,6 +1078,12 @@ func (p OpenAIProvider) streamResponsesPayload(
 func (p OpenAIProvider) streamResponsesPayloadContext(
 	ctx context.Context, payload map[string]any,
 ) (StreamIter, *iam.ProviderAccountObservation, error) {
+	if p.isZen() {
+		var err error
+		if ctx, err = ensureZenInvocation(ctx); err != nil {
+			return nil, nil, err
+		}
+	}
 	if p.isAnonymousZen() {
 		payload = adaptAnonymousZenResponsesPayload(payload)
 	}
@@ -986,6 +1091,7 @@ func (p OpenAIProvider) streamResponsesPayloadContext(
 	if err != nil {
 		return nil, observation, err
 	}
+	applyZenInvocation(ctx, headers)
 	headers.Set("Accept", "text/event-stream")
 	applyResponsesVisionHeader(headers, payload)
 	post := func(b string, h http.Header) (*http.Response, error) {
@@ -1015,6 +1121,7 @@ func (p OpenAIProvider) streamResponsesPayloadContext(
 		if base, headers, observation, err = prepareOpenAIAuth(p.auth); err != nil {
 			return nil, observation, err
 		}
+		applyZenInvocation(ctx, headers)
 		headers.Set("Accept", "text/event-stream")
 		applyResponsesVisionHeader(headers, payload)
 		response, err = post(base, headers)
@@ -1046,41 +1153,6 @@ func (p OpenAIProvider) streamResponsesPayloadContext(
 		)
 	}
 	return newHTTPStreamIter(response, "responses"), observation, nil
-}
-
-func (p CodexProvider) CompleteContext(ctx context.Context, model string, messages []Message, kw Kwargs) (map[string]any, error) {
-	response, _, err := p.CompleteContextWithObservation(ctx, model, messages, kw)
-	return response, err
-}
-
-func (p CodexProvider) CompleteContextWithObservation(ctx context.Context, model string, messages []Message, kw Kwargs) (map[string]any, *iam.ProviderAccountObservation, error) {
-	return p.inner.completeViaResponsesContextWithObservation(ctx, model, messages, kw)
-}
-
-func (p CodexProvider) CompleteResponsesContext(ctx context.Context, model string, payload map[string]any) (map[string]any, *iam.ProviderAccountObservation, error) {
-	request := cloneMap(payload)
-	request["model"] = model
-	request["stream"] = false
-	delete(request, "force_api_support")
-	return p.inner.callResponsesPayloadContext(ctx, request, false)
-}
-
-func (p CodexProvider) StreamContext(ctx context.Context, model string, messages []Message, kw Kwargs) (StreamIter, error) {
-	if err := ctx.Err(); err != nil {
-		return nil, err
-	}
-	return p.inner.streamViaResponsesContext(ctx, model, messages, kw)
-}
-
-func (p CodexProvider) StreamResponsesContext(ctx context.Context, model string, payload map[string]any) (StreamIter, *iam.ProviderAccountObservation, error) {
-	if err := ctx.Err(); err != nil {
-		return nil, nil, err
-	}
-	request := cloneMap(payload)
-	request["model"] = model
-	request["stream"] = true
-	delete(request, "force_api_support")
-	return p.inner.streamResponsesPayloadContext(ctx, request)
 }
 
 func applyResponsesVisionHeader(headers http.Header, payload map[string]any) {

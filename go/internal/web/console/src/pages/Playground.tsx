@@ -1,7 +1,7 @@
 import { memo } from "preact/compat";
 import { useEffect, useMemo, useRef, useState } from "preact/hooks";
 import { AlertCircle, ChevronDown, ChevronUp, FileAudio, Play, RefreshCw, Send, Trash2 } from "lucide-preact";
-import { getJSON, requestJSON, sendJSON, type JSONRecord } from "../lib/api";
+import { APIError, getJSON, requestJSON, sendJSON, type JSONRecord } from "../lib/api";
 import type { ConsoleMode } from "../lib/mode";
 import { asList, asRecord, numberValue, stringValue } from "../lib/records";
 import { EmptyState, ErrorState, PageHeading } from "../components/PageState";
@@ -12,28 +12,134 @@ import {
   capabilityLabels,
   catalogModels,
   filterModels,
+  transportForSurface,
   useModelFilter,
 } from "../components/ModelPicker";
 
-type ChatTurn = { role: "user" | "assistant"; content: string; served?: string; latency?: number };
+type TextSurface = "/v1/chat/completions" | "/v1/responses" | "/v1/messages";
+type ChatTurn = { role: "user" | "assistant"; content: string; reasoning?: string; toolCalls?: JSONRecord[]; wire?: unknown[]; served?: string; latency?: number };
+export type PlaygroundFailure = { message: string; status: number; code: string; retry: string; action: string };
+
+const textSurfaces: { path: TextSurface; label: string }[] = [
+  { path: "/v1/chat/completions", label: "Chat Completions" },
+  { path: "/v1/responses", label: "Responses" },
+  { path: "/v1/messages", label: "Anthropic Messages" },
+];
+
+function normalizedSurface(surface: string): string {
+  return surface.replace(/^\/v1/, "");
+}
+
+export function supportedTextSurfaces(model: CatalogModel | undefined): TextSurface[] {
+  if (!model) return [];
+  const supported = new Set([...model.surfaces, ...model.nativeSurfaces, ...model.emulatedSurfaces].map(normalizedSurface));
+  return textSurfaces.filter(({ path }) => supported.has(normalizedSurface(path))).map(({ path }) => path);
+}
+
+export function defaultTextSurface(model: CatalogModel | undefined): TextSurface {
+  const supported = supportedTextSurfaces(model);
+  const native = supported.find((surface) => transportForSurface(model, surface) === "native");
+  const translated = supported.find((surface) => transportForSurface(model, surface) === "translated");
+  return native ?? translated ?? supported[0] ?? "/v1/chat/completions";
+}
+
+function textParts(value: unknown): string {
+  if (typeof value === "string") return value;
+  return asList(value).map(asRecord).map((part) => stringValue(part.text, stringValue(part.output_text))).join("");
+}
+
+function parseTextResponse(surface: TextSurface, raw: JSONRecord): Pick<ChatTurn, "content" | "reasoning" | "toolCalls" | "wire"> {
+  if (surface === "/v1/chat/completions") {
+    const message = asRecord(asRecord(asList(raw.choices)[0]).message);
+    return {
+      content: textParts(message.content) || "(the provider returned no text)",
+      reasoning: textParts(message.reasoning_content ?? message.reasoning),
+      toolCalls: asList(message.tool_calls).map(asRecord),
+      wire: [message],
+    };
+  }
+  if (surface === "/v1/messages") {
+    const content = asList(raw.content).map(asRecord);
+    return {
+      content: content.filter((part) => stringValue(part.type) === "text").map((part) => stringValue(part.text)).join("") || "(the provider returned no text)",
+      reasoning: content.filter((part) => ["thinking", "reasoning"].includes(stringValue(part.type))).map((part) => stringValue(part.thinking, stringValue(part.text))).join("\n"),
+      toolCalls: content.filter((part) => stringValue(part.type) === "tool_use"),
+      wire: content,
+    };
+  }
+  const output = asList(raw.output).map(asRecord);
+  const messages = output.filter((item) => stringValue(item.type) === "message");
+  const reasoning = output.filter((item) => stringValue(item.type) === "reasoning");
+  return {
+    content: stringValue(raw.output_text) || messages.map((item) => textParts(item.content)).join("") || "(the provider returned no text)",
+    reasoning: reasoning.map((item) => textParts(item.summary ?? item.content)).join("\n"),
+    toolCalls: output.filter((item) => ["function_call", "tool_call"].includes(stringValue(item.type))),
+    wire: output,
+  };
+}
+
+function requestHistory(surface: TextSurface, turns: ChatTurn[]): unknown[] {
+  return turns.flatMap((turn) => {
+    if (turn.role === "user") return [{ role: "user", content: turn.content }];
+    if (surface === "/v1/responses" && turn.wire?.length) return turn.wire;
+    if (surface === "/v1/messages" && turn.wire?.length) return [{ role: "assistant", content: turn.wire }];
+    if (surface === "/v1/chat/completions" && turn.wire?.length) return turn.wire;
+    return [{ role: "assistant", content: turn.content }];
+  });
+}
+
+function toolsForSurface(surface: TextSurface, tools: unknown[]): JSONRecord[] {
+  return tools.map(asRecord).map((tool) => {
+    const fn = asRecord(tool.function);
+    if (surface === "/v1/responses") return fn.name ? { type: "function", name: fn.name, description: fn.description, parameters: fn.parameters } : tool;
+    if (surface === "/v1/messages") return fn.name ? { name: fn.name, description: fn.description, input_schema: fn.parameters } : tool;
+    return tool;
+  });
+}
 
 const ChatTurnView = memo(function ChatTurnView({ turn }: { turn: ChatTurn }) {
   return <article class={`chat-turn chat-turn--${turn.role}`}>
     <header><span>{turn.role === "user" ? "You" : "Assistant"}</span>{turn.served ? <small class="technical">{turn.served}{turn.latency ? ` · ${turn.latency} ms` : ""}</small> : null}</header>
     <p>{turn.content}</p>
+    {turn.reasoning ? <details class="chat-turn__detail"><summary>Reasoning</summary><pre>{turn.reasoning}</pre></details> : null}
+    {turn.toolCalls?.length ? <details class="chat-turn__detail"><summary>Tool calls ({turn.toolCalls.length})</summary><pre>{JSON.stringify(turn.toolCalls, null, 2)}</pre></details> : null}
   </article>;
 });
 
 // modeFor picks the playground surface a model can actually be exercised on.
 // A model that only synthesizes speech must not be offered a chat composer.
-function modeFor(model: CatalogModel | undefined): "chat" | "tts" | "transcription" | "image" | "video" {
-  if (!model) return "chat";
-  if (model.capabilities.includes("chat")) return "chat";
-  if (model.capabilities.includes("video")) return "video";
-  if (model.capabilities.includes("image")) return "image";
-  if (model.capabilities.includes("tts")) return "tts";
-  if (model.capabilities.includes("transcription")) return "transcription";
-  return "chat";
+type PlaygroundMode = "chat" | "tts" | "transcription" | "embedding" | "image" | "video" | "unknown";
+
+export function modesFor(model: CatalogModel | undefined): PlaygroundMode[] {
+  if (!model) return [];
+  return ["video", "image", "tts", "transcription", "embedding", "chat"].filter((mode) => model.capabilities.includes(mode)) as PlaygroundMode[];
+}
+
+export function modeFor(model: CatalogModel | undefined): PlaygroundMode {
+  return modesFor(model)[0] ?? "unknown";
+}
+
+export function playgroundFailure(cause: unknown, fallback = "Playground request failed."): PlaygroundFailure {
+  if (!(cause instanceof APIError)) {
+    return { message: cause instanceof Error ? cause.message : fallback, status: 0, code: "", retry: "Unknown", action: "Review the request and try again." };
+  }
+  const retryable = cause.retryable ?? [408, 429, 500, 502, 503, 504].includes(cause.status);
+  let action = cause.action;
+  if (!action) {
+    if (cause.status === 401) action = "Reconnect or sign in, then retry the request.";
+    else if (cause.status === 403) action = "Review project access and the selected provider connection.";
+    else if (cause.status === 404) action = "Refresh the catalog and select an available model or endpoint.";
+    else if (cause.status === 429) action = cause.retryAfter ? `Wait until ${cause.retryAfter}, then retry.` : "Wait for the provider limit to reset, then retry.";
+    else if (retryable) action = "Retry the request; if it repeats, inspect the connected provider.";
+    else action = "Correct the request or provider configuration before retrying.";
+  }
+  return {
+    message: cause.message,
+    status: cause.status,
+    code: cause.code,
+    retry: cause.retryAfter ? `After ${cause.retryAfter}` : retryable ? "Yes" : "No",
+    action,
+  };
 }
 
 // localeOf reads the BCP-47 prefix of a voice id like "pt-PT-RaquelNeural".
@@ -59,7 +165,7 @@ function ChatThread({ turns, running, onClear }: { turns: ChatTurn[]; running: b
   );
 }
 
-export function Playground({ data, mode, principalID, onPrincipalIDChange, preset, onPresetConsumed, onBack }: {
+export function Playground({ data, mode, principalID, onPrincipalIDChange, preset, onPresetConsumed, onBack, onChanged }: {
   data: JSONRecord;
   mode: ConsoleMode;
   principalID: string;
@@ -67,6 +173,7 @@ export function Playground({ data, mode, principalID, onPrincipalIDChange, prese
   preset?: string;
   onPresetConsumed?: () => void;
   onBack?: () => void;
+  onChanged?: () => Promise<void>;
 }) {
   const projects = asList(data.projects).map(asRecord);
   const memberships = asList(data.memberships).map(asRecord);
@@ -96,12 +203,16 @@ export function Playground({ data, mode, principalID, onPrincipalIDChange, prese
   const [filter, setFilter] = useModelFilter();
   const [settingsOpen, setSettingsOpen] = useState(true);
   const [turns, setTurns] = useState<ChatTurn[]>([]);
+  const [textSurface, setTextSurface] = useState<TextSurface>("/v1/chat/completions");
+  const [previousResponseID, setPreviousResponseID] = useState("");
   const [draft, setDraft] = useState("");
   const [toolsOpen, setToolsOpen] = useState(false);
   const [toolDefinitions, setToolDefinitions] = useState("");
   const [toolResult, setToolResult] = useState("");
   const [toolCallID, setToolCallID] = useState("");
   const [speechText, setSpeechText] = useState("The gateway routed this request end to end.");
+	const [embeddingInput, setEmbeddingInput] = useState("The gateway routed this embedding request end to end.");
+	const [operationMode, setOperationMode] = useState<PlaygroundMode>("unknown");
   const [speechSpeed, setSpeechSpeed] = useState("1");
   const [locale, setLocale] = useState("all");
   const [audioURL, setAudioURL] = useState("");
@@ -115,6 +226,7 @@ export function Playground({ data, mode, principalID, onPrincipalIDChange, prese
   const [result, setResult] = useState<JSONRecord | null>(null);
   const [rawOpen, setRawOpen] = useState(true);
   const [error, setError] = useState("");
+  const [failure, setFailure] = useState<PlaygroundFailure | null>(null);
   const [running, setRunning] = useState(false);
   const fileRef = useRef<HTMLInputElement | null>(null);
   const catalogRequest = useRef(0);
@@ -127,6 +239,7 @@ export function Playground({ data, mode, principalID, onPrincipalIDChange, prese
     if (!projectID || !scopedPrincipalID) return "";
     const query = new URLSearchParams({ project_id: projectID });
     if (mode === "admin") query.set("principal_id", scopedPrincipalID);
+    if (mode === "admin") query.set("diagnostics", "1");
     return `/models?${query.toString()}`;
   }, [mode, projectID, scopedPrincipalID]);
   const loadCatalog = async () => {
@@ -143,6 +256,9 @@ export function Playground({ data, mode, principalID, onPrincipalIDChange, prese
       if (request === catalogRequest.current) setCatalogError(cause instanceof Error ? cause.message : "Model catalog could not load.");
     }
   };
+  const refreshEvidence = async () => {
+    await Promise.allSettled([loadCatalog(), onChanged?.() ?? Promise.resolve()]);
+  };
   useEffect(() => {
     setProjectID((current) => eligibleProjects.some((project) => stringValue(project.id) === current) ? current : stringValue(eligibleProjects[0]?.id));
   }, [eligibleProjects, scopedPrincipalID]);
@@ -154,7 +270,7 @@ export function Playground({ data, mode, principalID, onPrincipalIDChange, prese
     // must never be advertised as runnable self-service actions.
     return mode === "portal"
       ? rows.filter((row) => row.capabilities.includes("chat"))
-      : rows.filter((row) => row.capabilities.some((capability) => ["chat", "tts", "transcription", "image", "video"].includes(capability)));
+      : rows.filter((row) => !row.capabilities.length || row.capabilities.some((capability) => ["chat", "tts", "transcription", "embedding", "image", "video"].includes(capability)));
   }, [catalog, catalogSource, catalogPath, mode]);
   const visible = useMemo(() => filterModels(models, filter), [models, filter]);
   // A model handed over from a provider page wins over any default selection.
@@ -165,7 +281,7 @@ export function Playground({ data, mode, principalID, onPrincipalIDChange, prese
     }
     const presetScope = `${scopedPrincipalID}|${projectID}|${preset}`;
     if (appliedPreset.current === presetScope || !models.length) return;
-    if (models.some((row) => row.id === preset)) {
+    if (models.some((row) => row.id === preset && !row.disabled)) {
       appliedPreset.current = presetScope;
       setModel(preset);
       setSettingsOpen(false);
@@ -177,10 +293,12 @@ export function Playground({ data, mode, principalID, onPrincipalIDChange, prese
   useEffect(() => {
     const presetScope = `${scopedPrincipalID}|${projectID}|${preset}`;
     if (preset && appliedPreset.current !== presetScope) return;
-    setModel((current) => visible.some((row) => row.id === current) ? current : (visible[0]?.id ?? ""));
+    setModel((current) => visible.some((row) => row.id === current && !row.disabled) ? current : (visible.find((row) => !row.disabled)?.id ?? ""));
   }, [visible, preset]);
   const selected = models.find((row) => row.id === model);
-  const surface = modeFor(selected);
+	const availableModes = mode === "portal" ? (selected?.capabilities.includes("chat") ? ["chat" as PlaygroundMode] : []) : modesFor(selected);
+	const surface = availableModes.includes(operationMode) ? operationMode : (availableModes[0] ?? "unknown");
+  const availableTextSurfaces = supportedTextSurfaces(selected);
   const toolsUnsupported = selected?.tools === "unsupported" || !selected?.capabilities.includes("chat");
   useEffect(() => {
     executionAbort.current?.abort();
@@ -188,10 +306,16 @@ export function Playground({ data, mode, principalID, onPrincipalIDChange, prese
     executionRequest.current += 1;
     executionPending.current = false;
     setTurns([]); setRunning(false);
-    setResult(null); setError(""); setAudioURL(""); setTranscript("");
+    setPreviousResponseID("");
+    setResult(null); setError(""); setFailure(null); setAudioURL(""); setTranscript("");
     setImageURL(""); setVideoURL(""); setVideoStatus("");
     videoPoll.current += 1;
-  }, [model, projectID, scopedPrincipalID]);
+	}, [model, projectID, scopedPrincipalID, textSurface, surface]);
+  useEffect(() => {
+		setTextSurface(defaultTextSurface(selected));
+		setOperationMode(availableModes[0] ?? "unknown");
+    setPreviousResponseID("");
+  }, [model, mode]);
   useEffect(() => () => {
     executionAbort.current?.abort();
     executionAbort.current = null;
@@ -221,10 +345,16 @@ export function Playground({ data, mode, principalID, onPrincipalIDChange, prese
 
   const requireScope = () => {
     if (!projectID || !model || (mode === "admin" && !principalID)) {
+      setFailure(null);
       setError(mode === "admin" && !principalID ? "Select a human owner, project, and model." : "Select a project and model.");
       return false;
     }
     return true;
+  };
+  const reportError = (cause: unknown, fallback?: string) => {
+    const next = playgroundFailure(cause, fallback);
+    setError(next.message);
+    setFailure(next.status ? next : null);
   };
 
   // The composer reads its text from the element rather than component state:
@@ -235,7 +365,7 @@ export function Playground({ data, mode, principalID, onPrincipalIDChange, prese
     if (executionPending.current) return;
     if (!requireScope()) return;
     const text = (override ?? draft).trim();
-    if (!text) { setError("Enter a message."); return; }
+    if (!text) { setFailure(null); setError("Enter a message."); return; }
     const history: ChatTurn[] = [...turns, { role: "user", content: text }];
     const request = ++executionRequest.current;
     const controller = new AbortController();
@@ -244,35 +374,40 @@ export function Playground({ data, mode, principalID, onPrincipalIDChange, prese
     setTurns(history);
     setDraft("");
     setRunning(true);
-    setError("");
+    setError(""); setFailure(null);
     setResult(null);
     try {
-      const body: JSONRecord = {
-        project_id: projectID, model,
-        messages: history.map((turn) => ({ role: turn.role, content: turn.content })),
-      };
+      const body: JSONRecord = { project_id: projectID, model };
+      const statefulResponses = textSurface === "/v1/responses" && selected?.statefulResponses === "supported" && previousResponseID;
+      if (textSurface === "/v1/responses") {
+        body.input = statefulResponses ? text : requestHistory(textSurface, history);
+        if (statefulResponses) body.previous_response_id = previousResponseID;
+      } else {
+        body.messages = requestHistory(textSurface, history);
+        if (textSurface === "/v1/messages") body.max_tokens = 1024;
+      }
       if (toolsOpen && toolDefinitions.trim()) {
         let parsed: unknown;
         try { parsed = JSON.parse(toolDefinitions); } catch { throw new Error("Tool definitions must be valid JSON."); }
         if (!Array.isArray(parsed)) throw new Error("Tool definitions must be a JSON array.");
-        body.tools = parsed;
+        body.tools = toolsForSurface(textSurface, parsed);
       }
       if (toolsOpen && toolResult.trim()) {
         if (!toolCallID.trim()) throw new Error("Enter the provider's tool call ID before adding a tool result.");
-        body.messages = [...asList(body.messages), { role: "tool", content: toolResult.trim(), tool_call_id: toolCallID.trim() }];
+        if (textSurface === "/v1/responses") body.input = [...asList(body.input), { type: "function_call_output", call_id: toolCallID.trim(), output: toolResult.trim() }];
+        else if (textSurface === "/v1/messages") body.messages = [...asList(body.messages), { role: "user", content: [{ type: "tool_result", tool_use_id: toolCallID.trim(), content: toolResult.trim() }] }];
+        else body.messages = [...asList(body.messages), { role: "tool", content: toolResult.trim(), tool_call_id: toolCallID.trim() }];
       }
       if (mode === "admin") body.principal_id = principalID;
-      const payload = await sendJSON<JSONRecord>(mode, "/playground", "POST", body, controller.signal);
+      const payload = await sendJSON<JSONRecord>(mode, `/playground${textSurface}`, "POST", body, controller.signal);
       if (request !== executionRequest.current) return;
       setResult(payload);
       const raw = asRecord(payload.raw_response);
-      const choice = asRecord(asList(raw.choices)[0]);
-      const message = asRecord(choice.message);
-      const anthropic = asList(raw.content).map(asRecord).map((part) => stringValue(part.text)).join("");
-      const reply = stringValue(message.content, anthropic) || "(the provider returned no text)";
+      const parsed = parseTextResponse(textSurface, raw);
+      if (textSurface === "/v1/responses" && selected?.statefulResponses === "supported") setPreviousResponseID(stringValue(raw.id));
       const served = asRecord(payload.served);
       setTurns([...history, {
-        role: "assistant", content: reply,
+        role: "assistant", ...parsed,
         served: `${stringValue(served.provider)}/${stringValue(served.model)}`,
         latency: numberValue(payload.latency_ms),
       }]);
@@ -281,12 +416,13 @@ export function Playground({ data, mode, principalID, onPrincipalIDChange, prese
       setResult(null);
       setTurns(turns);
       setDraft((current) => current || text);
-      setError(cause instanceof Error ? cause.message : "Playground request failed.");
+      reportError(cause);
     } finally {
       if (request === executionRequest.current) {
         executionAbort.current = null;
         executionPending.current = false;
         setRunning(false);
+        void refreshEvidence();
       }
     }
   };
@@ -295,13 +431,13 @@ export function Playground({ data, mode, principalID, onPrincipalIDChange, prese
     event.preventDefault();
     if (executionPending.current) return;
     if (!requireScope()) return;
-    if (!speechText.trim()) { setError("Enter text to synthesize."); return; }
+    if (!speechText.trim()) { setFailure(null); setError("Enter text to synthesize."); return; }
     const request = ++executionRequest.current;
     const controller = new AbortController();
     executionAbort.current = controller;
     executionPending.current = true;
     setRunning(true);
-    setError("");
+    setError(""); setFailure(null);
     setResult(null);
     setAudioURL("");
     try {
@@ -315,28 +451,55 @@ export function Playground({ data, mode, principalID, onPrincipalIDChange, prese
     } catch (cause) {
       if (request !== executionRequest.current) return;
       setResult(null);
-      setError(cause instanceof Error ? cause.message : "Speech request failed.");
+      reportError(cause, "Speech request failed.");
     } finally {
       if (request === executionRequest.current) {
         executionAbort.current = null;
         executionPending.current = false;
         setRunning(false);
+        void refreshEvidence();
       }
     }
   };
+
+	const runEmbeddings = async (event: Event) => {
+		event.preventDefault();
+		if (executionPending.current) return;
+		if (!requireScope()) return;
+		if (!embeddingInput.trim()) { setFailure(null); setError("Enter text to embed."); return; }
+		const request = ++executionRequest.current;
+		const controller = new AbortController();
+		executionAbort.current = controller;
+		executionPending.current = true;
+		setRunning(true); setError(""); setFailure(null); setResult(null);
+		try {
+			const body: JSONRecord = { project_id: projectID, model, input: embeddingInput.trim() };
+			if (mode === "admin") body.principal_id = principalID;
+			const payload = await sendJSON<JSONRecord>(mode, "/playground/embeddings", "POST", body, controller.signal);
+			if (request !== executionRequest.current) return;
+			setResult(payload);
+		} catch (cause) {
+			if (request !== executionRequest.current) return;
+			setResult(null); reportError(cause, "Embeddings request failed.");
+		} finally {
+			if (request === executionRequest.current) {
+				executionAbort.current = null; executionPending.current = false; setRunning(false); void refreshEvidence();
+			}
+		}
+	};
 
   const runTranscription = async (event: Event) => {
     event.preventDefault();
     if (executionPending.current) return;
     if (!requireScope()) return;
     const file = fileRef.current?.files?.[0];
-    if (!file) { setError("Choose an audio file to transcribe."); return; }
+    if (!file) { setFailure(null); setError("Choose an audio file to transcribe."); return; }
     const request = ++executionRequest.current;
     const controller = new AbortController();
     executionAbort.current = controller;
     executionPending.current = true;
     setRunning(true);
-    setError("");
+    setError(""); setFailure(null);
     setResult(null);
     setTranscript("");
     try {
@@ -352,12 +515,13 @@ export function Playground({ data, mode, principalID, onPrincipalIDChange, prese
     } catch (cause) {
       if (request !== executionRequest.current) return;
       setResult(null);
-      setError(cause instanceof Error ? cause.message : "Transcription request failed.");
+      reportError(cause, "Transcription request failed.");
     } finally {
       if (request === executionRequest.current) {
         executionAbort.current = null;
         executionPending.current = false;
         setRunning(false);
+        void refreshEvidence();
       }
     }
   };
@@ -366,12 +530,12 @@ export function Playground({ data, mode, principalID, onPrincipalIDChange, prese
     event.preventDefault();
     if (executionPending.current) return;
     if (!requireScope()) return;
-    if (!mediaPrompt.trim()) { setError("Describe the image you want."); return; }
+    if (!mediaPrompt.trim()) { setFailure(null); setError("Describe the image you want."); return; }
     const request = ++executionRequest.current;
     const controller = new AbortController();
     executionAbort.current = controller;
     executionPending.current = true;
-    setRunning(true); setError(""); setResult(null); setImageURL("");
+    setRunning(true); setError(""); setFailure(null); setResult(null); setImageURL("");
     try {
       const body: JSONRecord = { project_id: projectID, model, prompt: mediaPrompt.trim() };
       if (mode === "admin") body.principal_id = principalID;
@@ -383,12 +547,13 @@ export function Playground({ data, mode, principalID, onPrincipalIDChange, prese
     } catch (cause) {
       if (request !== executionRequest.current) return;
       setResult(null);
-      setError(cause instanceof Error ? cause.message : "Image request failed.");
+      reportError(cause, "Image request failed.");
     } finally {
       if (request === executionRequest.current) {
         executionAbort.current = null;
         executionPending.current = false;
         setRunning(false);
+        void refreshEvidence();
       }
     }
   };
@@ -399,18 +564,19 @@ export function Playground({ data, mode, principalID, onPrincipalIDChange, prese
     event.preventDefault();
     if (executionPending.current) return;
     if (!requireScope()) return;
-    if (!mediaPrompt.trim()) { setError("Describe the video you want."); return; }
+    if (!mediaPrompt.trim()) { setFailure(null); setError("Describe the video you want."); return; }
     const attempt = ++videoPoll.current;
     const controller = new AbortController();
     executionAbort.current = controller;
     executionPending.current = true;
-    setRunning(true); setError(""); setResult(null); setVideoURL(""); setVideoStatus("Starting the generation\u2026");
+    setRunning(true); setError(""); setFailure(null); setResult(null); setVideoURL(""); setVideoStatus("Starting the generation\u2026");
     try {
       const body: JSONRecord = { project_id: projectID, model, prompt: mediaPrompt.trim() };
       if (mode === "admin") body.principal_id = principalID;
       const started = await sendJSON<JSONRecord>(mode, "/playground/video", "POST", body, controller.signal);
       if (attempt !== videoPoll.current) return;
       setResult(started);
+      void refreshEvidence();
       const operation = stringValue(started.operation);
       if (!operation) throw new Error("The provider did not return an operation to poll.");
       for (let tick = 1; tick <= 80; tick += 1) {
@@ -423,6 +589,7 @@ export function Playground({ data, mode, principalID, onPrincipalIDChange, prese
         const payload = await sendJSON<JSONRecord>(mode, "/playground/video", "POST", pollBody, controller.signal);
         if (attempt !== videoPoll.current) return;
         setResult(payload);
+        void refreshEvidence();
         if (stringValue(payload.status) === "completed") {
           const base64 = stringValue(payload.video_base64);
           if (base64) {
@@ -438,13 +605,14 @@ export function Playground({ data, mode, principalID, onPrincipalIDChange, prese
     } catch (cause) {
       if (attempt !== videoPoll.current) return;
       setResult(null);
-      setError(cause instanceof Error ? cause.message : "Video request failed.");
+      reportError(cause, "Video request failed.");
       setVideoStatus("");
     } finally {
       if (attempt === videoPoll.current) {
         executionAbort.current = null;
         executionPending.current = false;
         setRunning(false);
+        void refreshEvidence();
       }
     }
   };
@@ -455,13 +623,11 @@ export function Playground({ data, mode, principalID, onPrincipalIDChange, prese
   const capabilityNote = selected
     ? selected.capabilities.map((capability) => capabilityLabels[capability as keyof typeof capabilityLabels] ?? capability).join(" · ")
     : "";
-  const selectedSurface = surface === "chat" ? "/v1/chat/completions" : {
-    tts: "/v1/audio/speech", transcription: "/v1/audio/transcriptions",
+  const selectedSurface = surface === "chat" ? textSurface : {
+		tts: "/v1/audio/speech", transcription: "/v1/audio/transcriptions", embedding: "/v1/embeddings",
     image: "/v1/images/generations", video: "/v1/videos/generations",
-  }[surface];
-  const expectedTransport = selected?.nativeSurfaces.some((candidate) => candidate.replace(/^\/v1/, "") === selectedSurface.replace(/^\/v1/, ""))
-    ? "native"
-    : selected?.emulatedSurfaces.some((candidate) => candidate.replace(/^\/v1/, "") === selectedSurface.replace(/^\/v1/, "")) ? "translated" : "unknown";
+  }[surface as "tts" | "transcription" | "image" | "video"] ?? "Unknown";
+  const expectedTransport = transportForSurface(selected, selectedSurface);
   const formatFreshness = (value: string) => value ? new Date(value).toLocaleString() : "Not available";
   const scopeSummary = [
     humans.find((principal) => stringValue(principal.id) === principalID),
@@ -492,9 +658,14 @@ export function Playground({ data, mode, principalID, onPrincipalIDChange, prese
             {mode === "admin" ? <label>Human owner<select value={principalID} onInput={(event) => onPrincipalIDChange((event.currentTarget as HTMLSelectElement).value)}><option value="">Select a human owner</option>{humans.map((principal) => <option value={stringValue(principal.id)} key={stringValue(principal.id)}>{stringValue(principal.display_name, stringValue(principal.id))}</option>)}</select></label> : null}
             <label>Project<select value={projectID} onInput={(event) => setProjectID((event.currentTarget as HTMLSelectElement).value)}><option value="">Select a project</option>{eligibleProjects.map((project) => <option value={stringValue(project.id)} key={stringValue(project.id)}>{stringValue(project.name, stringValue(project.slug))}</option>)}</select></label>
             {surface === "tts" && locales.length > 1 ? <label>Language<select value={locale} onInput={(event) => setLocale((event.currentTarget as HTMLSelectElement).value)}><option value="all">All languages ({locales.length})</option>{locales.map((code) => <option value={code} key={code}>{code}</option>)}</select></label> : null}
+			{surface === "chat" && availableTextSurfaces.length > 1 ? <label>Text surface<select value={textSurface} onInput={(event) => setTextSurface((event.currentTarget as HTMLSelectElement).value as TextSurface)}>{textSurfaces.filter(({ path }) => availableTextSurfaces.includes(path)).map(({ path, label }) => <option value={path} key={path}>{label} · {transportForSurface(selected, path)}</option>)}</select></label> : null}
+			{availableModes.length > 1 ? <label>Operation<select value={surface} onInput={(event) => setOperationMode((event.currentTarget as HTMLSelectElement).value as PlaygroundMode)}>{availableModes.map((candidate) => <option value={candidate} key={candidate}>{capabilityLabels[candidate as keyof typeof capabilityLabels] ?? candidate}</option>)}</select></label> : null}
           </div>
           <ModelFilters models={models} filter={filter} onChange={setFilter} />
           <ModelCombo models={voiceModels} filter={localeFilter} value={model} onChange={setModel} label="Model or route" />
+          {selected && !selected.capabilities.length ? <p class="form-help"><strong>Capabilities unknown.</strong> The catalog did not prove a runnable chat, embeddings, image, speech, transcription, or video surface, so execution controls are disabled.</p> : null}
+          {selected?.publicationState === "unverified" && selected.published ? <p class="form-help"><strong>Published by administrator opt-in.</strong> This model is runnable without successful completion verification.</p> : null}
+          {selected?.publicationState === "failed" ? <p class="form-help"><strong>Publication blocked.</strong> Verification failed{selected.failureCode ? ` (${selected.failureCode})` : ""}; this model is not runnable.</p> : null}
           {selected ? <dl class="playground-capability-facts compact-facts">
             <div><dt>Catalog freshness</dt><dd>{formatFreshness(selected.discoveredAt)}</dd></div>
             <div><dt>Verification freshness</dt><dd>{formatFreshness(selected.verifiedAt)}</dd></div>
@@ -507,7 +678,7 @@ export function Playground({ data, mode, principalID, onPrincipalIDChange, prese
       <section class="playground-work">
         <div class="playground-stage">
         {surface === "chat" ? <>
-          <ChatThread turns={turns} running={running} onClear={() => { executionAbort.current?.abort(); executionAbort.current = null; executionRequest.current += 1; executionPending.current = false; setRunning(false); setTurns([]); setResult(null); setError(""); }} />
+          <ChatThread turns={turns} running={running} onClear={() => { executionAbort.current?.abort(); executionAbort.current = null; executionRequest.current += 1; executionPending.current = false; setRunning(false); setTurns([]); setPreviousResponseID(""); setResult(null); setError(""); }} />
           <form class="chat-composer surface" onSubmit={sendChat}>
             <details class="playground-tools" open={toolsOpen} onToggle={(event) => setToolsOpen((event.currentTarget as HTMLDetailsElement).open)}>
               <summary>Tools {toolsUnsupported ? "(unsupported by this model)" : "(optional)"}</summary>
@@ -530,12 +701,18 @@ export function Playground({ data, mode, principalID, onPrincipalIDChange, prese
           </form>
         </> : null}
 
-        {surface === "tts" ? <form class="surface form-stack" onSubmit={runSpeech}>
+		{surface === "tts" ? <form class="surface form-stack" onSubmit={runSpeech}>
           <label>Text to speak<textarea value={speechText} rows={4} onInput={(event) => setSpeechText((event.currentTarget as HTMLTextAreaElement).value)} /></label>
           <label class="playground-speed">Speed<input inputMode="decimal" value={speechSpeed} onInput={(event) => setSpeechSpeed((event.currentTarget as HTMLInputElement).value)} /></label>
           <button class="button button--primary" type="submit" disabled={running || !model}>{running ? <RefreshCw class="spin" size={16} /> : <Play size={16} />} Synthesize speech</button>
           {audioURL ? <div class="playground-audio"><p class="eyebrow">Synthesized audio</p><audio controls src={audioURL} /><p class="form-help">{numberValue(result?.audio_bytes)} bytes · {stringValue(result?.audio_format)}</p></div> : null}
-        </form> : null}
+		</form> : null}
+
+		{surface === "embedding" ? <form class="surface form-stack" onSubmit={runEmbeddings}>
+			<label>Text to embed<textarea value={embeddingInput} rows={4} onInput={(event) => setEmbeddingInput((event.currentTarget as HTMLTextAreaElement).value)} /></label>
+			<button class="button button--primary" type="submit" disabled={running || !model}>{running ? <RefreshCw class="spin" size={16} /> : <Play size={16} />} Create embedding</button>
+			{result ? <p class="form-help">{numberValue(result.vectors)} vector · {numberValue(result.dimensions)} dimensions</p> : null}
+		</form> : null}
 
         {surface === "image" ? <form class="surface form-stack" onSubmit={runImage}>
           <label>Describe the image<textarea value={mediaPrompt} rows={3} onInput={(event) => setMediaPrompt((event.currentTarget as HTMLTextAreaElement).value)} /></label>
@@ -558,7 +735,7 @@ export function Playground({ data, mode, principalID, onPrincipalIDChange, prese
           {transcript ? <div class="playground-transcript"><p class="eyebrow">Transcript</p><p>{transcript}</p></div> : null}
         </form> : null}
 
-        {error ? <ErrorState title="Playground request did not complete" detail={error} /> : null}
+        {error ? <ErrorState title={failure ? `Request failed · HTTP ${failure.status}${failure.code ? ` · ${failure.code}` : ""}` : "Playground request did not complete"} detail={error} /> : null}
         <p class="playground-limit"><AlertCircle size={16} /> Streaming is unavailable in this playground. Capability-proven controls and routes are enabled for the selected model only.</p>
         </div>
 
@@ -566,7 +743,13 @@ export function Playground({ data, mode, principalID, onPrincipalIDChange, prese
         {error ? <section class="surface playground-outcome playground-outcome--error">
           <p class="eyebrow" style={{ color: "var(--color-danger, #e5484d)" }}>Request failed</p>
           <h2>{model || "Routing error"}</h2>
-          <p class="form-help">Catalog discovery does not guarantee current inference availability. Review the error, route access, credentials, and provider status.</p>
+          {failure ? <dl class="compact-facts">
+            <div><dt>Status</dt><dd class="technical">HTTP {failure.status}</dd></div>
+            <div><dt>Code</dt><dd class="technical">{failure.code || "Not supplied"}</dd></div>
+            <div><dt>Retry</dt><dd>{failure.retry}</dd></div>
+            <div><dt>Action</dt><dd>{failure.action}</dd></div>
+          </dl> : null}
+          <p class="form-help">Catalog discovery does not guarantee current inference availability. Provider and verification evidence refreshes after this request.</p>
         </section> : result ? <section class="surface playground-outcome">
           <div class="section-heading"><div><p class="eyebrow">Routed result</p><h2>{stringValue(served.provider)} / {stringValue(served.model)}</h2></div><span class="technical">{numberValue(result.latency_ms)} ms</span></div>
           <dl class="compact-facts">

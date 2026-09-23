@@ -46,6 +46,7 @@ type ProviderConnection struct {
 	OAuthExpiresAt     int64  `json:"oauth_expires_at,omitempty"`
 	OAuthAccountID     string `json:"oauth_account_id,omitempty"`
 	OAuthAccountLabel  string `json:"oauth_account_label,omitempty"`
+	OAuthProjectID     string `json:"oauth_project_id,omitempty"`
 	OAuthStatus        string `json:"oauth_status,omitempty"`
 }
 

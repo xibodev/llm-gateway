@@ -7,7 +7,15 @@ import (
 
 	core "github.com/xibodev/llmgw-core"
 	coreproviders "github.com/xibodev/llmgw-core/providers"
+
+	"llmgw/internal/iam"
 )
+
+type providerEvidenceGenerationKey struct{}
+
+func WithProviderEvidenceGeneration(ctx context.Context, generation int64) context.Context {
+	return context.WithValue(ctx, providerEvidenceGenerationKey{}, generation)
+}
 
 // NewGatewayProviderOrchestrator builds the shared connector surface for the
 // reviewed anonymous profiles supplied by the application registry.
@@ -38,17 +46,28 @@ func usesApplicationAnonymousAdapter(registryID string) bool {
 }
 
 func applicationModelDiscoverer(providerID string) core.ProviderModelDiscoverer {
-	return func(context.Context, core.ProviderConnection) ([]core.ModelInfo, error) {
+	return func(ctx context.Context, _ core.ProviderConnection) ([]core.ModelInfo, error) {
 		rows, _, err := RefreshCatalogForPrincipalWithError(providerID, nil)
 		if err != nil {
 			_, _, status := CatalogFailure(err)
 			return nil, core.NewProviderOperationError("provider catalog", status, "", err)
 		}
 		models := make([]core.ModelInfo, 0, len(rows))
+		modelIDs := make([]string, 0, len(rows))
 		for _, row := range rows {
+			modelIDs = append(modelIDs, row.ID)
 			models = append(models, core.ModelInfo{
 				ID: row.ID, Object: "model", OwnedBy: row.Vendor, Description: row.Label,
 			})
+		}
+		generation, ok := ctx.Value(providerEvidenceGenerationKey{}).(int64)
+		if !ok {
+			return nil, fmt.Errorf("provider evidence generation is required")
+		}
+		if err := iam.ReconcileProviderModelCatalog(
+			providerID, "", iam.ModelEvidenceCompletion, modelIDs, generation,
+		); err != nil {
+			return nil, fmt.Errorf("prepare model evidence: %w", err)
 		}
 		return models, nil
 	}
@@ -56,15 +75,17 @@ func applicationModelDiscoverer(providerID string) core.ProviderModelDiscoverer 
 
 func anonymousProbeSelector(profile AnonymousProviderProfile) core.ProviderProbeSelector {
 	return func(_ core.ProviderConnection, models []core.ModelInfo) []core.Target {
-		rows := make([]ModelInfo, 0, len(models))
+		seen := make(map[string]bool, len(models))
+		targets := make([]core.Target, 0, len(models))
 		for _, model := range models {
-			rows = append(rows, ModelInfo{ID: model.ID, Free: true})
+			id := strings.TrimSpace(model.ID)
+			if id == "" || seen[id] {
+				continue
+			}
+			seen[id] = true
+			targets = append(targets, core.Target{Provider: profile.ProviderID, Model: id})
 		}
-		model := AnonymousVerificationModel(profile.RegistryID, rows)
-		if model == "" {
-			return nil
-		}
-		return []core.Target{{Provider: profile.ProviderID, Model: model}}
+		return targets
 	}
 }
 

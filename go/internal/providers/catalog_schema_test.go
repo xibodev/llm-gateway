@@ -115,3 +115,19 @@ func TestPreAnonymousZenFilterCatalogEntriesAreDiscarded(t *testing.T) {
 		t.Fatalf("pre-filter Zen catalog survived: models=%+v refreshed=%v", models, refreshed)
 	}
 }
+
+func TestPreVertexEmptyActionsCatalogEntriesAreDiscarded(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("LLMGW_STATE_DIR", dir)
+	resetCatalogForTest(t)
+
+	legacy := `{"vertex_ai":{"schema_version":4,"models":[{"id":"gemini-3.1-pro-preview"}],"refreshed_at":"` +
+		time.Now().UTC().Format(time.RFC3339) + `"}}`
+	if err := os.WriteFile(filepath.Join(dir, "catalog.json"), []byte(legacy), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	models, refreshed := CatalogCached("vertex_ai")
+	if len(models) != 0 || !refreshed.IsZero() {
+		t.Fatalf("schema-4 Vertex catalog survived: models=%+v refreshed=%v", models, refreshed)
+	}
+}

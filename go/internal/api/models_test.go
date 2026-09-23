@@ -1,11 +1,13 @@
 package api
 
 import (
+	"encoding/base64"
 	"net/http"
 	"net/http/httptest"
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 
 	"llmgw/internal/config"
 	"llmgw/internal/iam"
@@ -14,6 +16,76 @@ import (
 
 	core "github.com/xibodev/llmgw-core"
 )
+
+func TestAnonymousModelListPublishesOnlyExactVerifiedTargets(t *testing.T) {
+	t.Setenv("LLMGW_STATE_DIR", t.TempDir())
+	iam.ResetForTests()
+	t.Cleanup(iam.ResetForTests)
+	if _, err := iam.Initialize(); err != nil {
+		t.Fatal(err)
+	}
+	profile := providers.AnonymousProviderProfiles()[0]
+	oldProviders := config.Get().Providers
+	t.Cleanup(func() { config.Update(func(s *config.Settings) { s.Providers = oldProviders }) })
+	config.Update(func(s *config.Settings) {
+		s.Providers = map[string]*config.ProviderConfig{profile.ProviderID: {
+			Type: profile.RuntimeType, RegistryID: profile.RegistryID, BaseURL: profile.BaseURL,
+		}}
+	})
+	if err := iam.MarkAnonymousProviderManaged(profile.ProviderID); err != nil {
+		t.Fatal(err)
+	}
+	generation, err := iam.ProviderCheckGeneration(profile.ProviderID, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, evidence := range []iam.ProviderModelEvidence{
+		{ProviderID: profile.ProviderID, Model: "working", Operation: iam.ModelEvidenceCompletion, State: "verified", Generation: generation},
+		{ProviderID: profile.ProviderID, Model: "broken", Operation: iam.ModelEvidenceCompletion, State: "failed", Generation: generation},
+	} {
+		if err := iam.RecordProviderModelEvidence(evidence); err != nil {
+			t.Fatal(err)
+		}
+	}
+	originalCatalog := catalogModelsForPrincipal
+	catalogModelsForPrincipal = func(providerID string, _ *config.Principal) []providers.ModelInfo {
+		if providerID == profile.ProviderID {
+			return []providers.ModelInfo{{ID: "working"}, {ID: "broken"}, {ID: "sibling"}}
+		}
+		return nil
+	}
+	t.Cleanup(func() { catalogModelsForPrincipal = originalCatalog })
+
+	public, err := buildModelList(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rows := public["data"].([]any)
+	if len(rows) != 1 || rows[0].(map[string]any)["id"] != profile.ProviderID+"/working" {
+		t.Fatalf("public rows=%+v", rows)
+	}
+	for _, field := range []string{"publication_state", "published", "disabled", "admin_unverified_opt_in", "observed_at", "latency_ms", "failure_code"} {
+		if _, exists := rows[0].(map[string]any)[field]; exists {
+			t.Fatalf("public row exposed admin diagnostic %q: %+v", field, rows[0])
+		}
+	}
+	diagnostics, err := buildModelListWithDiagnostics(nil, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	states := map[string]string{}
+	for _, raw := range diagnostics["data"].([]any) {
+		row := raw.(map[string]any)
+		states[row["id"].(string)] = row["publication_state"].(string)
+	}
+	if !reflect.DeepEqual(states, map[string]string{
+		profile.ProviderID + "/working": "verified",
+		profile.ProviderID + "/broken":  "failed",
+		profile.ProviderID + "/sibling": "unverified",
+	}) {
+		t.Fatalf("diagnostic states=%+v", states)
+	}
+}
 
 func TestIsChatModel(t *testing.T) {
 	cases := []struct {
@@ -67,6 +139,11 @@ func TestModelListAliasesAreDeterministicUniqueAndRoundTrip(t *testing.T) {
 	})
 	providers.ResetProviders()
 	t.Cleanup(providers.ResetProviders)
+	for _, providerID := range []string{"alpha", "zeta"} {
+		if rows := providers.RefreshCatalog(providerID); len(rows) == 0 {
+			t.Fatalf("%s refresh returned no models", providerID)
+		}
+	}
 	originalCatalog := catalogModelsForPrincipal
 	catalogCalls := map[string]int{}
 	catalogModelsForPrincipal = func(provider string, principal *config.Principal) []providers.ModelInfo {
@@ -271,6 +348,13 @@ func TestModelPresentationMetadataInfersLocalAudioCapabilities(t *testing.T) {
 
 func TestCommonCategoryPresentationMetadata(t *testing.T) {
 	capabilities, endpoints := commonCategoryPresentationMetadata(
+		[]map[string]bool{{"chat": true}, {"chat": true}},
+	)
+	if capabilities["chat"] != true || !reflect.DeepEqual(endpoints, []string{"/v1/chat/completions"}) {
+		t.Fatalf("chat category metadata=%+v endpoints=%+v", capabilities, endpoints)
+	}
+
+	capabilities, endpoints = commonCategoryPresentationMetadata(
 		[]map[string]bool{
 			{"transcription": true},
 			{"transcription": true},
@@ -380,6 +464,108 @@ func TestModelListAddsTypedCapabilitiesWithoutChangingLegacyFields(t *testing.T)
 	}
 }
 
+func TestModelListTransportMetadataUsesExecutionDeclarationsAndPlanner(t *testing.T) {
+	t.Setenv("LLMGW_STATE_DIR", t.TempDir())
+	iam.ResetForTests()
+	t.Cleanup(iam.ResetForTests)
+	config.Update(func(s *config.Settings) {
+		s.OpenAICodexClientID = "fixture-client"
+		s.CredentialEncryptionKey = base64.RawURLEncoding.EncodeToString(make([]byte, 32))
+		s.Providers = map[string]*config.ProviderConfig{
+			"ai-studio":   {Type: "ai_studio", APIKey: "fixture"},
+			"vertex":      {Type: "vertex_ai", APIKey: "fixture", Project: "fixture"},
+			"antigravity": {Type: "google_antigravity"},
+			"codex":       {Type: "openai_compatible", RegistryID: "openai_codex"},
+			"anthropic":   {Type: "anthropic", APIKey: "fixture"},
+		}
+		s.Endpoints = map[string]*config.EndpointConfig{}
+	})
+	if _, err := iam.Initialize(); err != nil {
+		t.Fatal(err)
+	}
+	owner, err := iam.CreatePrincipal("human", "fixture:transport-metadata", "", "Transport metadata")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, providerID := range []string{"codex", "antigravity"} {
+		if _, err := iam.PutOAuthProviderConnection(iam.OAuthConnectionCreate{
+			PrincipalID: owner.ID, ProviderID: providerID, Kind: providerID + "_oauth", AccessToken: "fixture-access",
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	providers.ResetProviders()
+	t.Cleanup(providers.ResetProviders)
+
+	trusted := func(surface string) *core.ModelCapabilities {
+		capabilities := providers.AdaptModelCapabilities(
+			map[string]any{"chat": true}, []string{surface}, time.Time{}, time.Time{},
+		)
+		capabilities.Provenance = core.ModelCapabilityProvenance{
+			Source: core.ModelCapabilitySourceUpstreamReported, Confidence: core.ModelCapabilityConfidenceHigh,
+		}
+		return capabilities
+	}
+	originalCatalog := catalogModelsForPrincipal
+	originalRefreshedAt := catalogRefreshedAtForPrincipal
+	catalogModelsForPrincipal = func(providerID string, _ *config.Principal) []providers.ModelInfo {
+		surface := "/v1/chat/completions"
+		switch providerID {
+		case "codex":
+			surface = "/v1/responses"
+		case "anthropic":
+			surface = "/v1/messages"
+		}
+		return []providers.ModelInfo{{
+			ID: "fixture-model", Capabilities: map[string]any{"chat": true},
+			SupportedSurfaces: []string{surface}, TypedCapabilities: trusted(surface),
+		}}
+	}
+	catalogRefreshedAtForPrincipal = func(string, *config.Principal) time.Time { return time.Now() }
+	t.Cleanup(func() {
+		catalogModelsForPrincipal = originalCatalog
+		catalogRefreshedAtForPrincipal = originalRefreshedAt
+	})
+
+	response, err := buildModelList(&config.Principal{PrincipalID: owner.ID, PrincipalKind: owner.Kind})
+	if err != nil {
+		t.Fatal(err)
+	}
+	rows := map[string]map[string]any{}
+	for _, raw := range response["data"].([]any) {
+		row := raw.(map[string]any)
+		rows[row["id"].(string)] = row
+	}
+	assertSurfaces := func(id string, native, emulated []string) {
+		t.Helper()
+		row := rows[id]
+		if row == nil {
+			t.Fatalf("model %q missing from %+v", id, rows)
+		}
+		if got, _ := row["native_surfaces"].([]string); !reflect.DeepEqual(got, native) {
+			t.Fatalf("%s native_surfaces=%v, want %v", id, got, native)
+		}
+		if got, _ := row["emulated_surfaces"].([]string); !reflect.DeepEqual(got, emulated) {
+			t.Fatalf("%s emulated_surfaces=%v, want %v", id, got, emulated)
+		}
+	}
+	assertSurfaces("ai-studio/fixture-model", nil, []string{
+		"/v1/chat/completions", "/v1/responses", "/v1/messages",
+	})
+	assertSurfaces("vertex/fixture-model", nil, []string{
+		"/v1/chat/completions", "/v1/responses", "/v1/messages",
+	})
+	assertSurfaces("antigravity/fixture-model", nil, []string{
+		"/v1/chat/completions", "/v1/responses", "/v1/messages",
+	})
+	assertSurfaces("codex/fixture-model", []string{"/v1/responses"}, []string{
+		"/v1/chat/completions", "/v1/messages",
+	})
+	assertSurfaces("anthropic/fixture-model", []string{"/v1/messages"}, []string{
+		"/v1/chat/completions", "/v1/responses",
+	})
+}
+
 func TestModelListRespectsKeyAndProjectPolicy(t *testing.T) {
 	t.Setenv("LLMGW_STATE_DIR", t.TempDir())
 	iam.ResetForTests()
@@ -411,6 +597,11 @@ func TestModelListRespectsKeyAndProjectPolicy(t *testing.T) {
 	})
 	if err != nil {
 		t.Fatal(err)
+	}
+	if rows := providers.RefreshCatalogForPrincipal("echo", &config.Principal{
+		PrincipalID: principal.ID, PrincipalKind: principal.Kind, ProjectID: project.ID, Project: project.Slug,
+	}); len(rows) == 0 {
+		t.Fatal("service project refresh returned no models")
 	}
 	server := httptest.NewServer(NewServer())
 	defer server.Close()

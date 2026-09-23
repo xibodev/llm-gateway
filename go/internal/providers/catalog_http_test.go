@@ -9,15 +9,23 @@ import (
 	"testing"
 	"time"
 
-	codexauth "github.com/xibodev/llm-provider-auth/codex"
+	providerauth "github.com/xibodev/llm-provider-auth"
+	coreproviders "github.com/xibodev/llmgw-core/providers"
 )
 
 func catalogFixtureCodex(t *testing.T, base string) Provider {
 	t.Helper()
-	oldURL := codexauth.ModelsURL
-	codexauth.ModelsURL = base + "/models"
-	t.Cleanup(func() { codexauth.ModelsURL = oldURL })
-	return CodexProvider{inner: OpenAIProvider{auth: catalogFixtureAuth{base: base}, Timeout: 5}}
+	inner, err := coreproviders.NewCodexProvider(coreproviders.CodexProviderConfig{
+		SessionSource: coreproviders.NewCodexTokenSessionSource(
+			providerauth.NewStaticTokenSource(&providerauth.Token{AccessToken: "fixture"}), "",
+		),
+		Instructions: codexInstructions, ResponsesURL: base + "/responses",
+		ModelsURL: base + "/models", Client: httpClient(5),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return CodexProvider{inner: inner}
 }
 
 // Generate padding indefinitely so the decoder, not the fixture, must stop reading.
@@ -62,22 +70,23 @@ func TestDecodeCatalogResponseBoundsReadAndPreservesStatus(t *testing.T) {
 
 func TestCatalogResponseSizeBoundaryAndCache(t *testing.T) {
 	for _, provider := range []struct {
-		name, body string
-		new        func(string) Provider
+		name, body  string
+		maxResponse int
+		new         func(string) Provider
 	}{
-		{"anthropic", `{"data":[{"id":"claude-fixture"}],"private":"fixture-secret"}`, func(base string) Provider {
+		{"anthropic", `{"data":[{"id":"claude-fixture"}],"private":"fixture-secret"}`, catalogMaxResponseBytes, func(base string) Provider {
 			return AnthropicNativeProvider{BaseURL: base, APIKey: "fixture-key", Timeout: 5}
 		}},
-		{"openai", `{"data":[{"id":"fixture-model"}],"private":"fixture-secret"}`, func(base string) Provider {
+		{"openai", `{"data":[{"id":"fixture-model"}],"private":"fixture-secret"}`, catalogMaxResponseBytes, func(base string) Provider {
 			return OpenAIProvider{auth: catalogFixtureAuth{base: base}, Timeout: 5}
 		}},
-		{"ollama", `{"models":[{"name":"fixture-model"}],"private":"fixture-secret"}`, func(base string) Provider {
+		{"ollama", `{"models":[{"name":"fixture-model"}],"private":"fixture-secret"}`, catalogMaxResponseBytes, func(base string) Provider {
 			return OllamaProvider{BaseURL: base, Timeout: 5}
 		}},
-		{"azure", `{"data":[{"id":"fixture-deployment","model":"gpt-4o","status":"succeeded"}],"private":"fixture-secret"}`, func(base string) Provider {
+		{"azure", `{"data":[{"id":"fixture-deployment","model":"gpt-4o","status":"succeeded"}],"private":"fixture-secret"}`, catalogMaxResponseBytes, func(base string) Provider {
 			return AzureOpenAIProvider{BaseURL: base, APIKey: "fixture-key", Timeout: 5}
 		}},
-		{"codex", `{"data":[{"id":"fixture-model"}],"private":"fixture-secret"}`, func(base string) Provider {
+		{"codex", `{"data":[{"id":"fixture-model","supported_in_api":true,"visibility":"list"}],"private":"fixture-secret"}`, 4 << 20, func(base string) Provider {
 			return catalogFixtureCodex(t, base)
 		}},
 	} {
@@ -89,7 +98,7 @@ func TestCatalogResponseSizeBoundaryAndCache(t *testing.T) {
 			t.Run(provider.name+"/"+name, func(t *testing.T) {
 				server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 					_, _ = io.WriteString(w, provider.body)
-					size := catalogMaxResponseBytes - len(provider.body)
+					size := provider.maxResponse - len(provider.body)
 					if oversized {
 						size++
 					}

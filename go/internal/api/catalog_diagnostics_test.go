@@ -81,6 +81,24 @@ func TestAdminCatalogDiagnosticsEmptyHTTPAndDNS(t *testing.T) {
 				http.DefaultTransport = catalogDNSTransport{}
 				t.Cleanup(func() { http.DefaultTransport = original })
 			}
+			refresh := httptest.NewRequest(http.MethodPost, "/admin/api/providers/diagnostic/refresh?principal_id="+principal.ID, nil)
+			refresh.Header.Set("Authorization", "Bearer admin-secret")
+			refreshResponse := httptest.NewRecorder()
+			NewServer().ServeHTTP(refreshResponse, refresh)
+			var refreshPayload map[string]any
+			if err := json.Unmarshal(refreshResponse.Body.Bytes(), &refreshPayload); err != nil {
+				t.Fatal(err)
+			}
+			wantRefreshCode := scenario.code
+			if scenario.name == "empty" {
+				wantRefreshCode = "catalog_empty"
+			}
+			if refreshResponse.Code != http.StatusOK || stringOf(refreshPayload["failure_code"]) != wantRefreshCode {
+				t.Fatalf("refresh diagnostics: %d %+v", refreshResponse.Code, refreshPayload)
+			}
+			if scenario.code != "" && scenario.status != 0 && refreshPayload["details"] == nil {
+				t.Fatalf("refresh lost failure details: %+v", refreshPayload)
+			}
 			for _, route := range []string{"catalog", "models"} {
 				method := http.MethodGet
 				if route == "models" {
@@ -98,12 +116,13 @@ func TestAdminCatalogDiagnosticsEmptyHTTPAndDNS(t *testing.T) {
 					t.Fatalf("legacy contract: %d %+v", rec.Code, payload)
 				}
 				diagnostic := payload["catalog"].(map[string]any)
-				if diagnostic["status"] != scenario.want || stringOf(diagnostic["failure_code"]) != scenario.code ||
+				wantReadStatus := scenario.want
+				if scenario.code != "" {
+					wantReadStatus = "not_synced"
+				}
+				if diagnostic["status"] != wantReadStatus || stringOf(diagnostic["failure_code"]) != "" ||
 					diagnostic["stale"] != false || diagnostic["source_scope"] != "principal" || diagnostic["owner_scope"] != "human_owner" {
 					t.Fatalf("diagnostics: %+v", diagnostic)
-				}
-				if scenario.code != "" && scenario.status != 0 && diagnostic["upstream_status"] != float64(scenario.status) {
-					t.Fatalf("upstream status: %+v", diagnostic)
 				}
 				for _, private := range []string{"fixture-secret", "fixture-token", "private-fixture.invalid", principal.ID} {
 					if strings.Contains(rec.Body.String(), private) {
@@ -114,11 +133,69 @@ func TestAdminCatalogDiagnosticsEmptyHTTPAndDNS(t *testing.T) {
 			if scenario.name == "empty" && calls.Load() != 1 {
 				t.Fatalf("successful empty catalog was not cached: %d calls", calls.Load())
 			}
-			checks, err := iam.LastProviderChecks("")
-			if err != nil || len(checks["diagnostic"]) != 0 {
-				t.Fatalf("GET must not run or persist verification: %+v %v", checks, err)
+			checks, err := iam.LastProviderChecks(principal.ID)
+			if err != nil || len(checks["diagnostic"]) != 1 || checks["diagnostic"][0].Operation != iam.CheckCatalogSync {
+				t.Fatalf("GET changed explicit sync evidence: %+v %v", checks, err)
 			}
 		})
+	}
+}
+
+func TestModelReadEndpointsUseCachedSnapshotUntilExplicitRefresh(t *testing.T) {
+	var calls atomic.Int32
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls.Add(1)
+		_, _ = w.Write([]byte(`{"data":[{"id":"fixture-model","capabilities":{"chat":true}}]}`))
+	}))
+	defer upstream.Close()
+	setupCatalogDiagnosticAPI(t, upstream.URL)
+	config.Update(func(s *config.Settings) { s.AllowUnauthenticatedAPI = true })
+	server := NewServer()
+
+	reads := []struct {
+		method string
+		path   string
+		admin  bool
+	}{
+		{method: http.MethodGet, path: "/v1/models"},
+		{method: http.MethodGet, path: "/admin/api/models", admin: true},
+		{method: http.MethodPost, path: "/admin/api/providers/diagnostic/models", admin: true},
+		{method: http.MethodGet, path: "/admin/api/providers/diagnostic/catalog", admin: true},
+	}
+	read := func(test struct {
+		method string
+		path   string
+		admin  bool
+	}) {
+		req := httptest.NewRequest(test.method, test.path, nil)
+		if test.admin {
+			req.Header.Set("Authorization", "Bearer admin-secret")
+		}
+		rec := httptest.NewRecorder()
+		server.ServeHTTP(rec, req)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("%s %s: status=%d body=%s", test.method, test.path, rec.Code, rec.Body.String())
+		}
+	}
+	for _, test := range reads {
+		read(test)
+	}
+	if calls.Load() != 0 {
+		t.Fatalf("model reads contacted upstream %d times", calls.Load())
+	}
+
+	refresh := httptest.NewRequest(http.MethodPost, "/admin/api/providers/diagnostic/refresh", nil)
+	refresh.Header.Set("Authorization", "Bearer admin-secret")
+	refreshResponse := httptest.NewRecorder()
+	server.ServeHTTP(refreshResponse, refresh)
+	if refreshResponse.Code != http.StatusOK || calls.Load() != 1 {
+		t.Fatalf("explicit refresh status=%d calls=%d body=%s", refreshResponse.Code, calls.Load(), refreshResponse.Body.String())
+	}
+	for _, test := range reads {
+		read(test)
+	}
+	if calls.Load() != 1 {
+		t.Fatalf("cached reads after sync contacted upstream %d times", calls.Load())
 	}
 }
 
@@ -142,6 +219,11 @@ func TestCatalogReadinessDoesNotBorrowAnotherScopeVerification(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
+	if _, _, err := providers.RefreshCatalogForPrincipalWithError("diagnostic", &config.Principal{
+		PrincipalID: owner.ID, PrincipalKind: owner.Kind,
+	}); err != nil {
+		t.Fatal(err)
+	}
 	for _, id := range []string{owner.ID, other.ID} {
 		req := httptest.NewRequest(http.MethodGet, "/admin/api/providers/diagnostic/catalog?principal_id="+id, nil)
 		req.Header.Set("Authorization", "Bearer admin-secret")
@@ -152,7 +234,7 @@ func TestCatalogReadinessDoesNotBorrowAnotherScopeVerification(t *testing.T) {
 			t.Fatalf("response: %d %s %v", rec.Code, rec.Body.String(), err)
 		}
 		readiness := payload["readiness"].(map[string]any)
-		if readiness["model_verified"] != (id == owner.ID) || readiness["catalog_synced"] != true {
+		if readiness["model_verified"] != (id == owner.ID) || readiness["catalog_synced"] != (id == owner.ID) {
 			t.Fatalf("readiness: %+v", readiness)
 		}
 		if id == other.ID && strings.Contains(rec.Body.String(), "private-model") {
@@ -296,6 +378,19 @@ func TestCatalogErrorPreservesScopedVerification(t *testing.T) {
 				if !scenario.gateway {
 					url += "?principal_id=" + owner.ID
 				}
+				refreshURL := "/admin/api/providers/diagnostic/refresh"
+				if !scenario.gateway {
+					refreshURL += "?principal_id=" + owner.ID
+				}
+				refresh := httptest.NewRequest(http.MethodPost, refreshURL, nil)
+				refresh.Header.Set("Authorization", "Bearer admin-secret")
+				refreshResponse := httptest.NewRecorder()
+				NewServer().ServeHTTP(refreshResponse, refresh)
+				var refreshPayload map[string]any
+				if err := json.Unmarshal(refreshResponse.Body.Bytes(), &refreshPayload); err != nil ||
+					refreshResponse.Code != http.StatusOK || refreshPayload["failure_code"] != "catalog_http_error" {
+					t.Fatalf("refresh: %d %s %v", refreshResponse.Code, refreshResponse.Body.String(), err)
+				}
 				req := httptest.NewRequest(method, url, nil)
 				req.Header.Set("Authorization", "Bearer admin-secret")
 				rec := httptest.NewRecorder()
@@ -306,7 +401,7 @@ func TestCatalogErrorPreservesScopedVerification(t *testing.T) {
 				}
 				catalog := payload["catalog"].(map[string]any)
 				readiness := payload["readiness"].(map[string]any)
-				if catalog["status"] != "error" || catalog["failure_code"] != "catalog_http_error" || catalog["upstream_status"] != float64(502) ||
+				if catalog["status"] != "not_synced" || catalog["failure_code"] != nil ||
 					readiness["catalog_synced"] != false || len(payload["models"].([]any)) != 0 {
 					t.Fatalf("catalog failure lost: %+v", payload)
 				}
@@ -341,6 +436,9 @@ func TestModelListRetainsBestEffortContractOnCatalogFailure(t *testing.T) {
 	config.Update(func(s *config.Settings) { s.Providers["healthy"] = &config.ProviderConfig{Type: "echo"} })
 	providers.ForgetCatalog("healthy")
 	t.Cleanup(func() { providers.ForgetCatalog("healthy") })
+	if rows := providers.RefreshCatalog("healthy"); len(rows) == 0 {
+		t.Fatal("healthy provider refresh returned no models")
+	}
 	result, err := buildModelList(nil)
 	if err != nil || result["object"] != "list" || len(result["data"].([]any)) == 0 {
 		t.Fatalf("best-effort model list: %+v %v", result, err)
@@ -364,6 +462,13 @@ func TestGoogleCatalogMethodsDoNotProveModelEntitlement(t *testing.T) {
 	defer upstream.Close()
 	setupCatalogDiagnosticAPI(t, upstream.URL)
 	config.Update(func(s *config.Settings) { s.Providers["diagnostic"].Type = "ai_studio" })
+	refresh := httptest.NewRequest(http.MethodPost, "/admin/api/providers/diagnostic/refresh", nil)
+	refresh.Header.Set("Authorization", "Bearer admin-secret")
+	refreshResponse := httptest.NewRecorder()
+	NewServer().ServeHTTP(refreshResponse, refresh)
+	if refreshResponse.Code != http.StatusOK {
+		t.Fatalf("refresh: %d %s", refreshResponse.Code, refreshResponse.Body.String())
+	}
 	req := httptest.NewRequest(http.MethodGet, "/admin/api/providers/diagnostic/catalog", nil)
 	req.Header.Set("Authorization", "Bearer admin-secret")
 	rec := httptest.NewRecorder()

@@ -249,6 +249,42 @@ func TestEmbeddingsProxiesToUpstream(t *testing.T) {
 	}
 }
 
+func TestNativeGoogleEmbeddingsRejectUnsupportedOpenAIOptions(t *testing.T) {
+	resetState(t)
+	calls := 0
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls++
+		_, _ = w.Write([]byte(`{"embedding":{"values":[0.1,0.2]}}`))
+	}))
+	defer upstream.Close()
+	old := config.Get().Providers
+	t.Cleanup(func() { config.Update(func(s *config.Settings) { s.Providers = old }) })
+	config.Update(func(s *config.Settings) {
+		s.Providers = map[string]*config.ProviderConfig{
+			"studio": {Type: "ai_studio", BaseURL: upstream.URL, APIKey: "key"},
+		}
+		s.AllowUnauthenticatedAPI = true
+	})
+	providers.ResetProviders()
+	t.Cleanup(providers.ResetProviders)
+
+	for _, field := range []map[string]any{{"dimensions": 128}, {"encoding_format": "base64"}, {"input": []any{"valid", 17}}} {
+		body := map[string]any{"model": "studio/gemini-embedding-001", "input": "hello"}
+		for key, value := range field {
+			body[key] = value
+		}
+		raw, _ := json.Marshal(body)
+		rec := httptest.NewRecorder()
+		NewServer().ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/v1/embeddings", bytes.NewReader(raw)))
+		if rec.Code != http.StatusBadRequest {
+			t.Fatalf("field=%v status=%d body=%s", field, rec.Code, rec.Body.String())
+		}
+	}
+	if calls != 0 {
+		t.Fatalf("unsupported options reached upstream %d time(s)", calls)
+	}
+}
+
 func TestEmbeddingsNon2xxIsBoundedAndSanitized(t *testing.T) {
 	resetState(t)
 	const email = "embedding-owner@example.test"

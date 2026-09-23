@@ -151,7 +151,7 @@ export function App() {
       case "models": content = <ModelsEndpoints data={data} mode={mode} principalID={catalogPrincipalID} onPrincipalIDChange={setCatalogPrincipalID} />; break;
       case "playground": {
         const initialOwner = playgroundRoute.owner && appliedPlaygroundOwner !== route.detail ? playgroundRoute.owner : catalogPrincipalID;
-        content = <Playground data={data} mode={mode} principalID={initialOwner} onPrincipalIDChange={setCatalogPrincipalID} preset={playgroundRoute.model} onPresetConsumed={() => setRoute({ page: "playground", detail: route.detail })} onBack={playgroundRoute.provider ? () => navigate("providers", playgroundRoute.provider) : undefined} />;
+        content = <Playground data={data} mode={mode} principalID={initialOwner} onPrincipalIDChange={setCatalogPrincipalID} preset={playgroundRoute.model} onPresetConsumed={() => setRoute({ page: "playground", detail: route.detail })} onBack={playgroundRoute.provider ? () => navigate("providers", playgroundRoute.provider) : undefined} onChanged={refresh} />;
         break;
       }
       case "keys": {

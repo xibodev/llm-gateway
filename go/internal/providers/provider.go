@@ -70,6 +70,30 @@ type Provider interface {
 	IsStub() bool
 }
 
+// WireNativePreservationProvider explicitly declares that a provider forwards
+// one client surface without translating its payload or response protocol.
+// Implementing a surface method such as ResponsesProvider is not evidence of
+// preservation: adapters may implement those methods by translating requests.
+type WireNativePreservationProvider interface {
+	PreservesWireNativeSurface(model string, surface core.ModelSurface) bool
+}
+
+// PreservesWireNativeSurface checks the concrete provider through decorators.
+// It deliberately does not infer preservation from any invocation interface.
+func PreservesWireNativeSurface(provider Provider, model string, surface core.ModelSurface) bool {
+	for provider != nil {
+		if declaration, ok := provider.(WireNativePreservationProvider); ok {
+			return declaration.PreservesWireNativeSurface(model, surface)
+		}
+		unwrapper, ok := provider.(interface{ Unwrap() Provider })
+		if !ok {
+			return false
+		}
+		provider = unwrapper.Unwrap()
+	}
+	return false
+}
+
 // ContextProvider is the optional non-streaming context-aware provider surface.
 // Provider remains unchanged while implementations migrate incrementally.
 type ContextProvider interface {

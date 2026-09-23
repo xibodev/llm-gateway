@@ -11,6 +11,12 @@ import (
 func auditAdmin(
 	r *http.Request, action, targetType, targetID string, detail map[string]any,
 ) {
+	auditAdminResult(r, action, targetType, targetID, "success", detail)
+}
+
+func auditAdminResult(
+	r *http.Request, action, targetType, targetID, result string, detail map[string]any,
+) {
 	actor := getAdminActor(r)
 	if detail == nil {
 		detail = map[string]any{}
@@ -19,7 +25,7 @@ func auditAdmin(
 	if err := iam.RecordAudit(iam.AuditEvent{
 		ActorPrincipalID: actor.PrincipalID, ActorKeyID: actor.KeyID,
 		Action: action, TargetType: targetType, TargetID: targetID,
-		Result: "success", Detail: detail,
+		Result: result, Detail: detail,
 	}); err != nil {
 		log.Printf("record admin audit: %v", err)
 	}

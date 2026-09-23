@@ -15,6 +15,8 @@ import (
 	"llmgw/internal/config"
 	"llmgw/internal/iam"
 	"llmgw/internal/router"
+
+	core "github.com/xibodev/llmgw-core"
 )
 
 func disabledPolicyRequest(t *testing.T, handler http.Handler, path, model, token string, stream bool) *httptest.ResponseRecorder {
@@ -232,7 +234,7 @@ func TestDisabledProviderPlaygroundAvailability(t *testing.T) {
 			if _, status, message := enforcePlaygroundPolicy(principal, "fixture/model", "", resolution.Targets); status != want {
 				t.Fatalf("playground policy status=%d want=%d: %s", status, want, message)
 			}
-			if _, _, status, message := audioPlaygroundTarget(principal, "fixture/model"); status != want {
+			if _, _, status, message := audioPlaygroundTarget(principal, "fixture/model", core.ModelOperationAudioOut); status != want {
 				t.Fatalf("audio playground policy status=%d want=%d: %s", status, want, message)
 			}
 		}

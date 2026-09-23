@@ -1,18 +1,15 @@
 package providers
 
 import (
-	"crypto/rand"
-	"encoding/hex"
 	"errors"
-	"fmt"
 	"net/http"
 	"strings"
 
-	"llmgw/internal/buildinfo"
 	"llmgw/internal/config"
 	"llmgw/internal/iam"
 
 	copilotauth "github.com/xibodev/llm-provider-auth/copilot"
+	corezen "github.com/xibodev/llmgw-core/providers/zen"
 )
 
 func init() {
@@ -75,11 +72,11 @@ func copilotInvocationError(err error) error {
 // bearerAuth is a static base URL + optional Bearer key: openai_compatible,
 // bedrock (token), litellm, localai, and any keyless local server.
 type bearerAuth struct {
-	base            string
-	apiKey          string
-	observation     *iam.ProviderAccountObservation
-	opencode        bool
-	opencodeProject string
+	base         string
+	apiKey       string
+	observation  *iam.ProviderAccountObservation
+	opencode     bool
+	zenAnonymous *corezen.Client
 }
 
 func normalizeBearerKey(value string) string {
@@ -98,14 +95,6 @@ func AnonymousAPIKey(value string) bool {
 	return key == "" || strings.EqualFold(key, "public")
 }
 
-func openCodeCorrelationID(prefix string) (string, error) {
-	var raw [13]byte
-	if _, err := rand.Read(raw[:]); err != nil {
-		return "", err
-	}
-	return prefix + "_" + hex.EncodeToString(raw[:]), nil
-}
-
 func newBearerAuth(
 	base, apiKey string, observation *iam.ProviderAccountObservation, opencode bool,
 ) (bearerAuth, error) {
@@ -116,9 +105,13 @@ func newBearerAuth(
 	if !opencode {
 		return auth, nil
 	}
-	var err error
-	if auth.opencodeProject, err = openCodeCorrelationID("prj"); err != nil {
-		return bearerAuth{}, err
+	if AnonymousAPIKey(apiKey) {
+		var err error
+		auth.zenAnonymous, err = newAnonymousZenClient(auth.base, "", 10)
+		if err != nil {
+			return bearerAuth{}, err
+		}
+		return auth, nil
 	}
 	return auth, nil
 }
@@ -128,31 +121,9 @@ func (a bearerAuth) Prepare() (string, http.Header, error) {
 	h.Set("Content-Type", "application/json")
 	key := normalizeBearerKey(a.apiKey)
 	if a.opencode {
-		if a.opencodeProject == "" {
-			return "", nil, errors.New("OpenCode request identity is unavailable")
+		if a.zenAnonymous != nil {
+			h.Set("Authorization", "Bearer public")
 		}
-		sessionID, err := openCodeCorrelationID("ses")
-		if err != nil {
-			return "", nil, fmt.Errorf("create OpenCode session identity: %w", err)
-		}
-		requestID, err := openCodeCorrelationID("msg")
-		if err != nil {
-			return "", nil, fmt.Errorf("create OpenCode request identity: %w", err)
-		}
-		if key == "" {
-			key = "public"
-		}
-		if key == "public" {
-			h.Set("x-opencode-project", "global")
-			h.Set("x-opencode-client", "cli")
-			h.Set("User-Agent", openCodeAnonymousUserAgent)
-		} else {
-			h.Set("x-opencode-project", a.opencodeProject)
-			h.Set("x-opencode-client", "llmgw")
-			h.Set("User-Agent", "llm-gateway/"+buildinfo.Version)
-		}
-		h.Set("x-opencode-session", sessionID)
-		h.Set("x-opencode-request", requestID)
 	}
 	if key != "" {
 		h.Set("Authorization", "Bearer "+key)

@@ -21,12 +21,13 @@ import (
 
 // ProviderConfig is one connected upstream.
 type ProviderConfig struct {
-	Type       string   `yaml:"type" json:"type"`
-	RegistryID string   `yaml:"registry_id,omitempty" json:"registry_id,omitempty"`
-	BaseURL    string   `yaml:"base_url,omitempty" json:"base_url,omitempty"`
-	APIKey     string   `yaml:"api_key,omitempty" json:"-"`
-	Region     string   `yaml:"region,omitempty" json:"region,omitempty"`
-	Timeout    *float64 `yaml:"timeout,omitempty" json:"timeout,omitempty"`
+	Type                string   `yaml:"type" json:"type"`
+	RegistryID          string   `yaml:"registry_id,omitempty" json:"registry_id,omitempty"`
+	BaseURL             string   `yaml:"base_url,omitempty" json:"base_url,omitempty"`
+	APIKey              string   `yaml:"api_key,omitempty" json:"-"`
+	Region              string   `yaml:"region,omitempty" json:"region,omitempty"`
+	Timeout             *float64 `yaml:"timeout,omitempty" json:"timeout,omitempty"`
+	PublicOAuthClientID string   `yaml:"public_oauth_client_id,omitempty" json:"public_oauth_client_id,omitempty"`
 	// DefaultVoice selects the voice used by speech-synthesis providers when
 	// a request names the provider without a specific voice.
 	DefaultVoice string `yaml:"default_voice,omitempty" json:"default_voice,omitempty"`
@@ -35,6 +36,9 @@ type ProviderConfig struct {
 	// individual models may require a specific region instead.
 	Project  string `yaml:"project,omitempty" json:"project,omitempty"`
 	Location string `yaml:"location,omitempty" json:"location,omitempty"`
+	// VertexRequestType optionally selects Google's request accounting path.
+	// Empty preserves the provider default; dedicated requires provisioned throughput.
+	VertexRequestType string `yaml:"vertex_request_type,omitempty" json:"vertex_request_type,omitempty"`
 	// Disabled keeps the provider configured but takes it out of service:
 	// requests 404, catalogs are not refreshed, and the console shows it as
 	// disabled until it is re-enabled.
@@ -48,8 +52,9 @@ type ProviderConfig struct {
 
 // EndpointMember is one pinned provider/model target in a failover chain.
 type EndpointMember struct {
-	Provider string `yaml:"provider" json:"provider"`
-	Model    string `yaml:"model" json:"model"`
+	Provider        string `yaml:"provider" json:"provider"`
+	Model           string `yaml:"model" json:"model"`
+	AllowUnverified bool   `yaml:"allow_unverified,omitempty" json:"allow_unverified,omitempty"`
 }
 
 // EndpointConfig is an ordered failover chain of pinned real models. A client
@@ -166,14 +171,20 @@ type Settings struct {
 	LiteLLMTimeoutSeconds          float64 `yaml:"litellm_timeout_seconds"`
 
 	// github copilot
-	GithubCopilotOAuthToken     string  `yaml:"github_copilot_oauth_token"`
-	GithubCopilotUseGhCLI       bool    `yaml:"github_copilot_use_gh_cli"`
-	GithubCopilotCacheDir       string  `yaml:"github_copilot_cache_dir"`
-	GithubCopilotTimeoutSeconds float64 `yaml:"github_copilot_timeout_seconds"`
-	GithubCopilotEditorVersion  string  `yaml:"github_copilot_editor_version"`
-	GithubCopilotIntegrationID  string  `yaml:"github_copilot_integration_id"`
-	OpenAICodexClientID         string  `yaml:"openai_codex_client_id"`
-	AllowCopilotProxy           bool    `yaml:"allow_copilot_proxy"`
+	GithubCopilotOAuthToken       string  `yaml:"github_copilot_oauth_token"`
+	GithubCopilotUseGhCLI         bool    `yaml:"github_copilot_use_gh_cli"`
+	GithubCopilotCacheDir         string  `yaml:"github_copilot_cache_dir"`
+	GithubCopilotTimeoutSeconds   float64 `yaml:"github_copilot_timeout_seconds"`
+	GithubCopilotEditorVersion    string  `yaml:"github_copilot_editor_version"`
+	GithubCopilotIntegrationID    string  `yaml:"github_copilot_integration_id"`
+	OpenAICodexClientID           string  `yaml:"openai_codex_client_id"`
+	GoogleAntigravityClientID     string  `yaml:"-"`
+	GoogleAntigravityClientSecret string  `yaml:"-"`
+	GoogleAntigravityOAuthProfile string  `yaml:"-"`
+	GoogleAntigravityClientMode   string  `yaml:"-"`
+	GoogleAntigravityRedirectURI  string  `yaml:"-"`
+	OAuthPublicBaseURL            string  `yaml:"-"`
+	AllowCopilotProxy             bool    `yaml:"allow_copilot_proxy"`
 }
 
 // Defaults returns a Settings with the same defaults as the Python model.
@@ -239,6 +250,74 @@ func Update(fn func(*Settings)) {
 	mu.Lock()
 	defer mu.Unlock()
 	fn(current)
+}
+
+// UpdateAndSave stages a complete isolated configuration, persists it, and only
+// then installs it in memory. A failed save leaves the live configuration intact.
+func UpdateAndSave(fn func(*Settings) error) (func() error, error) {
+	mu.Lock()
+	defer mu.Unlock()
+	previous := cloneSettings(current)
+	next := cloneSettings(current)
+	if err := fn(next); err != nil {
+		return nil, err
+	}
+	if err := writeConfigPayload(configPayload(next)); err != nil {
+		return nil, err
+	}
+	current = next
+	return func() error {
+		mu.Lock()
+		defer mu.Unlock()
+		err := writeConfigPayload(configPayload(previous))
+		current = previous
+		return err
+	}, nil
+}
+
+func cloneSettings(source *Settings) *Settings {
+	next := *source
+	next.APIKeys = append([]string(nil), source.APIKeys...)
+	next.Providers = make(map[string]*ProviderConfig, len(source.Providers))
+	for id, provider := range source.Providers {
+		if provider == nil {
+			next.Providers[id] = nil
+			continue
+		}
+		copy := *provider
+		if provider.Timeout != nil {
+			timeout := *provider.Timeout
+			copy.Timeout = &timeout
+		}
+		next.Providers[id] = &copy
+	}
+	next.Endpoints = make(map[string]*EndpointConfig, len(source.Endpoints))
+	for name, endpoint := range source.Endpoints {
+		if endpoint == nil {
+			next.Endpoints[name] = nil
+			continue
+		}
+		copy := *endpoint
+		copy.Failover = append([]EndpointMember(nil), endpoint.Failover...)
+		next.Endpoints[name] = &copy
+	}
+	next.Policies.Overrides = make(map[string]ProviderPolicy, len(source.Policies.Overrides))
+	for id, policy := range source.Policies.Overrides {
+		next.Policies.Overrides[id] = policy
+	}
+	next.Policies.OverrideFields = make(map[string]map[string]any, len(source.Policies.OverrideFields))
+	for id, fields := range source.Policies.OverrideFields {
+		next.Policies.OverrideFields[id] = cloneStringAnyMap(fields)
+	}
+	next.Savings.PriceCatalog = make(map[string]map[string]float64, len(source.Savings.PriceCatalog))
+	for model, prices := range source.Savings.PriceCatalog {
+		copy := make(map[string]float64, len(prices))
+		for unit, price := range prices {
+			copy[unit] = price
+		}
+		next.Savings.PriceCatalog[model] = copy
+	}
+	return &next
 }
 
 // AddProviderIfMissing persists one provider without overwriting an instance
@@ -514,6 +593,12 @@ func applyEnv(s *Settings) {
 	envStr("LLMGW_GITHUB_COPILOT_EDITOR_VERSION", &s.GithubCopilotEditorVersion)
 	envStr("LLMGW_GITHUB_COPILOT_INTEGRATION_ID", &s.GithubCopilotIntegrationID)
 	envStr("LLMGW_OPENAI_CODEX_CLIENT_ID", &s.OpenAICodexClientID)
+	envStr("LLMGW_GOOGLE_ANTIGRAVITY_CLIENT_ID", &s.GoogleAntigravityClientID)
+	envStr("LLMGW_GOOGLE_ANTIGRAVITY_CLIENT_SECRET", &s.GoogleAntigravityClientSecret)
+	envStr("LLMGW_GOOGLE_ANTIGRAVITY_OAUTH_PROFILE", &s.GoogleAntigravityOAuthProfile)
+	envStr("LLMGW_GOOGLE_ANTIGRAVITY_CLIENT_MODE", &s.GoogleAntigravityClientMode)
+	envStr("LLMGW_GOOGLE_ANTIGRAVITY_REDIRECT_URI", &s.GoogleAntigravityRedirectURI)
+	envStr("LLMGW_OAUTH_PUBLIC_BASE_URL", &s.OAuthPublicBaseURL)
 	envBool("LLMGW_ALLOW_COPILOT_PROXY", &s.AllowCopilotProxy)
 }
 
@@ -536,6 +621,9 @@ func applyConfig(s *Settings, payload map[string]any) {
 			if v, ok := m["registry_id"].(string); ok {
 				cfg.RegistryID = v
 			}
+			if v, ok := m["public_oauth_client_id"].(string); ok {
+				cfg.PublicOAuthClientID = v
+			}
 			if v, ok := m["base_url"].(string); ok {
 				cfg.BaseURL = resolveEnv(v)
 			}
@@ -553,6 +641,9 @@ func applyConfig(s *Settings, payload map[string]any) {
 			}
 			if v, ok := m["location"].(string); ok {
 				cfg.Location = v
+			}
+			if v, ok := m["vertex_request_type"].(string); ok {
+				cfg.VertexRequestType = v
 			}
 			if v, ok := m["disabled"].(bool); ok {
 				cfg.Disabled = v
@@ -652,8 +743,9 @@ func parseMembers(items []any) []EndpointMember {
 		}
 		prov, _ := m["provider"].(string)
 		model, _ := m["model"].(string)
+		allowUnverified, _ := m["allow_unverified"].(bool)
 		if prov != "" && model != "" {
-			out = append(out, EndpointMember{Provider: prov, Model: model})
+			out = append(out, EndpointMember{Provider: prov, Model: model, AllowUnverified: allowUnverified})
 		}
 	}
 	return out
@@ -749,7 +841,11 @@ func configPayload(s *Settings) map[string]any {
 	for name, ep := range s.Endpoints {
 		fo := []any{}
 		for _, m := range ep.Failover {
-			fo = append(fo, map[string]any{"provider": m.Provider, "model": m.Model})
+			member := map[string]any{"provider": m.Provider, "model": m.Model}
+			if m.AllowUnverified {
+				member["allow_unverified"] = true
+			}
+			fo = append(fo, member)
 		}
 		endpoints[name] = map[string]any{"failover": fo}
 	}
@@ -781,6 +877,9 @@ func providerConfigPayload(pc *ProviderConfig) map[string]any {
 	if pc.RegistryID != "" {
 		entry["registry_id"] = pc.RegistryID
 	}
+	if pc.PublicOAuthClientID != "" {
+		entry["public_oauth_client_id"] = pc.PublicOAuthClientID
+	}
 	if pc.BaseURL != "" {
 		entry["base_url"] = pc.BaseURL
 	}
@@ -795,6 +894,9 @@ func providerConfigPayload(pc *ProviderConfig) map[string]any {
 	}
 	if pc.Location != "" {
 		entry["location"] = pc.Location
+	}
+	if pc.VertexRequestType != "" {
+		entry["vertex_request_type"] = pc.VertexRequestType
 	}
 	if pc.Disabled {
 		entry["disabled"] = true

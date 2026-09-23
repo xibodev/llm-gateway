@@ -24,17 +24,29 @@ persists between runs.
 
 Open `http://127.0.0.1:8898/console` with the disposable `LLMGW_API_KEY`.
 
+For Antigravity manual-code UAT, put the caller-owned profile values only in
+the gitignored `test/uat/.env.uat`: set the profile to `consumer_manual`, choose
+an explicit `public` or `confidential` client mode, and set the exact registered
+redirect URI. A confidential profile also requires its client secret. Start the
+stack with the existing `--env-file` command; do not use `docker compose config`
+or shell tracing because both can print resolved environment values. In the
+console choose **Manual code**, leave the optional administrator profile fields
+blank, approve access in the opened browser, then paste either the code or the
+full redirect URL.
+
 ## First-run acceptance
 
 1. Create a human and project; assign the human `owner` or `admin`.
 2. Connect a real API-key provider, sync its catalog, and run **Test completion**.
 3. Complete personal Copilot device authorization when that integration is in
    scope.
-4. Connect `edge_tts`, sync voices, and run a real MP3 synthesis.
-5. Create and test an endpoint with two eligible providers.
-6. Mint a key that **acts as the human owner** when it must use that human's
+4. When Antigravity is in scope, complete manual-code authorization and verify
+   that the provider appears only after the pasted response succeeds.
+5. Connect `edge_tts`, sync voices, and run a real MP3 synthesis.
+6. Create and test an endpoint with two eligible providers.
+7. Mint a key that **acts as the human owner** when it must use that human's
    private OAuth connection.
-7. Set project policy and inspect audit/usage without recording secret values.
+8. Set project policy and inspect audit/usage without recording secret values.
 
 ## Direct endpoint gate
 

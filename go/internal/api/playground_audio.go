@@ -17,6 +17,8 @@ import (
 	"llmgw/internal/iam"
 	"llmgw/internal/providers"
 	"llmgw/internal/router"
+
+	core "github.com/xibodev/llmgw-core"
 )
 
 // The playground exercises audio models through the same project attribution,
@@ -29,6 +31,13 @@ type playgroundSpeechBody struct {
 	Model       string `json:"model"`
 	Input       string `json:"input"`
 	Speed       any    `json:"speed"`
+}
+
+type playgroundEmbeddingsBody struct {
+	ProjectID   string `json:"project_id"`
+	PrincipalID string `json:"principal_id"`
+	Model       string `json:"model"`
+	Input       any    `json:"input"`
 }
 
 // resolvePlaygroundActor mirrors the chat playground's admin principal
@@ -53,7 +62,7 @@ func resolvePlaygroundActor(r *http.Request, principalID, projectID string) (*co
 
 // audioPlaygroundTarget resolves a requested model to one provider/model pair
 // under the project's policy, exactly as the audio endpoints do.
-func audioPlaygroundTarget(principal *config.Principal, model string) (string, string, int, string) {
+func audioPlaygroundTarget(principal *config.Principal, model string, operation core.ModelOperation) (string, string, int, string) {
 	model = strings.TrimSpace(model)
 	if model == "" {
 		return "", "", http.StatusBadRequest, "model is required"
@@ -72,7 +81,60 @@ func audioPlaygroundTarget(principal *config.Principal, model string) (string, s
 	if len(targets) == 0 {
 		return "", "", http.StatusNotFound, "no routable target for '" + model + "'"
 	}
-	return targets[0].Provider, targets[0].Model, 0, ""
+	for _, target := range targets {
+		row, found := providers.CatalogCachedLookupForPrincipal(target.Provider, target.Model, principal)
+		if found && providers.ModelOperationSupport(row, operation) == core.SupportUnsupported {
+			continue
+		}
+		if operation == core.ModelOperationAudioOut {
+			if _, native := providers.SpeechSynthesizerForPrincipal(target.Provider, principal); native {
+				return target.Provider, target.Model, 0, ""
+			}
+		}
+		if operation == core.ModelOperationEmbeddings {
+			if instance, err := providers.GetProviderForPrincipal(target.Provider, principal); err == nil {
+				if _, native := providers.AsEmbeddingProvider(instance); native {
+					return target.Provider, target.Model, 0, ""
+				}
+			}
+		}
+		if _, _, ok := providers.ProviderHTTPTarget(target.Provider, principal); ok {
+			return target.Provider, target.Model, 0, ""
+		}
+	}
+	return "", "", http.StatusBadRequest, "no route member supports the requested operation"
+}
+
+func mediaPlaygroundTarget(principal *config.Principal, model string, operation core.ModelOperation) (string, string, int, string) {
+	model = strings.TrimSpace(model)
+	if model == "" {
+		return "", "", http.StatusBadRequest, "model is required"
+	}
+	resolution, err := router.ResolveForPrincipal(model, principal)
+	if err != nil {
+		if _, missing := err.(*router.ModelNotFoundError); missing {
+			return "", "", http.StatusNotFound, err.Error()
+		}
+		return "", "", http.StatusInternalServerError, "Gateway route configuration is unavailable."
+	}
+	targets, status, message := enforcePlaygroundPolicy(principal, model, resolution.Category, resolution.Targets)
+	if status != 0 {
+		return "", "", status, message
+	}
+	for _, target := range targets {
+		row, found := providers.CatalogCachedLookupForPrincipal(target.Provider, target.Model, principal)
+		if found && !providers.ModelSupportsOperation(row, operation) {
+			continue
+		}
+		if operation == core.ModelOperationImage {
+			if _, ok := imageGeneratorFor(target.Provider, principal); ok {
+				return target.Provider, target.Model, 0, ""
+			}
+		} else if _, ok := videoGeneratorFor(target.Provider, principal); ok {
+			return target.Provider, target.Model, 0, ""
+		}
+	}
+	return "", "", http.StatusBadRequest, "no route member supports the requested media operation"
 }
 
 // POST /admin/api/playground/speech — synthesize audio and return it inline so
@@ -95,7 +157,7 @@ func handleAdminPlaygroundSpeech(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "input text is required")
 		return
 	}
-	providerID, voice, status, message := audioPlaygroundTarget(principal, body.Model)
+	providerID, voice, status, message := audioPlaygroundTarget(principal, body.Model, core.ModelOperationAudioOut)
 	if status != 0 {
 		writeError(w, status, message)
 		return
@@ -148,6 +210,111 @@ func handleAdminPlaygroundSpeech(w http.ResponseWriter, r *http.Request) {
 		"content_type": contentType,
 		"audio_base64": base64.StdEncoding.EncodeToString(audio),
 		"audio_bytes":  len(audio),
+	})
+}
+
+func handleAdminPlaygroundEmbeddings(w http.ResponseWriter, r *http.Request) {
+	if !adminAuthed(w, r) {
+		return
+	}
+	var body playgroundEmbeddingsBody
+	if !decodeBody(r, &body) {
+		writeError(w, http.StatusBadRequest, "invalid playground request")
+		return
+	}
+	principal, project, status, message := resolvePlaygroundActor(r, body.PrincipalID, body.ProjectID)
+	if status != 0 {
+		writeError(w, status, message)
+		return
+	}
+	if inputEmpty(body.Input) {
+		writeError(w, http.StatusBadRequest, "embedding input is required")
+		return
+	}
+	providerID, upstreamModel, status, message := audioPlaygroundTarget(principal, body.Model, core.ModelOperationEmbeddings)
+	if status != 0 {
+		writeError(w, status, message)
+		return
+	}
+	if instance, providerErr := providers.GetProviderForPrincipal(providerID, principal); providerErr == nil {
+		if embedder, supported := providers.AsEmbeddingProvider(instance); supported {
+			if !nativeEmbeddingInputValid(body.Input) {
+				writeError(w, http.StatusBadRequest, "native embedding input must be a string or array of strings")
+				return
+			}
+			started := time.Now()
+			result, embedErr := embedder.Embed(r.Context(), upstreamModel, body.Input)
+			latency := time.Since(started).Milliseconds()
+			status := http.StatusOK
+			errorCode := ""
+			if embedErr != nil {
+				status, errorCode = upstreamErrorStatus(embedErr), "upstream"
+			}
+			recordPlaygroundEmbeddingUsage(body.Model, providerID, upstreamModel, principal, project, status, latency, errorCode)
+			if embedErr != nil {
+				writeUpstreamError(w, embedErr)
+				return
+			}
+			writePlaygroundEmbeddingResult(w, r, result, body.Model, providerID, upstreamModel, principal, project, latency)
+			return
+		}
+	}
+	base, headers, ok := providers.ProviderHTTPTarget(providerID, principal)
+	if !ok {
+		writeError(w, http.StatusBadRequest, "provider does not expose an OpenAI-compatible embeddings endpoint")
+		return
+	}
+	payload, _ := json.Marshal(embeddingsRequest{Model: upstreamModel, Input: body.Input})
+	request, err := http.NewRequestWithContext(r.Context(), http.MethodPost, strings.TrimRight(base, "/")+"/embeddings", bytes.NewReader(payload))
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "could not build the upstream request")
+		return
+	}
+	copyAuthHeaders(request, headers, false)
+	request.Header.Set("Content-Type", "application/json")
+	started := time.Now()
+	response, err := embeddingsClient.Do(request)
+	latency := time.Since(started).Milliseconds()
+	if err != nil {
+		recordPlaygroundEmbeddingUsage(body.Model, providerID, upstreamModel, principal, project, http.StatusBadGateway, latency, "upstream")
+		writeError(w, http.StatusBadGateway, "embeddings provider request failed")
+		return
+	}
+	result := readAPIProxyResponse(response, "embeddings")
+	recordPlaygroundEmbeddingUsage(body.Model, providerID, upstreamModel, principal, project, result.status, latency, result.errorCode)
+	if result.err != nil {
+		writeUpstreamError(w, result.err)
+		return
+	}
+	decoded := decodeJSONObject(result.body)
+	writePlaygroundEmbeddingResult(w, r, decoded, body.Model, providerID, upstreamModel, principal, project, latency)
+}
+
+func writePlaygroundEmbeddingResult(w http.ResponseWriter, r *http.Request, decoded map[string]any, requestedModel, providerID, upstreamModel string, principal *config.Principal, project iam.Project, latency int64) {
+	data, _ := decoded["data"].([]any)
+	dimensions := 0
+	if len(data) > 0 {
+		if first, ok := data[0].(map[string]any); ok {
+			if vector, ok := first["embedding"].([]any); ok {
+				dimensions = len(vector)
+			}
+		}
+	}
+	auditAdmin(r, "playground.embeddings", "project", project.ID, map[string]any{"model": requestedModel, "principal_id": principal.PrincipalID})
+	writeJSON(w, http.StatusOK, map[string]any{
+		"project_id": project.ID, "principal_id": principal.PrincipalID,
+		"served":     map[string]any{"provider": providerID, "model": upstreamModel},
+		"latency_ms": latency, "vectors": len(data), "dimensions": dimensions,
+		"usage": safePlaygroundValue(decoded["usage"]), "raw_response": safePlaygroundValue(decoded),
+	})
+}
+
+func recordPlaygroundEmbeddingUsage(requestedModel, providerID, upstreamModel string, principal *config.Principal, project iam.Project, status int, latency int64, errorCode string) {
+	router.RecordUsage(router.UsageRecord{
+		Endpoint: "playground.embeddings", RequestedModel: requestedModel, RoutedModel: upstreamModel,
+		Provider: providerID, Project: project.Slug, Key: "playground", ProjectID: project.ID,
+		PrincipalID: principal.PrincipalID, StatusCode: status, LatencyMS: latency,
+		ErrorCode: errorCode, CreditsMilli: embeddingsCreditsMilli,
 	})
 }
 
@@ -229,7 +396,7 @@ func handleAdminPlaygroundTranscription(w http.ResponseWriter, r *http.Request) 
 		writeError(w, status, message)
 		return
 	}
-	providerID, upstreamModel, status, message := audioPlaygroundTarget(principal, r.FormValue("model"))
+	providerID, upstreamModel, status, message := audioPlaygroundTarget(principal, r.FormValue("model"), core.ModelOperationAudioIn)
 	if status != 0 {
 		writeError(w, status, message)
 		return
@@ -346,8 +513,8 @@ type playgroundMediaBody struct {
 	Operation   string         `json:"operation"`
 }
 
-// POST /admin/api/playground/image — generate an image under project
-// attribution and return it inline for the console to display.
+// POST /admin/api/playground/image generates an image under project
+// attribution and returns it inline for the console to display.
 func handleAdminPlaygroundImage(w http.ResponseWriter, r *http.Request) {
 	if !adminAuthed(w, r) {
 		return
@@ -362,11 +529,15 @@ func handleAdminPlaygroundImage(w http.ResponseWriter, r *http.Request) {
 		writeError(w, status, message)
 		return
 	}
+	executePlaygroundImage(w, r, body, principal, project)
+}
+
+func executePlaygroundImage(w http.ResponseWriter, r *http.Request, body playgroundMediaBody, principal *config.Principal, project iam.Project) {
 	if strings.TrimSpace(body.Prompt) == "" {
 		writeError(w, http.StatusBadRequest, "a prompt is required")
 		return
 	}
-	providerID, model, status, message := audioPlaygroundTarget(principal, body.Model)
+	providerID, model, status, message := mediaPlaygroundTarget(principal, body.Model, core.ModelOperationImage)
 	if status != 0 {
 		writeError(w, status, message)
 		return
@@ -387,8 +558,13 @@ func handleAdminPlaygroundImage(w http.ResponseWriter, r *http.Request) {
 	}
 	latency := time.Since(started).Milliseconds()
 	if err != nil {
-		_ = iam.RecordAudit(iam.AuditEvent{ActorPrincipalID: principal.PrincipalID, Action: "playground.image", TargetType: "project", TargetID: project.ID, Result: "failure", Detail: map[string]any{"model": body.Model}})
+		recordPlaygroundMediaFailure("playground.image", "playground.image", body.Model, providerID, model, principal, project, started, err)
 		writeUpstreamError(w, err)
+		return
+	}
+	if err := validateGeneratedImages(images); err != nil {
+		recordPlaygroundMediaFailure("playground.image", "playground.image", body.Model, providerID, model, principal, project, started, err)
+		writeError(w, http.StatusBadGateway, err.Error())
 		return
 	}
 	inputTokens, outputTokens := googleModalityUsage(usage)
@@ -426,7 +602,7 @@ func handleAdminPlaygroundVideo(w http.ResponseWriter, r *http.Request) {
 		writeError(w, status, message)
 		return
 	}
-	providerID, model, status, message := audioPlaygroundTarget(principal, body.Model)
+	providerID, model, status, message := mediaPlaygroundTarget(principal, body.Model, core.ModelOperationVideo)
 	if status != 0 {
 		writeError(w, status, message)
 		return
@@ -450,6 +626,7 @@ func handleAdminPlaygroundVideo(w http.ResponseWriter, r *http.Request) {
 			job, err = generator.PollVideo(operation)
 		}
 		if err != nil {
+			recordPlaygroundMediaFailure("playground.video", "playground.video", body.Model, providerID, model, principal, project, time.Now(), err)
 			writeUpstreamError(w, err)
 			return
 		}
@@ -469,6 +646,7 @@ func handleAdminPlaygroundVideo(w http.ResponseWriter, r *http.Request) {
 		job, err = generator.StartVideo(model, body.Prompt, body.Parameters)
 	}
 	if err != nil {
+		recordPlaygroundMediaFailure("playground.video", "playground.video", body.Model, providerID, model, principal, project, started, err)
 		writeUpstreamError(w, err)
 		return
 	}
@@ -480,4 +658,16 @@ func handleAdminPlaygroundVideo(w http.ResponseWriter, r *http.Request) {
 	})
 	_ = iam.RecordAudit(iam.AuditEvent{ActorPrincipalID: principal.PrincipalID, Action: "playground.video", TargetType: "project", TargetID: project.ID, Result: "success", Detail: map[string]any{"model": body.Model, "operation": job.Operation}})
 	writeJSON(w, http.StatusAccepted, videoJobPayload(providerID, model, job))
+}
+
+func recordPlaygroundMediaFailure(endpoint, action, requested, providerID, model string, principal *config.Principal, project iam.Project, started time.Time, err error) {
+	router.RecordUsage(router.UsageRecord{
+		Endpoint: endpoint, RequestedModel: requested, RoutedModel: model, Provider: providerID,
+		Project: project.Slug, Key: "playground", ProjectID: project.ID, PrincipalID: principal.PrincipalID,
+		StatusCode: upstreamErrorStatus(err), LatencyMS: time.Since(started).Milliseconds(), ErrorCode: "upstream",
+	})
+	_ = iam.RecordAudit(iam.AuditEvent{
+		ActorPrincipalID: principal.PrincipalID, Action: action, TargetType: "project", TargetID: project.ID,
+		Result: "failure", Detail: map[string]any{"model": requested},
+	})
 }

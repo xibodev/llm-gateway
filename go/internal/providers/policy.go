@@ -162,6 +162,10 @@ func (r *ResilientProvider) CompleteWithObservation(
 func (r *ResilientProvider) CompleteContextWithObservation(
 	ctx context.Context, model string, messages []Message, kw Kwargs,
 ) (map[string]any, *iam.ProviderAccountObservation, error) {
+	ctx, err := ensureProviderZenInvocation(ctx, r.inner)
+	if err != nil {
+		return nil, nil, err
+	}
 	if err := r.checkCircuit(); err != nil {
 		return nil, nil, err
 	}
@@ -213,6 +217,10 @@ func (r *ResilientProvider) CompleteResponses(
 func (r *ResilientProvider) CompleteResponsesContext(
 	ctx context.Context, model string, payload map[string]any,
 ) (map[string]any, *iam.ProviderAccountObservation, error) {
+	ctx, err := ensureProviderZenInvocation(ctx, r.inner)
+	if err != nil {
+		return nil, nil, err
+	}
 	if err := r.checkCircuit(); err != nil {
 		return nil, nil, err
 	}
@@ -265,6 +273,10 @@ func (r *ResilientProvider) StreamResponses(
 func (r *ResilientProvider) StreamResponsesContext(
 	ctx context.Context, model string, payload map[string]any,
 ) (StreamIter, *iam.ProviderAccountObservation, error) {
+	ctx, err := ensureProviderZenInvocation(ctx, r.inner)
+	if err != nil {
+		return nil, nil, err
+	}
 	if err := ctx.Err(); err != nil {
 		return nil, nil, err
 	}
@@ -319,6 +331,10 @@ func (r *ResilientProvider) Stream(model string, messages []Message, kw Kwargs) 
 }
 
 func (r *ResilientProvider) StreamContext(ctx context.Context, model string, messages []Message, kw Kwargs) (StreamIter, error) {
+	ctx, err := ensureProviderZenInvocation(ctx, r.inner)
+	if err != nil {
+		return nil, err
+	}
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
@@ -409,6 +425,23 @@ func (r *ResilientProvider) SynthesizeContext(ctx context.Context, voice, text, 
 
 func (r *ResilientProvider) GenerateImages(model, prompt string, count int) ([]GeneratedImage, map[string]any, error) {
 	return r.GenerateImagesContext(context.Background(), model, prompt, count)
+}
+
+func (r *ResilientProvider) Embed(ctx context.Context, model string, input any) (map[string]any, error) {
+	embedder, ok := AsEmbeddingProvider(r.inner)
+	if !ok {
+		return nil, &ConfigError{Msg: "provider does not support embeddings"}
+	}
+	if err := r.checkCircuit(); err != nil {
+		return nil, err
+	}
+	result, err := embedder.Embed(ctx, model, input)
+	if err == nil {
+		r.recordSuccess()
+	} else {
+		r.recordInvocationOutcome(err)
+	}
+	return result, err
 }
 
 func (r *ResilientProvider) GenerateImagesContext(ctx context.Context, model, prompt string, count int) ([]GeneratedImage, map[string]any, error) {

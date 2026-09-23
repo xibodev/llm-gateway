@@ -20,7 +20,7 @@ func TestGatewayProviderOrchestratorRegistersOnlyReviewedAnonymousProfiles(t *te
 	}
 }
 
-func TestAnonymousProbeSelectorUsesReviewedProfileModel(t *testing.T) {
+func TestAnonymousProbeSelectorUsesEveryDiscoveredModel(t *testing.T) {
 	profile := AnonymousProviderProfile{
 		RegistryID: "llm7", ProviderID: "fixture",
 	}
@@ -28,8 +28,19 @@ func TestAnonymousProbeSelectorUsesReviewedProfileModel(t *testing.T) {
 		core.ProviderConnection{ProviderID: "fixture", Kind: core.ProviderConnectionAnonymous, AuthKind: core.ProviderAuthAnonymous},
 		[]core.ModelInfo{{ID: "paid"}, {ID: "codestral-latest"}},
 	)
-	if len(targets) != 1 || targets[0].Provider != "fixture" || targets[0].Model != "codestral-latest" {
+	if len(targets) != 2 || targets[0] != (core.Target{Provider: "fixture", Model: "paid"}) ||
+		targets[1] != (core.Target{Provider: "fixture", Model: "codestral-latest"}) {
 		t.Fatalf("targets=%+v", targets)
+	}
+}
+
+func TestAnonymousProbeSelectorDoesNotVerifySiblingsFromOneTarget(t *testing.T) {
+	profile := AnonymousProviderProfile{RegistryID: "fixture", ProviderID: "fixture"}
+	targets := anonymousProbeSelector(profile)(core.ProviderConnection{}, []core.ModelInfo{
+		{ID: "working"}, {ID: "broken"}, {ID: "working"},
+	})
+	if len(targets) != 2 || targets[0].Model != "working" || targets[1].Model != "broken" {
+		t.Fatalf("per-model targets=%+v", targets)
 	}
 }
 

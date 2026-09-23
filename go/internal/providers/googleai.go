@@ -60,12 +60,13 @@ type GoogleAIProvider struct {
 	// bearerToken carries a minted OAuth2 access token. When set it replaces
 	// the x-goog-api-key header: service-account auth is a Bearer credential,
 	// and Vertex rejects a request that presents both.
-	bearerToken    string
-	bearerTokenFor func() (string, error)
-	baseURL        string // ai_studio only
-	project        string // vertex only
-	location       string // vertex only
-	timeout        time.Duration
+	bearerToken       string
+	bearerTokenFor    func() (string, error)
+	baseURL           string // ai_studio only
+	project           string // vertex only
+	location          string // vertex only
+	vertexRequestType string // vertex invocation accounting only
+	timeout           time.Duration
 }
 
 // NewAIStudio builds the generativelanguage.googleapis.com provider.
@@ -114,6 +115,18 @@ func NewVertexAIWithTokenSource(
 	provider := NewVertexAI(baseURL, "", project, location, timeoutSeconds)
 	provider.bearerTokenFor = tokenSource
 	return provider
+}
+
+func (p GoogleAIProvider) withVertexRequestType(value string) GoogleAIProvider {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "paygo":
+		p.vertexRequestType = "shared"
+	case "dedicated":
+		p.vertexRequestType = "dedicated"
+	default:
+		p.vertexRequestType = ""
+	}
+	return p
 }
 
 func googleTimeout(seconds float64) time.Duration {
@@ -188,6 +201,9 @@ func (p GoogleAIProvider) doContext(ctx context.Context, method, url string, bod
 		return nil, 0, err
 	}
 	request.Header.Set("Content-Type", "application/json")
+	if p.surface == SurfaceVertex && p.vertexRequestType != "" {
+		request.Header.Set("X-Vertex-AI-LLM-Request-Type", p.vertexRequestType)
+	}
 	bearerToken, err := p.currentBearerToken()
 	if err != nil {
 		return nil, 0, err
@@ -416,6 +432,93 @@ func googleUsage(decoded map[string]any) (int, int, int) {
 		total = input + output
 	}
 	return input, output, total
+}
+
+// EmbeddingProvider is implemented by native providers that can return an
+// OpenAI-shaped embedding envelope without an OpenAI-compatible HTTP surface.
+type EmbeddingProvider interface {
+	Embed(context.Context, string, any) (map[string]any, error)
+}
+
+func (p GoogleAIProvider) Embed(ctx context.Context, model string, input any) (map[string]any, error) {
+	values := make([]string, 0, 1)
+	switch typed := input.(type) {
+	case string:
+		if strings.TrimSpace(typed) != "" {
+			values = append(values, typed)
+		}
+	case []string:
+		values = append(values, typed...)
+	case []any:
+		for _, raw := range typed {
+			text, ok := raw.(string)
+			if !ok {
+				return nil, &InvocationError{Msg: p.label() + ": embedding input must contain only strings"}
+			}
+			values = append(values, text)
+		}
+	default:
+		return nil, &InvocationError{Msg: p.label() + ": embedding input must be a string or array of strings"}
+	}
+	if len(values) == 0 {
+		return nil, &InvocationError{Msg: p.label() + ": embedding input is required"}
+	}
+	data := make([]any, 0, len(values))
+	totalTokens := 0
+	for index, text := range values {
+		var endpoint string
+		var body map[string]any
+		var err error
+		if p.surface == SurfaceVertex && !strings.HasPrefix(strings.ToLower(strings.TrimPrefix(model, "models/")), "gemini-embedding-2") {
+			endpoint, err = p.modelURL(model, "predict")
+			body = map[string]any{"instances": []any{map[string]any{"content": text}}}
+		} else {
+			endpoint, err = p.modelURL(model, "embedContent")
+			body = map[string]any{"content": map[string]any{"parts": []any{map[string]any{"text": text}}}}
+		}
+		if err != nil {
+			return nil, err
+		}
+		decoded, _, err := p.doContext(ctx, http.MethodPost, endpoint, body)
+		if err != nil {
+			return nil, err
+		}
+		vector, tokens := googleEmbedding(decoded)
+		if len(vector) == 0 {
+			return nil, &InvocationError{Msg: p.label() + ": embedding response contained no vector"}
+		}
+		totalTokens += tokens
+		data = append(data, map[string]any{"object": "embedding", "index": index, "embedding": vector})
+	}
+	return map[string]any{
+		"object": "list", "data": data, "model": strings.TrimPrefix(strings.TrimSpace(model), "models/"),
+		"usage": map[string]any{"prompt_tokens": totalTokens, "total_tokens": totalTokens},
+	}, nil
+}
+
+func googleEmbedding(decoded map[string]any) ([]any, int) {
+	if embedding, ok := decoded["embedding"].(map[string]any); ok {
+		values, _ := embedding["values"].([]any)
+		usage, _ := decoded["usageMetadata"].(map[string]any)
+		tokens := 0
+		if count, ok := usage["promptTokenCount"].(float64); ok {
+			tokens = int(count)
+		}
+		return values, tokens
+	}
+	predictions, _ := decoded["predictions"].([]any)
+	if len(predictions) == 0 {
+		return nil, 0
+	}
+	prediction, _ := predictions[0].(map[string]any)
+	embeddings, _ := prediction["embeddings"].(map[string]any)
+	values, _ := embeddings["values"].([]any)
+	statistics, _ := embeddings["statistics"].(map[string]any)
+	tokens := 0
+	if count, ok := statistics["token_count"].(float64); ok {
+		tokens = int(count)
+	}
+	return values, tokens
 }
 
 // ---- image --------------------------------------------------------------- //
@@ -983,7 +1086,7 @@ func (p GoogleAIProvider) vertexPublisherModels(publisher string) ([]ModelInfo, 
 		if modelCount > googleCatalogMaxModels {
 			return nil, catalogError("catalog_not_discoverable", "Provider catalog listing exceeded the model limit.", 0)
 		}
-		models = append(models, vertexManagedModels(decoded)...)
+		models = append(models, vertexManagedModels(decoded, p.location == vertexDefaultLocation)...)
 		nextToken, _ := decoded["nextPageToken"].(string)
 		if nextToken == "" {
 			break
@@ -1022,7 +1125,7 @@ func vertexDiscoveryBase(baseURL string) string {
 // the operator to stand up their own endpoint first. One measured region
 // carried 11,841 of those against roughly 78 managed models; without this
 // filter a single region's catalog balloons past 14,000 rows.
-func vertexManagedModels(decoded map[string]any) []ModelInfo {
+func vertexManagedModels(decoded map[string]any, allowEmptyActions bool) []ModelInfo {
 	raw, _ := decoded["publisherModels"].([]any)
 	models := make([]ModelInfo, 0, len(raw))
 	for _, entry := range raw {
@@ -1038,12 +1141,10 @@ func vertexManagedModels(decoded map[string]any) []ModelInfo {
 		if id == "" {
 			continue
 		}
-		actions, _ := fields["supportedActions"].(map[string]any)
+		rawActions, actionsPresent := fields["supportedActions"]
+		actions, _ := rawActions.(map[string]any)
 		_, openGeneration := actions["openGenerationAiStudio"]
 		_, gated := actions["requestAccess"]
-		if !openGeneration && !gated {
-			continue
-		}
 		// The list response carries no display-name field either — only
 		// name/versionId/supportedActions and similar machine fields were
 		// observed — so Label is left unset rather than guessed.
@@ -1059,6 +1160,9 @@ func vertexManagedModels(decoded map[string]any) []ModelInfo {
 		// (router.ResolveForPrincipal), so an operator who knows the id can
 		// still address it directly.
 		if len(capabilities) == 0 {
+			continue
+		}
+		if !openGeneration && !gated && !(allowEmptyActions && (!actionsPresent || len(actions) == 0)) {
 			continue
 		}
 		models = append(models, ModelInfo{
@@ -1141,6 +1245,26 @@ func AsVideoGenerator(provider Provider) (VideoGenerator, bool) {
 		}
 		if generator, ok := provider.(VideoGenerator); ok {
 			return generator, true
+		}
+		unwrapper, ok := provider.(interface{ Unwrap() Provider })
+		if !ok {
+			return nil, false
+		}
+		provider = unwrapper.Unwrap()
+	}
+	return nil, false
+}
+
+func AsEmbeddingProvider(provider Provider) (EmbeddingProvider, bool) {
+	for provider != nil {
+		if resilient, ok := provider.(*ResilientProvider); ok {
+			if _, supported := AsEmbeddingProvider(resilient.inner); !supported {
+				return nil, false
+			}
+			return resilient, true
+		}
+		if embedder, ok := provider.(EmbeddingProvider); ok {
+			return embedder, true
 		}
 		unwrapper, ok := provider.(interface{ Unwrap() Provider })
 		if !ok {

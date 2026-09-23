@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"path/filepath"
 	"sync/atomic"
 	"testing"
 
@@ -119,6 +120,24 @@ func TestEnsureAnonymousProviderDoesNotOverwriteOrEnable(t *testing.T) {
 	}
 }
 
+func TestEnsureAnonymousProviderRejectsEndpointNameCollision(t *testing.T) {
+	setupAnonymousAutomationAPITest(t)
+	config.Update(func(settings *config.Settings) {
+		settings.Endpoints = map[string]*config.EndpointConfig{
+			"LLM7": {Failover: []config.EndpointMember{{Provider: "echo", Model: "echo-default"}}},
+		}
+	})
+	profile := providers.AnonymousProviderProfile{
+		RegistryID: "llm7", ProviderID: "llm7", RuntimeType: "openai_compatible", BaseURL: "https://api.llm7.io/v1",
+	}
+	if _, status := ensureAnonymousProvider(profile); status != "collision" {
+		t.Fatalf("status=%q", status)
+	}
+	if _, exists := config.Provider("llm7"); exists {
+		t.Fatal("automation created a provider colliding with an endpoint")
+	}
+}
+
 func TestEnsureAnonymousProviderRefusesRetainedPersonalConnection(t *testing.T) {
 	setupAnonymousAutomationAPITest(t)
 	config.Update(func(s *config.Settings) {
@@ -139,6 +158,79 @@ func TestEnsureAnonymousProviderRefusesRetainedPersonalConnection(t *testing.T) 
 	}
 	if _, exists := config.Provider("llm7"); exists {
 		t.Fatal("automation recreated a provider ID with a retained credential")
+	}
+}
+
+func TestDeleteProviderClearsAutomationOwnership(t *testing.T) {
+	setupAnonymousAutomationAPITest(t)
+	profile := providers.AnonymousProviderProfiles()[0]
+	config.Update(func(s *config.Settings) {
+		s.Providers[profile.ProviderID] = &config.ProviderConfig{
+			Type: profile.RuntimeType, RegistryID: profile.RegistryID, BaseURL: profile.BaseURL,
+		}
+	})
+	if err := config.Save(); err != nil {
+		t.Fatal(err)
+	}
+	if err := iam.MarkAnonymousProviderManaged(profile.ProviderID); err != nil {
+		t.Fatal(err)
+	}
+	request := httptest.NewRequest(http.MethodDelete, "/admin/api/providers/"+profile.ProviderID, nil)
+	request.SetPathValue("id", profile.ProviderID)
+	request.Header.Set("Authorization", "Bearer admin")
+	response := httptest.NewRecorder()
+	handleDeleteProvider(response, request)
+	if response.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
+	}
+	managed, err := iam.AnonymousProviderManaged(profile.ProviderID)
+	if err != nil || managed {
+		t.Fatalf("managed=%v err=%v", managed, err)
+	}
+}
+
+func TestDeleteProviderSaveFailurePreservesSystemCredential(t *testing.T) {
+	setupAnonymousAutomationAPITest(t)
+	t.Setenv("LLMGW_CONFIG", filepath.Join(t.TempDir(), "missing", "config.yaml"))
+	config.Update(func(settings *config.Settings) {
+		settings.CredentialEncryptionKey = base64.RawURLEncoding.EncodeToString(bytes.Repeat([]byte{0x42}, 32))
+		settings.Providers["fixture"] = &config.ProviderConfig{Type: "openai_compatible"}
+	})
+	if stored, err := iam.PutSystemProviderConnection("fixture", "api_key", "fixture-secret"); err != nil || !stored {
+		t.Fatalf("store credential: stored=%v err=%v", stored, err)
+	}
+	request := httptest.NewRequest(http.MethodDelete, "/admin/api/providers/fixture", nil)
+	request.SetPathValue("id", "fixture")
+	request.Header.Set("Authorization", "Bearer admin")
+	response := httptest.NewRecorder()
+	handleDeleteProvider(response, request)
+	if response.Code != http.StatusInternalServerError {
+		t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
+	}
+	if config.Get().Providers["fixture"] == nil {
+		t.Fatal("failed save removed provider from memory")
+	}
+	secret, _, ok, err := iam.SystemProviderConnectionSecret("fixture")
+	if err != nil || !ok || secret != "fixture-secret" {
+		t.Fatalf("credential changed: ok=%v secret=%q err=%v", ok, secret, err)
+	}
+}
+
+func TestDeleteProviderRejectsEndpointReference(t *testing.T) {
+	setupAnonymousAutomationAPITest(t)
+	config.Update(func(settings *config.Settings) {
+		settings.Providers["fixture"] = &config.ProviderConfig{Type: "echo"}
+		settings.Endpoints = map[string]*config.EndpointConfig{
+			"route": {Failover: []config.EndpointMember{{Provider: "fixture", Model: "echo-default"}}},
+		}
+	})
+	request := httptest.NewRequest(http.MethodDelete, "/admin/api/providers/fixture", nil)
+	request.SetPathValue("id", "fixture")
+	request.Header.Set("Authorization", "Bearer admin")
+	response := httptest.NewRecorder()
+	handleDeleteProvider(response, request)
+	if response.Code != http.StatusConflict || config.Get().Providers["fixture"] == nil {
+		t.Fatalf("status=%d providers=%+v body=%s", response.Code, config.Get().Providers, response.Body.String())
 	}
 }
 

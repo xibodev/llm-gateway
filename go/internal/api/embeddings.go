@@ -10,6 +10,8 @@ import (
 	"llmgw/internal/config"
 	"llmgw/internal/providers"
 	"llmgw/internal/router"
+
+	core "github.com/xibodev/llmgw-core"
 )
 
 // POST /v1/embeddings — text -> vector. Reverse-proxied to the resolved
@@ -87,7 +89,7 @@ func handleEmbeddings(w http.ResponseWriter, r *http.Request) {
 	// function: it resolves provider/model or a category to ONE target and runs
 	// the key policy over it. Duplicating it here would mean two copies of the
 	// policy call that could drift apart.
-	provider, upstreamModel, status, msg := resolveAudioTarget(principal, req.Model)
+	provider, upstreamModel, status, msg := resolveAudioTarget(principal, req.Model, core.ModelOperationEmbeddings)
 	if status != 0 {
 		if status == 400 && strings.TrimSpace(req.Model) == "" {
 			msg = "'model' is required (e.g. llama-embed/qwen3-embedding-0.6b)"
@@ -95,6 +97,49 @@ func handleEmbeddings(w http.ResponseWriter, r *http.Request) {
 		recordFailureUsage("openai.embeddings", req.Model, principal, status, "policy_or_route", started)
 		writeError(w, status, msg)
 		return
+	}
+	requestedModel := req.Model
+	if instance, providerErr := providers.GetProviderForPrincipal(provider, principal); providerErr == nil {
+		if embedder, supported := providers.AsEmbeddingProvider(instance); supported {
+			if !nativeEmbeddingInputValid(req.Input) {
+				recordFailureUsage("openai.embeddings", requestedModel, principal, http.StatusBadRequest, "invalid_input", started)
+				writeError(w, http.StatusBadRequest, "native embedding input must be a string or array of strings")
+				return
+			}
+			if req.Dimensions != nil {
+				recordFailureUsage("openai.embeddings", requestedModel, principal, http.StatusBadRequest, "unsupported_dimensions", started)
+				writeError(w, http.StatusBadRequest, "dimensions is not supported by this native embeddings provider")
+				return
+			}
+			if format := strings.TrimSpace(req.EncodingFormat); format != "" && format != "float" {
+				recordFailureUsage("openai.embeddings", requestedModel, principal, http.StatusBadRequest, "unsupported_encoding", started)
+				writeError(w, http.StatusBadRequest, "only encoding_format 'float' is supported by this native embeddings provider")
+				return
+			}
+			result, embedErr := embedder.Embed(r.Context(), upstreamModel, req.Input)
+			status := http.StatusOK
+			errorCode := ""
+			if embedErr != nil {
+				status = upstreamErrorStatus(embedErr)
+				errorCode = "upstream"
+			}
+			encoded, _ := json.Marshal(result)
+			router.RecordUsage(router.UsageRecord{
+				Endpoint: "openai.embeddings", RequestedModel: requestedModel,
+				RoutedModel: upstreamModel, Provider: provider,
+				Project: principal.Project, Key: principal.Key,
+				ProjectID: principal.ProjectID, PrincipalID: principal.PrincipalID,
+				KeyID: principal.KeyID, InputTokens: embeddingsPromptTokens(encoded),
+				StatusCode: status, LatencyMS: time.Since(started).Milliseconds(),
+				ErrorCode: errorCode, IsStub: isStub(provider), CreditsMilli: embeddingsCreditsMilli,
+			})
+			if embedErr != nil {
+				writeUpstreamError(w, embedErr)
+				return
+			}
+			writeJSON(w, http.StatusOK, result)
+			return
+		}
 	}
 
 	base, headers, okp := providers.ProviderHTTPTarget(provider, principal)
@@ -142,6 +187,26 @@ func handleEmbeddings(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeAPIProxySuccess(w, result.status, result.contentType, result.body)
+}
+
+func nativeEmbeddingInputValid(input any) bool {
+	switch values := input.(type) {
+	case string:
+		return strings.TrimSpace(values) != ""
+	case []any:
+		if len(values) == 0 {
+			return false
+		}
+		for _, value := range values {
+			text, ok := value.(string)
+			if !ok || strings.TrimSpace(text) == "" {
+				return false
+			}
+		}
+		return true
+	default:
+		return false
+	}
 }
 
 // inputEmpty rejects the three shapes that mean "nothing to embed" before a
