@@ -132,6 +132,11 @@ test("deterministic fixture declares its proven Chat surface", async () => {
 	assert.match(source, /supported_endpoints: \["\/v1\/chat\/completions"\]/);
 });
 
+test("live sweep excludes unpublished diagnostic catalog rows", async () => {
+  const source = await readFile(new URL("./run.mjs", import.meta.url), "utf8");
+  assert.match(source, /row\?\.disabled !== true && row\?\.published !== false/);
+});
+
 test("release policy requires execution but tolerates external outages", () => {
   const required = ["docker-health", "model-sweep-completeness", "model-sweep-evidence", "api-evidence", "route-evidence", "playground-evidence", "restart-persistence", "restart-api-evidence", "cleanup"];
   const base = { schema, mode: "deterministic", execution: { started: true, completed: true, commit: "abc" }, checks: required.map((name) => ({ name, required: true, status: "passed" })), model_sweep: [] };

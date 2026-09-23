@@ -211,7 +211,10 @@ async function directCatalogProbe(provider) {
 }
 
 async function sweepProvider(provider, models) {
-  const candidates = models.filter((row) => row?.free === true || isFreeModel(provider, row?.id)).map((row) => row.id);
+  const candidates = models
+    .filter((row) => row?.disabled !== true && row?.published !== false)
+    .filter((row) => row?.free === true || isFreeModel(provider, row?.id))
+    .map((row) => row.id);
   let cursor = 0;
   const worker = async () => {
     while (cursor < candidates.length) {
@@ -685,7 +688,9 @@ async function runAcceptance() {
       }
     }
     for (const entry of modelsByProvider) await sweepProvider(entry.provider, entry.models);
-    const candidates = modelsByProvider.reduce((total, entry) => total + entry.models.filter((row) => row?.free === true || isFreeModel(entry.provider, row?.id)).length, 0);
+    const candidates = modelsByProvider.reduce((total, entry) => total + entry.models.filter((row) =>
+      row?.disabled !== true && row?.published !== false && (row?.free === true || isFreeModel(entry.provider, row?.id)),
+    ).length, 0);
     check("model-sweep-completeness", candidates > 0 && report.model_sweep.length === candidates ? "passed" : candidates === 0 ? "inconclusive" : "failed", `${report.model_sweep.length}/${candidates} free model(s) observed`, true);
     const healthy = selectHealthyModels(report.model_sweep);
     if (!healthy.length) {
