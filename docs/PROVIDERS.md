@@ -31,7 +31,7 @@ is `endpoints`.
 | Anthropic | Native Anthropic | API key or setup token | System or personal | Native Messages and token counting; setup tokens are stored only as encrypted connections. |
 | Google Gemini | Google's OpenAI-compatible endpoint | API key | System or personal | Distinct from native AI Studio. |
 | Google AI Studio | Native Gemini | API key | System or personal | Chat, image, and video; native chat streaming is not implemented. |
-| Vertex AI (Agent Platform) | Native Gemini/Vertex | API key or service-account JSON | System or personal | Project/location required; discovery credential requirements can differ from inference. |
+| Vertex AI (Agent Platform) | Native Gemini/Vertex | API key or service-account JSON | System or personal | Project/location required; discovery credential requirements can differ from inference. Optional request type selects default, PayGo, or dedicated provisioned throughput. |
 | Google Antigravity | Cloud Code Assist `v1internal` | Browser OAuth | Personal | Experimental undocumented API; exact upstream catalog, non-streaming chat, tools, and reasoning. |
 | OpenRouter | OpenAI-compatible | API key | System or personal | Multi-vendor aggregator. |
 | Groq | OpenAI-compatible | API key | System or personal | Hosted low-latency inference. |
@@ -72,6 +72,10 @@ Copilot is stricter:
 
 Codex OAuth is human-private and is not assignable to services or the system
 principal. OAuth subscription connections cannot be copied between humans.
+The gateway embeds the verified public Codex client ID and supports official
+device authorization plus browser PKCE. Browser sign-in uses OpenAI's registered
+loopback redirect and accepts the final redirect URL pasted back into the console;
+no client secret, browser cookie, or local Codex credential file is imported.
 Connections created before client-profile binding was introduced must be
 reauthorized once: older encrypted envelopes do not contain the OAuth client
 identity required for safe token refresh, and the gateway does not guess it.
@@ -96,7 +100,7 @@ Google exposes four distinct paths:
 | --- | --- | --- | --- |
 | `gemini` | Google's OpenAI-compatible API | API key | OpenAI-shaped client compatibility. |
 | `ai_studio` | Native Gemini API | API key | Native image and Veo video support. |
-| `vertex_ai` | Native Gemini/Vertex API | Service-account JSON or eligible API key | Project and location scope; Cloud billing. |
+| `vertex_ai` | Native Gemini/Vertex API | Service-account JSON or eligible API key | Project and location scope; Cloud billing. `vertex_request_type: dedicated` requires matching provisioned capacity and never silently falls back. |
 | `google_antigravity` | Cloud Code Assist `v1internal` | Browser OAuth | Experimental owner-private catalog and non-streaming chat; requires an operator-provided OAuth client. |
 
 Model IDs and regional availability differ. Configure separate provider
@@ -141,8 +145,8 @@ left unmanaged; rate limits and outages are recorded without removing them.
 
 - Copilot gateway use is not a sanctioned public provider API; keep personal
   entitlements owner-private and respect provider terms.
-- OpenAI does not currently document third-party Codex client registration; the
-  project does not embed the official CLI's first-party client ID.
+- Codex subscription transport uses OpenAI's public Codex OAuth client and
+  ChatGPT backend. Keep it owner-private and expect upstream compatibility to change.
 - Google Antigravity uses undocumented Cloud Code Assist `v1internal` APIs and
   can change or stop working independently of this project.
 - Edge TTS uses an unofficial read-aloud service and may change independently.

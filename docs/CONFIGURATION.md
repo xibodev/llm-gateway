@@ -53,6 +53,7 @@ Supported fields depend on the runtime type:
 | `region` | Provider region, used by Bedrock. |
 | `project` | Cloud project, used by Vertex AI. |
 | `location` | Cloud location, used by Vertex AI. |
+| `vertex_request_type` | Optional Vertex invocation mode: `default`, `paygo`, or `dedicated`. Unset preserves Google's default routing; `dedicated` requires matching provisioned throughput and does not fall back. |
 | `default_voice` | Default voice for speech providers. |
 | `disabled` | Keep the instance configured while removing it from routing. |
 | `force_api_support` | Opt the instance into experimental catalog-driven API adaptation. |

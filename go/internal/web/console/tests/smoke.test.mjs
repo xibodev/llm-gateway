@@ -254,6 +254,9 @@ test("provider onboarding renders required setup fields and editable configurati
   const styles = readFileSync(resolve(root, "src/styles/base.css"), "utf8");
   assert.match(hub, /Google Cloud project ID/);
   assert.match(hub, /fields\.has\("location"\)/);
+  assert.match(hub, /fields\.has\("vertex_request_type"\)/);
+  assert.match(hub, /Provisioned throughput only/);
+  assert.match(hub, /form\.set\("vertex_request_type", vertexRequestType\)/);
   assert.match(hub, /leave blank to keep the current key/);
   assert.match(detail, /Edit configuration/);
   assert.match(oauth, /OAuth client ID/);
@@ -287,6 +290,7 @@ test("playground uses typed capabilities and does not expose portal media routes
   assert.match(playground, /transportForSurface\(selected, selectedSurface\)/);
   assert.match(playground, /mode === "portal"/);
   assert.match(playground, /row\.capabilities\.includes\("chat"\)/);
+  assert.match(playground, /selected\?\.capabilities\.includes\("chat"\) \? \["chat" as PlaygroundMode\]/);
   assert.match(playground, /Catalog freshness/);
   assert.match(playground, /Verification freshness/);
   assert.match(playground, /Transport mode/);
@@ -628,7 +632,7 @@ test("playground keeps failed requests out of conversation history", () => {
   assert.match(playground, /const executionRequest = useRef\(0\)/);
   assert.match(playground, /const executionPending = useRef\(false\)/);
   assert.match(playground, /const executionAbort = useRef<AbortController \| null>\(null\)/);
-  assert.match(playground, /\[model, projectID, scopedPrincipalID, textSurface\]/);
+  assert.match(playground, /\[model, projectID, scopedPrincipalID, textSurface, surface\]/);
   assert.match(playground, /onClear=\{\(\) => \{ executionAbort\.current\?\.abort\(\); executionAbort\.current = null; executionRequest\.current \+= 1;/);
   assert.match(playground, /setResult\(null\);\s*reportError\(cause/);
   assert.match(playground, /Catalog discovery does not guarantee current inference availability/);

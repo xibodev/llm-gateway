@@ -954,13 +954,34 @@ func TestUpsertProviderPersistsProjectAndLocation(t *testing.T) {
 	defer server.Close()
 	status, created := jsonRequest(t, server.URL+"/admin/api/providers", http.MethodPost, "admin-secret", map[string]any{
 		"registry_id": "vertex_ai", "id": "vertex", "api_key": "test-key",
-		"project": "my-project", "location": "us-central1",
+		"project": "my-project", "location": "us-central1", "vertex_request_type": "dedicated",
 	})
 	if status != http.StatusOK {
 		t.Fatalf("create: %d %+v", status, created)
 	}
 	cfg := config.Get().Providers["vertex"]
-	if cfg == nil || cfg.Project != "my-project" || cfg.Location != "us-central1" {
+	if cfg == nil || cfg.Project != "my-project" || cfg.Location != "us-central1" || cfg.VertexRequestType != "dedicated" {
 		t.Fatalf("project/location were dropped: %+v", cfg)
+	}
+	status, _ = jsonRequest(t, server.URL+"/admin/api/providers", http.MethodPost, "admin-secret", map[string]any{
+		"registry_id": "vertex_ai", "id": "vertex", "project": "my-project", "location": "us-central1",
+	})
+	if status != http.StatusOK || config.Get().Providers["vertex"].VertexRequestType != "dedicated" {
+		t.Fatalf("omitted request type was not preserved: status=%d config=%+v", status, config.Get().Providers["vertex"])
+	}
+	clear := ""
+	status, _ = jsonRequest(t, server.URL+"/admin/api/providers", http.MethodPost, "admin-secret", map[string]any{
+		"registry_id": "vertex_ai", "id": "vertex", "project": "my-project", "location": "us-central1",
+		"vertex_request_type": clear,
+	})
+	if status != http.StatusOK || config.Get().Providers["vertex"].VertexRequestType != "" {
+		t.Fatalf("explicit clear failed: status=%d config=%+v", status, config.Get().Providers["vertex"])
+	}
+	status, _ = jsonRequest(t, server.URL+"/admin/api/providers", http.MethodPost, "admin-secret", map[string]any{
+		"registry_id": "vertex_ai", "id": "vertex", "project": "my-project", "location": "us-central1",
+		"vertex_request_type": "invalid",
+	})
+	if status != http.StatusBadRequest {
+		t.Fatalf("invalid request type status=%d", status)
 	}
 }

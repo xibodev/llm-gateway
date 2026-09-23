@@ -5,7 +5,7 @@ import { build } from "esbuild";
 const { outputFiles } = await build({
   stdin: {
     contents: `
-      export { modeFor, playgroundFailure } from "./src/pages/Playground.tsx";
+      export { modeFor, modesFor, playgroundFailure } from "./src/pages/Playground.tsx";
       export { APIError, requestJSON } from "./src/lib/api.ts";
     `,
     resolveDir: new URL("..", import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, "$1"),
@@ -26,7 +26,9 @@ test("playground surfaces only affirmatively supported controls", () => {
   assert.equal(subject.modeFor({ capabilities: [] }), "unknown");
   assert.equal(subject.modeFor({ capabilities: ["image"] }), "image");
   assert.equal(subject.modeFor({ capabilities: ["tts"] }), "tts");
-  assert.equal(subject.modeFor({ capabilities: ["chat", "image"] }), "chat");
+  assert.equal(subject.modeFor({ capabilities: ["chat", "image"] }), "image");
+  assert.deepEqual(subject.modesFor({ capabilities: ["chat", "image"] }), ["image", "chat"]);
+  assert.equal(subject.modeFor({ capabilities: ["embedding"] }), "embedding");
 });
 
 test("playground failure keeps safe status, code, retry, and action", () => {

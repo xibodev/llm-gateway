@@ -333,6 +333,14 @@ func resolveCredentialObserved(
 func newVertexProvider(
 	providerID string, cfg *config.ProviderConfig, principal *config.Principal,
 ) (Provider, error) {
+	requestType := strings.ToLower(strings.TrimSpace(cfg.VertexRequestType))
+	switch requestType {
+	case "", "default", "paygo", "dedicated":
+	default:
+		return nil, &ConfigError{Msg: fmt.Sprintf(
+			"provider '%s': vertex_request_type must be default, paygo, or dedicated", providerID,
+		)}
+	}
 	secret, kind, _, err := resolveCredentialObserved(providerID, cfg, principal)
 	if err != nil {
 		return nil, err
@@ -354,7 +362,8 @@ func newVertexProvider(
 				"provider '%s': connection kind %q is not usable for vertex_ai", providerID, kind,
 			)}
 		}
-		return NewVertexAI(cfg.BaseURL, secret, cfg.Project, cfg.Location, cfg.TimeoutOr(120)), nil
+		provider := NewVertexAI(cfg.BaseURL, secret, cfg.Project, cfg.Location, cfg.TimeoutOr(120)).withVertexRequestType(requestType)
+		return provider, nil
 	}
 
 	credential, err := gcpauth.Parse([]byte(secret))
@@ -390,9 +399,10 @@ func newVertexProvider(
 		}
 		return token, nil
 	}
-	return NewVertexAIWithTokenSource(
+	provider := NewVertexAIWithTokenSource(
 		cfg.BaseURL, project, cfg.Location, cfg.TimeoutOr(120), tokenSource,
-	), nil
+	).withVertexRequestType(requestType)
+	return provider, nil
 }
 
 func providerCacheKey(providerID string, principal *config.Principal) string {

@@ -36,6 +36,9 @@ type ProviderConfig struct {
 	// individual models may require a specific region instead.
 	Project  string `yaml:"project,omitempty" json:"project,omitempty"`
 	Location string `yaml:"location,omitempty" json:"location,omitempty"`
+	// VertexRequestType optionally selects Google's request accounting path.
+	// Empty preserves the provider default; dedicated requires provisioned throughput.
+	VertexRequestType string `yaml:"vertex_request_type,omitempty" json:"vertex_request_type,omitempty"`
 	// Disabled keeps the provider configured but takes it out of service:
 	// requests 404, catalogs are not refreshed, and the console shows it as
 	// disabled until it is re-enabled.
@@ -639,6 +642,9 @@ func applyConfig(s *Settings, payload map[string]any) {
 			if v, ok := m["location"].(string); ok {
 				cfg.Location = v
 			}
+			if v, ok := m["vertex_request_type"].(string); ok {
+				cfg.VertexRequestType = v
+			}
 			if v, ok := m["disabled"].(bool); ok {
 				cfg.Disabled = v
 			}
@@ -888,6 +894,9 @@ func providerConfigPayload(pc *ProviderConfig) map[string]any {
 	}
 	if pc.Location != "" {
 		entry["location"] = pc.Location
+	}
+	if pc.VertexRequestType != "" {
+		entry["vertex_request_type"] = pc.VertexRequestType
 	}
 	if pc.Disabled {
 		entry["disabled"] = true

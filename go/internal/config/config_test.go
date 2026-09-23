@@ -127,7 +127,7 @@ func TestSaveLoadRoundTrip(t *testing.T) {
 			"vertex": {
 				Type: "vertex_ai", RegistryID: "vertex_ai",
 				Project: "project-a", Location: "us-central1",
-				DefaultVoice: "voice-a", Disabled: true,
+				VertexRequestType: "dedicated", DefaultVoice: "voice-a", Disabled: true,
 			},
 		}
 		s.OpenAICodexClientID = "codex-client"
@@ -152,7 +152,7 @@ func TestSaveLoadRoundTrip(t *testing.T) {
 	}
 	vertex, ok := reloaded.Providers["vertex"]
 	if !ok || vertex.Project != "project-a" || vertex.Location != "us-central1" ||
-		vertex.DefaultVoice != "voice-a" || !vertex.Disabled {
+		vertex.VertexRequestType != "dedicated" || vertex.DefaultVoice != "voice-a" || !vertex.Disabled {
 		t.Fatalf("provider setup fields did not round-trip: %+v", vertex)
 	}
 	if reloaded.OpenAICodexClientID != "codex-client" {

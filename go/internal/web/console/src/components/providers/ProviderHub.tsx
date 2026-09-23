@@ -34,6 +34,7 @@ export function ConnectDialog({ entry, onClose, onConfigured, mode = "create", t
   const [region, setRegion] = useState(stringValue(providerConfig.region) || stringValue(entry.default_region));
   const [project, setProject] = useState(stringValue(providerConfig.project));
   const [location, setLocation] = useState(stringValue(providerConfig.location) || stringValue(entry.default_location));
+  const [vertexRequestType, setVertexRequestType] = useState(stringValue(providerConfig.vertex_request_type));
   const [forceApiSupport, setForceApiSupport] = useState(boolValue(providerConfig.force_api_support) || stringValue(entry.runtime_type) === "github_copilot" || stringValue(entry.id) === "github_copilot");
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
@@ -101,6 +102,7 @@ export function ConnectDialog({ entry, onClose, onConfigured, mode = "create", t
         form.set("region", region.trim());
         form.set("project", project.trim());
         form.set("location", location.trim());
+        if (fields.has("vertex_request_type")) form.set("vertex_request_type", vertexRequestType);
         form.set("api_key", selectedFile);
         await sendForm<JSONRecord>("admin", "/providers", form);
       } else {
@@ -112,6 +114,7 @@ export function ConnectDialog({ entry, onClose, onConfigured, mode = "create", t
           region: region.trim(),
           project: project.trim(),
           location: location.trim(),
+          vertex_request_type: fields.has("vertex_request_type") ? vertexRequestType : undefined,
           force_api_support: forceApiSupport,
           credential_kind: credentialKind,
         });
@@ -222,6 +225,18 @@ export function ConnectDialog({ entry, onClose, onConfigured, mode = "create", t
             <label>
               Location
               <input value={location} onInput={(event) => setLocation((event.currentTarget as HTMLInputElement).value)} placeholder="global" autoComplete="off" />
+            </label>
+          ) : null}
+          {fields.has("vertex_request_type") ? (
+            <label>
+              Vertex request type
+              <select value={vertexRequestType} onInput={(event) => setVertexRequestType((event.currentTarget as HTMLSelectElement).value)}>
+                <option value="">Provider default</option>
+                <option value="default">Default capacity</option>
+                <option value="paygo">PayGo only</option>
+                <option value="dedicated">Provisioned throughput only</option>
+              </select>
+              <small>Dedicated requests fail instead of falling back when the selected model has no provisioned capacity.</small>
             </label>
           ) : null}
           <label class="key-scope__check" style={{ marginTop: "8px", marginBottom: "8px" }}>

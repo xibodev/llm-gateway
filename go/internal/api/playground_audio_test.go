@@ -147,6 +147,43 @@ func TestPlaygroundSpeechProxiesOpenAICompatibleProvider(t *testing.T) {
 	}
 }
 
+func TestPlaygroundEmbeddingsProxiesAndSummarizesVector(t *testing.T) {
+	const providerKey = "test-provider-key"
+	var upstreamPath, upstreamAuth string
+	var upstreamBody map[string]any
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		upstreamPath, upstreamAuth = r.URL.Path, r.Header.Get("Authorization")
+		_ = json.NewDecoder(r.Body).Decode(&upstreamBody)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"object":"list","data":[{"object":"embedding","index":0,"embedding":[0.1,0.2,0.3]}],"usage":{"prompt_tokens":2,"total_tokens":2}}`))
+	}))
+	defer upstream.Close()
+
+	resetAudioTestState(t)
+	config.Update(func(s *config.Settings) {
+		s.APIKey = "admin-secret"
+		s.AllowUnauthenticatedAPI = false
+		s.Providers = map[string]*config.ProviderConfig{
+			"embed": {Type: "openai_compatible", BaseURL: upstream.URL + "/v1", APIKey: providerKey},
+		}
+		s.Endpoints = map[string]*config.EndpointConfig{}
+	})
+	providers.ResetProviders()
+	t.Cleanup(providers.ResetProviders)
+	server := httptest.NewServer(NewServer())
+	defer server.Close()
+	ownerID, projectID := uatScope(t, server.URL)
+	status, result := jsonRequest(t, server.URL+"/admin/api/playground/embeddings", http.MethodPost, "admin-secret", map[string]any{
+		"principal_id": ownerID, "project_id": projectID, "model": "embed/bge-m3", "input": "hello",
+	})
+	if status != http.StatusOK || result["vectors"] != float64(1) || result["dimensions"] != float64(3) {
+		t.Fatalf("status=%d result=%+v", status, result)
+	}
+	if upstreamPath != "/v1/embeddings" || upstreamAuth != "Bearer "+providerKey || upstreamBody["model"] != "bge-m3" || upstreamBody["input"] != "hello" {
+		t.Fatalf("path=%q auth=%q body=%+v", upstreamPath, upstreamAuth, upstreamBody)
+	}
+}
+
 func TestPlaygroundSpeechRequiresInputAndScope(t *testing.T) {
 	resetAudioTestState(t)
 	config.Update(func(s *config.Settings) {

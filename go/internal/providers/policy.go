@@ -427,6 +427,23 @@ func (r *ResilientProvider) GenerateImages(model, prompt string, count int) ([]G
 	return r.GenerateImagesContext(context.Background(), model, prompt, count)
 }
 
+func (r *ResilientProvider) Embed(ctx context.Context, model string, input any) (map[string]any, error) {
+	embedder, ok := AsEmbeddingProvider(r.inner)
+	if !ok {
+		return nil, &ConfigError{Msg: "provider does not support embeddings"}
+	}
+	if err := r.checkCircuit(); err != nil {
+		return nil, err
+	}
+	result, err := embedder.Embed(ctx, model, input)
+	if err == nil {
+		r.recordSuccess()
+	} else {
+		r.recordInvocationOutcome(err)
+	}
+	return result, err
+}
+
 func (r *ResilientProvider) GenerateImagesContext(ctx context.Context, model, prompt string, count int) ([]GeneratedImage, map[string]any, error) {
 	generator, ok := AsImageGenerator(r.inner)
 	if !ok {

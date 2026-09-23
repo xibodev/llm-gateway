@@ -13,6 +13,7 @@ import (
 	"llmgw/internal/iam"
 
 	providerauth "github.com/xibodev/llm-provider-auth"
+	browseroauth "github.com/xibodev/llm-provider-auth/browseroauth"
 	codexauth "github.com/xibodev/llm-provider-auth/codex"
 	core "github.com/xibodev/llmgw-core"
 	coreproviders "github.com/xibodev/llmgw-core/providers"
@@ -161,7 +162,26 @@ func (a codexAuth) refreshConnection(initial iam.OAuthTokenEnvelope, initialConn
 	if err != nil {
 		return &ConfigError{Msg: "openai_codex: " + err.Error()}
 	}
-	tokens, err := codexauth.Refresh(clientID, envelope.RefreshToken)
+	var tokens codexauth.TokenSet
+	if strings.TrimSpace(envelope.OAuthProfile) == codexOAuthProfileBrowser {
+		var browserTokens browseroauth.TokenEnvelope
+		browserTokens, err = codexBrowserConfig(clientID).Refresh(context.Background(), envelope.RefreshToken)
+		if err == nil {
+			accountID, accountLabel := codexIDTokenIdentity(browserTokens.IDToken)
+			tokens = codexauth.TokenSet{
+				AccessToken: browserTokens.AccessToken, RefreshToken: browserTokens.RefreshToken,
+				IDToken: browserTokens.IDToken, TokenType: browserTokens.TokenType,
+				ExpiresAt: browserTokens.ExpiresAt.Unix(), AccountID: accountID, AccountLabel: accountLabel,
+			}
+		} else {
+			var endpoint *browseroauth.EndpointError
+			if errors.As(err, &endpoint) {
+				err = &codexauth.RefreshError{StatusCode: endpoint.StatusCode, Code: endpoint.Code, Description: endpoint.Description}
+			}
+		}
+	} else {
+		tokens, err = codexauth.Refresh(clientID, envelope.RefreshToken)
+	}
 	if err != nil {
 		var refreshError *codexauth.RefreshError
 		if errors.As(err, &refreshError) && shouldRevokeCodexRefresh(strings.ToLower(refreshError.Code)) {
@@ -203,7 +223,8 @@ func (a codexAuth) refreshConnection(initial iam.OAuthTokenEnvelope, initialConn
 			RefreshToken: refreshToken, IDToken: idToken, TokenType: tokenType, ExpiresAt: expiresAt,
 			AccountID: accountID, AccountLabel: accountLabel, Status: "active",
 			ProjectID: envelope.ProjectID, OAuthProfile: envelope.OAuthProfile,
-			OAuthClientID: envelope.OAuthClientID,
+			OAuthClientID: envelope.OAuthClientID, OAuthClientMode: envelope.OAuthClientMode,
+			OAuthRedirectURI: envelope.OAuthRedirectURI, OAuthClientSecret: envelope.OAuthClientSecret,
 		},
 	)
 	if errors.Is(err, iam.ErrOAuthProviderConnectionChanged) {
@@ -261,7 +282,8 @@ func RefreshCodexOAuthConnection(
 }
 
 func codexOAuthClientIDForEnvelope(envelope iam.OAuthTokenEnvelope) (string, error) {
-	if strings.TrimSpace(envelope.OAuthProfile) != codexOAuthProfileDevice || strings.TrimSpace(envelope.OAuthClientID) == "" {
+	profile := strings.TrimSpace(envelope.OAuthProfile)
+	if (profile != codexOAuthProfileDevice && profile != codexOAuthProfileBrowser) || strings.TrimSpace(envelope.OAuthClientID) == "" {
 		return "", errors.New("OAuth client profile is unavailable; reauthorize this connection")
 	}
 	return strings.TrimSpace(envelope.OAuthClientID), nil
@@ -348,6 +370,10 @@ type codexRefreshTransport struct {
 }
 
 func (t codexRefreshTransport) RoundTrip(request *http.Request) (*http.Response, error) {
+	if request.Method == http.MethodGet && request.Header.Get("OpenAI-Beta") != "" {
+		request = request.Clone(request.Context())
+		request.Header.Del("OpenAI-Beta")
+	}
 	response, err := t.inner.RoundTrip(request)
 	if err != nil || response.StatusCode != http.StatusUnauthorized {
 		return response, err
@@ -367,12 +393,17 @@ func (t codexRefreshTransport) RoundTrip(request *http.Request) (*http.Response,
 			return nil, err
 		}
 	}
-	for _, name := range []string{"Authorization", "ChatGPT-Account-ID", "OpenAI-Beta", "originator"} {
+	for _, name := range []string{"Authorization", "ChatGPT-Account-ID", "originator"} {
 		if value := headers.Get(name); value != "" {
 			retry.Header.Set(name, value)
 		} else {
 			retry.Header.Del(name)
 		}
+	}
+	if request.Header.Get("OpenAI-Beta") != "" {
+		retry.Header.Set("OpenAI-Beta", headers.Get("OpenAI-Beta"))
+	} else {
+		retry.Header.Del("OpenAI-Beta")
 	}
 	return t.inner.RoundTrip(retry)
 }
@@ -583,6 +614,7 @@ func (p CodexProvider) CompleteResponsesContext(ctx context.Context, model strin
 	if err != nil {
 		return nil, observation, err
 	}
+	payload = normalizeCodexResponsesInput(payload)
 	response, err := p.inner.CompleteResponses(ctx, model, payload, nil)
 	return response, p.currentObservation(observation), codexInvocationError(err)
 }
@@ -592,9 +624,22 @@ func (p CodexProvider) StreamResponsesContext(ctx context.Context, model string,
 	if err != nil {
 		return nil, observation, err
 	}
+	payload = normalizeCodexResponsesInput(payload)
 	stream, err := p.inner.StreamResponses(ctx, model, payload, nil)
 	if err != nil {
 		return nil, p.currentObservation(observation), codexInvocationError(err)
 	}
 	return &codexCoreStream{inner: stream}, p.currentObservation(observation), nil
+}
+
+func normalizeCodexResponsesInput(payload map[string]any) map[string]any {
+	if text, ok := payload["input"].(string); ok {
+		copy := make(map[string]any, len(payload))
+		for key, value := range payload {
+			copy[key] = value
+		}
+		copy["input"] = []any{map[string]any{"role": "user", "content": text}}
+		return copy
+	}
+	return payload
 }

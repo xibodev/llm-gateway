@@ -353,7 +353,7 @@ func configureOAuthClientID(providerRef, clientID string, allowUpdate bool) erro
 
 func startOAuthFlow(
 	principal iam.Principal, providerRef, clientID string, allowClientIDUpdate bool,
-	request *http.Request, connectionName, source string,
+	request *http.Request, connectionName, source, preferredFlow string,
 ) (response map[string]any, err error) {
 	previousCodexClientID := config.Get().OpenAICodexClientID
 	rollbackCodexClientID := oauthRegistryIDForRef(providerRef) == "openai_codex" &&
@@ -380,7 +380,13 @@ func startOAuthFlow(
 	if !providerConfigured && !allowClientIDUpdate {
 		return nil, fmt.Errorf("Only an administrator can configure this OAuth provider.")
 	}
-	if browserAdapter, ok := adapter.(providers.BrowserProviderAuthAdapter); ok {
+	browserAdapter, browserSupported := adapter.(providers.BrowserProviderAuthAdapter)
+	deviceAdapter, deviceSupported := adapter.(providers.DeviceProviderAuthAdapter)
+	useBrowser := preferredFlow == "browser" || (!deviceSupported && browserSupported)
+	if preferredFlow != "" && preferredFlow != "browser" && preferredFlow != "device_code" {
+		return nil, fmt.Errorf("Unsupported OAuth flow.")
+	}
+	if useBrowser && browserSupported {
 		callbackID := oauthRegistryIDForRef(providerRef)
 		redirectURI, err := oauthCallbackURL(request, callbackID)
 		if err != nil {
@@ -418,8 +424,7 @@ func startOAuthFlow(
 			"flow_id": flowID, "expires_in": expiresIn, "expires_at": expiresAt,
 		}, nil
 	}
-	deviceAdapter, ok := adapter.(providers.DeviceProviderAuthAdapter)
-	if !ok {
+	if !deviceSupported {
 		return nil, fmt.Errorf("provider %q does not support device authorization", providerRef)
 	}
 	start, err := deviceAdapter.StartDevice(context.Background())
@@ -489,6 +494,8 @@ func antigravityManualConfig(providerID string, input providers.ProviderAuthManu
 }
 
 const antigravityManualProfile = "consumer_manual"
+const codexBrowserManualProfile = "browser_pkce"
+const codexBrowserLoopbackRedirectURI = "http://localhost:1455/auth/callback"
 
 var startManualProviderOAuth = func(ctx context.Context, adapter providers.ManualProviderAuthAdapter, input providers.ProviderAuthManualConfig) (providers.ProviderAuthBrowserStart, error) {
 	return adapter.StartManual(ctx, input)
@@ -541,6 +548,60 @@ func startManualOAuthFlow(
 	}, nil
 }
 
+func startCodexBrowserFlow(principal iam.Principal, providerRef, clientID string, allowClientIDUpdate bool, connectionName, source string) (map[string]any, error) {
+	providerID, _, _, adapterErr := oauthAdapterFor(providerRef)
+	if adapterErr != nil {
+		return nil, adapterErr
+	}
+	_, providerConfigured := config.Get().Providers[providerID]
+	if !providerConfigured && !allowClientIDUpdate {
+		return nil, fmt.Errorf("Only an administrator can configure this OAuth provider.")
+	}
+	previousClientID := config.Get().OpenAICodexClientID
+	rollbackClientID := allowClientIDUpdate && strings.TrimSpace(clientID) != "" && strings.TrimSpace(clientID) != strings.TrimSpace(previousClientID)
+	flowStarted := false
+	defer func() {
+		if rollbackClientID && !flowStarted {
+			config.Update(func(settings *config.Settings) { settings.OpenAICodexClientID = previousClientID })
+			_ = config.Save()
+		}
+	}()
+	if err := configureOAuthClientID(providerRef, clientID, allowClientIDUpdate); err != nil {
+		return nil, err
+	}
+	providerID, kind, adapter, err := oauthAdapterFor(providerRef)
+	if err != nil {
+		return nil, err
+	}
+	manual, ok := adapter.(providers.ManualProviderAuthAdapter)
+	if !ok {
+		return nil, fmt.Errorf("provider %q does not support manual browser authorization", providerRef)
+	}
+	capturedConfig := providers.ProviderAuthManualConfig{ClientID: providers.EffectiveCodexClientID(), ClientMode: "public", RedirectURI: codexBrowserLoopbackRedirectURI}
+	start, err := manual.StartManual(context.Background(), capturedConfig)
+	if err != nil {
+		return nil, err
+	}
+	private := map[string]string{}
+	if json.Unmarshal([]byte(start.PrivateState), &private) != nil || private["state"] == "" || private["code_verifier"] == "" {
+		return nil, fmt.Errorf("official Codex browser OAuth returned incomplete authorization data")
+	}
+	now := time.Now()
+	flowID := private["state"]
+	storeBrowserOAuthFlow(flowID, browserOAuthFlowState{
+		PrincipalID: principal.ID, ProviderID: providerID, Kind: kind,
+		ConnectionName: connectionName, Source: source, ExpectedState: flowID,
+		PrivateState: start.PrivateState, ExpiresAt: now.Add(10 * time.Minute).Unix(),
+		StartedAt: now.Unix(), Manual: true, ManualConfig: capturedConfig,
+	})
+	flowStarted = true
+	return map[string]any{
+		"provider_id": providerID, "flow": codexBrowserManualProfile, "profile": codexBrowserManualProfile,
+		"authorization_url": start.AuthorizationURL, "flow_id": flowID,
+		"expires_in": 600, "expires_at": now.Add(10 * time.Minute).Unix(),
+	}, nil
+}
+
 func completeManualOAuthFlow(principal iam.Principal, providerRef, flowID, authorizationResponse string) map[string]any {
 	providerID, _, adapter, err := oauthAdapterFor(providerRef)
 	if err != nil {
@@ -583,20 +644,27 @@ func completeManualOAuthFlow(principal iam.Principal, providerRef, flowID, autho
 	if err != nil || result.Status != "authorized" {
 		return failed("Manual authorization failed.")
 	}
+	profile := antigravityManualProfile
+	clientID, clientMode, redirectURI, clientSecret := flow.ManualConfig.ClientID, flow.ManualConfig.ClientMode, flow.ManualConfig.RedirectURI, flow.ManualConfig.ClientSecret
+	if oauthRegistryIDForRef(providerRef) == "openai_codex" {
+		profile = codexBrowserManualProfile
+		clientID = strings.TrimSpace(flow.ManualConfig.ClientID)
+		clientMode, redirectURI, clientSecret = "public", "http://localhost:1455/auth/callback", ""
+	}
 	connection, err := iam.PutOAuthProviderConnection(iam.OAuthConnectionCreate{
 		PrincipalID: principal.ID, ProviderID: providerID, Name: flow.ConnectionName,
 		Kind: flow.Kind, Source: flow.Source, MakeDefault: true,
 		AccessToken: result.AccessToken, RefreshToken: result.RefreshToken, IDToken: result.IDToken,
 		TokenType: result.TokenType, ExpiresAt: result.ExpiresAt, AccountID: result.AccountID,
 		AccountLabel: result.AccountLabel, ProjectID: result.ProjectID, Status: "active",
-		OAuthProfile: antigravityManualProfile, OAuthClientID: flow.ManualConfig.ClientID,
-		OAuthClientMode: flow.ManualConfig.ClientMode, OAuthRedirectURI: flow.ManualConfig.RedirectURI,
-		OAuthClientSecret: flow.ManualConfig.ClientSecret,
+		OAuthProfile: profile, OAuthClientID: clientID,
+		OAuthClientMode: clientMode, OAuthRedirectURI: redirectURI,
+		OAuthClientSecret: clientSecret,
 	})
 	if err != nil {
 		return failed("Could not store the private OAuth connection.")
 	}
-	if flow.PersistConfig {
+	if flow.PersistConfig && profile == antigravityManualProfile {
 		if err := iam.PutOAuthClientProfile(iam.OAuthClientProfile{
 			ProviderID: "google_antigravity", Profile: antigravityManualProfile,
 			ClientID: flow.ManualConfig.ClientID, ClientSecret: flow.ManualConfig.ClientSecret,
@@ -681,6 +749,9 @@ func pollBrowserOAuthFlow(principal iam.Principal, providerRef, flowID string) (
 	browserOAuthFlows.Lock()
 	defer browserOAuthFlows.Unlock()
 	flow, ok := browserOAuthFlows.values[strings.TrimSpace(flowID)]
+	if !ok {
+		return nil, false
+	}
 	if !ok || flow.PrincipalID != principal.ID || flow.ProviderID != providerID {
 		return safeOAuthPollResponse("expired", "Browser authorization is no longer active. Start again."), true
 	}
@@ -954,6 +1025,7 @@ func oauthPollInput(r *http.Request) (string, string, bool) {
 }
 
 type oauthStartRequest struct {
+	Flow           string `json:"flow"`
 	Profile        string `json:"profile"`
 	ClientID       string `json:"client_id"`
 	ClientSecret   string `json:"client_secret"`
@@ -968,6 +1040,7 @@ func oauthStartInput(r *http.Request) oauthStartRequest {
 		return oauthStartRequest{}
 	}
 	body.Profile = strings.ToLower(strings.TrimSpace(body.Profile))
+	body.Flow = strings.ToLower(strings.TrimSpace(body.Flow))
 	body.ClientID = strings.TrimSpace(body.ClientID)
 	body.ClientMode = strings.ToLower(strings.TrimSpace(body.ClientMode))
 	body.RedirectURI = strings.TrimSpace(body.RedirectURI)
@@ -996,10 +1069,12 @@ func handleUserOAuthStart(w http.ResponseWriter, r *http.Request) {
 	input := oauthStartInput(r)
 	var response map[string]any
 	var err error
-	if input.Profile == antigravityManualProfile {
+	if input.Flow == "browser" && oauthRegistryIDForRef(r.PathValue("provider_id")) == "openai_codex" {
+		response, err = startCodexBrowserFlow(principal, r.PathValue("provider_id"), "", false, input.ConnectionName, iam.ConnectionSourceUser)
+	} else if input.Profile == antigravityManualProfile {
 		response, err = startManualOAuthFlow(principal, r.PathValue("provider_id"), input.ConnectionName, iam.ConnectionSourceUser, providers.ProviderAuthManualConfig{}, false)
 	} else {
-		response, err = startOAuthFlow(principal, r.PathValue("provider_id"), "", false, r, input.ConnectionName, iam.ConnectionSourceUser)
+		response, err = startOAuthFlow(principal, r.PathValue("provider_id"), "", false, r, input.ConnectionName, iam.ConnectionSourceUser, input.Flow)
 	}
 	if err != nil {
 		writeError(w, 400, oauthErrorText(err.Error()))
@@ -1020,7 +1095,7 @@ func handleUserOAuthComplete(w http.ResponseWriter, r *http.Request) {
 	}
 	response := completeManualOAuthFlow(principal, r.PathValue("provider_id"), flowID, authorizationResponse)
 	if response["status"] == "authorized" {
-		_ = iam.RecordAudit(iam.AuditEvent{ActorPrincipalID: principal.ID, Action: "oauth_connection.connect", TargetType: "principal", TargetID: principal.ID, Result: "success", Detail: map[string]any{"provider": r.PathValue("provider_id"), "source": "self-service", "profile": antigravityManualProfile}})
+		_ = iam.RecordAudit(iam.AuditEvent{ActorPrincipalID: principal.ID, Action: "oauth_connection.connect", TargetType: "principal", TargetID: principal.ID, Result: "success", Detail: map[string]any{"provider": r.PathValue("provider_id"), "source": "self-service", "profile": manualOAuthAuditProfile(r.PathValue("provider_id"))}})
 	}
 	writeJSON(w, http.StatusOK, response)
 }
@@ -1061,13 +1136,15 @@ func handlePrincipalOAuthStart(w http.ResponseWriter, r *http.Request) {
 	}
 	input := oauthStartInput(r)
 	var response map[string]any
-	if input.Profile == antigravityManualProfile {
+	if input.Flow == "browser" && oauthRegistryIDForRef(r.PathValue("provider_id")) == "openai_codex" {
+		response, err = startCodexBrowserFlow(principal, r.PathValue("provider_id"), input.ClientID, true, input.ConnectionName, iam.ConnectionSourceAdmin)
+	} else if input.Profile == antigravityManualProfile {
 		response, err = startManualOAuthFlow(principal, r.PathValue("provider_id"), input.ConnectionName, iam.ConnectionSourceAdmin, providers.ProviderAuthManualConfig{
 			ClientID: input.ClientID, ClientSecret: input.ClientSecret,
 			ClientMode: input.ClientMode, RedirectURI: input.RedirectURI,
 		}, input.ClientID != "" || input.ClientSecret != "" || input.ClientMode != "" || input.RedirectURI != "")
 	} else {
-		response, err = startOAuthFlow(principal, r.PathValue("provider_id"), input.ClientID, true, r, input.ConnectionName, iam.ConnectionSourceAdmin)
+		response, err = startOAuthFlow(principal, r.PathValue("provider_id"), input.ClientID, true, r, input.ConnectionName, iam.ConnectionSourceAdmin, input.Flow)
 	}
 	if err != nil {
 		writeError(w, 400, oauthErrorText(err.Error()))
@@ -1092,9 +1169,16 @@ func handlePrincipalOAuthComplete(w http.ResponseWriter, r *http.Request) {
 	}
 	response := completeManualOAuthFlow(principal, r.PathValue("provider_id"), flowID, authorizationResponse)
 	if response["status"] == "authorized" {
-		auditAdmin(r, "oauth_connection.connect", "principal", principal.ID, map[string]any{"provider": r.PathValue("provider_id"), "profile": antigravityManualProfile})
+		auditAdmin(r, "oauth_connection.connect", "principal", principal.ID, map[string]any{"provider": r.PathValue("provider_id"), "profile": manualOAuthAuditProfile(r.PathValue("provider_id"))})
 	}
 	writeJSON(w, http.StatusOK, response)
+}
+
+func manualOAuthAuditProfile(providerRef string) string {
+	if oauthRegistryIDForRef(providerRef) == "openai_codex" {
+		return codexBrowserManualProfile
+	}
+	return antigravityManualProfile
 }
 
 func handlePrincipalOAuthPoll(w http.ResponseWriter, r *http.Request) {

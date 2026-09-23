@@ -71,6 +71,7 @@ export function OAuthConnectDialog({
   const [clientMode, setClientMode] = useState("public");
   const [redirectURI, setRedirectURI] = useState("");
   const [oauthProfile, setOAuthProfile] = useState("gateway_callback");
+  const [codexFlow, setCodexFlow] = useState("browser");
   const [authorizationResponse, setAuthorizationResponse] = useState("");
   const [flow, setFlow] = useState<DeviceFlow | null>(null);
   const [stage, setStage] = useState<OAuthStage>("intro");
@@ -83,6 +84,7 @@ export function OAuthConnectDialog({
   const popup = useRef<Window | null>(null);
   const requiresClientID = asList(entry.onboarding_fields).map(String).includes("client_id");
   const supportsConsumerManual = stringValue(entry.id) === "google_antigravity";
+  const supportsCodexFlows = stringValue(entry.id) === "openai_codex";
 
   const closePopup = useCallback(() => {
     try {
@@ -237,6 +239,7 @@ export function OAuthConnectDialog({
             } : {}),
           } : {}),
           connection_name: connectionName.trim() || "personal",
+          ...(supportsCodexFlows ? { flow: codexFlow } : {}),
         },
       );
       const interval = Math.max(1, numberValue(response.interval, 5));
@@ -244,7 +247,7 @@ export function OAuthConnectDialog({
         numberValue(response.expires_at) * 1000 ||
         Date.now() + Math.max(60, numberValue(response.expires_in, 900)) * 1000;
       const browser = stringValue(response.flow) === "browser";
-      const manual = stringValue(response.flow) === "consumer_manual";
+	  const manual = ["consumer_manual", "browser_pkce"].includes(stringValue(response.flow));
       const verificationURI = stringValue(response.authorization_url, stringValue(response.verification_uri));
       const nextFlow = {
         providerID: stringValue(response.provider_id, providerID),
@@ -402,6 +405,14 @@ export function OAuthConnectDialog({
               {clientMode === "confidential" ? <label class="owner-select">OAuth client secret<input type="password" value={clientSecret} onInput={(event) => setClientSecret((event.currentTarget as HTMLInputElement).value)} autoComplete="new-password" /></label> : null}
               <label class="owner-select">Fixed redirect URI<input value={redirectURI} onInput={(event) => setRedirectURI((event.currentTarget as HTMLInputElement).value)} placeholder="https://localhost.example/callback" autoComplete="off" /></label>
             </> : null}
+            {supportsCodexFlows ? <label class="owner-select">
+              Sign-in flow
+              <select value={codexFlow} onChange={(event) => setCodexFlow((event.currentTarget as HTMLSelectElement).value)}>
+                <option value="browser">Browser sign-in</option>
+                <option value="device_code">Device code</option>
+              </select>
+              <small class="form-help">Browser sign-in matches the official Codex CLI profile. Device authorization remains available for headless environments.</small>
+            </label> : null}
             {requiresClientID && mode === "admin" ? (
               <label class="owner-select">
                 OAuth client ID
@@ -414,9 +425,8 @@ export function OAuthConnectDialog({
                   autoComplete="off"
                 />
                 <small class="form-help">
-                  Enter only an OAuth client ID you are authorized to operate. OpenAI
-                  does not currently document third-party Codex client registration,
-                  and the gateway does not embed the official Codex CLI client ID.
+                  Leave blank to use the verified public Codex client. Enter a different
+                  client ID only when you are authorized to operate it.
                 </small>
               </label>
             ) : null}

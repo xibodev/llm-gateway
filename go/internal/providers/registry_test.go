@@ -112,6 +112,9 @@ func TestVertexRegistryDefaultsLocation(t *testing.T) {
 	if entry.DefaultLocation != "global" {
 		t.Fatalf("Vertex default location=%q, want global", entry.DefaultLocation)
 	}
+	if !slices.Contains(entry.OnboardingFields, "vertex_request_type") {
+		t.Fatalf("Vertex onboarding fields omit request type: %+v", entry.OnboardingFields)
+	}
 }
 
 func TestSubscriptionOAuthProvidersArePersonal(t *testing.T) {

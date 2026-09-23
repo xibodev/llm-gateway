@@ -38,6 +38,8 @@ type catalogEntry struct {
 	//   - v2 rows predate persisted typed capability snapshots and discovery
 	//     timestamps.
 	//   - v3 anonymous OpenCode Zen rows predate shared Zen discovery evidence.
+	//   - v4 Vertex rows dropped callable global models whose supportedActions
+	//     field was absent or empty.
 	//
 	// Bump this whenever a release changes what a persisted row means; the
 	// cost is one forced re-discovery per provider, the alternative is
@@ -47,7 +49,7 @@ type catalogEntry struct {
 	RefreshedAt   time.Time   `json:"refreshed_at"`
 }
 
-const catalogSchemaVersion = 4
+const catalogSchemaVersion = 5
 
 var (
 	catMu         sync.Mutex

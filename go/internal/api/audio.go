@@ -58,6 +58,13 @@ func resolveAudioTarget(principal *config.Principal, model string, operation cor
 				return target.Provider, target.Model, 0, ""
 			}
 		}
+		if operation == core.ModelOperationEmbeddings {
+			if instance, err := providers.GetProviderForPrincipal(target.Provider, principal); err == nil {
+				if _, native := providers.AsEmbeddingProvider(instance); native {
+					return target.Provider, target.Model, 0, ""
+				}
+			}
+		}
 		if _, _, ok := providers.ProviderHTTPTarget(target.Provider, principal); ok {
 			return target.Provider, target.Model, 0, ""
 		}

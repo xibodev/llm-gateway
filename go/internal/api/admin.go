@@ -208,14 +208,15 @@ func handleState(w http.ResponseWriter, r *http.Request) {
 		}
 		entry := map[string]any{
 			"id": pid, "type": pc.Type, "base_url": pc.BaseURL, "region": pc.Region,
-			"registry_id":       pc.RegistryID,
-			"api_key_set":       secrets[pid] != "" || pc.APIKey != "" || systemConnection,
-			"force_api_support": pc.ForceApiSupport,
-			"project":           pc.Project,
-			"location":          pc.Location,
-			"default_voice":     pc.DefaultVoice,
-			"disabled":          pc.Disabled,
-			"models":            len(models),
+			"registry_id":         pc.RegistryID,
+			"api_key_set":         secrets[pid] != "" || pc.APIKey != "" || systemConnection,
+			"force_api_support":   pc.ForceApiSupport,
+			"project":             pc.Project,
+			"location":            pc.Location,
+			"vertex_request_type": pc.VertexRequestType,
+			"default_voice":       pc.DefaultVoice,
+			"disabled":            pc.Disabled,
+			"models":              len(models),
 		}
 		if !refreshed.IsZero() {
 			entry["catalog_refreshed"] = refreshed.UTC().Format(time.RFC3339)
@@ -335,6 +336,7 @@ type providerBody struct {
 	Region              string   `json:"region"`
 	Project             string   `json:"project"`
 	Location            string   `json:"location"`
+	VertexRequestType   *string  `json:"vertex_request_type"`
 	PublicOAuthClientID string   `json:"public_oauth_client_id"`
 	ClearPublicOAuthID  *bool    `json:"clear_public_oauth_client_id"`
 	ForceApiSupport     flexBool `json:"force_api_support"`
@@ -406,6 +408,18 @@ func handleUpsertProvider(w http.ResponseWriter, r *http.Request) {
 	if !contains(providers.ProviderTypes, body.Type) {
 		writeError(w, 400, "unknown provider type "+body.Type)
 		return
+	}
+	if body.VertexRequestType != nil {
+		value := strings.ToLower(strings.TrimSpace(*body.VertexRequestType))
+		if body.Type != "vertex_ai" && value != "" {
+			writeError(w, 400, "vertex_request_type is only valid for vertex_ai providers")
+			return
+		}
+		if value != "" && value != "default" && value != "paygo" && value != "dedicated" {
+			writeError(w, 400, "vertex_request_type must be default, paygo, or dedicated")
+			return
+		}
+		body.VertexRequestType = &value
 	}
 	if err := providerEndpointCollision(pid); err != nil {
 		writeError(w, http.StatusConflict, err.Error())
@@ -510,6 +524,12 @@ func handleUpsertProvider(w http.ResponseWriter, r *http.Request) {
 			if next.PublicOAuthClientID == "" && (body.ClearPublicOAuthID == nil || !*body.ClearPublicOAuthID) {
 				next.PublicOAuthClientID = previous.PublicOAuthClientID
 			}
+			if body.VertexRequestType == nil {
+				next.VertexRequestType = previous.VertexRequestType
+			}
+		}
+		if body.VertexRequestType != nil {
+			next.VertexRequestType = *body.VertexRequestType
 		}
 		s.Providers[pid] = next
 	})

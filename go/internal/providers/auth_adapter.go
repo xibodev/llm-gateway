@@ -2,8 +2,11 @@ package providers
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"net/http"
+	"net/url"
 	"strings"
 	"sync"
 
@@ -12,6 +15,7 @@ import (
 	"llmgw/internal/iam"
 
 	antigravityauth "github.com/xibodev/llm-provider-auth/antigravity"
+	browseroauth "github.com/xibodev/llm-provider-auth/browseroauth"
 	codexauth "github.com/xibodev/llm-provider-auth/codex"
 	copilotauth "github.com/xibodev/llm-provider-auth/copilot"
 )
@@ -20,6 +24,8 @@ const (
 	maxProviderAuthDiagnosticChars = 300
 	DefaultCodexClientID           = "app_EMoamEEZ73f0CkXaXp7hrann"
 	codexOAuthProfileDevice        = "device_client_id"
+	codexOAuthProfileBrowser       = "browser_pkce"
+	codexBrowserRedirectURI        = "http://localhost:1455/auth/callback"
 )
 
 func EffectiveCodexClientID() string {
@@ -161,6 +167,9 @@ var providerAuthAdapters = struct {
 	},
 }}
 
+var codexBrowserAuthorizeURL = "https://auth.openai.com/oauth/authorize"
+var codexBrowserHTTPClient *http.Client
+
 func RegisterProviderAuthAdapterFactory(id string, factory ProviderAuthAdapterFactory) error {
 	id = strings.ToLower(strings.TrimSpace(id))
 	if !registryIdentifierPattern.MatchString(id) {
@@ -269,7 +278,7 @@ type codexDevicePrivateState struct {
 func (openAICodexAuthAdapter) ID() string             { return "openai_codex" }
 func (openAICodexAuthAdapter) CredentialKind() string { return "openai_codex_oauth" }
 func (openAICodexAuthAdapter) Capabilities() ProviderAuthCapabilities {
-	return ProviderAuthCapabilities{DeviceCode: true, Refresh: true, Revoke: true}
+	return ProviderAuthCapabilities{DeviceCode: true, BrowserCallback: true, Refresh: true, Revoke: true}
 }
 func (adapter openAICodexAuthAdapter) StartDevice(context.Context) (ProviderAuthStart, error) {
 	flow, err := codexauth.StartDeviceFlow(adapter.clientID)
@@ -282,6 +291,98 @@ func (adapter openAICodexAuthAdapter) StartDevice(context.Context) (ProviderAuth
 		VerificationURI: flow.VerificationURI, Interval: flow.Interval,
 		ExpiresIn: flow.ExpiresIn, PrivateState: string(private),
 	}, nil
+}
+func (adapter openAICodexAuthAdapter) StartBrowser(_ context.Context, redirectURI string) (ProviderAuthBrowserStart, error) {
+	oauth := codexBrowserConfig(adapter.clientID)
+	authorization, err := oauth.AuthorizationURL(redirectURI)
+	if err != nil {
+		return ProviderAuthBrowserStart{}, err
+	}
+	private, _ := json.Marshal(map[string]string{
+		"state": authorization.State, "code_verifier": authorization.CodeVerifier,
+		"redirect_uri": redirectURI, "client_id": adapter.clientID,
+	})
+	return ProviderAuthBrowserStart{AuthorizationURL: authorization.URL, PrivateState: string(private), ExpiresIn: 600}, nil
+}
+func (adapter openAICodexAuthAdapter) CompleteBrowser(ctx context.Context, code, privateState string) (ProviderAuthPoll, error) {
+	state := map[string]string{}
+	if json.Unmarshal([]byte(privateState), &state) != nil || state["code_verifier"] == "" || state["redirect_uri"] == "" || state["client_id"] != adapter.clientID {
+		return ProviderAuthPoll{}, fmt.Errorf("Codex browser OAuth profile changed or is unavailable")
+	}
+	tokens, err := codexBrowserConfig(adapter.clientID).Exchange(ctx, code, state["code_verifier"], state["redirect_uri"])
+	if err != nil {
+		return ProviderAuthPoll{}, err
+	}
+	accountID, accountLabel := codexIDTokenIdentity(tokens.IDToken)
+	return ProviderAuthPoll{
+		Status: "authorized", AccessToken: tokens.AccessToken, RefreshToken: tokens.RefreshToken,
+		IDToken: tokens.IDToken, TokenType: tokens.TokenType, ExpiresAt: tokens.ExpiresAt.Unix(),
+		AccountID: accountID, AccountLabel: accountLabel,
+		OAuthProfile: codexOAuthProfileBrowser, OAuthClientID: adapter.clientID,
+	}, nil
+}
+
+func codexBrowserConfig(clientID string) browseroauth.Config {
+	return browseroauth.Config{
+		AuthorizeURL: codexBrowserAuthorizeURL, TokenURL: codexauth.OAuthTokenURL,
+		ClientID: strings.TrimSpace(clientID), ClientAuthMode: browseroauth.ClientAuthModePublicPKCE,
+		Scopes: []string{"openid", "profile", "email", "offline_access"},
+		ExtraAuthParams: url.Values{
+			"id_token_add_organizations": {"true"}, "codex_cli_simplified_flow": {"true"}, "originator": {"codex_cli_rs"},
+		},
+		HTTPClient: codexBrowserHTTPClient,
+	}
+}
+
+func codexIDTokenIdentity(idToken string) (string, string) {
+	parts := strings.Split(idToken, ".")
+	if len(parts) != 3 {
+		return "", ""
+	}
+	raw, err := base64.RawURLEncoding.DecodeString(parts[1])
+	if err != nil {
+		return "", ""
+	}
+	claims := struct {
+		Email     string `json:"email"`
+		AccountID string `json:"chatgpt_account_id"`
+		Profile   struct {
+			Email string `json:"email"`
+		} `json:"https://api.openai.com/profile"`
+		Auth struct {
+			AccountID string `json:"chatgpt_account_id"`
+		} `json:"https://api.openai.com/auth"`
+	}{}
+	if json.Unmarshal(raw, &claims) != nil {
+		return "", ""
+	}
+	accountID := strings.TrimSpace(claims.Auth.AccountID)
+	if accountID == "" {
+		accountID = strings.TrimSpace(claims.AccountID)
+	}
+	label := strings.TrimSpace(claims.Email)
+	if label == "" {
+		label = strings.TrimSpace(claims.Profile.Email)
+	}
+	return accountID, label
+}
+func (adapter openAICodexAuthAdapter) StartManual(_ context.Context, input ProviderAuthManualConfig) (ProviderAuthBrowserStart, error) {
+	clientID := strings.TrimSpace(input.ClientID)
+	if clientID == "" {
+		clientID = adapter.clientID
+	}
+	redirectURI := strings.TrimSpace(input.RedirectURI)
+	if redirectURI == "" {
+		redirectURI = codexBrowserRedirectURI
+	}
+	return (openAICodexAuthAdapter{clientID: clientID}).StartBrowser(context.Background(), redirectURI)
+}
+func (adapter openAICodexAuthAdapter) CompleteManual(ctx context.Context, code, privateState string, input ProviderAuthManualConfig) (ProviderAuthPoll, error) {
+	clientID := strings.TrimSpace(input.ClientID)
+	if clientID == "" {
+		clientID = adapter.clientID
+	}
+	return (openAICodexAuthAdapter{clientID: clientID}).CompleteBrowser(ctx, code, privateState)
 }
 func (adapter openAICodexAuthAdapter) PollDevice(
 	_ context.Context, deviceCode, privateState string,

@@ -127,6 +127,9 @@ func TestVertexDiscoveryKeepsOnlyManagedModels(t *testing.T) {
 					"supportedActions": map[string]any{"openGenerationAiStudio": map[string]any{}}},
 				{"name": "publishers/google/models/gemini-gated-b",
 					"supportedActions": map[string]any{"requestAccess": map[string]any{}}},
+				{"name": "publishers/google/models/gemini-global-empty-actions",
+					"supportedActions": map[string]any{}},
+				{"name": "publishers/google/models/gemini-missing-actions"},
 				{"name": "publishers/hf-someone/models/gemini-deployable-c",
 					"supportedActions": map[string]any{"deploy": map[string]any{}, "deployGke": map[string]any{}}},
 			},
@@ -142,11 +145,30 @@ func TestVertexDiscoveryKeepsOnlyManagedModels(t *testing.T) {
 	for _, m := range models {
 		ids[m.ID] = true
 	}
-	if !ids["gemini-managed-a"] || !ids["gemini-gated-b"] {
+	if !ids["gemini-managed-a"] || !ids["gemini-gated-b"] || !ids["gemini-global-empty-actions"] || !ids["gemini-missing-actions"] {
 		t.Fatalf("managed models missing: %+v", ids)
 	}
 	if ids["gemini-deployable-c"] {
-		t.Fatalf("self-deploy Garden model must not enter the catalog: %+v", ids)
+		t.Fatalf("self-deploy model entered the catalog: %+v", ids)
+	}
+}
+
+func TestVertexRegionalDiscoveryDoesNotInferEmptyActions(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]any{"publisherModels": []map[string]any{
+			{"name": "publishers/google/models/gemini-regional-empty-actions", "supportedActions": map[string]any{}},
+			{"name": "publishers/google/models/gemini-regional-missing-actions"},
+		}})
+	}))
+	defer server.Close()
+
+	models, err := newVertexTestProvider(t, server.URL, "us-central1").vertexPublisherModels("google")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(models) != 0 {
+		t.Fatalf("regional empty actions were treated as availability evidence: %+v", models)
 	}
 }
 
