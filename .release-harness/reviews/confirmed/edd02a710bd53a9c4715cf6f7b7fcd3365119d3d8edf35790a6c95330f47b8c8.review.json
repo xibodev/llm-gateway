@@ -1,0 +1,112 @@
+{
+  "schema_version": "1.0.0",
+  "mode": "change",
+  "contract": {
+    "digest": "31b393ab3e80162226619c441694573993ac618382d74642101484a0bf2e9c80"
+  },
+  "authoring_provenance": {
+    "status": "established",
+    "path": ".release-harness/drafts/llm-gateway.record.json",
+    "digest": "6732ddf3dc8236b974e2aae5f81b546d89c2a466b6fb0a368d76620955bf981e"
+  },
+  "sources": [
+    {
+      "source_id": "primary",
+      "status": "established",
+      "repository_identity": "https://github.com/xibodev/llm-gateway.git",
+      "base_ref": "origin/main",
+      "base_commit": "0cd6cdf42f3e2559ae35b11f018f1116705df32d",
+      "merge_base": "0cd6cdf42f3e2559ae35b11f018f1116705df32d",
+      "head_commit": "b546fcaab67661cd6f88ec0137dc82873da81ff4",
+      "head_tree": "587887c3853898ebc17801f8e5a4e8b7e017a88e",
+      "reviewed_source_digest": "e0e9213096752ed50f603bdced52a6b1be61ef72a6df8b68d581651c1003fd25",
+      "changed_paths": [
+        {
+          "status": "modified",
+          "path": "test/live-acceptance/core.test.mjs",
+          "old_blob": "04dd5741ccf0fb67bbc9a6b3a00c2ea340e1a431",
+          "new_blob": "145336049c7d6374278899020c2ec8a176a3393d"
+        },
+        {
+          "status": "modified",
+          "path": "test/live-acceptance/run.mjs",
+          "old_blob": "bcee3e2149efd7570887e258b6ff0f5ecb02bde0",
+          "new_blob": "6b688384d8e81312201da67b5a2663e5593d4648"
+        }
+      ]
+    }
+  ],
+  "facts": [
+    {
+      "id": "claude-cli-parser-change",
+      "claim": "Claude Code 2.1.270 treats --tools as variadic; the prior separated empty tool value consumed the positional prompt, causing every release lane to report no stdin and no output.",
+      "status": "observed",
+      "evidence": {
+        "source": "release run 35917047933; pinned Claude CLI help and bounded parser probes"
+      }
+    },
+    {
+      "id": "claude-command-fixed",
+      "claim": "Claude acceptance now closes variadic tool options with assignment syntax and places the positional prompt last; parser probes proceed to the configured API without stdin or missing-input errors.",
+      "status": "observed",
+      "evidence": {
+        "source": "test/live-acceptance/run.mjs; test/live-acceptance/core.test.mjs"
+      }
+    },
+    {
+      "id": "acceptance-gates-pass",
+      "claim": "Live-acceptance policy tests and deterministic Docker acceptance pass after the command correction.",
+      "status": "observed",
+      "evidence": {
+        "source": "policy tests 15/15; deterministic acceptance PASS 3/3"
+      }
+    }
+  ],
+  "impact": {
+    "assertions": [
+      {
+        "id": "A1",
+        "impact": "unchanged",
+        "supported_by": [
+          "claude-command-fixed",
+          "acceptance-gates-pass"
+        ]
+      },
+      {
+        "id": "A2",
+        "impact": "unchanged",
+        "supported_by": [
+          "acceptance-gates-pass"
+        ]
+      },
+      {
+        "id": "A3",
+        "impact": "unchanged",
+        "supported_by": [
+          "acceptance-gates-pass"
+        ]
+      },
+      {
+        "id": "A4",
+        "impact": "unchanged",
+        "supported_by": [
+          "claude-cli-parser-change",
+          "claude-command-fixed",
+          "acceptance-gates-pass"
+        ]
+      }
+    ],
+    "requires": [],
+    "possible_binding_changes": []
+  },
+  "questions": [],
+  "conclusion": {
+    "action": "reuse_contract",
+    "summary": "The change restores pinned Claude CLI acceptance input without changing gateway runtime behavior or the accepted release proposition."
+  },
+  "proposed": {
+    "by": "opencode-session",
+    "at": "2026-09-23T20:51:06.951Z"
+  },
+  "digest": "edd02a710bd53a9c4715cf6f7b7fcd3365119d3d8edf35790a6c95330f47b8c8"
+}
