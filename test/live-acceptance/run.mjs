@@ -54,6 +54,10 @@ const report = {
   policy: null,
 };
 
+function progress(message) {
+  console.log(`[${new Date().toISOString()}] ${message}`);
+}
+
 function check(name, status, detail, required = true, evidence = {}) {
   const redact = (value) => String(value || "").replaceAll(adminKey, "[REDACTED]").replaceAll(encryptionKey, "[REDACTED]");
   report.checks.push({ name, status, detail: safeExcerpt(redact(detail), 500), required, ...evidence });
@@ -215,6 +219,7 @@ async function sweepProvider(provider, models) {
     .filter((row) => row?.disabled !== true && row?.published !== false)
     .filter((row) => row?.free === true || isFreeModel(provider, row?.id))
     .map((row) => row.id);
+  progress(`sweep ${provider}: ${candidates.length} published model(s)`);
   let cursor = 0;
   const worker = async () => {
     while (cursor < candidates.length) {
@@ -240,6 +245,8 @@ async function sweepProvider(provider, models) {
   }
   await Promise.all(Array.from({ length: Math.min(sweepConcurrency, candidates.length || 1) }, worker));
   report.model_sweep.sort((left, right) => `${left.provider}/${left.model}`.localeCompare(`${right.provider}/${right.model}`));
+  const passed = report.model_sweep.filter((row) => row.provider === provider && row.classification === classifications.pass).length;
+  progress(`sweep ${provider}: complete, ${passed}/${candidates.length} passed`);
 }
 
 async function directProviderProbe(provider, model) {
@@ -425,6 +432,13 @@ async function testPlayground(identity, healthy, plans) {
     for (const [index, targetCase] of targets.entries()) {
       const { target, members, minimumAttempts } = targetCase;
       const page = await context.newPage();
+      const catalogResponse = page.waitForResponse((candidate) => {
+        if (candidate.request().method() !== "GET") return false;
+        const url = new URL(candidate.url());
+        return url.pathname.endsWith("/admin/api/models") &&
+          url.searchParams.get("principal_id") === identity.principalID &&
+          url.searchParams.get("project_id") === identity.projectID;
+      }, { timeout: 30_000 });
       await page.goto(`${baseURL}/console#/playground`, { waitUntil: "domcontentloaded" });
       await page.waitForFunction(() => document.querySelector(".playground-page") || document.querySelector('input[type="password"]'), null, { timeout: 15_000 });
       const password = page.locator('input[type="password"]');
@@ -441,11 +455,21 @@ async function testPlayground(identity, healthy, plans) {
         { principalID: identity.principalID, projectID: identity.projectID },
         { timeout: 15_000 },
       );
+      const catalog = await catalogResponse;
+      if (!catalog.ok()) throw new Error(`Playground catalog returned HTTP ${catalog.status()}`);
+      const catalogPayload = await catalog.json().catch(() => null);
       const combo = page.locator(".model-combo input");
       await combo.focus();
       await combo.fill(target);
       const option = page.locator('.model-combo [role="option"]', { hasText: target }).first();
-      await option.waitFor({ state: "visible", timeout: 10_000 });
+      try {
+        await option.waitFor({ state: "visible", timeout: 10_000 });
+      } catch (error) {
+        const row = (catalogPayload?.data || []).find((item) => item?.id === target);
+        const catalogIDs = (catalogPayload?.data || []).map((item) => item?.id).filter(Boolean);
+        const rendered = await page.locator('.model-combo [role="option"] strong').allTextContents();
+        throw new Error(`Playground did not offer ${target}; catalog_row=${JSON.stringify(row || null)} catalog_ids=${JSON.stringify(catalogIDs.slice(0, 40))} input=${JSON.stringify(await combo.inputValue().catch(() => ""))} rendered=${JSON.stringify(rendered.slice(0, 20))}; ${error.message}`);
+      }
       await option.dispatchEvent("mousedown");
       await page.waitForFunction((value) => document.querySelector(".model-combo input")?.value === value, target, { timeout: 10_000 });
       const composer = page.locator('.chat-composer textarea[placeholder^="Send a message"]');
@@ -553,9 +577,11 @@ async function testClaude(identity, healthy, plans) {
 }
 
 async function setupDocker() {
+  progress(`docker: preparing ${mode} gateway`);
   report.execution.commit = (await command("git", ["rev-parse", "HEAD"])).stdout;
   const candidateImage = process.env.LLMGW_ACCEPTANCE_IMAGE;
   if (candidateImage) {
+    progress("docker: pulling candidate image");
     await docker("pull", candidateImage);
     const inspection = JSON.parse((await docker("image", "inspect", candidateImage)).stdout)[0];
     const expectedCommit = process.env.LLMGW_ACCEPTANCE_EXPECT_COMMIT || "";
@@ -569,6 +595,7 @@ async function setupDocker() {
     report.execution.candidate_digest = expectedDigest;
     report.execution.candidate_revision = revision;
   } else {
+    progress("docker: building local image");
     await docker("build", "-f", "go/Dockerfile", "--build-arg", `VERSION=acceptance-${report.execution.commit.slice(0, 8)}`, "--build-arg", `COMMIT=${report.execution.commit}`, "-t", image, "go");
   }
   await docker("network", "create", ...(mode === "deterministic" ? ["--internal"] : []), network);
@@ -576,6 +603,7 @@ async function setupDocker() {
   await docker("volume", "create", volume);
   const publishedPort = mode === "deterministic" ? [] : ["-p", `127.0.0.1:${port}:8787`];
   await docker("run", "-d", "--name", container, "--network", network, "--network-alias", "gateway", ...publishedPort, "-v", `${volume}:/state`, "-e", "LLMGW_HOST=0.0.0.0", "-e", "LLMGW_PORT=8787", "-e", "LLMGW_STATE_DIR=/state", "-e", "LLMGW_API_KEY", "-e", "LLMGW_CREDENTIAL_ENCRYPTION_KEY", "-e", "LLMGW_ALLOW_UNAUTHENTICATED_API=0", ...(mode === "live" ? ["-e", "LLMGW_ANONYMOUS_PROVIDER_AUTOMATION=true"] : []), image, "serve", { env: { ...process.env, LLMGW_API_KEY: adminKey, LLMGW_CREDENTIAL_ENCRYPTION_KEY: encryptionKey } });
+  progress("docker: gateway container started, waiting for health");
   if (mode === "deterministic") {
     await docker("create", "--name", edge, "--network", accessNetwork, "-p", `127.0.0.1:${port}:8080`, "-v", `${resolve(import.meta.dirname, "edge-nginx.conf")}:/etc/nginx/nginx.conf:ro`, "nginx:1.27-alpine@sha256:65645c7bb6a0661892a8b03b89d0743208a18dd2f3f17a54ef4b76fb8e2f2a10");
     await docker("network", "connect", network, edge);
@@ -583,6 +611,7 @@ async function setupDocker() {
   }
   const health = await waitHealth();
   check("docker-health", health.status === 200 ? "passed" : "failed", health.text, true);
+  progress("docker: gateway healthy");
 }
 
 async function restartAndCheck(identity, healthy, plans) {
@@ -629,6 +658,7 @@ async function restartAndCheck(identity, healthy, plans) {
 }
 
 async function cleanup(servers = []) {
+  progress("cleanup: removing temporary resources");
   const errors = [];
   for (const name of servers) await docker("rm", "-f", name).catch((error) => errors.push(error.message));
   if (mode === "deterministic") await docker("rm", "-f", edge).catch((error) => errors.push(error.message));
@@ -639,6 +669,7 @@ async function cleanup(servers = []) {
   await docker("image", "rm", "-f", image).catch((error) => errors.push(error.message));
   report.execution.cleanup_completed = errors.length === 0;
   check("cleanup", errors.length === 0 ? "passed" : "failed", errors.join("; ") || "temporary resources removed", true);
+  progress(`cleanup: ${errors.length ? `completed with ${errors.length} error(s)` : "complete"}`);
 }
 
 async function runAcceptance() {
@@ -651,8 +682,10 @@ async function runAcceptance() {
   }
   const servers = [];
   try {
+    progress(`acceptance: start mode=${mode}`);
     await writeReport();
     await setupDocker();
+    progress("identity: creating scoped owner and project");
     const identity = await createIdentityAndKey();
     let modelsByProvider = [];
     if (mode === "deterministic") {
@@ -674,7 +707,9 @@ async function runAcceptance() {
       modelsByProvider = [{ provider: "kilo-code", models: healthy }];
       report.providers.push({ id: "fault-429", fixture_models: fault429.length }, { id: "fault-503", fixture_models: fault503.length });
     } else {
+	  progress("providers: waiting for anonymous automation");
 	  modelsByProvider = await waitAnonymousProviderAutomation();
+	  progress(`providers: automation complete for ${modelsByProvider.length} provider(s)`);
       for (const [id, status] of [["fault-429", 429], ["fault-503", 503]]) {
         const name = `${project}-${id}`;
         await docker("run", "-d", "--name", name, "--network", network, "-e", `STATUS=${status}`, "-e", "MODELS=fault-model", "-v", `${resolve(import.meta.dirname)}:/harness:ro`, "node:22.23.2-alpine", "node", "/harness/fixture-server.mjs");
@@ -687,6 +722,7 @@ async function runAcceptance() {
         await configureProvider(id, "custom_openai", `http://${name}:8080`);
       }
     }
+    progress("models: starting published-model sweep");
     for (const entry of modelsByProvider) await sweepProvider(entry.provider, entry.models);
     const candidates = modelsByProvider.reduce((total, entry) => total + entry.models.filter((row) =>
       row?.disabled !== true && row?.published !== false && (row?.free === true || isFreeModel(entry.provider, row?.id)),
@@ -699,16 +735,22 @@ async function runAcceptance() {
     } else {
       check("model-sweep-evidence", "passed", `${healthy.length}/${candidates} free model(s) supplied usable evidence`, true);
       check("healthy-cohort", "passed", `${healthy.length} model(s) selected`, true);
+      progress(`routes: creating plans from ${healthy.length} healthy model(s)`);
       const plans = await createRoutes(healthy);
+      progress("api: testing chat, messages, and failover routes");
       await testAPIs(identity.token, plans, healthy);
+      progress("playground: testing browser targets");
       await testPlayground(identity, healthy, plans);
       if (mode === "live") {
+        progress("claude: testing CLI capabilities");
         await testClaude(identity, healthy, plans);
       }
+      progress("restart: testing persisted state and routes");
       await restartAndCheck(identity, healthy, plans);
     }
     report.execution.completed = true;
   } catch (error) {
+    progress(`acceptance: failed: ${error.message}`);
     check("harness", "failed", error.stack || error.message, true);
   } finally {
     await cleanup(servers);

@@ -385,6 +385,9 @@ func readCatalogForPrincipal(
 }
 
 func catalogCacheKey(providerID string, principal *config.Principal) string {
+	if managed, err := AutomationManagedAnonymousProvider(providerID); err == nil && managed {
+		return providerID
+	}
 	return providerCacheKey(providerID, principal)
 }
 

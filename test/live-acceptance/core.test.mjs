@@ -135,6 +135,9 @@ test("deterministic fixture declares its proven Chat surface", async () => {
 test("live sweep excludes unpublished diagnostic catalog rows", async () => {
   const source = await readFile(new URL("./run.mjs", import.meta.url), "utf8");
   assert.match(source, /row\?\.disabled !== true && row\?\.published !== false/);
+  assert.match(source, /const catalogResponse = page\.waitForResponse/);
+  assert.match(source, /const catalog = await catalogResponse/);
+  assert.match(source, /await option\.waitFor\(\{ state: "visible"/);
 });
 
 test("release policy requires execution but tolerates external outages", () => {
