@@ -64,6 +64,14 @@ func TestAnonymousModelListPublishesOnlyExactVerifiedTargets(t *testing.T) {
 	if len(rows) != 1 || rows[0].(map[string]any)["id"] != profile.ProviderID+"/working" {
 		t.Fatalf("public rows=%+v", rows)
 	}
+	scoped, err := buildModelList(&config.Principal{PrincipalID: "human-owner", PrincipalKind: "human", ProjectID: "project"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	scopedRows := scoped["data"].([]any)
+	if len(scopedRows) != 1 || scopedRows[0].(map[string]any)["id"] != profile.ProviderID+"/working" {
+		t.Fatalf("scoped rows=%+v", scopedRows)
+	}
 	for _, field := range []string{"publication_state", "published", "disabled", "admin_unverified_opt_in", "observed_at", "latency_ms", "failure_code"} {
 		if _, exists := rows[0].(map[string]any)[field]; exists {
 			t.Fatalf("public row exposed admin diagnostic %q: %+v", field, rows[0])

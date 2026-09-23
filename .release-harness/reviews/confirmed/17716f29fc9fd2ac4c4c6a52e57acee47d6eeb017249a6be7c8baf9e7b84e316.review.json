@@ -1,0 +1,123 @@
+{
+  "schema_version": "1.0.0",
+  "mode": "change",
+  "contract": {
+    "digest": "31b393ab3e80162226619c441694573993ac618382d74642101484a0bf2e9c80"
+  },
+  "authoring_provenance": {
+    "status": "established",
+    "path": ".release-harness/drafts/llm-gateway.record.json",
+    "digest": "6732ddf3dc8236b974e2aae5f81b546d89c2a466b6fb0a368d76620955bf981e"
+  },
+  "sources": [
+    {
+      "source_id": "primary",
+      "status": "established",
+      "repository_identity": "https://github.com/xibodev/llm-gateway.git",
+      "base_ref": "origin/main",
+      "base_commit": "a7a365d768510876d0e8308a78cdb7abe8d98968",
+      "merge_base": "a7a365d768510876d0e8308a78cdb7abe8d98968",
+      "head_commit": "b12fa19a24c52cd9a9b5434941fb4c3f5aba5cb0",
+      "head_tree": "64802cd39ae208ebb76ef1e1a7630b3f810b78ac",
+      "reviewed_source_digest": "33ae37a3cedd854231eb65b3ecb113bcab579059888d86ea0e58152ff3524d3d",
+      "changed_paths": [
+        {
+          "status": "modified",
+          "path": "go/internal/api/models_test.go",
+          "old_blob": "08871a83ec70b08b89dcb91f40841610920347d7",
+          "new_blob": "2b1d762a34303e23b28ecee8128e41f78b954bda"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/providers/catalog.go",
+          "old_blob": "791a138859bbd4be22adea16ac93825ed25bb356",
+          "new_blob": "d6e209efc32774bd8ae5cb83af57d920d0d63cd4"
+        },
+        {
+          "status": "modified",
+          "path": "test/live-acceptance/core.test.mjs",
+          "old_blob": "54222e78fe87606274589443d1a54ad4ba3ddaae",
+          "new_blob": "04dd5741ccf0fb67bbc9a6b3a00c2ea340e1a431"
+        },
+        {
+          "status": "modified",
+          "path": "test/live-acceptance/run.mjs",
+          "old_blob": "b69a7fe56c25385c019dbc9dbd0e8d7c35107785",
+          "new_blob": "bcee3e2149efd7570887e258b6ff0f5ecb02bde0"
+        }
+      ]
+    }
+  ],
+  "facts": [
+    {
+      "id": "scoped-anonymous-catalog-fixed",
+      "claim": "Automation-managed anonymous providers now reuse their gateway-scoped catalog for human project model lists, while BYOC and private provider caches remain principal/project isolated.",
+      "status": "observed",
+      "evidence": {
+        "source": "go/internal/providers/catalog.go; go/internal/api/models_test.go; full providers and API tests"
+      }
+    },
+    {
+      "id": "live-browser-path-proven",
+      "claim": "A local clean-state live run completed published-model sweeps, API and route checks, all six Playground targets, restart checks, and cleanup after the catalog fix; Claude lanes were locally inconclusive because of the Windows CLI execution environment and remain enforced in Linux release CI.",
+      "status": "observed",
+      "evidence": {
+        "source": "local live acceptance report llmgw-live-final-fix-report.json; Playground 6/6; restart and cleanup passed"
+      }
+    },
+    {
+      "id": "canonical-gates-pass",
+      "claim": "Standalone build, vet, full tests, vulnerability scan, console audit/lint/tests/dist, documentation checks, live-acceptance policy tests, and deterministic Docker acceptance pass.",
+      "status": "observed",
+      "evidence": {
+        "source": "GOWORK=off go build/vet/test/govulncheck; console audit/lint/test/check:dist; scripts/check-docs.mjs; policy tests 15/15; deterministic acceptance PASS 3/3"
+      }
+    }
+  ],
+  "impact": {
+    "assertions": [
+      {
+        "id": "A1",
+        "impact": "unchanged",
+        "supported_by": [
+          "canonical-gates-pass"
+        ]
+      },
+      {
+        "id": "A2",
+        "impact": "unchanged",
+        "supported_by": [
+          "canonical-gates-pass"
+        ]
+      },
+      {
+        "id": "A3",
+        "impact": "unchanged",
+        "supported_by": [
+          "canonical-gates-pass"
+        ]
+      },
+      {
+        "id": "A4",
+        "impact": "unchanged",
+        "supported_by": [
+          "scoped-anonymous-catalog-fixed",
+          "live-browser-path-proven",
+          "canonical-gates-pass"
+        ]
+      }
+    ],
+    "requires": [],
+    "possible_binding_changes": []
+  },
+  "questions": [],
+  "conclusion": {
+    "action": "reuse_contract",
+    "summary": "The fix restores published anonymous models to scoped catalogs and improves acceptance observability without changing the accepted CLI, health, or public model-list proposition."
+  },
+  "proposed": {
+    "by": "opencode-session",
+    "at": "2026-09-23T20:20:02.560Z"
+  },
+  "digest": "17716f29fc9fd2ac4c4c6a52e57acee47d6eeb017249a6be7c8baf9e7b84e316"
+}
