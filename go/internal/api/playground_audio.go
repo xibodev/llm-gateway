@@ -33,6 +33,13 @@ type playgroundSpeechBody struct {
 	Speed       any    `json:"speed"`
 }
 
+type playgroundEmbeddingsBody struct {
+	ProjectID   string `json:"project_id"`
+	PrincipalID string `json:"principal_id"`
+	Model       string `json:"model"`
+	Input       any    `json:"input"`
+}
+
 // resolvePlaygroundActor mirrors the chat playground's admin principal
 // resolution: an explicit human principal, or the acting admin's own.
 func resolvePlaygroundActor(r *http.Request, principalID, projectID string) (*config.Principal, iam.Project, int, string) {
@@ -82,6 +89,13 @@ func audioPlaygroundTarget(principal *config.Principal, model string, operation 
 		if operation == core.ModelOperationAudioOut {
 			if _, native := providers.SpeechSynthesizerForPrincipal(target.Provider, principal); native {
 				return target.Provider, target.Model, 0, ""
+			}
+		}
+		if operation == core.ModelOperationEmbeddings {
+			if instance, err := providers.GetProviderForPrincipal(target.Provider, principal); err == nil {
+				if _, native := providers.AsEmbeddingProvider(instance); native {
+					return target.Provider, target.Model, 0, ""
+				}
 			}
 		}
 		if _, _, ok := providers.ProviderHTTPTarget(target.Provider, principal); ok {
@@ -196,6 +210,111 @@ func handleAdminPlaygroundSpeech(w http.ResponseWriter, r *http.Request) {
 		"content_type": contentType,
 		"audio_base64": base64.StdEncoding.EncodeToString(audio),
 		"audio_bytes":  len(audio),
+	})
+}
+
+func handleAdminPlaygroundEmbeddings(w http.ResponseWriter, r *http.Request) {
+	if !adminAuthed(w, r) {
+		return
+	}
+	var body playgroundEmbeddingsBody
+	if !decodeBody(r, &body) {
+		writeError(w, http.StatusBadRequest, "invalid playground request")
+		return
+	}
+	principal, project, status, message := resolvePlaygroundActor(r, body.PrincipalID, body.ProjectID)
+	if status != 0 {
+		writeError(w, status, message)
+		return
+	}
+	if inputEmpty(body.Input) {
+		writeError(w, http.StatusBadRequest, "embedding input is required")
+		return
+	}
+	providerID, upstreamModel, status, message := audioPlaygroundTarget(principal, body.Model, core.ModelOperationEmbeddings)
+	if status != 0 {
+		writeError(w, status, message)
+		return
+	}
+	if instance, providerErr := providers.GetProviderForPrincipal(providerID, principal); providerErr == nil {
+		if embedder, supported := providers.AsEmbeddingProvider(instance); supported {
+			if !nativeEmbeddingInputValid(body.Input) {
+				writeError(w, http.StatusBadRequest, "native embedding input must be a string or array of strings")
+				return
+			}
+			started := time.Now()
+			result, embedErr := embedder.Embed(r.Context(), upstreamModel, body.Input)
+			latency := time.Since(started).Milliseconds()
+			status := http.StatusOK
+			errorCode := ""
+			if embedErr != nil {
+				status, errorCode = upstreamErrorStatus(embedErr), "upstream"
+			}
+			recordPlaygroundEmbeddingUsage(body.Model, providerID, upstreamModel, principal, project, status, latency, errorCode)
+			if embedErr != nil {
+				writeUpstreamError(w, embedErr)
+				return
+			}
+			writePlaygroundEmbeddingResult(w, r, result, body.Model, providerID, upstreamModel, principal, project, latency)
+			return
+		}
+	}
+	base, headers, ok := providers.ProviderHTTPTarget(providerID, principal)
+	if !ok {
+		writeError(w, http.StatusBadRequest, "provider does not expose an OpenAI-compatible embeddings endpoint")
+		return
+	}
+	payload, _ := json.Marshal(embeddingsRequest{Model: upstreamModel, Input: body.Input})
+	request, err := http.NewRequestWithContext(r.Context(), http.MethodPost, strings.TrimRight(base, "/")+"/embeddings", bytes.NewReader(payload))
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "could not build the upstream request")
+		return
+	}
+	copyAuthHeaders(request, headers, false)
+	request.Header.Set("Content-Type", "application/json")
+	started := time.Now()
+	response, err := embeddingsClient.Do(request)
+	latency := time.Since(started).Milliseconds()
+	if err != nil {
+		recordPlaygroundEmbeddingUsage(body.Model, providerID, upstreamModel, principal, project, http.StatusBadGateway, latency, "upstream")
+		writeError(w, http.StatusBadGateway, "embeddings provider request failed")
+		return
+	}
+	result := readAPIProxyResponse(response, "embeddings")
+	recordPlaygroundEmbeddingUsage(body.Model, providerID, upstreamModel, principal, project, result.status, latency, result.errorCode)
+	if result.err != nil {
+		writeUpstreamError(w, result.err)
+		return
+	}
+	decoded := decodeJSONObject(result.body)
+	writePlaygroundEmbeddingResult(w, r, decoded, body.Model, providerID, upstreamModel, principal, project, latency)
+}
+
+func writePlaygroundEmbeddingResult(w http.ResponseWriter, r *http.Request, decoded map[string]any, requestedModel, providerID, upstreamModel string, principal *config.Principal, project iam.Project, latency int64) {
+	data, _ := decoded["data"].([]any)
+	dimensions := 0
+	if len(data) > 0 {
+		if first, ok := data[0].(map[string]any); ok {
+			if vector, ok := first["embedding"].([]any); ok {
+				dimensions = len(vector)
+			}
+		}
+	}
+	auditAdmin(r, "playground.embeddings", "project", project.ID, map[string]any{"model": requestedModel, "principal_id": principal.PrincipalID})
+	writeJSON(w, http.StatusOK, map[string]any{
+		"project_id": project.ID, "principal_id": principal.PrincipalID,
+		"served":     map[string]any{"provider": providerID, "model": upstreamModel},
+		"latency_ms": latency, "vectors": len(data), "dimensions": dimensions,
+		"usage": safePlaygroundValue(decoded["usage"]), "raw_response": safePlaygroundValue(decoded),
+	})
+}
+
+func recordPlaygroundEmbeddingUsage(requestedModel, providerID, upstreamModel string, principal *config.Principal, project iam.Project, status int, latency int64, errorCode string) {
+	router.RecordUsage(router.UsageRecord{
+		Endpoint: "playground.embeddings", RequestedModel: requestedModel, RoutedModel: upstreamModel,
+		Provider: providerID, Project: project.Slug, Key: "playground", ProjectID: project.ID,
+		PrincipalID: principal.PrincipalID, StatusCode: status, LatencyMS: latency,
+		ErrorCode: errorCode, CreditsMilli: embeddingsCreditsMilli,
 	})
 }
 

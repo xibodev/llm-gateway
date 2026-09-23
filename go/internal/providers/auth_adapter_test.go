@@ -13,8 +13,62 @@ import (
 	"llmgw/internal/iam"
 
 	antigravityauth "github.com/xibodev/llm-provider-auth/antigravity"
+	codexauth "github.com/xibodev/llm-provider-auth/codex"
 	copilotauth "github.com/xibodev/llm-provider-auth/copilot"
 )
+
+func TestCodexBrowserOAuthUsesOfficialPKCEProfile(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := r.ParseForm(); err != nil {
+			t.Fatal(err)
+		}
+		if r.Form.Get("client_id") != "fixture-client" || r.Form.Get("code_verifier") == "" || r.Form.Get("redirect_uri") != "https://gateway.example.test/oauth/callback/openai_codex" {
+			t.Fatalf("token form=%v", r.Form)
+		}
+		_, _ = w.Write([]byte(`{"access_token":"access-token","refresh_token":"refresh-token","expires_in":3600}`))
+	}))
+	defer server.Close()
+	oldAuthorize, oldToken, oldClient := codexBrowserAuthorizeURL, codexauth.OAuthTokenURL, codexBrowserHTTPClient
+	codexBrowserAuthorizeURL, codexauth.OAuthTokenURL, codexBrowserHTTPClient = server.URL+"/authorize", server.URL+"/token", server.Client()
+	t.Cleanup(func() {
+		codexBrowserAuthorizeURL, codexauth.OAuthTokenURL, codexBrowserHTTPClient = oldAuthorize, oldToken, oldClient
+	})
+
+	adapter := openAICodexAuthAdapter{clientID: "fixture-client"}
+	start, err := adapter.StartBrowser(context.Background(), "https://gateway.example.test/oauth/callback/openai_codex")
+	if err != nil {
+		t.Fatal(err)
+	}
+	authorizationURL, _ := url.Parse(start.AuthorizationURL)
+	query := authorizationURL.Query()
+	if query.Get("client_id") != "fixture-client" || query.Get("code_challenge") == "" || query.Get("state") == "" ||
+		query.Get("id_token_add_organizations") != "true" || query.Get("codex_cli_simplified_flow") != "true" || query.Get("originator") != "codex_cli_rs" {
+		t.Fatalf("authorization URL=%s", start.AuthorizationURL)
+	}
+	result, err := adapter.CompleteBrowser(context.Background(), "authorization-code", start.PrivateState)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Status != "authorized" || result.AccessToken != "access-token" || result.RefreshToken != "refresh-token" ||
+		result.OAuthProfile != codexOAuthProfileBrowser || result.OAuthClientID != "fixture-client" {
+		t.Fatalf("result=%+v", result)
+	}
+}
+
+func TestCodexManualBrowserUsesRegisteredLoopbackRedirect(t *testing.T) {
+	adapter := openAICodexAuthAdapter{clientID: "fixture-client"}
+	start, err := adapter.StartManual(context.Background(), ProviderAuthManualConfig{ClientID: "captured-client"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	authorizationURL, _ := url.Parse(start.AuthorizationURL)
+	if got := authorizationURL.Query().Get("redirect_uri"); got != codexBrowserRedirectURI {
+		t.Fatalf("redirect_uri=%q", got)
+	}
+	if got := authorizationURL.Query().Get("client_id"); got != "captured-client" {
+		t.Fatalf("client_id=%q", got)
+	}
+}
 
 func TestGoogleAntigravityBrowserOAuthUsesSharedFlowAndDiscoversProject(t *testing.T) {
 	tokenServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

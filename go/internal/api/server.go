@@ -131,6 +131,7 @@ func NewServer() http.Handler {
 	mux.HandleFunc("POST /admin/api/playground/v1/messages", handleAdminPlaygroundMessages)
 	mux.HandleFunc("POST /admin/api/playground/speech", handleAdminPlaygroundSpeech)
 	mux.HandleFunc("POST /admin/api/playground/transcription", handleAdminPlaygroundTranscription)
+	mux.HandleFunc("POST /admin/api/playground/embeddings", handleAdminPlaygroundEmbeddings)
 	mux.HandleFunc("POST /admin/api/playground/image", handleAdminPlaygroundImage)
 	mux.HandleFunc("POST /admin/api/playground/video", handleAdminPlaygroundVideo)
 	mux.HandleFunc("GET /admin/api/models", handleAdminModels)

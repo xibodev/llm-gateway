@@ -27,7 +27,7 @@ export type CatalogModel = {
 
 // Capability names the console reasons about. A model may carry several; the
 // list is ordered so the most specific modality wins when picking a default.
-export const capabilityOrder = ["video", "image", "tts", "transcription", "vision", "chat"] as const;
+export const capabilityOrder = ["video", "image", "tts", "transcription", "embedding", "vision", "chat"] as const;
 export type Capability = (typeof capabilityOrder)[number];
 
 export const capabilityLabels: Record<Capability, string> = {
@@ -36,6 +36,7 @@ export const capabilityLabels: Record<Capability, string> = {
   video: "Video generation",
   tts: "Text to speech",
   transcription: "Transcription",
+  embedding: "Embeddings",
   vision: "Vision",
 };
 
@@ -64,12 +65,14 @@ export function capabilitiesFor(row: JSONRecord): string[] {
   if (operations.video === "supported") out.add("video");
   if (operations.audio_in === "supported") out.add("transcription");
   if (operations.audio_out === "supported") out.add("tts");
+  if (operations.embeddings === "supported") out.add("embedding");
   if (inputs.image === "supported") out.add("vision");
   for (const name of declared) {
     if (name === "tts" || name === "speech") out.add("tts");
     else if (name === "transcription" || name === "stt" || name === "asr") out.add("transcription");
     else if (name === "video") out.add("video");
     else if (name === "image") out.add("image");
+    else if (name === "embedding" || name === "embeddings") out.add("embedding");
     else if (name === "vision" || name === "multimodal") out.add("vision");
     else if (name === "chat" || name === "completion" || name === "tools") out.add("chat");
   }
@@ -78,11 +81,12 @@ export function capabilitiesFor(row: JSONRecord): string[] {
     if (surface.includes("/audio/transcriptions")) out.add("transcription");
     if (surface.includes("/images/generations")) out.add("image");
     if (surface.includes("/videos/generations")) out.add("video");
+    if (surface.includes("/embeddings")) out.add("embedding");
     if (surface.includes("/chat/completions") || surface.includes("/messages") || surface.includes("/responses")) out.add("chat");
   }
   // Generation-only rows (speech, transcription, image, video) must not
   // masquerade as chat models.
-  if ((out.has("tts") || out.has("transcription") || out.has("image") || out.has("video")) && !declared.includes("chat") &&
+  if ((out.has("tts") || out.has("transcription") || out.has("embedding") || out.has("image") || out.has("video")) && !declared.includes("chat") &&
       !surfaces.some((surface) => surface.includes("/chat/completions") || surface.includes("/messages") || surface.includes("/responses"))) {
     out.delete("chat");
   }

@@ -156,7 +156,7 @@ func TestOAuthStartSurfacesProviderPersistenceFailure(t *testing.T) {
 	_, err := startOAuthFlow(
 		iam.Principal{ID: "owner", Kind: "human"}, "openai_codex", "", true,
 		httptest.NewRequest(http.MethodPost, "http://127.0.0.1/oauth/start", nil),
-		"personal", iam.ConnectionSourceUser,
+		"personal", iam.ConnectionSourceUser, "device_code",
 	)
 	if err == nil || err.Error() != "could not persist the OAuth provider configuration" {
 		t.Fatalf("start error=%v", err)
@@ -179,7 +179,7 @@ func TestUserOAuthStartCannotCreateGlobalProvider(t *testing.T) {
 	_, err := startOAuthFlow(
 		iam.Principal{ID: "owner", Kind: "human"}, "openai_codex", "", false,
 		httptest.NewRequest(http.MethodPost, "http://127.0.0.1/oauth/start", nil),
-		"personal", iam.ConnectionSourceUser,
+		"personal", iam.ConnectionSourceUser, "device_code",
 	)
 	if err == nil || !strings.Contains(err.Error(), "administrator") {
 		t.Fatalf("start error=%v", err)
@@ -215,7 +215,7 @@ func TestAdminCodexClientIDRollsBackWhenFlowStartFails(t *testing.T) {
 	_, err := startOAuthFlow(
 		iam.Principal{ID: "owner", Kind: "human"}, "codex", "replacement-client", true,
 		httptest.NewRequest(http.MethodPost, "http://127.0.0.1/oauth/start", nil),
-		"personal", iam.ConnectionSourceAdmin,
+		"personal", iam.ConnectionSourceAdmin, "device_code",
 	)
 	if err == nil {
 		t.Fatal("failed upstream start unexpectedly succeeded")
@@ -225,6 +225,33 @@ func TestAdminCodexClientIDRollsBackWhenFlowStartFails(t *testing.T) {
 	}
 	if got := config.Load().OpenAICodexClientID; got != "previous-client" {
 		t.Fatalf("persisted client ID=%q", got)
+	}
+}
+
+func TestCodexOAuthStartUsesRequestedBrowserFlow(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("LLMGW_STATE_DIR", dir)
+	t.Setenv("LLMGW_CONFIG", dir+"/config.yaml")
+	oldSettings := *config.Get()
+	t.Cleanup(func() { config.Update(func(settings *config.Settings) { *settings = oldSettings }) })
+	config.Update(func(settings *config.Settings) {
+		settings.Providers = map[string]*config.ProviderConfig{
+			"codex": {Type: "openai_compatible", RegistryID: "openai_codex"},
+		}
+		settings.OpenAICodexClientID = "fixture-client"
+	})
+	response, err := startCodexBrowserFlow(
+		iam.Principal{ID: "owner", Kind: "human"}, "codex", "fixture-client", true, "personal", iam.ConnectionSourceAdmin,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if response["flow"] != codexBrowserManualProfile || response["authorization_url"] == "" || response["flow_id"] == "" {
+		t.Fatalf("response=%+v", response)
+	}
+	authorizationURL, _ := url.Parse(response["authorization_url"].(string))
+	if got := authorizationURL.Query().Get("redirect_uri"); got != "http://localhost:1455/auth/callback" {
+		t.Fatalf("redirect_uri=%q", got)
 	}
 }
 

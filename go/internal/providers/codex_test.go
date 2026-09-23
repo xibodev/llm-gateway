@@ -3,6 +3,7 @@ package providers
 import (
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -14,6 +15,7 @@ import (
 	"llmgw/internal/iam"
 
 	providerauth "github.com/xibodev/llm-provider-auth"
+	browseroauth "github.com/xibodev/llm-provider-auth/browseroauth"
 	codexauth "github.com/xibodev/llm-provider-auth/codex"
 	core "github.com/xibodev/llmgw-core"
 	coreproviders "github.com/xibodev/llmgw-core/providers"
@@ -297,6 +299,56 @@ func TestCodexProviderUsesResponsesRefreshesOnceAndCatalogsWithClientVersion(t *
 	}
 }
 
+func TestCodexCatalogRefreshRetryDoesNotGainInferenceBetaHeader(t *testing.T) {
+	setupCodexProviderTest(t)
+	human, err := iam.CreatePrincipal("human", "authentik:codex-catalog-header", "", "Owner")
+	if err != nil {
+		t.Fatal(err)
+	}
+	oldProviders := config.Get().Providers
+	t.Cleanup(func() { config.Update(func(s *config.Settings) { s.Providers = oldProviders }) })
+	config.Update(func(s *config.Settings) {
+		s.Providers = map[string]*config.ProviderConfig{"codex": {Type: "openai_compatible", RegistryID: "openai_codex"}}
+	})
+	if _, err := iam.PutOAuthProviderConnection(iam.OAuthConnectionCreate{
+		PrincipalID: human.ID, ProviderID: "codex", Kind: "openai_codex_oauth",
+		AccessToken: "old-access", RefreshToken: "refresh-token", AccountID: "account-42",
+		OAuthProfile: codexOAuthProfileDevice, OAuthClientID: "fixture-client",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	requests := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/models":
+			requests++
+			if r.Header.Get("OpenAI-Beta") != "" {
+				t.Fatalf("catalog request %d carried beta header %q", requests, r.Header.Get("OpenAI-Beta"))
+			}
+			if requests == 1 {
+				w.WriteHeader(http.StatusUnauthorized)
+				return
+			}
+			_, _ = w.Write([]byte(`{"models":[{"slug":"gpt-5.6-sol","visibility":"list","supported_in_api":true}]}`))
+		case "/oauth/token":
+			_, _ = w.Write([]byte(`{"access_token":"new-access","refresh_token":"new-refresh"}`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+	oldModels, oldToken := codexauth.ModelsURL, codexauth.OAuthTokenURL
+	codexauth.ModelsURL, codexauth.OAuthTokenURL = server.URL+"/models", server.URL+"/oauth/token"
+	t.Cleanup(func() { codexauth.ModelsURL, codexauth.OAuthTokenURL = oldModels, oldToken })
+	provider, err := newCodexProvider(codexAuth{principalID: human.ID, providerID: "codex", clientID: "fixture-client"}, 30, server.Client(), "fixture")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if models := provider.ListModels(); len(models) != 1 || requests != 2 {
+		t.Fatalf("models=%+v requests=%d", models, requests)
+	}
+}
+
 func TestCodexCatalogFiltersEligibilityAndVisibility(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Query().Get("client_version") != "fixture-version" {
@@ -413,6 +465,10 @@ func TestCodexSharedTransportPreservesStreamingAndResponsesSurface(t *testing.T)
 	if request["previous_response_id"] != "resp_previous" || request["conversation"] != "conv_shared" || request["stream"] != true {
 		t.Fatalf("native request state=%+v", request)
 	}
+	input, ok := request["input"].([]any)
+	if !ok || len(input) != 1 || input[0].(map[string]any)["role"] != "user" || input[0].(map[string]any)["content"] != "hello" {
+		t.Fatalf("native shorthand input was not normalized: %+v", request["input"])
+	}
 
 	nativeStream, _, err := provider.StreamResponses("gpt-codex", map[string]any{
 		"input": "hello", "include": []any{"reasoning.encrypted_content"},
@@ -432,6 +488,18 @@ func TestCodexSharedTransportPreservesStreamingAndResponsesSurface(t *testing.T)
 	joined := strings.Join(events, "\n")
 	if nativeStream.Err() != nil || !strings.Contains(joined, `"type":"response.reasoning_summary_text.delta"`) || !strings.Contains(joined, `"sequence_number":1`) || !strings.Contains(joined, `"encrypted_content":"opaque"`) {
 		t.Fatalf("native events=%q err=%v", events, nativeStream.Err())
+	}
+}
+
+func TestCodexBrowserRefreshEndpointErrorUsesTypedRevocationContract(t *testing.T) {
+	err := &browseroauth.EndpointError{StatusCode: http.StatusBadRequest, Code: "invalid_grant", Description: "expired"}
+	var endpoint *browseroauth.EndpointError
+	if !errors.As(err, &endpoint) {
+		t.Fatal("fixture endpoint error did not match")
+	}
+	translated := &codexauth.RefreshError{StatusCode: endpoint.StatusCode, Code: endpoint.Code, Description: endpoint.Description}
+	if !shouldRevokeCodexRefresh(translated.Code) || codexRefreshInvocationError(translated) == nil {
+		t.Fatalf("translated refresh error=%+v", translated)
 	}
 }
 

@@ -63,7 +63,7 @@
       "chatgpt"
     ],
     "label": "OpenAI Codex",
-    "description": "Owner-private Codex device authorization with the verified Responses transport. Authenticate with your ChatGPT / OpenAI account.",
+    "description": "Owner-private Codex browser or device authorization with the verified Responses transport. Authenticate with your ChatGPT / OpenAI account.",
     "categories": [
       "coding",
       "oauth",
@@ -73,6 +73,7 @@
     "protocol": "openai",
     "availability": "available",
     "auth_methods": [
+      "oauth_browser",
       "oauth_device"
     ],
     "connection_scope": "personal",
@@ -248,7 +249,8 @@
     "onboarding_fields": [
       "api_key",
       "project",
-      "location"
+      "location",
+      "vertex_request_type"
     ],
     "risk_level": "yellow",
     "risk_notice": "Requires a Google Cloud project id. The API key must be bound to a service account with Agent Platform access, and model availability varies by location \u2014 'global' carries the widest selection. A service account key may be uploaded instead of an API key; it is stored encrypted and exchanged for short-lived access tokens.",

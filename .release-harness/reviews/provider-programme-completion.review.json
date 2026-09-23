@@ -1,0 +1,342 @@
+{
+  "schema_version": "1.0.0",
+  "mode": "change",
+  "contract": {
+    "digest": "31b393ab3e80162226619c441694573993ac618382d74642101484a0bf2e9c80"
+  },
+  "authoring_provenance": {
+    "status": "established",
+    "path": ".release-harness/drafts/llm-gateway.record.json",
+    "digest": "6732ddf3dc8236b974e2aae5f81b546d89c2a466b6fb0a368d76620955bf981e"
+  },
+  "sources": [
+    {
+      "source_id": "primary",
+      "status": "established",
+      "repository_identity": "https://github.com/xibodev/llm-gateway.git",
+      "base_ref": "staging",
+      "base_commit": "07db64ff5b7f1d6f26427eb292e138623256ddca",
+      "merge_base": "07db64ff5b7f1d6f26427eb292e138623256ddca",
+      "head_commit": "b71a3eea47375b373699f55b6fed0b4486b79fc8",
+      "head_tree": "3e2e46076fc62b72cbae943a26e89c3589439dab",
+      "reviewed_source_digest": "6acc11317385bc3282dae3b3d83dcd21889e4073176a531d671c558f07171f4a",
+      "changed_paths": [
+        {
+          "status": "modified",
+          "path": "docs/CONFIGURATION.md",
+          "old_blob": "5bd506ad449201cdc1def98ddbcb5afc9d1cc628",
+          "new_blob": "3b1f41f70043df98d13482a3801809d6b486ca58"
+        },
+        {
+          "status": "modified",
+          "path": "docs/PROVIDERS.md",
+          "old_blob": "e58d7a4d9106d0422f82b630b8f4759afb81cefe",
+          "new_blob": "202496ab96d1200c37c6732e2a6451c09e8537fc"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/api/admin.go",
+          "old_blob": "a1019095fa603dde3c15c35356aceb75fab8d972",
+          "new_blob": "7653b18e5ef1c89b4aed71680615ada182847e4b"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/api/audio.go",
+          "old_blob": "faa449e4bea8862a38b8ae184fbe86689b846ccd",
+          "new_blob": "b8a557dba6ddb1661e201baff1525394934f85ff"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/api/embeddings_test.go",
+          "old_blob": "a966119e9078396f30a23df380fefedd51726365",
+          "new_blob": "32acdb27e89929fb0f05f51a4c30baf6eb144485"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/api/embeddings.go",
+          "old_blob": "1552f5f0465a2185decca5cc24a016636b340290",
+          "new_blob": "27675814ea9cc3a0f7596a6d245b3e73fa2a31c5"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/api/oauth_api_test.go",
+          "old_blob": "40b167b4e1d783146a9e4dfb74d4306119d3b049",
+          "new_blob": "6f0a8b89a094804e730a57be009a68d34779fcef"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/api/oauth.go",
+          "old_blob": "52dcd3f35ce58571a94f971a5e63e8d3283458f3",
+          "new_blob": "c9523fda24cffecb4e4c2a34168df7c207cd8383"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/api/playground_audio_test.go",
+          "old_blob": "4d9e162fe96066667901dfc7396a356a67c65a7f",
+          "new_blob": "5a9d378aedcdbeaa7853ab8ad2c2f8ea56a341d6"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/api/playground_audio.go",
+          "old_blob": "29db842cdd08c5c0a2362e7cb4cf4f0b3115edf6",
+          "new_blob": "d4182beeb2536549ec8f3738ec5cc20439d8b28b"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/api/provider_lifecycle_test.go",
+          "old_blob": "bfaadb6c0ee7fa87c936a20effeac8c36de75cbf",
+          "new_blob": "b11b83fde2f22b3e930301e4d3387ea154404c55"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/api/server.go",
+          "old_blob": "a07c4ed7eba1557eff8ce589bfbc6eb1d49669ec",
+          "new_blob": "434400c30367b68759a14273989983b368196194"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/config/config_test.go",
+          "old_blob": "663705fb35a8c354394f8389c75913323e8afe3d",
+          "new_blob": "a627908042b445583d360244c0f60a18ec578d3a"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/config/config.go",
+          "old_blob": "9edcf467406cc48b8a2136596a49ddf9760f5478",
+          "new_blob": "543c0b131baa7cb092c141b0c0bb77ba3819de1d"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/providers/auth_adapter_test.go",
+          "old_blob": "be15a9488d811c37c4d40879d2284572493799a8",
+          "new_blob": "25d28cb3245582e100e7e4d175005892d56d61dd"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/providers/auth_adapter.go",
+          "old_blob": "341983cc614b4afd38fec44498efeff2b6b4f1df",
+          "new_blob": "6095bba57a54f723a5446e5fef5d0f95cf837678"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/providers/catalog_schema_test.go",
+          "old_blob": "b86d9a69cb10ead8ada215628cc5217463e2c192",
+          "new_blob": "ec12c767079cbb94ca868a87ec7df08ee7da7005"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/providers/catalog.go",
+          "old_blob": "a370d030dd85239da22763f2e3adc743594de027",
+          "new_blob": "791a138859bbd4be22adea16ac93825ed25bb356"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/providers/codex_test.go",
+          "old_blob": "4b344c32be758ffa49428f93c7d7bac1f8083997",
+          "new_blob": "64457540ff536f2417fbb85f1fc65a91783fb32a"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/providers/codex.go",
+          "old_blob": "31aaadd0d37a19e6c3ac65129750f0a44c751a33",
+          "new_blob": "d992190fc64056f32c7584a3df055c7c837e139f"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/providers/factory.go",
+          "old_blob": "12d1e0055b756186a583f563d104ef48b2eccd41",
+          "new_blob": "bf9d09bf3855af862a21648502cabc49c1f39e90"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/providers/googleai_discovery_test.go",
+          "old_blob": "d44384f4dd4c63664de451780439fd189cbb3803",
+          "new_blob": "7ebd1d1400d10e478d29b20520aa025e488e6596"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/providers/googleai_test.go",
+          "old_blob": "4ef482c7e51829dccba4646ecd1613cb2d642e45",
+          "new_blob": "72e7ca14bd4d97e32475cda845e2db9cff2d92ba"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/providers/googleai.go",
+          "old_blob": "37140e48757f1e56c680a4fb266b66612ce37ee6",
+          "new_blob": "440e806eb1fa7b0bef85144fdc601433a0eccde0"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/providers/policy.go",
+          "old_blob": "e268abac7545c82174d38b82b4a2c650901e470c",
+          "new_blob": "4b32714daca790c1fb180e25d4c59665237e432b"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/providers/registry_manifest.json",
+          "old_blob": "b85ba028dc3e7084aa840a516072ff2852e40e1c",
+          "new_blob": "21da4adba6810c3401b25dc0bc5226d7113fbb2d"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/providers/registry_test.go",
+          "old_blob": "55b0a9287036bfe6a753985fac8dfb85185d138d",
+          "new_blob": "f00fbc67121a948311b0c356807021ab4e15959a"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/web/admin.html",
+          "old_blob": "51f4cb129169a361b6322c03616458346dea6c04",
+          "new_blob": "f1538aa2717802c3a24b02a06853c9215d54f0eb"
+        },
+        {
+          "status": "deleted",
+          "path": "go/internal/web/console/dist/assets/index-BIgkbkyp.css",
+          "old_blob": "0aaa068c01b4692feb958d4676b7c84c10009a51",
+          "new_blob": "0000000000000000000000000000000000000000"
+        },
+        {
+          "status": "added",
+          "path": "go/internal/web/console/dist/assets/index-BQ6y8a8l.css",
+          "old_blob": "0000000000000000000000000000000000000000",
+          "new_blob": "a5318632d62722b8ccc6783e8d6aa9fda778cb97"
+        },
+        {
+          "status": "added",
+          "path": "go/internal/web/console/dist/assets/index-C06t2_O9.js",
+          "old_blob": "0000000000000000000000000000000000000000",
+          "new_blob": "93a26ae9a6b5f4a57931768fffceb426893cd930"
+        },
+        {
+          "status": "deleted",
+          "path": "go/internal/web/console/dist/assets/index-pZiHfKpy.js",
+          "old_blob": "be95202399795ea53f042d5855940f0dbef8d52e",
+          "new_blob": "0000000000000000000000000000000000000000"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/web/console/dist/index.html",
+          "old_blob": "e9633e4b499e892f25986795225068b8379d8e06",
+          "new_blob": "f8ad67d1951cf0e5cba3e50169276691626604fc"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/web/console/src/components/ModelPicker.tsx",
+          "old_blob": "7117a2e7278d1e15ee04c2c5fa05ee4475ad6106",
+          "new_blob": "f5c6cefdad5b1cdcf106e50af752f72fd060dfc3"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/web/console/src/components/providers/OAuthConnectDialog.tsx",
+          "old_blob": "0a0de7949596d11e346a0a315bf7c31726d9c000",
+          "new_blob": "fd900b4caead235c918041436f30e3261e50a91d"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/web/console/src/components/providers/ProviderHub.tsx",
+          "old_blob": "6cc969f28544e183dffdc10c6304cd7006ea7269",
+          "new_blob": "0ab74d42d50fac929d5d6919693140d303bf4ab2"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/web/console/src/pages/Playground.tsx",
+          "old_blob": "66581b82da157922b07dec549105609ded5bc501",
+          "new_blob": "eaf35b54105ebe43366c4a5a5635ba6e4ecaba00"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/web/console/src/styles/base.css",
+          "old_blob": "ff99965a892acbf1878c337b9a24e7ff6a769c86",
+          "new_blob": "1a72ea70bcda31bf52f2d7b39c8f257490499300"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/web/console/tests/model-picker.test.mjs",
+          "old_blob": "ac201801b71f85ff017041f926e2b269af6bb8fb",
+          "new_blob": "2a4665c3b153a835ee1d2a07ca22687a2c093625"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/web/console/tests/playground-behavior.test.mjs",
+          "old_blob": "cb48f84cfaf7571848a701cea52d492e3cb0d62e",
+          "new_blob": "486a6e30872482b0366cdd13edeff5fa46ee8331"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/web/console/tests/smoke.test.mjs",
+          "old_blob": "cac68c2d7213099e3547b0cc7a7099b0ca2d2c03",
+          "new_blob": "0285107dbf016d75fa39008e8f4e6db823ac39e5"
+        },
+        {
+          "status": "modified",
+          "path": "SECURITY.md",
+          "old_blob": "8c82171f2c227eda497f714c1a246eb30315a124",
+          "new_blob": "27bc8562aaf5335837d89a1b4a1561a4f52bbaa9"
+        }
+      ]
+    }
+  ],
+  "facts": [
+    {
+      "id": "canonical-gates-pass",
+      "claim": "Standalone GOWORK=off build, vet, full tests, vulnerability scan, console audit/lint/tests/dist, documentation checks, Docker build, and deterministic acceptance pass.",
+      "status": "observed",
+      "evidence": { "source": "go build/vet/test/govulncheck; console check:dist; scripts/check-docs.mjs; deterministic acceptance PASS 3/3" }
+    },
+    {
+      "id": "vertex-global-programme-proven",
+      "claim": "Vertex global discovery publishes safely classifiable current rows, explicit shared/dedicated routing is preserved, both provisioned models answer dedicated requests, and native gemini-embedding-2 returns a 3072-dimensional vector through llmgw.",
+      "status": "observed",
+      "evidence": { "source": "go/internal/providers/googleai.go; googleai_discovery_test.go; googleai_test.go; local isolated service-account staging" }
+    },
+    {
+      "id": "codex-browser-programme-proven",
+      "claim": "Codex browser PKCE stores an owner-private account-bound connection, catalog discovery returns eight models without the inference beta header, and gpt-5.6-sol completes three native Responses turns with exact context retention.",
+      "status": "observed",
+      "evidence": { "source": "go/internal/providers/auth_adapter.go; codex.go; oauth.go; local isolated browser staging" }
+    },
+    {
+      "id": "playground-multisurface-proven",
+      "claim": "The admin Playground selects image versus chat explicitly for multimodal models, executes OpenAI-compatible and native Vertex embeddings, and renders without horizontal overflow at desktop and 390px mobile widths.",
+      "status": "observed",
+      "evidence": { "source": "Playground.tsx; ModelPicker.tsx; playground_audio.go; Playwright local staging screenshots and live vector summaries" }
+    }
+  ],
+  "impact": {
+    "assertions": [
+      {
+        "id": "A1",
+        "impact": "unchanged",
+        "supported_by": ["canonical-gates-pass", "codex-browser-programme-proven"]
+      },
+      {
+        "id": "A2",
+        "impact": "unchanged",
+        "supported_by": ["canonical-gates-pass", "vertex-global-programme-proven"]
+      },
+      {
+        "id": "A3",
+        "impact": "unchanged",
+        "supported_by": ["canonical-gates-pass", "playground-multisurface-proven"]
+      },
+      {
+        "id": "A4",
+        "impact": "unchanged",
+        "supported_by": ["canonical-gates-pass", "vertex-global-programme-proven", "codex-browser-programme-proven", "playground-multisurface-proven"]
+      }
+    ],
+    "requires": [],
+    "possible_binding_changes": [
+      "Vertex deployments may optionally set vertex_request_type to default, paygo, or dedicated; omission preserves existing provider-default behavior."
+    ]
+  },
+  "questions": [],
+  "conclusion": {
+    "action": "reuse_contract",
+    "summary": "The completed provider programme strengthens catalog accuracy, owner-private authentication, native operation routing, and Playground coverage without changing the accepted release identity, health, or public model-list proposition."
+  },
+  "proposed": {
+    "by": "opencode-session",
+    "at": "2026-09-23T13:46:35.986Z"
+  }
+}

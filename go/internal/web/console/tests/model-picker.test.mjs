@@ -37,6 +37,8 @@ test("missing capability metadata remains unknown instead of becoming chat", () 
   assert.deepEqual(picker.capabilitiesFor({ capabilities: { tts: true } }), ["tts"]);
   assert.deepEqual(picker.capabilitiesFor({ typed_capabilities: { operations: { chat: "supported" } } }), ["chat"]);
   assert.deepEqual(picker.capabilitiesFor({ typed_capabilities: { operations: { image: "supported" }, inputs: { image: "unknown" } } }), ["image"]);
+  assert.deepEqual(picker.capabilitiesFor({ supported_surfaces: ["/v1/embeddings"] }), ["embedding"]);
+  assert.deepEqual(picker.capabilitiesFor({ typed_capabilities: { operations: { embeddings: "supported" } } }), ["embedding"]);
 });
 
 test("catalog projection preserves publication and freshness evidence", () => {

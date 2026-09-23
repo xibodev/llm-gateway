@@ -108,14 +108,15 @@ const ChatTurnView = memo(function ChatTurnView({ turn }: { turn: ChatTurn }) {
 
 // modeFor picks the playground surface a model can actually be exercised on.
 // A model that only synthesizes speech must not be offered a chat composer.
-export function modeFor(model: CatalogModel | undefined): "chat" | "tts" | "transcription" | "image" | "video" | "unknown" {
-  if (!model) return "unknown";
-  if (model.capabilities.includes("chat")) return "chat";
-  if (model.capabilities.includes("video")) return "video";
-  if (model.capabilities.includes("image")) return "image";
-  if (model.capabilities.includes("tts")) return "tts";
-  if (model.capabilities.includes("transcription")) return "transcription";
-  return "unknown";
+type PlaygroundMode = "chat" | "tts" | "transcription" | "embedding" | "image" | "video" | "unknown";
+
+export function modesFor(model: CatalogModel | undefined): PlaygroundMode[] {
+  if (!model) return [];
+  return ["video", "image", "tts", "transcription", "embedding", "chat"].filter((mode) => model.capabilities.includes(mode)) as PlaygroundMode[];
+}
+
+export function modeFor(model: CatalogModel | undefined): PlaygroundMode {
+  return modesFor(model)[0] ?? "unknown";
 }
 
 export function playgroundFailure(cause: unknown, fallback = "Playground request failed."): PlaygroundFailure {
@@ -210,6 +211,8 @@ export function Playground({ data, mode, principalID, onPrincipalIDChange, prese
   const [toolResult, setToolResult] = useState("");
   const [toolCallID, setToolCallID] = useState("");
   const [speechText, setSpeechText] = useState("The gateway routed this request end to end.");
+	const [embeddingInput, setEmbeddingInput] = useState("The gateway routed this embedding request end to end.");
+	const [operationMode, setOperationMode] = useState<PlaygroundMode>("unknown");
   const [speechSpeed, setSpeechSpeed] = useState("1");
   const [locale, setLocale] = useState("all");
   const [audioURL, setAudioURL] = useState("");
@@ -267,7 +270,7 @@ export function Playground({ data, mode, principalID, onPrincipalIDChange, prese
     // must never be advertised as runnable self-service actions.
     return mode === "portal"
       ? rows.filter((row) => row.capabilities.includes("chat"))
-      : rows.filter((row) => !row.capabilities.length || row.capabilities.some((capability) => ["chat", "tts", "transcription", "image", "video"].includes(capability)));
+      : rows.filter((row) => !row.capabilities.length || row.capabilities.some((capability) => ["chat", "tts", "transcription", "embedding", "image", "video"].includes(capability)));
   }, [catalog, catalogSource, catalogPath, mode]);
   const visible = useMemo(() => filterModels(models, filter), [models, filter]);
   // A model handed over from a provider page wins over any default selection.
@@ -293,7 +296,8 @@ export function Playground({ data, mode, principalID, onPrincipalIDChange, prese
     setModel((current) => visible.some((row) => row.id === current && !row.disabled) ? current : (visible.find((row) => !row.disabled)?.id ?? ""));
   }, [visible, preset]);
   const selected = models.find((row) => row.id === model);
-  const surface = modeFor(selected);
+	const availableModes = mode === "portal" ? (selected?.capabilities.includes("chat") ? ["chat" as PlaygroundMode] : []) : modesFor(selected);
+	const surface = availableModes.includes(operationMode) ? operationMode : (availableModes[0] ?? "unknown");
   const availableTextSurfaces = supportedTextSurfaces(selected);
   const toolsUnsupported = selected?.tools === "unsupported" || !selected?.capabilities.includes("chat");
   useEffect(() => {
@@ -306,11 +310,12 @@ export function Playground({ data, mode, principalID, onPrincipalIDChange, prese
     setResult(null); setError(""); setFailure(null); setAudioURL(""); setTranscript("");
     setImageURL(""); setVideoURL(""); setVideoStatus("");
     videoPoll.current += 1;
-  }, [model, projectID, scopedPrincipalID, textSurface]);
+	}, [model, projectID, scopedPrincipalID, textSurface, surface]);
   useEffect(() => {
-    setTextSurface(defaultTextSurface(selected));
+		setTextSurface(defaultTextSurface(selected));
+		setOperationMode(availableModes[0] ?? "unknown");
     setPreviousResponseID("");
-  }, [model]);
+  }, [model, mode]);
   useEffect(() => () => {
     executionAbort.current?.abort();
     executionAbort.current = null;
@@ -457,6 +462,32 @@ export function Playground({ data, mode, principalID, onPrincipalIDChange, prese
     }
   };
 
+	const runEmbeddings = async (event: Event) => {
+		event.preventDefault();
+		if (executionPending.current) return;
+		if (!requireScope()) return;
+		if (!embeddingInput.trim()) { setFailure(null); setError("Enter text to embed."); return; }
+		const request = ++executionRequest.current;
+		const controller = new AbortController();
+		executionAbort.current = controller;
+		executionPending.current = true;
+		setRunning(true); setError(""); setFailure(null); setResult(null);
+		try {
+			const body: JSONRecord = { project_id: projectID, model, input: embeddingInput.trim() };
+			if (mode === "admin") body.principal_id = principalID;
+			const payload = await sendJSON<JSONRecord>(mode, "/playground/embeddings", "POST", body, controller.signal);
+			if (request !== executionRequest.current) return;
+			setResult(payload);
+		} catch (cause) {
+			if (request !== executionRequest.current) return;
+			setResult(null); reportError(cause, "Embeddings request failed.");
+		} finally {
+			if (request === executionRequest.current) {
+				executionAbort.current = null; executionPending.current = false; setRunning(false); void refreshEvidence();
+			}
+		}
+	};
+
   const runTranscription = async (event: Event) => {
     event.preventDefault();
     if (executionPending.current) return;
@@ -593,7 +624,7 @@ export function Playground({ data, mode, principalID, onPrincipalIDChange, prese
     ? selected.capabilities.map((capability) => capabilityLabels[capability as keyof typeof capabilityLabels] ?? capability).join(" · ")
     : "";
   const selectedSurface = surface === "chat" ? textSurface : {
-    tts: "/v1/audio/speech", transcription: "/v1/audio/transcriptions",
+		tts: "/v1/audio/speech", transcription: "/v1/audio/transcriptions", embedding: "/v1/embeddings",
     image: "/v1/images/generations", video: "/v1/videos/generations",
   }[surface as "tts" | "transcription" | "image" | "video"] ?? "Unknown";
   const expectedTransport = transportForSurface(selected, selectedSurface);
@@ -627,11 +658,12 @@ export function Playground({ data, mode, principalID, onPrincipalIDChange, prese
             {mode === "admin" ? <label>Human owner<select value={principalID} onInput={(event) => onPrincipalIDChange((event.currentTarget as HTMLSelectElement).value)}><option value="">Select a human owner</option>{humans.map((principal) => <option value={stringValue(principal.id)} key={stringValue(principal.id)}>{stringValue(principal.display_name, stringValue(principal.id))}</option>)}</select></label> : null}
             <label>Project<select value={projectID} onInput={(event) => setProjectID((event.currentTarget as HTMLSelectElement).value)}><option value="">Select a project</option>{eligibleProjects.map((project) => <option value={stringValue(project.id)} key={stringValue(project.id)}>{stringValue(project.name, stringValue(project.slug))}</option>)}</select></label>
             {surface === "tts" && locales.length > 1 ? <label>Language<select value={locale} onInput={(event) => setLocale((event.currentTarget as HTMLSelectElement).value)}><option value="all">All languages ({locales.length})</option>{locales.map((code) => <option value={code} key={code}>{code}</option>)}</select></label> : null}
-            {surface === "chat" && availableTextSurfaces.length > 1 ? <label>Text surface<select value={textSurface} onInput={(event) => setTextSurface((event.currentTarget as HTMLSelectElement).value as TextSurface)}>{textSurfaces.filter(({ path }) => availableTextSurfaces.includes(path)).map(({ path, label }) => <option value={path} key={path}>{label} · {transportForSurface(selected, path)}</option>)}</select></label> : null}
+			{surface === "chat" && availableTextSurfaces.length > 1 ? <label>Text surface<select value={textSurface} onInput={(event) => setTextSurface((event.currentTarget as HTMLSelectElement).value as TextSurface)}>{textSurfaces.filter(({ path }) => availableTextSurfaces.includes(path)).map(({ path, label }) => <option value={path} key={path}>{label} · {transportForSurface(selected, path)}</option>)}</select></label> : null}
+			{availableModes.length > 1 ? <label>Operation<select value={surface} onInput={(event) => setOperationMode((event.currentTarget as HTMLSelectElement).value as PlaygroundMode)}>{availableModes.map((candidate) => <option value={candidate} key={candidate}>{capabilityLabels[candidate as keyof typeof capabilityLabels] ?? candidate}</option>)}</select></label> : null}
           </div>
           <ModelFilters models={models} filter={filter} onChange={setFilter} />
           <ModelCombo models={voiceModels} filter={localeFilter} value={model} onChange={setModel} label="Model or route" />
-          {selected && !selected.capabilities.length ? <p class="form-help"><strong>Capabilities unknown.</strong> The catalog did not prove a runnable chat, image, speech, transcription, or video surface, so execution controls are disabled.</p> : null}
+          {selected && !selected.capabilities.length ? <p class="form-help"><strong>Capabilities unknown.</strong> The catalog did not prove a runnable chat, embeddings, image, speech, transcription, or video surface, so execution controls are disabled.</p> : null}
           {selected?.publicationState === "unverified" && selected.published ? <p class="form-help"><strong>Published by administrator opt-in.</strong> This model is runnable without successful completion verification.</p> : null}
           {selected?.publicationState === "failed" ? <p class="form-help"><strong>Publication blocked.</strong> Verification failed{selected.failureCode ? ` (${selected.failureCode})` : ""}; this model is not runnable.</p> : null}
           {selected ? <dl class="playground-capability-facts compact-facts">
@@ -669,12 +701,18 @@ export function Playground({ data, mode, principalID, onPrincipalIDChange, prese
           </form>
         </> : null}
 
-        {surface === "tts" ? <form class="surface form-stack" onSubmit={runSpeech}>
+		{surface === "tts" ? <form class="surface form-stack" onSubmit={runSpeech}>
           <label>Text to speak<textarea value={speechText} rows={4} onInput={(event) => setSpeechText((event.currentTarget as HTMLTextAreaElement).value)} /></label>
           <label class="playground-speed">Speed<input inputMode="decimal" value={speechSpeed} onInput={(event) => setSpeechSpeed((event.currentTarget as HTMLInputElement).value)} /></label>
           <button class="button button--primary" type="submit" disabled={running || !model}>{running ? <RefreshCw class="spin" size={16} /> : <Play size={16} />} Synthesize speech</button>
           {audioURL ? <div class="playground-audio"><p class="eyebrow">Synthesized audio</p><audio controls src={audioURL} /><p class="form-help">{numberValue(result?.audio_bytes)} bytes · {stringValue(result?.audio_format)}</p></div> : null}
-        </form> : null}
+		</form> : null}
+
+		{surface === "embedding" ? <form class="surface form-stack" onSubmit={runEmbeddings}>
+			<label>Text to embed<textarea value={embeddingInput} rows={4} onInput={(event) => setEmbeddingInput((event.currentTarget as HTMLTextAreaElement).value)} /></label>
+			<button class="button button--primary" type="submit" disabled={running || !model}>{running ? <RefreshCw class="spin" size={16} /> : <Play size={16} />} Create embedding</button>
+			{result ? <p class="form-help">{numberValue(result.vectors)} vector · {numberValue(result.dimensions)} dimensions</p> : null}
+		</form> : null}
 
         {surface === "image" ? <form class="surface form-stack" onSubmit={runImage}>
           <label>Describe the image<textarea value={mediaPrompt} rows={3} onInput={(event) => setMediaPrompt((event.currentTarget as HTMLTextAreaElement).value)} /></label>

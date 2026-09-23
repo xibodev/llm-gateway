@@ -110,8 +110,9 @@ not expose it to untrusted users.
 
 - GitHub Copilot gateway use is a personal-use grey area, not a sanctioned public
   provider API. Respect provider terms and keep entitlements owner-private.
-- OpenAI does not currently document third-party Codex client registration. The
-  gateway does not embed the official CLI's first-party client ID.
+- Codex uses the verified public Codex OAuth client ID with official device or
+  browser-PKCE authorization. Tokens remain owner-private; the gateway does not
+  extract browser cookies or import the local Codex CLI credential store.
 - Claude personal-subscription OAuth, browser-cookie extraction, MITM
   interception, and stealth session reuse are not implemented.
 - Edge TTS uses an unofficial public read-aloud service and may change.
