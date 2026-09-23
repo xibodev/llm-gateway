@@ -1,0 +1,115 @@
+{
+  "schema_version": "1.0.0",
+  "mode": "change",
+  "contract": {
+    "digest": "31b393ab3e80162226619c441694573993ac618382d74642101484a0bf2e9c80"
+  },
+  "authoring_provenance": {
+    "status": "established",
+    "path": ".release-harness/drafts/llm-gateway.record.json",
+    "digest": "6732ddf3dc8236b974e2aae5f81b546d89c2a466b6fb0a368d76620955bf981e"
+  },
+  "sources": [
+    {
+      "source_id": "primary",
+      "status": "established",
+      "repository_identity": "https://github.com/xibodev/llm-gateway.git",
+      "base_ref": "origin/main",
+      "base_commit": "737e121bf535bfaf2537e586b81cfec9ac475ca9",
+      "merge_base": "737e121bf535bfaf2537e586b81cfec9ac475ca9",
+      "head_commit": "381c6f59a1d3b165678d19f4d25d29b4b2f97e26",
+      "head_tree": "91b943b9ccbf2e8f52399bb6b362b13d6650d2ac",
+      "reviewed_source_digest": "c655ed07974653e0f43027f6744214fb0dcfc54e37594a89d3289bd4f895dd2a",
+      "changed_paths": [
+        {
+          "status": "modified",
+          "path": "test/live-acceptance/core.test.mjs",
+          "old_blob": "145336049c7d6374278899020c2ec8a176a3393d",
+          "new_blob": "15218bcb823443751af11f415b1e2b01281b2ba3"
+        },
+        {
+          "status": "modified",
+          "path": "test/live-acceptance/run.mjs",
+          "old_blob": "6b688384d8e81312201da67b5a2663e5593d4648",
+          "new_blob": "30a1904f4d59c5e2f3250c065b9724f167f607ce"
+        }
+      ]
+    }
+  ],
+  "facts": [
+    {
+      "id": "claude-profile-restored",
+      "claim": "Pinned Claude Code 2.1.270 acceptance now sends prompts through closed stdin, maps the known Sonnet client profile to each gateway target with modelOverrides, and disables thinking, summaries, compaction, and prompt caching for the documented Chat-only core profile.",
+      "status": "observed",
+      "evidence": {
+        "source": "test/live-acceptance/run.mjs; docs/CLIENTS.md core profile"
+      }
+    },
+    {
+      "id": "full-live-gate-pass",
+      "claim": "A clean local live run passed all required API, route, Playground, Claude, restart, and cleanup evidence; Claude passed 4/4 capabilities and 9/9 lanes, with one external rate-limit warning only.",
+      "status": "observed",
+      "evidence": {
+        "source": "local report llmgw-live-core-profile-pass.json; verdict pass_with_warnings"
+      }
+    },
+    {
+      "id": "focused-gates-pass",
+      "claim": "Live-acceptance policy tests pass 15/15 and JavaScript syntax validation passes.",
+      "status": "observed",
+      "evidence": {
+        "source": "npm test; node --check test/live-acceptance/run.mjs"
+      }
+    }
+  ],
+  "impact": {
+    "assertions": [
+      {
+        "id": "A1",
+        "impact": "unchanged",
+        "supported_by": [
+          "claude-profile-restored",
+          "full-live-gate-pass",
+          "focused-gates-pass"
+        ]
+      },
+      {
+        "id": "A2",
+        "impact": "unchanged",
+        "supported_by": [
+          "full-live-gate-pass",
+          "focused-gates-pass"
+        ]
+      },
+      {
+        "id": "A3",
+        "impact": "unchanged",
+        "supported_by": [
+          "full-live-gate-pass",
+          "focused-gates-pass"
+        ]
+      },
+      {
+        "id": "A4",
+        "impact": "unchanged",
+        "supported_by": [
+          "claude-profile-restored",
+          "full-live-gate-pass",
+          "focused-gates-pass"
+        ]
+      }
+    ],
+    "requires": [],
+    "possible_binding_changes": []
+  },
+  "questions": [],
+  "conclusion": {
+    "action": "reuse_contract",
+    "summary": "The change restores the documented Claude core-profile release evidence without changing gateway runtime behavior or the accepted release proposition."
+  },
+  "proposed": {
+    "by": "opencode-session",
+    "at": "2026-09-23T21:59:37.498Z"
+  },
+  "digest": "433dacc172408bf7b45c118cf57dd0c4bf38826332ca0321896136d71a1868d3"
+}
