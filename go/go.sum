@@ -20,8 +20,8 @@ github.com/xibodev/llm-provider-auth v0.3.0 h1:OW+MDYVlTFURuba+s9aoaBO6/TmxfB9RF
 github.com/xibodev/llm-provider-auth v0.3.0/go.mod h1:u6XRI5ljvcAqmJdx/uqxKF2Ou7Sfuo1OoiTkpkEu/9w=
 github.com/xibodev/llm-translate v0.2.0 h1:yxV3/ll0mUYEp99Ybke9TdBlT0Bz5L6ska0IPlZO1co=
 github.com/xibodev/llm-translate v0.2.0/go.mod h1:0XVHeiJ2cuH+vSULiZt2BLolzjx7f6Y+ZLiGdpsAkxg=
-github.com/xibodev/llmgw-core v0.5.3-0.20260922163606-39211fa457a5 h1:1gMOyDwn7dmIYGWs7wJsxYoih1pEzANUG2/qzhJYSpM=
-github.com/xibodev/llmgw-core v0.5.3-0.20260922163606-39211fa457a5/go.mod h1:GD/GHESSU+61D8Jw4t1racz2weMJjFjlK9rfa7iapI8=
+github.com/xibodev/llmgw-core v0.6.0 h1:aUXrRyNQPLET7zvlbASKXOYUeZwhqAlihVT1cbCKoAc=
+github.com/xibodev/llmgw-core v0.6.0/go.mod h1:GD/GHESSU+61D8Jw4t1racz2weMJjFjlK9rfa7iapI8=
 golang.org/x/mod v0.16.0 h1:QX4fJ0Rr5cPQCF7O9lh9Se4pmwfwskqZfq5moyldzic=
 golang.org/x/mod v0.16.0/go.mod h1:hTbmBsO62+eylJbnUtE2MGJUyE7QWk4xUqPFrRgJ+7c=
 golang.org/x/sys v0.6.0/go.mod h1:oPkhp1MJrh7nUepCBck5+mAzfO9JrbApNNgaTdGDITg=
