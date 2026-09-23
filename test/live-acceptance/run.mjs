@@ -521,7 +521,7 @@ async function testClaude(identity, healthy, plans) {
   const invoke = async (name, model, prompt, extra = [], persist = false) => {
     try {
       const persistence = persist ? [] : ["--no-session-persistence"];
-      const { stdout, stderr } = await command(claudeCommand, ["-p", prompt, "--bare", "--strict-mcp-config", "--mcp-config", '{"mcpServers":{}}', "--disable-slash-commands", "--no-chrome", "--model", model, ...persistence, "--permission-prompts", "none", ...extra], { cwd: claudeWorkspace, env, timeout: 120_000 });
+      const { stdout, stderr } = await command(claudeCommand, ["-p", "--bare", "--strict-mcp-config", "--mcp-config", '{"mcpServers":{}}', "--disable-slash-commands", "--no-chrome", "--model", model, ...persistence, "--permission-prompts", "none", ...extra, prompt], { cwd: claudeWorkspace, env, timeout: 120_000 });
       const text = stdout.trim();
       report.claude.push({ name, model, status: text ? "passed" : "failed", text: safeExcerpt(text), warning: safeExcerpt(stderr) });
       return { passed: Boolean(text), text, stderr };
@@ -531,7 +531,7 @@ async function testClaude(identity, healthy, plans) {
     }
   };
   const required = [];
-  required.push(["exact-hi", await invoke("exact-hi", target, "Say hi in one short sentence.", ["--tools", ""])]);
+  required.push(["exact-hi", await invoke("exact-hi", target, "Say hi in one short sentence.", ["--tools="])]);
   const sessionID = randomUUID();
   const memoryA = `alpha-${randomBytes(4).toString("hex")}`;
   const memoryB = `beta-${randomBytes(4).toString("hex")}`;
@@ -543,13 +543,13 @@ async function testClaude(identity, healthy, plans) {
   ];
   for (let index = 0; index < turns.length; index++) {
     const resume = index === 0 ? ["--session-id", sessionID] : ["--resume", sessionID];
-    const result = await invoke(`four-turn-${index + 1}`, target, turns[index], ["--tools", "", ...resume], true);
+    const result = await invoke(`four-turn-${index + 1}`, target, turns[index], ["--tools=", ...resume], true);
     if (index === 1) result.passed = result.passed && result.text.includes(memoryA);
     if (index === 3) result.passed = result.passed && result.text.includes(memoryA) && result.text.includes(memoryB);
     required.push([`four-turn-${index + 1}`, result]);
   }
-  for (const plan of plans) required.push([plan.name, await invoke(plan.name, plan.name, "Reply with exactly: ok", ["--tools", ""])]);
-  const toolResult = await invoke("read-tool", plans.at(-1).name, "Use Read on fixture.txt and return its first line exactly.", ["--tools", "Read", "--allowedTools", "Read", "--permission-mode", "dontAsk"]);
+  for (const plan of plans) required.push([plan.name, await invoke(plan.name, plan.name, "Reply with exactly: ok", ["--tools="])]);
+  const toolResult = await invoke("read-tool", plans.at(-1).name, "Use Read on fixture.txt and return its first line exactly.", ["--tools=Read", "--allowedTools=Read", "--permission-mode", "dontAsk"]);
   toolResult.passed = toolResult.passed && toolResult.text.includes("llmgw-live-acceptance");
   required.push(["read-tool", toolResult]);
   const passed = required.filter(([, result]) => result.passed).length;

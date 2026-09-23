@@ -115,6 +115,7 @@ test("browser acceptance selects the message composer rather than tool editors",
   assert.match(source, /textarea\[placeholder\^=\"Send a message\"\]/);
   assert.doesNotMatch(source, /locator\("\.chat-composer textarea"\)/);
   assert.match(source, /\/admin\/api\/playground\/v1\/chat\/completions/);
+  assert.match(source, /\.\.\.extra, prompt\]/);
 });
 
 test("human-like UAT uses a gateway-visible mock and syncs catalogs before routes", async () => {
