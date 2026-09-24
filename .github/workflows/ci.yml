@@ -37,6 +37,12 @@ jobs:
 
       - name: Test
         working-directory: go
+        # The suite is hermetic: an unreachable proxy fails any test that
+        # reaches the internet, while loopback test servers are never proxied.
+        env:
+          HTTP_PROXY: http://127.0.0.1:9
+          HTTPS_PROXY: http://127.0.0.1:9
+          NO_PROXY: ""
         run: go test ./...
 
       - name: Vulnerability scan

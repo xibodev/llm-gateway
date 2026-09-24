@@ -146,6 +146,18 @@ func TestOAuthStartSurfacesProviderPersistenceFailure(t *testing.T) {
 	if err := os.WriteFile(config.ConfigFilePath(), []byte("providers: invalid\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
+	// The device start precedes persistence, so it must be served locally: the
+	// real endpoint rejects a fixture client ID.
+	var starts atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		starts.Add(1)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"device_auth_id":"fixture-device","user_code":"FIXTURE-CODE","interval":5,"expires_in":600}`))
+	}))
+	defer server.Close()
+	oldUserCodeURL := codexauth.UserCodeURL
+	codexauth.UserCodeURL = server.URL
+	t.Cleanup(func() { codexauth.UserCodeURL = oldUserCodeURL })
 	oldSettings := *config.Get()
 	t.Cleanup(func() { config.Update(func(settings *config.Settings) { *settings = oldSettings }) })
 	config.Update(func(settings *config.Settings) {
@@ -160,6 +172,9 @@ func TestOAuthStartSurfacesProviderPersistenceFailure(t *testing.T) {
 	)
 	if err == nil || err.Error() != "could not persist the OAuth provider configuration" {
 		t.Fatalf("start error=%v", err)
+	}
+	if starts.Load() != 1 {
+		t.Fatalf("device starts=%d, want 1", starts.Load())
 	}
 	if config.Get().Providers["codex"] != nil {
 		t.Fatal("failed persistence installed the provider in memory")
