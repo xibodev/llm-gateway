@@ -410,3 +410,20 @@ func TestResilientProviderAnthropicTokenCountDefinitiveFailureBreaksCircuitStrea
 		t.Fatalf("error=%v calls=%d want=4", err, inner.calls)
 	}
 }
+
+func TestAnthropicPayloadHonoursJSONNumberMaxTokens(t *testing.T) {
+	// Request handlers decode with UseNumber; the streaming path must still
+	// forward the caller's limit instead of the provider default.
+	payload, err := AnthropicNativeProvider{}.payload("model", []Message{{"role": "user", "content": "hi"}}, true, Kwargs{"max_tokens": json.Number("64")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if payload["max_tokens"] != 64 {
+		t.Fatalf("max_tokens=%v, want 64", payload["max_tokens"])
+	}
+	for input, want := range map[any]int{json.Number("12"): 12, json.Number("12.9"): 12, json.Number("oops"): 0, float64(3): 3, int64(4): 4, "5": 0} {
+		if got := intOf(input); got != want {
+			t.Errorf("intOf(%#v)=%d, want %d", input, got, want)
+		}
+	}
+}

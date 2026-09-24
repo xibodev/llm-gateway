@@ -305,6 +305,23 @@ func TestCompatibilityFilterAllowsZenChatFacadeToResponsesModel(t *testing.T) {
 	}
 }
 
+func TestCompatibilityFilterAllowsCodexChatFacadeOnly(t *testing.T) {
+	setupEcho(t)
+	config.Update(func(settings *config.Settings) {
+		settings.Providers["codex"] = &config.ProviderConfig{Type: "openai_compatible", RegistryID: "openai_codex"}
+		settings.Providers["plain"] = &config.ProviderConfig{Type: "openai_compatible", BaseURL: "https://api.example.test/v1"}
+	})
+	capabilities := providers.AdaptModelCapabilities(nil, []string{"/responses"}, time.Now(), time.Time{})
+	capabilities.Surfaces.ChatCompletions = core.SupportUnsupported
+	request := CompatibilityRequest{Surface: core.ModelSurfaceChatCompletions, Streaming: true}
+	if !chatToResponsesCompatible(Target{Provider: "codex", Model: "gpt-fixture"}, capabilities, request) {
+		t.Fatal("Codex adapts Chat to native Responses but Chat was rejected")
+	}
+	if chatToResponsesCompatible(Target{Provider: "plain", Model: "gpt-fixture"}, capabilities, request) {
+		t.Fatal("a provider without a Chat facade accepted Chat for a Responses-only model")
+	}
+}
+
 func TestAffinitySelectsDeterministicStart(t *testing.T) {
 	setupEcho(t)
 	targets := []Target{{Provider: "echo", Model: "echo-small"}, {Provider: "echo", Model: "echo-strong"}, {Provider: "echo", Model: "echo-deep"}}

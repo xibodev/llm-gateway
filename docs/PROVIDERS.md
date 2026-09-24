@@ -80,6 +80,14 @@ Connections created before client-profile binding was introduced must be
 reauthorized once: older encrypted envelopes do not contain the OAuth client
 identity required for safe token refresh, and the gateway does not guess it.
 
+Codex models are native to Responses. Chat Completions and Messages requests
+reach them through a translated facade. `max_tokens`, `temperature`, `top_p`,
+and `stop` are ignored, because the official Codex client never sends them.
+Fields that change the structure of the answer are rejected with a
+configuration error instead of being dropped. These include a non-text
+`response_format`, `n` above 1, `logprobs`, a `tool_choice` other than `auto`,
+and audio output.
+
 ## Private and system credentials
 
 Human API-key and OAuth connections are AES-256-GCM encrypted with

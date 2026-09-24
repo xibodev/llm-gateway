@@ -101,14 +101,7 @@ func chatToResponsesCompatible(target Target, capabilities *core.ModelCapabiliti
 		return false
 	}
 	providerConfig := config.Get().Providers[target.Provider]
-	if providerConfig == nil {
-		return false
-	}
-	registryID := providers.EffectiveRegistryID(target.Provider, providerConfig.RegistryID, providerConfig.Type)
-	baseURL := strings.ToLower(strings.TrimSpace(providerConfig.BaseURL))
-	if registryID != "opencode_zen" &&
-		!strings.HasPrefix(baseURL, "https://opencode.ai/zen") &&
-		!strings.HasPrefix(baseURL, "http://opencode.ai/zen") {
+	if !providers.AdaptsChatToNativeResponses(target.Provider, providerConfig) {
 		return false
 	}
 	// The caller asks for Chat, but this provider deliberately adapts that

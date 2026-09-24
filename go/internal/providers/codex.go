@@ -577,7 +577,17 @@ func codexInvocationError(err error) error {
 	}
 }
 
-func codexChatPayload(model string, messages []Message, kw Kwargs) map[string]any {
+// codexChatPayload builds the Chat facade request. The Codex Responses
+// transport accepts only messages, tools and a prompt cache key. Length and
+// sampling hints (max_tokens, temperature, top_p, stop) are advisory and
+// ignored, as the official Codex client never sends them. Fields that change
+// the structure of the answer are rejected rather than silently dropped.
+func codexChatPayload(model string, messages []Message, kw Kwargs) (map[string]any, error) {
+	for field, value := range kw {
+		if value != nil && codexStructuralChatFields[field] && !codexChatFieldAllowed(field, value) {
+			return nil, &ConfigError{Msg: "openai_codex: Chat field " + field + " is not supported by the Codex Responses transport"}
+		}
+	}
 	payload := map[string]any{"model": model, "messages": messages}
 	if tools := kw["tools"]; tools != nil {
 		payload["tools"] = tools
@@ -585,7 +595,34 @@ func codexChatPayload(model string, messages []Message, kw Kwargs) map[string]an
 	if cacheKey, _ := kw["prompt_cache_key"].(string); cacheKey != "" {
 		payload["prompt_cache_key"] = cacheKey
 	}
-	return payload
+	return payload, nil
+}
+
+var codexStructuralChatFields = map[string]bool{
+	"response_format": true, "n": true, "logprobs": true, "top_logprobs": true, "audio": true,
+	"modalities": true, "prediction": true, "tool_choice": true, "parallel_tool_calls": true,
+}
+
+// codexChatFieldAllowed accepts a structural field only at a value that
+// matches what the Codex transport does anyway.
+func codexChatFieldAllowed(field string, value any) bool {
+	switch field {
+	case "n":
+		return intOf(value) == 1
+	case "logprobs", "parallel_tool_calls":
+		enabled, ok := value.(bool)
+		return ok && enabled == (field == "parallel_tool_calls")
+	case "tool_choice":
+		return value == "auto"
+	case "modalities":
+		list, ok := value.([]any)
+		return ok && len(list) == 1 && list[0] == "text"
+	case "response_format":
+		format, ok := value.(map[string]any)
+		return ok && format["type"] == "text"
+	default:
+		return false
+	}
 }
 
 func (p CodexProvider) CompleteContext(ctx context.Context, model string, messages []Message, kw Kwargs) (map[string]any, error) {
@@ -598,7 +635,11 @@ func (p CodexProvider) CompleteContextWithObservation(ctx context.Context, model
 	if err != nil {
 		return nil, observation, err
 	}
-	response, err := p.inner.Complete(ctx, model, codexChatPayload(model, messages, kw), nil)
+	payload, err := codexChatPayload(model, messages, kw)
+	if err != nil {
+		return nil, observation, err
+	}
+	response, err := p.inner.Complete(ctx, model, payload, nil)
 	return response, p.currentObservation(observation), codexInvocationError(err)
 }
 
@@ -606,7 +647,11 @@ func (p CodexProvider) StreamContext(ctx context.Context, model string, messages
 	if _, err := p.observation(); err != nil {
 		return nil, err
 	}
-	stream, err := p.inner.Stream(ctx, model, codexChatPayload(model, messages, kw), nil)
+	payload, err := codexChatPayload(model, messages, kw)
+	if err != nil {
+		return nil, err
+	}
+	stream, err := p.inner.Stream(ctx, model, payload, nil)
 	if err != nil {
 		return nil, codexInvocationError(err)
 	}

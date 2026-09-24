@@ -32,13 +32,16 @@ func TestCodexResponsesIsWireNative(t *testing.T) {
 }
 
 func TestCodexChatPayloadPassesOnlyProvenOptionalFields(t *testing.T) {
-	payload := codexChatPayload("gpt-5.6-sol", []Message{{"role": "user", "content": "hello"}}, Kwargs{
+	payload, err := codexChatPayload("gpt-5.6-sol", []Message{{"role": "user", "content": "hello"}}, Kwargs{
 		"prompt_cache_key": "fixture-cache",
 		"temperature":      0.7,
 		"top_p":            0.8,
 		"max_tokens":       128,
 		"stream_options":   map[string]any{"include_usage": true},
 	})
+	if err != nil {
+		t.Fatal(err)
+	}
 	if payload["model"] != "gpt-5.6-sol" || payload["prompt_cache_key"] != "fixture-cache" {
 		t.Fatalf("Codex Chat payload lost exact model/cache key: %+v", payload)
 	}
@@ -859,4 +862,52 @@ func setupCodexProviderTest(t *testing.T) {
 		s.Policies.Defaults = config.ProviderPolicy{}
 		s.Policies.Overrides = map[string]config.ProviderPolicy{}
 	})
+}
+
+func TestCodexChatFacadeRejectsStructuralFields(t *testing.T) {
+	messages := []Message{{"role": "user", "content": "hi"}}
+	payload, err := codexChatPayload("gpt-codex", messages, Kwargs{
+		"max_tokens": json.Number("64"), "temperature": 0.2, "top_p": 0.9, "stop": []any{"END"},
+		"n": json.Number("1"), "tool_choice": "auto", "parallel_tool_calls": true, "logprobs": false,
+		"response_format": map[string]any{"type": "text"}, "modalities": []any{"text"},
+		"prompt_cache_key": "fixture-cache", "tools": []any{map[string]any{"type": "function"}},
+	})
+	if err != nil {
+		t.Fatalf("advisory and default-valued fields were rejected: %v", err)
+	}
+	if len(payload) != 4 || payload["prompt_cache_key"] != "fixture-cache" || payload["tools"] == nil {
+		t.Fatalf("payload=%v", payload)
+	}
+	for field, value := range map[string]any{
+		"response_format":     map[string]any{"type": "json_schema"},
+		"n":                   json.Number("2"),
+		"tool_choice":         "required",
+		"parallel_tool_calls": false,
+		"logprobs":            true,
+		"top_logprobs":        json.Number("3"),
+		"modalities":          []any{"text", "audio"},
+		"audio":               map[string]any{"voice": "fixture"},
+		"prediction":          map[string]any{"type": "content"},
+	} {
+		if _, err := codexChatPayload("gpt-codex", messages, Kwargs{field: value}); err == nil || !IsConfig(err) || !strings.Contains(err.Error(), field) {
+			t.Errorf("%s=%v: err=%v, want a configuration error naming the field", field, value, err)
+		}
+	}
+}
+
+func TestAdaptsChatToNativeResponses(t *testing.T) {
+	for name, tc := range map[string]struct {
+		cfg  *config.ProviderConfig
+		want bool
+	}{
+		"codex registry":   {&config.ProviderConfig{Type: "openai_compatible", RegistryID: "openai_codex"}, true},
+		"zen registry":     {&config.ProviderConfig{Type: "openai_compatible", RegistryID: "opencode_zen"}, true},
+		"zen base URL":     {&config.ProviderConfig{Type: "openai_compatible", BaseURL: "https://opencode.ai/zen/v1"}, true},
+		"plain compatible": {&config.ProviderConfig{Type: "openai_compatible", BaseURL: "https://api.example.test/v1"}, false},
+		"missing config":   {nil, false},
+	} {
+		if got := AdaptsChatToNativeResponses("fixture", tc.cfg); got != tc.want {
+			t.Errorf("%s: got %v, want %v", name, got, tc.want)
+		}
+	}
 }

@@ -1,0 +1,26 @@
+# Messages to a Codex model
+request: POST /v1/messages
+status: 200
+header Content-Type: application/json
+header X-Llmgw-Transport-Mode: translated
+upstream: POST /backend-api/codex/responses
+upstream body: {"input":[{"content":"Say hello","role":"user"}],"instructions":"Follow the caller's request.","model":"gpt-fixture","store":false,"stream":true}
+body:
+{
+  "content": [
+    {
+      "text": "Hello from codex",
+      "type": "text"
+    }
+  ],
+  "id": "resp_fixture",
+  "model": "gpt-fixture",
+  "role": "assistant",
+  "stop_reason": "end_turn",
+  "stop_sequence": null,
+  "type": "message",
+  "usage": {
+    "input_tokens": 3,
+    "output_tokens": 4
+  }
+}

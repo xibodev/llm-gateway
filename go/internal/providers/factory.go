@@ -442,6 +442,21 @@ func ProviderCredentialAuthorized(
 	return found, nil
 }
 
+// AdaptsChatToNativeResponses reports whether a provider serves Chat
+// Completions for a Responses-native model by translating to its Responses
+// transport. Routing may then offer Chat and Messages for such models, which
+// the published model list already advertises as emulated (llm-gateway#76).
+func AdaptsChatToNativeResponses(providerID string, cfg *config.ProviderConfig) bool {
+	if cfg == nil {
+		return false
+	}
+	switch EffectiveRegistryID(providerID, cfg.RegistryID, cfg.Type) {
+	case "opencode_zen", "openai_codex":
+		return true
+	}
+	return isZenBaseURL(cfg.BaseURL)
+}
+
 // AnonymousZenForPrincipal reports the effective OpenCode Zen access mode
 // without exposing the resolved credential.
 func AnonymousZenForPrincipal(providerID string, principal *config.Principal) (bool, error) {

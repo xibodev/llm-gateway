@@ -153,6 +153,9 @@ func ollamaUsage(data map[string]any) map[string]any {
 	}
 }
 
+// intOf reads an integer option. Request handlers decode bodies with
+// UseNumber, so json.Number must count; ignoring it silently replaced a
+// caller's max_tokens with the provider default (llm-gateway#77).
 func intOf(v any) int {
 	switch n := v.(type) {
 	case float64:
@@ -161,6 +164,13 @@ func intOf(v any) int {
 		return n
 	case int64:
 		return int(n)
+	case json.Number:
+		if value, err := n.Int64(); err == nil {
+			return int(value)
+		}
+		if value, err := n.Float64(); err == nil {
+			return int(value)
+		}
 	}
 	return 0
 }

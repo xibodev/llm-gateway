@@ -418,6 +418,13 @@ func TestHTTPCharacterization(t *testing.T) {
 			"Chat Completions to a Codex model", "POST /v1/chat/completions", recorder, fixture.upstream.snapshot()))
 	})
 
+	t.Run("codex-messages", func(t *testing.T) {
+		fixture.upstream.reset()
+		recorder := fixture.do(http.MethodPost, "/v1/messages", fixture.humanKey, messages("codex/gpt-fixture", false))
+		assertCharacterization(t, "codex-messages", renderExchange(
+			"Messages to a Codex model", "POST /v1/messages", recorder, fixture.upstream.snapshot()))
+	})
+
 	t.Run("codex-responses-refresh-replay", func(t *testing.T) {
 		fixture.upstream.reset()
 		fixture.upstream.mu.Lock()
