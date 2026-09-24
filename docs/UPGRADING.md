@@ -23,7 +23,7 @@ newer than it supports.
 
 Use this for the [published-image quickstart](QUICKSTART.md#docker-compose),
 not the repository's source-build Compose file. The quickstart pins
-`ghcr.io/xibodev/llm-gateway:0.6.1`; select future versions from the
+`ghcr.io/xibodev/llm-gateway:0.7.4`; select future versions from the
 [release notes](https://github.com/xibodev/llm-gateway/releases/latest).
 
 1. Complete the offline backup checklist above with the **installed** image.

@@ -247,7 +247,7 @@ func TestCodexProviderUsesResponsesRefreshesOnceAndCatalogsWithClientVersion(t *
 				t.Fatalf("model headers auth=%q account=%q", r.Header.Get("Authorization"), r.Header.Get("ChatGPT-Account-ID"))
 			}
 			w.Header().Set("Content-Type", "application/json")
-			_, _ = w.Write([]byte(`{"data":[{"id":"gpt-5-codex","owned_by":"openai","description":"GPT-5 Codex","supported_in_api":true,"visibility":"list","supported_endpoints":["/responses"]}]}`))
+			_, _ = w.Write([]byte(`{"data":[{"id":"gpt-5-codex","owned_by":"openai","description":"GPT-5 Codex","supported_in_api":true,"visibility":"list"}]}`))
 		default:
 			http.NotFound(w, r)
 		}
@@ -286,7 +286,8 @@ func TestCodexProviderUsesResponsesRefreshesOnceAndCatalogsWithClientVersion(t *
 		t.Fatalf("refreshed=%+v ok=%v err=%v", refreshed, ok, err)
 	}
 	rows := codex.ListModels()
-	if len(rows) != 1 || rows[0].ID != "gpt-5-codex" || rows[0].Label != "GPT-5 Codex" || len(rows[0].SupportedSurfaces) != 1 {
+	if len(rows) != 1 || rows[0].ID != "gpt-5-codex" || rows[0].Label != "GPT-5 Codex" ||
+		len(rows[0].SupportedSurfaces) != 1 || rows[0].SupportedSurfaces[0] != "/responses" {
 		t.Fatalf("Codex models=%+v", rows)
 	}
 	capabilities := rows[0].TypedCapabilities

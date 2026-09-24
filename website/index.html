@@ -150,12 +150,13 @@
           <div class="code-head"><span>compose.yaml · published image</span><button class="copy-button" type="button" data-copy="#home-quickstart">Copy</button></div>
           <pre id="home-quickstart"><code>services:
   gateway:
-    image: ghcr.io/xibodev/llm-gateway:0.6.1
+    image: ghcr.io/xibodev/llm-gateway:0.7.4
     ports:
       - "127.0.0.1:${LLMGW_PORT:-8787}:8787"
     environment:
       LLMGW_API_KEY: ${LLMGW_API_KEY:?set LLMGW_API_KEY in .env}
       LLMGW_CREDENTIAL_ENCRYPTION_KEY: ${LLMGW_CREDENTIAL_ENCRYPTION_KEY:?set LLMGW_CREDENTIAL_ENCRYPTION_KEY in .env}
+      LLMGW_ANONYMOUS_PROVIDER_AUTOMATION: ${LLMGW_ANONYMOUS_PROVIDER_AUTOMATION:-false}
     volumes:
       - state:/state
     restart: unless-stopped

@@ -1,0 +1,176 @@
+{
+  "schema_version": "1.0.0",
+  "mode": "change",
+  "contract": {
+    "digest": "31b393ab3e80162226619c441694573993ac618382d74642101484a0bf2e9c80"
+  },
+  "authoring_provenance": {
+    "status": "established",
+    "path": ".release-harness/drafts/llm-gateway.record.json",
+    "digest": "6732ddf3dc8236b974e2aae5f81b546d89c2a466b6fb0a368d76620955bf981e"
+  },
+  "sources": [
+    {
+      "source_id": "primary",
+      "status": "established",
+      "repository_identity": "https://github.com/xibodev/llm-gateway.git",
+      "base_ref": "origin/main",
+      "base_commit": "8406ef7afb7c27d12d42dddc674fcfacbedfc2e0",
+      "merge_base": "b997fc2a6da134c9a1537802c362cca96742f6bb",
+      "head_commit": "521366726e80712d6e8e9bca20daf9ff391d29f5",
+      "head_tree": "698443e496e8f0add12eb8cfea1a2311d587e96e",
+      "reviewed_source_digest": "47b124566456318c44e7d27fa4d0fe620198bc63491680c770e8ba5cff322e26",
+      "changed_paths": [
+        {
+          "status": "modified",
+          "path": "docs/OPERATIONS.md",
+          "old_blob": "d11e11da59074caf1fa42439e1e80bc5b32ee2c4",
+          "new_blob": "4e5cd6525407afe60d00194faa5419d042274c9e"
+        },
+        {
+          "status": "modified",
+          "path": "docs/QUICKSTART.md",
+          "old_blob": "7737f68260cb3df33008f230a8be70420cb2dcc9",
+          "new_blob": "7f828498c0532f91b6e8e5e8b90e1f2992df50d2"
+        },
+        {
+          "status": "modified",
+          "path": "docs/UPGRADING.md",
+          "old_blob": "9a9aa66472e5146059cdf7ebb9db939659419e6d",
+          "new_blob": "35b96f63210a6589310c2a03a29068bdd9eeb665"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/providers/catalog.go",
+          "old_blob": "d6e209efc32774bd8ae5cb83af57d920d0d63cd4",
+          "new_blob": "a5e3a84af2490d387d364a16df46ef487630e764"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/providers/codex_test.go",
+          "old_blob": "64457540ff536f2417fbb85f1fc65a91783fb32a",
+          "new_blob": "6472cbd484ff2d40e42dcf944021c81b027f6759"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/providers/codex.go",
+          "old_blob": "d992190fc64056f32c7584a3df055c7c837e139f",
+          "new_blob": "a6bd49a3d37be5c981a072c44f34e8980b03a051"
+        },
+        {
+          "status": "modified",
+          "path": "website/index.html",
+          "old_blob": "23739f4e38a6bc818758e23117ee3bd3b5ddad88",
+          "new_blob": "37e9737ac6e4257de62d522c6a76307c7c23900e"
+        },
+        {
+          "status": "modified",
+          "path": "website/operations.html",
+          "old_blob": "3fff68fa8ad5083e29af84be85fa66442bbc9c95",
+          "new_blob": "e6ad85384621582df9e80bdd94de466bea3a844c"
+        },
+        {
+          "status": "modified",
+          "path": "website/providers.html",
+          "old_blob": "5c7190bf080247d1215f7100e8e222bf4aae7965",
+          "new_blob": "3a99546507ff0b8c64f3f879a211f307ccbb2295"
+        },
+        {
+          "status": "modified",
+          "path": "website/quickstart.html",
+          "old_blob": "9f001c74dc9661c6b18a2a1d0170d803778fe949",
+          "new_blob": "3618a171cc24ce67048c7eb90d30ffa8c1efc45b"
+        },
+        {
+          "status": "modified",
+          "path": "website/README.md",
+          "old_blob": "b0a489316c5d193513d82f1a362a69d2b1d9ca8e",
+          "new_blob": "65afe4cce1c6ddcefa3d8a8724e3922fe2307041"
+        },
+        {
+          "status": "modified",
+          "path": "website/search.json",
+          "old_blob": "0b92ebf45b25462ea9e066b278fb47137b1d18d5",
+          "new_blob": "8e484dfeae59e5ffa0e7a3523c2dfbb21fca83c9"
+        },
+        {
+          "status": "modified",
+          "path": "website/upgrading.html",
+          "old_blob": "506c18cec4c57e10d707b87d2b11bfafeb64efce",
+          "new_blob": "87b0e1f0c2efb05a51c0038df4f161a2d5233f86"
+        }
+      ]
+    }
+  ],
+  "facts": [
+    {
+      "id": "codex-responses-surface-restored",
+      "claim": "API-eligible listed Codex models now retain the provider's invariant Responses surface when the upstream catalog omits its legacy supported_endpoints field, and catalog schema 6 invalidates affected persisted rows.",
+      "status": "observed",
+      "evidence": {
+        "source": "go/internal/providers/codex.go; go/internal/providers/catalog.go; go/internal/providers/codex_test.go"
+      }
+    },
+    {
+      "id": "release-gates-pass",
+      "claim": "Go build, vet, full tests, focused provider/API tests, console lint/tests/check:dist, documentation checks, npm audit, govulncheck, and diff checks passed for the reviewed source.",
+      "status": "observed",
+      "evidence": {
+        "source": "local release gate execution"
+      }
+    },
+    {
+      "id": "website-release-projection-current",
+      "claim": "Canonical and website installation guidance now identifies the published v0.7.4 baseline, all eight native archives, and the explicit anonymous-provider opt-in without changing runtime defaults.",
+      "status": "observed",
+      "evidence": {
+        "source": "docs/QUICKSTART.md; docs/OPERATIONS.md; docs/UPGRADING.md; website/"
+      }
+    }
+  ],
+  "impact": {
+    "assertions": [
+      {
+        "id": "A1",
+        "impact": "unchanged",
+        "supported_by": [
+          "release-gates-pass"
+        ]
+      },
+      {
+        "id": "A2",
+        "impact": "unchanged",
+        "supported_by": [
+          "release-gates-pass"
+        ]
+      },
+      {
+        "id": "A3",
+        "impact": "unchanged",
+        "supported_by": [
+          "release-gates-pass"
+        ]
+      },
+      {
+        "id": "A4",
+        "impact": "unchanged",
+        "supported_by": [
+          "codex-responses-surface-restored",
+          "release-gates-pass"
+        ]
+      }
+    ],
+    "requires": [],
+    "possible_binding_changes": []
+  },
+  "questions": [],
+  "conclusion": {
+    "action": "reuse_contract",
+    "summary": "The Codex catalog correction restores truthful model surface metadata and refreshes stale rows without changing the accepted release identity, process health, or model-list availability proposition."
+  },
+  "proposed": {
+    "by": "opencode-session",
+    "at": "2026-09-24T05:25:07.441Z"
+  },
+  "digest": "3afe0ce687236a51b46cea76a9e760515401f68f4471141568b93c681b5fcc5a"
+}
