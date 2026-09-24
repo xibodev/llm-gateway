@@ -1,0 +1,185 @@
+{
+  "schema_version": "1.0.0",
+  "mode": "change",
+  "contract": {
+    "digest": "31b393ab3e80162226619c441694573993ac618382d74642101484a0bf2e9c80"
+  },
+  "authoring_provenance": {
+    "status": "established",
+    "path": ".release-harness/drafts/llm-gateway.record.json",
+    "digest": "6732ddf3dc8236b974e2aae5f81b546d89c2a466b6fb0a368d76620955bf981e"
+  },
+  "sources": [
+    {
+      "source_id": "primary",
+      "status": "established",
+      "repository_identity": "https://github.com/xibodev/llm-gateway.git",
+      "base_ref": "origin/main",
+      "base_commit": "652eb852b2aed87384b02e2c5ccb6d0b11c2e0ee",
+      "merge_base": "abadccfac0b04e313b7070e3056b32e13abdd99a",
+      "head_commit": "965a925dcb2de72e9a69661b58a3508e756436de",
+      "head_tree": "e96db2274f406e631f750dcaeaa6ae030739fc88",
+      "reviewed_source_digest": "ac9507ae75b8dee8239534031223e5dcd4794296d3ed30e3b0827fa89f09fab4",
+      "changed_paths": [
+        {
+          "status": "modified",
+          "path": ".github/workflows/pages.yml",
+          "old_blob": "e4d238e96b3c3400f241fae7300e75d9c60b1b08",
+          "new_blob": "7ce32b363a4679a419b734a50f4d33f98559cd2c"
+        },
+        {
+          "status": "modified",
+          "path": "CONTRIBUTING.md",
+          "old_blob": "32126dc41476179350d4e8b190789bc75987b761",
+          "new_blob": "d3d20ed6f3851ba1277a950fc7f7dc2b4026f5ca"
+        },
+        {
+          "status": "modified",
+          "path": "docs/PROVIDERS.md",
+          "old_blob": "af8b1913882550209091e71ddd6dc39601fbc025",
+          "new_blob": "2339edf814200cc27744bc0ea149ee29957d0e1d"
+        },
+        {
+          "status": "modified",
+          "path": "go/go.mod",
+          "old_blob": "461aafa903c19e23a6630234c9153c968dcc6cc5",
+          "new_blob": "7a68bab6b1d5c181791e593069d1a994f19ee428"
+        },
+        {
+          "status": "modified",
+          "path": "go/go.sum",
+          "old_blob": "7cd993434ac5553a7e9fe481b50de596b4d2dd1d",
+          "new_blob": "f9b7f5324b39035458856863e57f498381b4160a"
+        },
+        {
+          "status": "deleted",
+          "path": "go/internal/providers/registry_manifest.go",
+          "old_blob": "19124c99f0994760fe8d3ae533d24b6907ab6671",
+          "new_blob": "0000000000000000000000000000000000000000"
+        },
+        {
+          "status": "renamed",
+          "path": "go/internal/providers/registry_manifest.json",
+          "old_blob": "21da4adba6810c3401b25dc0bc5226d7113fbb2d",
+          "new_blob": "21da4adba6810c3401b25dc0bc5226d7113fbb2d"
+        },
+        {
+          "status": "added",
+          "path": "go/internal/providers/registry_overlay.go",
+          "old_blob": "0000000000000000000000000000000000000000",
+          "new_blob": "12633e388af7f6b7d7417e93ed12709f92075198"
+        },
+        {
+          "status": "added",
+          "path": "go/internal/providers/registry_overlay.json",
+          "old_blob": "0000000000000000000000000000000000000000",
+          "new_blob": "0967ef424bce6791893e9a57bb952f80fd536e93"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/providers/registry.go",
+          "old_blob": "e3a29c739f18c5f00f154e38b5ab5a1003c4b060",
+          "new_blob": "425d693adf38f3b384a33adc1da814036c740995"
+        }
+      ]
+    }
+  ],
+  "facts": [
+    {
+      "id": "registry-from-core",
+      "claim": "The gateway builds its provider registry from the llmgw-core v0.7.0 default registry plus the strictly decoded gateway overlay registry_overlay.json, validated against the runtime types it executes; RegistryEntry is an alias of the core type.",
+      "status": "observed",
+      "evidence": {
+        "source": "go/internal/providers/registry_overlay.go; go/internal/providers/registry.go; go/internal/providers/registry_overlay.json"
+      }
+    },
+    {
+      "id": "registry-snapshot-exact",
+      "claim": "registry_snapshot.json is the former registry_manifest.json with an identical blob, and TestEffectiveRegistryReproducesSnapshot proves the effective registry equals it; editing one label makes the test fail.",
+      "status": "observed",
+      "evidence": {
+        "source": "go/internal/providers/registry_test.go; rename of registry_manifest.json to registry_snapshot.json at blob 21da4adba6810c3401b25dc0bc5226d7113fbb2d"
+      }
+    },
+    {
+      "id": "docs-read-snapshot",
+      "claim": "The documentation check and the pages workflow read registry_snapshot.json, and the documentation checks pass with 25 registry entries.",
+      "status": "observed",
+      "evidence": {
+        "source": "scripts/check-docs.mjs; .github/workflows/pages.yml; CONTRIBUTING.md; docs/PROVIDERS.md"
+      }
+    },
+    {
+      "id": "core-dependency",
+      "claim": "go.mod pins github.com/xibodev/llmgw-core v0.7.0 instead of v0.6.0; its embedded manifest is byte-identical to the former gateway manifest.",
+      "status": "observed",
+      "evidence": {
+        "source": "go/go.mod; go/go.sum"
+      }
+    },
+    {
+      "id": "changed-paths-incomplete",
+      "claim": "The collected changed_paths omit the rename target go/internal/providers/registry_snapshot.json and the modified go/internal/providers/registry_test.go and scripts/check-docs.mjs, because the harness parses raw diff records in pairs (xibodev/release-harness#26); the reviewed source digest covers the full head tree.",
+      "status": "observed",
+      "evidence": {
+        "source": "git diff --name-status -M between the merge base and HEAD"
+      }
+    },
+    {
+      "id": "registry-gates-pass",
+      "claim": "gofmt, go build, go vet, the full Go test suite, govulncheck and documentation checks pass with the workspace disabled; coupling budgets are unchanged.",
+      "status": "observed",
+      "evidence": {
+        "source": "local release gates with GOWORK=off"
+      }
+    }
+  ],
+  "impact": {
+    "assertions": [
+      {
+        "id": "A1",
+        "impact": "unchanged",
+        "supported_by": [
+          "registry-snapshot-exact",
+          "registry-gates-pass"
+        ]
+      },
+      {
+        "id": "A2",
+        "impact": "unchanged",
+        "supported_by": [
+          "registry-snapshot-exact",
+          "registry-gates-pass"
+        ]
+      },
+      {
+        "id": "A3",
+        "impact": "unchanged",
+        "supported_by": [
+          "registry-snapshot-exact",
+          "registry-gates-pass"
+        ]
+      },
+      {
+        "id": "A4",
+        "impact": "unchanged",
+        "supported_by": [
+          "registry-snapshot-exact",
+          "registry-gates-pass"
+        ]
+      }
+    ],
+    "requires": [],
+    "possible_binding_changes": []
+  },
+  "questions": [],
+  "conclusion": {
+    "action": "reuse_contract",
+    "summary": "The gateway consumes the core provider registry through an empty overlay; the effective registry, its JSON and the documentation are unchanged, so release identity, health and model-list behavior are unchanged."
+  },
+  "proposed": {
+    "by": "modularization-m1-registry",
+    "at": "2026-09-24T19:15:59.516Z"
+  },
+  "digest": "fa82c4471387732e6bd9acdb857492278455ca29a006a8fbc215ef4951535086"
+}
