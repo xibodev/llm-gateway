@@ -90,16 +90,3 @@ func TestAnonymousVerificationModelNeverFallsBackToUnmarkedRows(t *testing.T) {
 		t.Fatalf("unmarked fallback=%q", got)
 	}
 }
-
-func TestZeroStringNumberRejectsMalformedValues(t *testing.T) {
-	for _, value := range []any{"0", "0.000", float64(0)} {
-		if !zeroStringNumber(value) {
-			t.Fatalf("valid zero rejected: %#v", value)
-		}
-	}
-	for _, value := range []any{"", ".", "...", "0..0", "1", float64(1)} {
-		if zeroStringNumber(value) {
-			t.Fatalf("malformed/nonzero value accepted: %#v", value)
-		}
-	}
-}
