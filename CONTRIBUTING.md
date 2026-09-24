@@ -74,8 +74,14 @@ Two test suites guard the library extraction (llm-gateway#67):
 - `website/`: public GitHub Pages presentation of the same facts.
 
 Provider names on the website/docs are checked against
-`go/internal/providers/registry_manifest.json`; public API paths are checked
-against `go/internal/api/server.go`.
+`go/internal/providers/registry_snapshot.json`, the effective provider registry;
+public API paths are checked against `go/internal/api/server.go`.
+
+The reviewed registry manifest lives in `llmgw-core`, and the gateway's own
+curation is `go/internal/providers/registry_overlay.json`. A test pins the
+snapshot to the core manifest plus that overlay. After an intended change,
+regenerate it with
+`LLMGW_UPDATE_GOLDEN=1 go test ./internal/providers -run TestEffectiveRegistryReproducesSnapshot`.
 
 ## Security reports
 

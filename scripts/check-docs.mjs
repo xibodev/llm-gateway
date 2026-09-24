@@ -202,7 +202,7 @@ for (const route of new Set(publicRoutes)) {
   check(websiteText.includes(route), `website omits ${route}`);
 }
 
-const registry = parseJson(join(root, "go", "internal", "providers", "registry_manifest.json"));
+const registry = parseJson(join(root, "go", "internal", "providers", "registry_snapshot.json"));
 const providersDoc = source(join(root, "docs", "PROVIDERS.md"));
 const providersPage = source(join(websiteDir, "providers.html"));
 const providerMatrixBody = providersPage.match(/<h2\b[^>]*\bid="registry"[^>]*>[\s\S]*?<tbody\b[^>]*>([\s\S]*?)<\/tbody>/i)?.[1] ?? "";

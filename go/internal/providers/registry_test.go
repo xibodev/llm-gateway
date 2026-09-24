@@ -2,10 +2,16 @@ package providers
 
 import (
 	"encoding/json"
+	"os"
+	"reflect"
 	"slices"
 	"testing"
 
 	"llmgw/internal/config"
+
+	anthropicauth "github.com/xibodev/llm-provider-auth/anthropic"
+	gcpauth "github.com/xibodev/llm-provider-auth/gcp"
+	coreproviders "github.com/xibodev/llmgw-core/providers"
 )
 
 func TestProviderRegistryIsUniqueAndRunnable(t *testing.T) {
@@ -180,71 +186,63 @@ func TestRegistryProviderResolvesAliasesAndReturnsCopies(t *testing.T) {
 	}
 }
 
-func TestValidateProviderRegistryRejectsAliasCollisions(t *testing.T) {
-	entries := []RegistryEntry{
-		validRegistryEntry("first"),
-		validRegistryEntry("second"),
+// TestEffectiveRegistryReproducesSnapshot pins the gateway's effective registry,
+// the core manifest plus the gateway overlay, to registry_snapshot.json, which
+// the website and documentation checks read. After an intended registry
+// change, regenerate the snapshot:
+//
+//	LLMGW_UPDATE_GOLDEN=1 go test ./internal/providers -run TestEffectiveRegistryReproducesSnapshot
+func TestEffectiveRegistryReproducesSnapshot(t *testing.T) {
+	got := ProviderRegistry()
+	if os.Getenv("LLMGW_UPDATE_GOLDEN") == "1" {
+		encoded, err := json.MarshalIndent(got, "", "  ")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile("registry_snapshot.json", append(encoded, '\n'), 0o644); err != nil {
+			t.Fatal(err)
+		}
 	}
-	entries[0].Aliases = []string{"shared"}
-	entries[1].Aliases = []string{"SHARED"}
-	if err := validateProviderRegistry(entries); err == nil {
-		t.Fatal("duplicate case-insensitive aliases should be rejected")
-	}
-}
-
-func TestValidateProviderRegistryRejectsInvalidAuthContract(t *testing.T) {
-	entry := validRegistryEntry("invalid")
-	entry.RequiresAPIKey = true
-	entry.AuthMethods = []string{"none"}
-	if err := validateProviderRegistry([]RegistryEntry{entry}); err == nil {
-		t.Fatal("requires_api_key without api_key auth should be rejected")
-	}
-
-	entry = validRegistryEntry("risky")
-	entry.RiskLevel = "yellow"
-	if err := validateProviderRegistry([]RegistryEntry{entry}); err == nil {
-		t.Fatal("non-green provider without a risk notice should be rejected")
-	}
-
-	entry = validRegistryEntry("missing-risk")
-	entry.RiskLevel = ""
-	if err := validateProviderRegistry([]RegistryEntry{entry}); err == nil {
-		t.Fatal("missing risk metadata should be rejected")
-	}
-
-	entry = validRegistryEntry("oauth-without-adapter")
-	entry.AuthMethods = []string{"oauth_device"}
-	entry.ConnectionScope = ConnectionScopePersonal
-	if err := validateProviderRegistry([]RegistryEntry{entry}); err == nil {
-		t.Fatal("available OAuth provider without auth_adapter should be rejected")
-	}
-}
-
-func TestDecodeProviderRegistryRejectsUnknownFields(t *testing.T) {
-	entry := validRegistryEntry("strict")
-	raw, err := json.Marshal(entry)
+	payload, err := os.ReadFile("registry_snapshot.json")
 	if err != nil {
 		t.Fatal(err)
 	}
-	var object map[string]any
-	if err := json.Unmarshal(raw, &object); err != nil {
-		t.Fatal(err)
-	}
-	object["risk_levle"] = "yellow"
-	payload, err := json.Marshal([]map[string]any{object})
+	entries, err := coreproviders.DecodeRegistryEntries(payload)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("snapshot: %v", err)
 	}
-	if _, err := decodeProviderRegistry(payload); err == nil {
-		t.Fatal("unknown manifest fields should be rejected")
+	want, err := coreproviders.NewRegistry(entries, coreproviders.ValidationOptions{RuntimeTypes: ProviderTypes})
+	if err != nil {
+		t.Fatalf("snapshot: %v", err)
+	}
+	if !reflect.DeepEqual(want.Entries(), got) {
+		t.Fatal("the effective registry differs from registry_snapshot.json; the manifest lives in llmgw-core " +
+			"and gateway curation in registry_overlay.json; regenerate the snapshot with LLMGW_UPDATE_GOLDEN=1")
 	}
 }
 
-func validRegistryEntry(id string) RegistryEntry {
-	return RegistryEntry{
-		ID: id, Label: id, Description: "test provider", RuntimeType: "openai_compatible",
-		Protocol: "openai", Availability: ProviderAvailable, AuthMethods: []string{"api_key"},
-		ConnectionScope: ConnectionScopeSystemOrPersonal, DefaultProviderID: id,
-		RiskLevel: "green",
+func TestRegistryOverlayCannotChangeWireFacts(t *testing.T) {
+	if _, err := loadProviderRegistry([]byte(`{"override":[{"id":"openai","runtime_type":"anthropic"}]}`)); err == nil {
+		t.Fatal("an overlay changed a wire fact")
+	}
+	if _, err := loadProviderRegistry([]byte(`{"override":[{"id":"not-a-provider","label":"x"}]}`)); err == nil {
+		t.Fatal("an overlay overrode an unknown entry")
+	}
+	unrunnable := `{"add":[{"id":"exotic","label":"Exotic","description":"x","runtime_type":"exotic",` +
+		`"protocol":"openai","availability":"available","auth_methods":["api_key"],` +
+		`"connection_scope":"system_or_personal","default_provider_id":"exotic","risk_level":"green"}]}`
+	if _, err := loadProviderRegistry([]byte(unrunnable)); err == nil {
+		t.Fatal("an overlay added an entry this gateway cannot execute")
+	}
+}
+
+// TestRegistryAuthMethodsMatchAuthLibrary keeps the registry vocabulary and the
+// credential kinds the auth library stores spelled identically.
+func TestRegistryAuthMethodsMatchAuthLibrary(t *testing.T) {
+	if coreproviders.AuthGCPServiceAccount != gcpauth.CredentialKind {
+		t.Fatalf("registry %q != auth library %q", coreproviders.AuthGCPServiceAccount, gcpauth.CredentialKind)
+	}
+	if coreproviders.AuthSetupToken != string(anthropicauth.CredentialSetupToken) {
+		t.Fatalf("registry %q != auth library %q", coreproviders.AuthSetupToken, anthropicauth.CredentialSetupToken)
 	}
 }

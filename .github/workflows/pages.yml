@@ -7,7 +7,7 @@ on:
       - website/**
       - brand/**
       - docs/**
-      - go/internal/providers/registry_manifest.json
+      - go/internal/providers/registry_snapshot.json
       - README.md
       - CONTRIBUTING.md
       - SECURITY.md
@@ -20,7 +20,7 @@ on:
       - website/**
       - brand/**
       - docs/**
-      - go/internal/providers/registry_manifest.json
+      - go/internal/providers/registry_snapshot.json
       - README.md
       - CONTRIBUTING.md
       - SECURITY.md

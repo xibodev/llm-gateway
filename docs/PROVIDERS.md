@@ -164,5 +164,7 @@ left unmanaged; rate limits and outages are recorded without removing them.
   of scope.
 
 The machine-readable source of this table is
-`go/internal/providers/registry_manifest.json`; CI verifies every registry label
+`go/internal/providers/registry_snapshot.json`, the effective registry: the
+reviewed `llmgw-core` manifest plus the gateway overlay
+`go/internal/providers/registry_overlay.json`. CI verifies every registry label
 appears in this reference and on the website.
