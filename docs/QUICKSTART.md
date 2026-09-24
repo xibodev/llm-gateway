@@ -8,7 +8,8 @@ Prefer no Docker? Use a [prebuilt native binary](#native-binary).
 
 - Docker Desktop (Linux containers) or Docker Engine with Compose.
 - `openssl` for the Linux/macOS shell example, or PowerShell 7 on Windows.
-- A provider credential, unless you use a local no-auth provider such as Ollama.
+- A provider credential, a local no-auth provider such as Ollama, or an explicit
+  opt-in to the [curated anonymous providers](PROVIDERS.md#anonymous-provider-automation).
 
 ## Docker Compose
 
@@ -19,12 +20,13 @@ Create `compose.yaml` in it with the following contents:
 ```yaml
 services:
   gateway:
-    image: ghcr.io/xibodev/llm-gateway:0.6.1
+    image: ghcr.io/xibodev/llm-gateway:0.7.4
     ports:
       - "127.0.0.1:${LLMGW_PORT:-8787}:8787"
     environment:
       LLMGW_API_KEY: ${LLMGW_API_KEY:?set LLMGW_API_KEY in .env}
       LLMGW_CREDENTIAL_ENCRYPTION_KEY: ${LLMGW_CREDENTIAL_ENCRYPTION_KEY:?set LLMGW_CREDENTIAL_ENCRYPTION_KEY in .env}
+      LLMGW_ANONYMOUS_PROVIDER_AUTOMATION: ${LLMGW_ANONYMOUS_PROVIDER_AUTOMATION:-false}
     volumes:
       - state:/state
     restart: unless-stopped
@@ -39,7 +41,7 @@ healthcheck. No command or healthcheck override is needed. The named volume
 persists configuration and databases at `/state`, owned by container UID/GID
 65532. Configure providers in the console; no config seed is needed.
 
-This recipe pins [v0.6.1](https://github.com/xibodev/llm-gateway/releases/tag/v0.6.1).
+This recipe pins [v0.7.4](https://github.com/xibodev/llm-gateway/releases/tag/v0.7.4).
 See [latest releases](https://github.com/xibodev/llm-gateway/releases/latest)
 when choosing a future version, and follow [Upgrading](UPGRADING.md).
 
@@ -166,30 +168,33 @@ Keep the original encryption key and folder through every upgrade.
 
 This is an **alternative installation**, not a way to access the Compose volume.
 Choose a separate private folder and download your archive plus
-[SHA256SUMS](https://github.com/xibodev/llm-gateway/releases/download/v0.6.1/SHA256SUMS):
+[SHA256SUMS](https://github.com/xibodev/llm-gateway/releases/download/v0.7.4/SHA256SUMS):
 
-| Platform | v0.6.1 download |
+| Platform | v0.7.4 download |
 | --- | --- |
-| Windows x64 | [windows_amd64.zip](https://github.com/xibodev/llm-gateway/releases/download/v0.6.1/llmgw_v0.6.1_windows_amd64.zip) |
-| Linux x64 | [linux_amd64.tar.gz](https://github.com/xibodev/llm-gateway/releases/download/v0.6.1/llmgw_v0.6.1_linux_amd64.tar.gz) |
-| Linux ARM64 | [linux_arm64.tar.gz](https://github.com/xibodev/llm-gateway/releases/download/v0.6.1/llmgw_v0.6.1_linux_arm64.tar.gz) |
-| macOS Intel | [darwin_amd64.tar.gz](https://github.com/xibodev/llm-gateway/releases/download/v0.6.1/llmgw_v0.6.1_darwin_amd64.tar.gz) |
-| macOS Apple Silicon | [darwin_arm64.tar.gz](https://github.com/xibodev/llm-gateway/releases/download/v0.6.1/llmgw_v0.6.1_darwin_arm64.tar.gz) |
+| Windows x64 | [windows_amd64.zip](https://github.com/xibodev/llm-gateway/releases/download/v0.7.4/llmgw_v0.7.4_windows_amd64.zip) |
+| Windows ARM64 | [windows_arm64.zip](https://github.com/xibodev/llm-gateway/releases/download/v0.7.4/llmgw_v0.7.4_windows_arm64.zip) |
+| Linux x64 | [linux_amd64.tar.gz](https://github.com/xibodev/llm-gateway/releases/download/v0.7.4/llmgw_v0.7.4_linux_amd64.tar.gz) |
+| Linux ARM64 | [linux_arm64.tar.gz](https://github.com/xibodev/llm-gateway/releases/download/v0.7.4/llmgw_v0.7.4_linux_arm64.tar.gz) |
+| Linux RISC-V 64 | [linux_riscv64.tar.gz](https://github.com/xibodev/llm-gateway/releases/download/v0.7.4/llmgw_v0.7.4_linux_riscv64.tar.gz) |
+| macOS Intel | [darwin_amd64.tar.gz](https://github.com/xibodev/llm-gateway/releases/download/v0.7.4/llmgw_v0.7.4_darwin_amd64.tar.gz) |
+| macOS Apple Silicon | [darwin_arm64.tar.gz](https://github.com/xibodev/llm-gateway/releases/download/v0.7.4/llmgw_v0.7.4_darwin_arm64.tar.gz) |
+| FreeBSD x64 | [freebsd_amd64.tar.gz](https://github.com/xibodev/llm-gateway/releases/download/v0.7.4/llmgw_v0.7.4_freebsd_amd64.tar.gz) |
 
 Before unpacking, calculate the archive's SHA-256 and compare it with the exact
 filename's entry in `SHA256SUMS`. Stop if they differ. For Linux x64:
 
 ```bash
-sha256sum llmgw_v0.6.1_linux_amd64.tar.gz
-tar -xzf llmgw_v0.6.1_linux_amd64.tar.gz
+sha256sum llmgw_v0.7.4_linux_amd64.tar.gz
+tar -xzf llmgw_v0.7.4_linux_amd64.tar.gz
 ```
 
 On macOS use `shasum -a 256 <ARCHIVE>` and `tar -xzf <ARCHIVE>` with your actual
 archive name. On Windows:
 
 ```powershell
-Get-FileHash .\llmgw_v0.6.1_windows_amd64.zip -Algorithm SHA256
-Expand-Archive .\llmgw_v0.6.1_windows_amd64.zip -DestinationPath .
+Get-FileHash .\llmgw_v0.7.4_windows_amd64.zip -Algorithm SHA256
+Expand-Archive .\llmgw_v0.7.4_windows_amd64.zip -DestinationPath .
 ```
 
 For this fresh native installation, generate `.env` once using the earlier
@@ -236,7 +241,7 @@ image recipe and native installation; do not mix their folders, projects or volu
 Clone the selected source release (Git required):
 
 ```bash
-git clone --branch v0.6.1 https://github.com/xibodev/llm-gateway.git
+git clone --branch v0.7.4 https://github.com/xibodev/llm-gateway.git
 cd llm-gateway
 ```
 

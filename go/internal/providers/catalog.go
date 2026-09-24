@@ -40,6 +40,8 @@ type catalogEntry struct {
 	//   - v3 anonymous OpenCode Zen rows predate shared Zen discovery evidence.
 	//   - v4 Vertex rows dropped callable global models whose supportedActions
 	//     field was absent or empty.
+	//   - v5 Codex rows could omit the provider's invariant Responses surface
+	//     when the upstream catalog omitted its legacy supported_endpoints field.
 	//
 	// Bump this whenever a release changes what a persisted row means; the
 	// cost is one forced re-discovery per provider, the alternative is
@@ -49,7 +51,7 @@ type catalogEntry struct {
 	RefreshedAt   time.Time   `json:"refreshed_at"`
 }
 
-const catalogSchemaVersion = 5
+const catalogSchemaVersion = 6
 
 var (
 	catMu         sync.Mutex

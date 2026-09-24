@@ -461,9 +461,13 @@ func (p CodexProvider) ListModelsWithError() (
 		if model.APIEligible == nil || !*model.APIEligible || model.APIVisibility != "list" {
 			continue
 		}
+		surfaces := model.SupportedAPIs
+		if len(surfaces) == 0 {
+			surfaces = []string{"/responses"}
+		}
 		rows = append(rows, ModelInfo{
 			ID: model.ID, Vendor: model.OwnedBy, Label: model.Description,
-			TypedCapabilities: model.Capabilities, SupportedSurfaces: model.SupportedAPIs,
+			TypedCapabilities: model.Capabilities, SupportedSurfaces: surfaces,
 		})
 	}
 	if len(rows) == 0 {
