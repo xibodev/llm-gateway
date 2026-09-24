@@ -1,0 +1,213 @@
+{
+  "schema_version": "1.0.0",
+  "mode": "change",
+  "contract": {
+    "digest": "31b393ab3e80162226619c441694573993ac618382d74642101484a0bf2e9c80"
+  },
+  "authoring_provenance": {
+    "status": "established",
+    "path": ".release-harness/drafts/llm-gateway.record.json",
+    "digest": "6732ddf3dc8236b974e2aae5f81b546d89c2a466b6fb0a368d76620955bf981e"
+  },
+  "sources": [
+    {
+      "source_id": "primary",
+      "status": "established",
+      "repository_identity": "https://github.com/xibodev/llm-gateway.git",
+      "base_ref": "origin/main",
+      "base_commit": "c3109faa02c7e27fa29cf2a32a85613b822f3082",
+      "merge_base": "c3109faa02c7e27fa29cf2a32a85613b822f3082",
+      "head_commit": "5f0e61799bdce333a2ea1f0d9abb25d9875ce2e8",
+      "head_tree": "ce54d68bc6ad2d0965b0f26d7b91e0c666acfed3",
+      "reviewed_source_digest": "dc230c1afb64c52ea7b1d261d34a56c7acf2dee5f88820bc74b26addb18718a7",
+      "changed_paths": [
+        {
+          "status": "modified",
+          "path": "CONTRIBUTING.md",
+          "old_blob": "3a48177ddfcab4920cb42908c9bc61dae7693807",
+          "new_blob": "32126dc41476179350d4e8b190789bc75987b761"
+        },
+        {
+          "status": "added",
+          "path": "go/internal/api/characterization_test.go",
+          "old_blob": "0000000000000000000000000000000000000000",
+          "new_blob": "7621a626ad71f14b60793700e1ae5a426fb48f6f"
+        },
+        {
+          "status": "added",
+          "path": "go/internal/api/testdata/characterization/anthropic-messages-native-stream.golden",
+          "old_blob": "0000000000000000000000000000000000000000",
+          "new_blob": "da720512a7fad23e7bf094c9638dca1af719447e"
+        },
+        {
+          "status": "added",
+          "path": "go/internal/api/testdata/characterization/anthropic-messages-native.golden",
+          "old_blob": "0000000000000000000000000000000000000000",
+          "new_blob": "cba2c3b03ec7d432577634ceef1def52649a4bc8"
+        },
+        {
+          "status": "added",
+          "path": "go/internal/api/testdata/characterization/codex-chat-completions.golden",
+          "old_blob": "0000000000000000000000000000000000000000",
+          "new_blob": "32e4d493c7e559677ee33988e26c8ad781d8e581"
+        },
+        {
+          "status": "added",
+          "path": "go/internal/api/testdata/characterization/codex-models.golden",
+          "old_blob": "0000000000000000000000000000000000000000",
+          "new_blob": "1865acd4fb5a3ece8ec423d105ed920c7b304a56"
+        },
+        {
+          "status": "added",
+          "path": "go/internal/api/testdata/characterization/codex-responses-native.golden",
+          "old_blob": "0000000000000000000000000000000000000000",
+          "new_blob": "a7ba87a629c3c98788dd28522799f33d84a4c4a2"
+        },
+        {
+          "status": "added",
+          "path": "go/internal/api/testdata/characterization/codex-responses-refresh-replay.golden",
+          "old_blob": "0000000000000000000000000000000000000000",
+          "new_blob": "52655d7febfa9253e139723972969ef43cf12e8d"
+        },
+        {
+          "status": "added",
+          "path": "go/internal/api/testdata/characterization/failover-after-output-stream.golden",
+          "old_blob": "0000000000000000000000000000000000000000",
+          "new_blob": "37a40eeea5a90e7f066b2ff8d41e0c3a6c95e795"
+        },
+        {
+          "status": "added",
+          "path": "go/internal/api/testdata/characterization/failover-before-output-stream.golden",
+          "old_blob": "0000000000000000000000000000000000000000",
+          "new_blob": "6d6d2263cc5cee87ea1106bc199932e01395bfc0"
+        },
+        {
+          "status": "added",
+          "path": "go/internal/api/testdata/characterization/openai-chat-native-stream.golden",
+          "old_blob": "0000000000000000000000000000000000000000",
+          "new_blob": "9d7c851127d2f855cebb8f0765750c7a24d8a172"
+        },
+        {
+          "status": "added",
+          "path": "go/internal/api/testdata/characterization/openai-chat-native.golden",
+          "old_blob": "0000000000000000000000000000000000000000",
+          "new_blob": "61be83fb01b1ec104290d76607a8b7d5c608f323"
+        },
+        {
+          "status": "added",
+          "path": "go/internal/api/testdata/characterization/openai-messages-via-chat-stream.golden",
+          "old_blob": "0000000000000000000000000000000000000000",
+          "new_blob": "0dd34c84540612eed829d6ae0e0b805aa3924ad0"
+        },
+        {
+          "status": "added",
+          "path": "go/internal/api/testdata/characterization/openai-messages-via-chat.golden",
+          "old_blob": "0000000000000000000000000000000000000000",
+          "new_blob": "1f32fc3cee4868dceac43124a384b1f770a7c21a"
+        },
+        {
+          "status": "added",
+          "path": "go/internal/api/testdata/characterization/openai-responses-native-stream.golden",
+          "old_blob": "0000000000000000000000000000000000000000",
+          "new_blob": "b2294561c118b5ba845e22d5b75181b6f0db55f2"
+        },
+        {
+          "status": "added",
+          "path": "go/internal/api/testdata/characterization/openai-responses-native.golden",
+          "old_blob": "0000000000000000000000000000000000000000",
+          "new_blob": "e0c79e970525125a43e9ca59670fa4d5d379dcf8"
+        },
+        {
+          "status": "added",
+          "path": "go/internal/api/testdata/characterization/openai-responses-via-chat-stream.golden",
+          "old_blob": "0000000000000000000000000000000000000000",
+          "new_blob": "2669923700f5432cf851403535641956a8587fcd"
+        },
+        {
+          "status": "added",
+          "path": "go/internal/api/testdata/characterization/openai-responses-via-chat.golden",
+          "old_blob": "0000000000000000000000000000000000000000",
+          "new_blob": "158d16bedd7ef50f9d9f309532f669abf9606d67"
+        },
+        {
+          "status": "added",
+          "path": "go/internal/architecture/boundary_test.go",
+          "old_blob": "0000000000000000000000000000000000000000",
+          "new_blob": "95e4966bf416c386249491ef3b989a4f496944d2"
+        },
+        {
+          "status": "added",
+          "path": "go/internal/architecture/doc.go",
+          "old_blob": "0000000000000000000000000000000000000000",
+          "new_blob": "f72a5e28a9637e656d077b0c88f2a1ff7a9e6ad5"
+        }
+      ]
+    }
+  ],
+  "facts": [
+    {
+      "id": "tests-only-change",
+      "claim": "The change adds an architecture test, HTTP characterization tests with golden files, and a contributor note; no production Go, console, build, or deployment file changed.",
+      "status": "observed",
+      "evidence": {
+        "source": "git diff origin/main...HEAD: CONTRIBUTING.md, go/internal/architecture, go/internal/api/characterization_test.go, go/internal/api/testdata/characterization"
+      }
+    },
+    {
+      "id": "guardrail-gates-pass",
+      "claim": "gofmt, go vet, and the full Go test suite pass; the characterization suite is stable across repeated runs and the boundary ratchet fails in both directions under mutation.",
+      "status": "observed",
+      "evidence": {
+        "source": "local go test ./..., go test -count=3 characterization, ratchet mutation check"
+      }
+    }
+  ],
+  "impact": {
+    "assertions": [
+      {
+        "id": "A1",
+        "impact": "unchanged",
+        "supported_by": [
+          "tests-only-change",
+          "guardrail-gates-pass"
+        ]
+      },
+      {
+        "id": "A2",
+        "impact": "unchanged",
+        "supported_by": [
+          "tests-only-change",
+          "guardrail-gates-pass"
+        ]
+      },
+      {
+        "id": "A3",
+        "impact": "unchanged",
+        "supported_by": [
+          "tests-only-change",
+          "guardrail-gates-pass"
+        ]
+      },
+      {
+        "id": "A4",
+        "impact": "unchanged",
+        "supported_by": [
+          "tests-only-change",
+          "guardrail-gates-pass"
+        ]
+      }
+    ],
+    "requires": [],
+    "possible_binding_changes": []
+  },
+  "questions": [],
+  "conclusion": {
+    "action": "reuse_contract",
+    "summary": "Test-only guardrails pin current behavior and dependency direction without changing release identity, health, or model-list behavior."
+  },
+  "proposed": {
+    "by": "modularization-m0",
+    "at": "2026-09-24T17:25:05.29Z"
+  },
+  "digest": "f36ab4fe60f0040ef3d8b03afa45641f6abaead0e41895823a9116d3ca055546"
+}
