@@ -1,0 +1,26 @@
+# Messages, native Anthropic
+request: POST /v1/messages
+status: 200
+header Content-Type: application/json
+header X-Llmgw-Transport-Mode: native
+upstream: POST /n/v1/messages
+upstream body: {"max_tokens":64,"messages":[{"content":"Say hello","role":"user"}],"model":"claude-fixture","stream":false}
+body:
+{
+  "content": [
+    {
+      "text": "Hello from messages",
+      "type": "text"
+    }
+  ],
+  "id": "msg_fixture",
+  "model": "claude-fixture",
+  "role": "assistant",
+  "stop_reason": "end_turn",
+  "stop_sequence": null,
+  "type": "message",
+  "usage": {
+    "input_tokens": 3,
+    "output_tokens": 4
+  }
+}

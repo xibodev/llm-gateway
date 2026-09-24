@@ -1,0 +1,12 @@
+# Chat Completions to a Codex model
+request: POST /v1/chat/completions
+status: 400
+header Content-Type: application/json
+body:
+{
+  "error": {
+    "code": "400",
+    "message": "no route member supports the requested operation and capabilities",
+    "type": "invalid_request_error"
+  }
+}

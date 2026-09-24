@@ -1,0 +1,33 @@
+# Responses, native Codex
+request: POST /v1/responses
+status: 200
+header Content-Type: application/json
+header X-Llmgw-Transport-Mode: native
+upstream: POST /backend-api/codex/responses
+upstream body: {"input":[{"content":"Say hello","role":"user"}],"instructions":"Follow the caller's request.","model":"gpt-fixture","store":false,"stream":true}
+body:
+{
+  "id": "resp_fixture",
+  "instructions": null,
+  "model": "gpt-fixture",
+  "object": "response",
+  "output": [
+    {
+      "content": [
+        {
+          "text": "Hello from codex",
+          "type": "output_text"
+        }
+      ],
+      "id": "msg_fixture",
+      "role": "assistant",
+      "type": "message"
+    }
+  ],
+  "status": "completed",
+  "usage": {
+    "input_tokens": 3,
+    "output_tokens": 4,
+    "total_tokens": 7
+  }
+}
