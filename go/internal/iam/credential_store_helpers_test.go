@@ -3,6 +3,7 @@ package iam
 import (
 	"os"
 	"path/filepath"
+	"strconv"
 	"sync"
 	"testing"
 	"time"
@@ -55,3 +56,5 @@ func (c *fakeClock) Advance(d time.Duration) {
 	c.now = c.now.Add(d)
 	c.mu.Unlock()
 }
+
+func formatRevision(revision int64) string { return strconv.FormatInt(revision, 10) }

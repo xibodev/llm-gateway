@@ -30,23 +30,27 @@ type OAuthTokenEnvelope struct {
 	OAuthRedirectURI  string `json:"oauth_redirect_uri,omitempty"`
 	OAuthClientSecret string `json:"-"`
 	Status            string `json:"status,omitempty"`
+	// Metadata holds provider values the credential store round-trips
+	// without interpreting. It may carry secrets, so it is never serialized.
+	Metadata map[string]string `json:"-"`
 }
 
 type storedOAuthEnvelope struct {
-	AccessToken       string `json:"access_token"`
-	RefreshToken      string `json:"refresh_token,omitempty"`
-	IDToken           string `json:"id_token,omitempty"`
-	TokenType         string `json:"token_type,omitempty"`
-	ExpiresAt         int64  `json:"expires_at,omitempty"`
-	AccountID         string `json:"account_id,omitempty"`
-	AccountLabel      string `json:"account_label,omitempty"`
-	ProjectID         string `json:"project_id,omitempty"`
-	OAuthProfile      string `json:"oauth_profile,omitempty"`
-	OAuthClientID     string `json:"oauth_client_id,omitempty"`
-	OAuthClientMode   string `json:"oauth_client_mode,omitempty"`
-	OAuthRedirectURI  string `json:"oauth_redirect_uri,omitempty"`
-	OAuthClientSecret string `json:"oauth_client_secret,omitempty"`
-	Status            string `json:"status,omitempty"`
+	AccessToken       string            `json:"access_token"`
+	RefreshToken      string            `json:"refresh_token,omitempty"`
+	IDToken           string            `json:"id_token,omitempty"`
+	TokenType         string            `json:"token_type,omitempty"`
+	ExpiresAt         int64             `json:"expires_at,omitempty"`
+	AccountID         string            `json:"account_id,omitempty"`
+	AccountLabel      string            `json:"account_label,omitempty"`
+	ProjectID         string            `json:"project_id,omitempty"`
+	OAuthProfile      string            `json:"oauth_profile,omitempty"`
+	OAuthClientID     string            `json:"oauth_client_id,omitempty"`
+	OAuthClientMode   string            `json:"oauth_client_mode,omitempty"`
+	OAuthRedirectURI  string            `json:"oauth_redirect_uri,omitempty"`
+	OAuthClientSecret string            `json:"oauth_client_secret,omitempty"`
+	Status            string            `json:"status,omitempty"`
+	Metadata          map[string]string `json:"metadata,omitempty"`
 }
 
 // OAuthConnectionCreate supplies a complete official OAuth token envelope for
@@ -400,7 +404,7 @@ func encodeOAuthEnvelope(envelope OAuthTokenEnvelope) (string, error) {
 		AccountLabel: envelope.AccountLabel, ProjectID: envelope.ProjectID, Status: envelope.Status,
 		OAuthProfile: envelope.OAuthProfile, OAuthClientID: envelope.OAuthClientID,
 		OAuthClientMode: envelope.OAuthClientMode, OAuthRedirectURI: envelope.OAuthRedirectURI,
-		OAuthClientSecret: envelope.OAuthClientSecret,
+		OAuthClientSecret: envelope.OAuthClientSecret, Metadata: envelope.Metadata,
 	})
 	return string(raw), err
 }
@@ -418,7 +422,7 @@ func decodeOAuthEnvelope(raw string) (OAuthTokenEnvelope, error) {
 			AccountLabel: stored.AccountLabel, ProjectID: stored.ProjectID, Status: stored.Status,
 			OAuthProfile: stored.OAuthProfile, OAuthClientID: stored.OAuthClientID,
 			OAuthClientMode: stored.OAuthClientMode, OAuthRedirectURI: stored.OAuthRedirectURI,
-			OAuthClientSecret: stored.OAuthClientSecret,
+			OAuthClientSecret: stored.OAuthClientSecret, Metadata: stored.Metadata,
 		}, nil
 	}
 	// v7 copied pre-envelope OAuth credentials as their original raw token. Keep
