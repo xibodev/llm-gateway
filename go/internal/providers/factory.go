@@ -327,6 +327,11 @@ func resolveCredentialObserved(
 	return config.ResolveProviderAPIKey(providerID, cfg), CredentialKindAPIKey, nil, nil
 }
 
+// gcpTokens caches service-account access tokens for every Vertex provider.
+// Providers are rebuilt on each settings change and per principal, so the
+// cache lives here, where tokens outlive those rebuilds.
+var gcpTokens gcpauth.TokenCache
+
 // newVertexProvider builds the Vertex provider for whichever credential kind is
 // stored. An API key keeps the existing x-goog-api-key path untouched; a
 // service-account key is exchanged for a short-lived OAuth2 access token.
@@ -383,7 +388,7 @@ func newVertexProvider(
 		)}
 	}
 	tokenSource := func() (string, error) {
-		token, tokenErr := gcpauth.AccessToken(credential, gcpauth.CloudPlatformScope)
+		token, tokenErr := gcpTokens.AccessToken(credential, gcpauth.CloudPlatformScope)
 		if tokenErr != nil {
 			var exchangeErr *gcpauth.TokenError
 			if errors.As(tokenErr, &exchangeErr) {

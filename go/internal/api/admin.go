@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"os"
 	"strconv"
 	"strings"
 	"sync"
@@ -19,7 +18,6 @@ import (
 	"llmgw/internal/router"
 
 	anthropicauth "github.com/xibodev/llm-provider-auth/anthropic"
-	copilotauth "github.com/xibodev/llm-provider-auth/copilot"
 	gcpauth "github.com/xibodev/llm-provider-auth/gcp"
 )
 
@@ -29,14 +27,6 @@ func persist() {
 }
 
 var endpointMutationMu sync.Mutex
-
-func copilotEnabled() bool {
-	if config.Get().AllowCopilotProxy {
-		return true
-	}
-	v := strings.ToLower(strings.TrimSpace(os.Getenv("LLMGW_EXPERIMENTAL_COPILOT_PROVIDER")))
-	return v == "1" || v == "true" || v == "yes" || v == "on"
-}
 
 func adminAuthed(w http.ResponseWriter, r *http.Request) bool {
 	return requireAdmin(w, r)
@@ -322,7 +312,7 @@ func handleState(w http.ResponseWriter, r *http.Request) {
 			"overrides": s.Policies.ConfiguredOverrides(),
 		},
 		"savings": router.Totals(false),
-		"copilot": map[string]any{"enabled": copilotEnabled(), "auth": copilotauth.AuthStatus()},
+		"copilot": map[string]any{"enabled": providers.CopilotEnabled(), "auth": providers.CopilotAuth().AuthStatus()},
 	})
 }
 
@@ -1420,7 +1410,7 @@ func handleCopilotLoginStart(w http.ResponseWriter, r *http.Request) {
 	if !adminAuthed(w, r) {
 		return
 	}
-	dc, err := copilotauth.StartDeviceFlow()
+	dc, err := providers.CopilotAuth().StartDeviceFlow()
 	if err != nil {
 		writeJSON(w, 200, map[string]any{"error": oauthErrorText(err.Error())})
 		return
@@ -1439,7 +1429,7 @@ func handleCopilotLoginPoll(w http.ResponseWriter, r *http.Request) {
 		DeviceCode string `json:"device_code"`
 	}
 	_ = decodeBody(r, &body)
-	result := copilotauth.PollDeviceFlowOnce(body.DeviceCode)
+	result := providers.CopilotAuth().PollDeviceFlowOnce(body.DeviceCode)
 	status, _ := result["status"].(string)
 	detail, _ := result["error"].(string)
 	writeJSON(w, 200, safeOAuthPollResponse(status, detail))
@@ -1449,7 +1439,7 @@ func handleCopilotLogout(w http.ResponseWriter, r *http.Request) {
 	if !adminAuthed(w, r) {
 		return
 	}
-	writeJSON(w, 200, copilotauth.ClearCachedCredentials())
+	writeJSON(w, 200, providers.CopilotAuth().ClearCachedCredentials())
 }
 
 // ---- helpers ------------------------------------------------------------ //

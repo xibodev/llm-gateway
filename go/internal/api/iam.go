@@ -7,8 +7,6 @@ import (
 	"llmgw/internal/config"
 	"llmgw/internal/iam"
 	"llmgw/internal/providers"
-
-	copilotauth "github.com/xibodev/llm-provider-auth/copilot"
 )
 
 type principalBody struct {
@@ -248,7 +246,7 @@ func handleImportSharedProviderCredential(w http.ResponseWriter, r *http.Request
 		writeError(w, 400, "source must be 'configured'")
 		return
 	}
-	secret, err := copilotauth.ResolveOAuthToken()
+	secret, err := providers.CopilotAuth().ResolveOAuthToken()
 	if err != nil {
 		writeError(w, 400, "configured provider credential is unavailable")
 		return
@@ -405,7 +403,7 @@ func handlePrincipalCopilotLoginStart(w http.ResponseWriter, r *http.Request) {
 		writeError(w, 400, "Copilot BYOC requires a human principal.")
 		return
 	}
-	dc, err := copilotauth.StartDeviceFlow()
+	dc, err := providers.CopilotAuth().StartDeviceFlow()
 	if err != nil {
 		writeError(w, 502, oauthErrorText(err.Error()))
 		return
@@ -442,7 +440,7 @@ func handlePrincipalCopilotLoginPoll(w http.ResponseWriter, r *http.Request) {
 		writeError(w, 400, "device_code required")
 		return
 	}
-	result := copilotauth.PollDeviceFlowTokenOnce(body.DeviceCode)
+	result := providers.CopilotAuth().PollDeviceFlowTokenOnce(body.DeviceCode)
 	if result.Status == "authorized" {
 		if _, err := iam.PutOAuthProviderConnection(iam.OAuthConnectionCreate{
 			PrincipalID: principalID, ProviderID: "copilot", Kind: "github_oauth",

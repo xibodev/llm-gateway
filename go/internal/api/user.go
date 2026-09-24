@@ -10,8 +10,6 @@ import (
 	"llmgw/internal/config"
 	"llmgw/internal/iam"
 	"llmgw/internal/providers"
-
-	copilotauth "github.com/xibodev/llm-provider-auth/copilot"
 )
 
 func handleUserMe(w http.ResponseWriter, r *http.Request) {
@@ -333,7 +331,7 @@ func handleUserCopilotLoginStart(w http.ResponseWriter, r *http.Request) {
 	if _, ok := requireSSOUser(w, r); !ok {
 		return
 	}
-	dc, err := copilotauth.StartDeviceFlow()
+	dc, err := providers.CopilotAuth().StartDeviceFlow()
 	if err != nil {
 		writeError(w, 502, oauthErrorText(err.Error()))
 		return
@@ -357,7 +355,7 @@ func handleUserCopilotLoginPoll(w http.ResponseWriter, r *http.Request) {
 		writeError(w, 400, "device_code required")
 		return
 	}
-	result := copilotauth.PollDeviceFlowTokenOnce(body.DeviceCode)
+	result := providers.CopilotAuth().PollDeviceFlowTokenOnce(body.DeviceCode)
 	if result.Status == "authorized" {
 		if _, err := iam.PutOAuthProviderConnection(iam.OAuthConnectionCreate{
 			PrincipalID: principal.ID, ProviderID: "copilot", Kind: "github_oauth",

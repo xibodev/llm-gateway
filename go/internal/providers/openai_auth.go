@@ -12,13 +12,6 @@ import (
 	corezen "github.com/xibodev/llmgw-core/providers/zen"
 )
 
-func init() {
-	copilotauth.CacheDirFunc = func() string { return config.Get().GithubCopilotCacheDir }
-	copilotauth.OAuthTokenFunc = func() string { return config.Get().GithubCopilotOAuthToken }
-	copilotauth.UseGhCLIFunc = func() bool { return config.Get().GithubCopilotUseGhCLI }
-	copilotauth.AllowProxyFunc = func() bool { return config.Get().AllowCopilotProxy }
-}
-
 // OpenAIAuth decouples authentication from the OpenAI wire transport. It
 // resolves the base URL + request headers for a call and can refresh
 // credentials after a 401. This is why one transport (OpenAIProvider) serves
@@ -56,7 +49,7 @@ func copilotInvocationError(err error) error {
 	if err == nil || IsInvocation(err) || IsConfig(err) {
 		return err
 	}
-	message := "github_copilot: " + err.Error()
+	message := "github_copilot: " + err.Error() + copilotGuidance(err)
 	var authErr *copilotauth.AuthError
 	if errors.As(err, &authErr) {
 		if authErr.Transport {
@@ -157,8 +150,8 @@ func (a copilotAuth) Prepare() (string, http.Header, error) {
 func (a copilotAuth) PrepareObserved() (
 	string, http.Header, *iam.ProviderAccountObservation, error,
 ) {
-	if err := copilotauth.AssertProxyAllowed(); err != nil {
-		return "", nil, nil, invocation("github_copilot: " + err.Error())
+	if err := copilotClient.AssertProxyAllowed(); err != nil {
+		return "", nil, nil, invocation("github_copilot: " + err.Error() + copilotGuidance(err))
 	}
 	s, observation, err := a.session(false)
 	if err != nil {
@@ -188,7 +181,7 @@ func (a copilotAuth) session(
 	force bool,
 ) (*copilotauth.Session, *iam.ProviderAccountObservation, error) {
 	if a.principal == nil || a.principal.PrincipalID == "" {
-		session, err := copilotauth.GetSession(force)
+		session, err := copilotClient.GetSession(force)
 		return session, nil, err
 	}
 	oauth, observation, ok, err := iam.ResolveProviderOAuthCredentialSecretWithObservation(
@@ -200,7 +193,7 @@ func (a copilotAuth) session(
 	if !ok {
 		return nil, observation, &ConfigError{Msg: "github_copilot: this principal has no active Copilot credential"}
 	}
-	session, err := copilotauth.GetSessionForOAuth(oauth, force)
+	session, err := copilotClient.GetSessionForOAuth(oauth, force)
 	if err != nil {
 		return nil, observation, copilotInvocationError(err)
 	}

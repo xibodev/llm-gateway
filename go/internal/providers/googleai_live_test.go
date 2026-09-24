@@ -30,7 +30,7 @@ func TestLiveVertexServiceAccountCall(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Parse: %v", err)
 	}
-	token, err := gcpauth.AccessToken(credential, gcpauth.CloudPlatformScope)
+	token, err := (&gcpauth.TokenCache{}).AccessToken(credential, gcpauth.CloudPlatformScope)
 	if err != nil {
 		t.Fatalf("AccessToken: %v", err)
 	}

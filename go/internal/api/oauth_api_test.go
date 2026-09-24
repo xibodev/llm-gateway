@@ -439,9 +439,9 @@ func TestOAuthHandlersSanitizeMaliciousPollDiagnostics(t *testing.T) {
 		_, _ = fmt.Fprintf(w, `{"error":%q}`, secret+" Bearer top-secret user@example.test?token=query-secret "+strings.Repeat("界", 400))
 	}))
 	defer mock.Close()
-	oldDevice, oldToken := copilotauth.DeviceCodeURL, copilotauth.AccessTokenURL
-	copilotauth.DeviceCodeURL, copilotauth.AccessTokenURL = mock.URL+"/device", mock.URL+"/token"
-	t.Cleanup(func() { copilotauth.DeviceCodeURL, copilotauth.AccessTokenURL = oldDevice, oldToken })
+	t.Cleanup(providers.SetCopilotEndpointsForTests(copilotauth.Endpoints{
+		DeviceCodeURL: mock.URL + "/device", AccessTokenURL: mock.URL + "/token",
+	}))
 
 	oldSettings := *config.Get()
 	t.Cleanup(func() { config.Update(func(settings *config.Settings) { *settings = oldSettings }) })
@@ -520,9 +520,7 @@ func TestLegacyAdminCopilotPollPersistsAuthorizedTokenWithoutProjectingIt(t *tes
 		_, _ = w.Write([]byte(`{"access_token":"authorized-cache-token"}`))
 	}))
 	defer mock.Close()
-	oldTokenURL := copilotauth.AccessTokenURL
-	copilotauth.AccessTokenURL = mock.URL
-	t.Cleanup(func() { copilotauth.AccessTokenURL = oldTokenURL })
+	t.Cleanup(providers.SetCopilotEndpointsForTests(copilotauth.Endpoints{AccessTokenURL: mock.URL}))
 
 	oldSettings := *config.Get()
 	t.Cleanup(func() { config.Update(func(settings *config.Settings) { *settings = oldSettings }) })
@@ -546,11 +544,11 @@ func TestLegacyAdminCopilotPollPersistsAuthorizedTokenWithoutProjectingIt(t *tes
 	if strings.Contains(string(encoded), "authorized-cache-token") || response["access_token"] != nil || response["refresh_token"] != nil || response["id_token"] != nil {
 		t.Fatalf("authorized poll projected a token: %s", encoded)
 	}
-	authStatus := copilotauth.AuthStatus()
+	authStatus := providers.CopilotAuth().AuthStatus()
 	if authStatus["active_source"] != "cache" || authStatus["cache_present"] != true {
 		t.Fatalf("authorized poll did not authenticate from cache: %+v", authStatus)
 	}
-	resolved, err := copilotauth.ResolveOAuthToken()
+	resolved, err := providers.CopilotAuth().ResolveOAuthToken()
 	if err != nil || resolved != "authorized-cache-token" {
 		t.Fatalf("persisted token resolution token=%q err=%v", resolved, err)
 	}
@@ -612,13 +610,11 @@ func TestUserOAuthDeviceFlowUsesMockedEndpointsAndNeverReturnsTokens(t *testing.
 	}))
 	defer mock.Close()
 	mockURL = mock.URL
-	oldDevice, oldAccess, oldSession := copilotauth.DeviceCodeURL, copilotauth.AccessTokenURL, copilotauth.SessionTokenURL
-	copilotauth.DeviceCodeURL = mock.URL + "/device"
-	copilotauth.AccessTokenURL = mock.URL + "/token"
-	copilotauth.SessionTokenURL = mock.URL + "/session"
-	t.Cleanup(func() {
-		copilotauth.DeviceCodeURL, copilotauth.AccessTokenURL, copilotauth.SessionTokenURL = oldDevice, oldAccess, oldSession
-	})
+	t.Cleanup(providers.SetCopilotEndpointsForTests(copilotauth.Endpoints{
+		DeviceCodeURL:   mock.URL + "/device",
+		AccessTokenURL:  mock.URL + "/token",
+		SessionTokenURL: mock.URL + "/session",
+	}))
 
 	oldSSOEnabled := config.Get().SSOEnabled
 	oldSSOSecret := config.Get().SSOSharedSecret

@@ -17,7 +17,6 @@ import (
 	antigravityauth "github.com/xibodev/llm-provider-auth/antigravity"
 	browseroauth "github.com/xibodev/llm-provider-auth/browseroauth"
 	codexauth "github.com/xibodev/llm-provider-auth/codex"
-	copilotauth "github.com/xibodev/llm-provider-auth/copilot"
 )
 
 const (
@@ -241,7 +240,7 @@ func (githubCopilotAuthAdapter) Capabilities() ProviderAuthCapabilities {
 	return ProviderAuthCapabilities{DeviceCode: true, Refresh: true}
 }
 func (githubCopilotAuthAdapter) StartDevice(context.Context) (ProviderAuthStart, error) {
-	device, err := copilotauth.StartDeviceFlow()
+	device, err := copilotClient.StartDeviceFlow()
 	if err != nil {
 		return ProviderAuthStart{}, err
 	}
@@ -253,7 +252,7 @@ func (githubCopilotAuthAdapter) StartDevice(context.Context) (ProviderAuthStart,
 func (githubCopilotAuthAdapter) PollDevice(
 	_ context.Context, deviceCode, _ string,
 ) ProviderAuthPoll {
-	result := copilotauth.PollDeviceFlowTokenOnce(deviceCode)
+	result := copilotClient.PollDeviceFlowTokenOnce(deviceCode)
 	return SafeProviderAuthPoll(ProviderAuthPoll{
 		Status: result.Status, Error: result.Error, AccessToken: result.AccessToken,
 	})
@@ -261,7 +260,7 @@ func (githubCopilotAuthAdapter) PollDevice(
 func (githubCopilotAuthAdapter) Refresh(
 	_ context.Context, envelope iam.OAuthTokenEnvelope,
 ) (ProviderAuthRefresh, error) {
-	session, err := copilotauth.GetSessionForOAuth(envelope.AccessToken, true)
+	session, err := copilotClient.GetSessionForOAuth(envelope.AccessToken, true)
 	if err != nil {
 		return ProviderAuthRefresh{}, err
 	}
