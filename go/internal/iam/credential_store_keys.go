@@ -36,7 +36,7 @@ const readOnlyCredentialRevision = "0"
 // ErrReadOnlyCredential reports a write to a reserved, read-only key.
 var ErrReadOnlyCredential = errors.New("credential is read-only in the credential store")
 
-var _ tokenstore.Store = (*CredentialStore)(nil)
+var _ core.CredentialStore = (*CredentialStore)(nil)
 
 func readOnlyCredentialKey(key string) bool {
 	return strings.HasPrefix(key, ProviderCredentialKeyPrefix) ||

@@ -30,18 +30,29 @@ type CredentialStoreOptions struct {
 	// Now returns the current time. Nil uses time.Now. Lease expiry is
 	// computed from it, so separately opened stores must agree on it.
 	Now func() time.Time
+	// Precedence selects the resolution order of a provider instance, which
+	// the gateway chooses by provider type. Nil resolves every instance with
+	// ConnectionPrecedence.
+	Precedence func(instance string) CredentialPrecedence
 }
 
 // CredentialStore exposes the encrypted provider connections as the
 // llm-provider-auth token store and the llmgw-core credential store.
 //
+// A key is the provider connection ID the gateway already reports as
+// ProviderAccountObservation.ConnectionID, and a revision is that
+// connection's credential_revision as a decimal string. Credentials outside
+// provider_connections use the reserved, read-only key namespaces
+// ProviderCredentialKeyPrefix and ConfiguredCredentialKeyPrefix.
+//
 // The store keeps no transaction open across a refresh. Refreshes of one key
 // are serialized by a lease row with a random holder and an expiry, so every
 // process sharing the database is excluded.
 type CredentialStore struct {
-	db       *sql.DB
-	leaseTTL time.Duration
-	now      func() time.Time
+	db         *sql.DB
+	leaseTTL   time.Duration
+	now        func() time.Time
+	precedence func(instance string) CredentialPrecedence
 }
 
 // NewCredentialStore returns a store over db, normally the handle DB returns.
@@ -52,7 +63,9 @@ func NewCredentialStore(db *sql.DB, options CredentialStoreOptions) (*Credential
 	if options.LeaseTTL < 0 {
 		return nil, errors.New("credential lease TTL must not be negative")
 	}
-	store := &CredentialStore{db: db, leaseTTL: options.LeaseTTL, now: options.Now}
+	store := &CredentialStore{
+		db: db, leaseTTL: options.LeaseTTL, now: options.Now, precedence: options.Precedence,
+	}
 	if store.leaseTTL == 0 {
 		store.leaseTTL = DefaultCredentialLeaseTTL
 	}
