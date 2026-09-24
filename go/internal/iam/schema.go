@@ -527,6 +527,16 @@ CREATE TABLE oauth_client_profiles (
 );
 `,
 	},
+	{
+		version: 20,
+		sql: `
+CREATE TABLE credential_leases (
+    key TEXT PRIMARY KEY,
+    holder TEXT NOT NULL,
+    expires_at_ns INTEGER NOT NULL
+);
+`,
+	},
 }
 
 func SchemaVersion() int { return len(migrations) }

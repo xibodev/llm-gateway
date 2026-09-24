@@ -35,6 +35,19 @@ func DB() (*sql.DB, error) {
 		_ = storeDB.Close()
 		storeDB = nil
 	}
+	db, err := openDB(path)
+	if err != nil {
+		return nil, err
+	}
+	storeDB = db
+	storePath = path
+	return storeDB, nil
+}
+
+// openDB opens and migrates one handle on the database at path. DB caches a
+// single handle per state directory; tests open more, the way separate
+// processes would, to prove cross-process guarantees such as credential leases.
+func openDB(path string) (*sql.DB, error) {
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return nil, fmt.Errorf("create IAM state directory: %w", err)
 	}
@@ -63,9 +76,7 @@ func DB() (*sql.DB, error) {
 		return nil, err
 	}
 	_ = os.Chmod(path, 0o600)
-	storeDB = db
-	storePath = path
-	return storeDB, nil
+	return db, nil
 }
 
 // ResetForTests closes the cached database handle.
