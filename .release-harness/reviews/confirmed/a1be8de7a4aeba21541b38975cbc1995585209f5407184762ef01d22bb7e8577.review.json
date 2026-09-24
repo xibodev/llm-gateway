@@ -1,0 +1,113 @@
+{
+  "schema_version": "1.0.0",
+  "mode": "change",
+  "contract": {
+    "digest": "31b393ab3e80162226619c441694573993ac618382d74642101484a0bf2e9c80"
+  },
+  "authoring_provenance": {
+    "status": "established",
+    "path": ".release-harness/drafts/llm-gateway.record.json",
+    "digest": "6732ddf3dc8236b974e2aae5f81b546d89c2a466b6fb0a368d76620955bf981e"
+  },
+  "sources": [
+    {
+      "source_id": "primary",
+      "status": "established",
+      "repository_identity": "https://github.com/xibodev/llm-gateway.git",
+      "base_ref": "origin/main",
+      "base_commit": "95559100d97bc4810d3c55f28f817923622c3979",
+      "merge_base": "31c1e7b73a3814b82a4e87af86cc35122764f398",
+      "head_commit": "3373d3bebf1af1a367a0ce3deaf2302ff4829b4d",
+      "head_tree": "9ed0a11e1e494f48ab996a38e62ceed8476397a7",
+      "reviewed_source_digest": "fdcf2d3f265f6bfbf659b7fa94ba2dbee3e026779c0287eb76a6a3e77b92e9ec",
+      "changed_paths": [
+        {
+          "status": "modified",
+          "path": "go/go.mod",
+          "old_blob": "e3f8e10f45c3b2112ed6f054b2ea5cc8bf5baf9a",
+          "new_blob": "f975b4014b27015a1be0a8d4a427f6580cfdaf68"
+        },
+        {
+          "status": "modified",
+          "path": "go/go.sum",
+          "old_blob": "994eea289e4680062688a1579a02e15e3e860a8c",
+          "new_blob": "c621db20dc1bc59af13cf7e1bb1e574ecf259d75"
+        }
+      ]
+    }
+  ],
+  "facts": [
+    {
+      "id": "core-v090-dependency",
+      "claim": "go.mod pins github.com/xibodev/llmgw-core v0.9.0 instead of v0.8.0; the gateway source is unchanged.",
+      "status": "observed",
+      "evidence": {
+        "source": "go/go.mod; go/go.sum"
+      }
+    },
+    {
+      "id": "core-v090-additive",
+      "claim": "v0.9.0 adds new contract, store, runtime and translation packages the gateway does not import, and fixes zen admission to give each request its own compatibility tool definitions with identical output.",
+      "status": "observed",
+      "evidence": {
+        "source": "llmgw-core v0.9.0 release notes and pull requests 10 to 13"
+      }
+    },
+    {
+      "id": "core-v090-gates-pass",
+      "claim": "gofmt, go build, go vet, the full Go test suite behind an unreachable proxy, govulncheck and documentation checks pass with the workspace disabled.",
+      "status": "observed",
+      "evidence": {
+        "source": "local release gates with GOWORK=off"
+      }
+    }
+  ],
+  "impact": {
+    "assertions": [
+      {
+        "id": "A1",
+        "impact": "unchanged",
+        "supported_by": [
+          "core-v090-additive",
+          "core-v090-gates-pass"
+        ]
+      },
+      {
+        "id": "A2",
+        "impact": "unchanged",
+        "supported_by": [
+          "core-v090-additive",
+          "core-v090-gates-pass"
+        ]
+      },
+      {
+        "id": "A3",
+        "impact": "unchanged",
+        "supported_by": [
+          "core-v090-additive",
+          "core-v090-gates-pass"
+        ]
+      },
+      {
+        "id": "A4",
+        "impact": "unchanged",
+        "supported_by": [
+          "core-v090-additive",
+          "core-v090-gates-pass"
+        ]
+      }
+    ],
+    "requires": [],
+    "possible_binding_changes": []
+  },
+  "questions": [],
+  "conclusion": {
+    "action": "reuse_contract",
+    "summary": "A dependency bump to additive core contracts and a zen aliasing fix with identical output; release identity, health and model-list behavior are unchanged."
+  },
+  "proposed": {
+    "by": "modularization-m2-core",
+    "at": "2026-09-24T21:46:32.63Z"
+  },
+  "digest": "a1be8de7a4aeba21541b38975cbc1995585209f5407184762ef01d22bb7e8577"
+}
