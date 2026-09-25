@@ -25,6 +25,10 @@ type RegistryEntry = coreproviders.RegistryEntry
 // ProviderRegistry returns copies so callers cannot mutate registry metadata.
 func ProviderRegistry() []RegistryEntry { return providerRegistry.Entries() }
 
+// EffectiveRegistry returns the effective registry itself, for the llmgw-core
+// APIs that vet against one. A Registry is immutable, so sharing it is safe.
+func EffectiveRegistry() *coreproviders.Registry { return providerRegistry }
+
 // RegistryProvider resolves a curated provider integration by id or alias.
 func RegistryProvider(id string) (RegistryEntry, bool) { return providerRegistry.Lookup(id) }
 
