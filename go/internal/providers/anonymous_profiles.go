@@ -38,15 +38,15 @@ func (p OpenAIProvider) chatURL(base string) string {
 	return strings.TrimRight(base, "/") + "/chat/completions"
 }
 
-func (p OpenAIProvider) modelsURL(base string) string {
+func (c openAICatalog) modelsURL(base string) string {
 	return strings.TrimRight(base, "/") + "/models"
 }
 
-func (p OpenAIProvider) normalizeAnonymousCatalog(rows []ModelInfo, items []any) ([]ModelInfo, error) {
-	if !p.anonymous {
+func (c openAICatalog) normalizeAnonymousCatalog(rows []ModelInfo, items []any) ([]ModelInfo, error) {
+	if !c.anonymous {
 		return rows, nil
 	}
-	switch p.registryID {
+	switch c.registryID {
 	case "kilo_code", "llm7", "ovh_ai_endpoints":
 	default:
 		return rows, nil
@@ -62,7 +62,7 @@ func (p OpenAIProvider) normalizeAnonymousCatalog(rows []ModelInfo, items []any)
 	}
 	out := make([]ModelInfo, 0, len(rows))
 	for _, row := range rows {
-		admission := coreproviders.AdmitAnonymousModel(p.registryID, byID[row.ID])
+		admission := coreproviders.AdmitAnonymousModel(c.registryID, byID[row.ID])
 		if !admission.Free {
 			continue
 		}

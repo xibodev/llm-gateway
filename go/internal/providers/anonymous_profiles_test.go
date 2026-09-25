@@ -44,8 +44,8 @@ func TestAnonymousCatalogProfilesFilterClaimedModels(t *testing.T) {
 		}, "free"},
 	} {
 		t.Run(testCase.registry, func(t *testing.T) {
-			provider := OpenAIProvider{registryID: testCase.registry, anonymous: true}
-			got, err := provider.normalizeAnonymousCatalog(rows, testCase.items)
+			catalog := openAICatalog{registryID: testCase.registry, anonymous: true}
+			got, err := catalog.normalizeAnonymousCatalog(rows, testCase.items)
 			if err != nil || len(got) != 1 || got[0].ID != testCase.want || !got[0].Free {
 				t.Fatalf("rows=%+v err=%v", got, err)
 			}
@@ -55,9 +55,10 @@ func TestAnonymousCatalogProfilesFilterClaimedModels(t *testing.T) {
 
 func TestPollinationsProfileUsesDistinctPathsAndArrayCatalog(t *testing.T) {
 	provider := OpenAIProvider{registryID: "pollinations", anonymous: true}
-	if provider.modelsURL("https://text.pollinations.ai") != "https://text.pollinations.ai/models" ||
+	catalog := openAICatalog{registryID: "pollinations", anonymous: true}
+	if catalog.modelsURL("https://text.pollinations.ai") != "https://text.pollinations.ai/models" ||
 		provider.chatURL("https://text.pollinations.ai") != "https://text.pollinations.ai/v1/chat/completions" {
-		t.Fatalf("models=%q chat=%q", provider.modelsURL("https://text.pollinations.ai"), provider.chatURL("https://text.pollinations.ai"))
+		t.Fatalf("models=%q chat=%q", catalog.modelsURL("https://text.pollinations.ai"), provider.chatURL("https://text.pollinations.ai"))
 	}
 	response := &http.Response{
 		StatusCode: http.StatusOK,

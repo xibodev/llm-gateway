@@ -124,8 +124,8 @@ func (p *zenProvider) ListModelsWithError() ([]ModelInfo, *CredentialObservation
 		models, err := anonymousZenModels(base, p.metadataURL, p.timeout)
 		return models, nil, err
 	}
-	catalog := OpenAIProvider{auth: bearerAuth{base: base, apiKey: p.apiKey, observation: p.observation}, Timeout: p.timeout}
-	return catalog.ListModelsWithError()
+	catalog := openAICatalog{base: base, header: openAIHeader(p.apiKey), observation: p.observation, timeout: p.timeout}
+	return catalog.list()
 }
 
 // httpTarget is where the gateway proxies a Zen instance's other endpoints,

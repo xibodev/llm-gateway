@@ -223,12 +223,40 @@ func (p OpenAIProvider) ListModelsWithError() (
 			0,
 		)
 	}
-	timeout := p.Timeout
+	catalog := openAICatalog{
+		base: base, header: headers, observation: observation, timeout: p.Timeout,
+		registryID: p.registryID, anonymous: p.anonymous,
+	}
+	return catalog.list()
+}
+
+// openAICatalog is an OpenAI-wire catalog the gateway lists on its own path:
+// GET /models at base with header, read into the rows /v1/models presents,
+// with the untyped capabilities a row reports. It lists the catalogs of the
+// OpenAI-compatible and Bedrock instances, of OpenCode Zen with a key and of
+// GitHub Copilot, each with the credential its facade resolved, whose
+// observation it reports. registryID and anonymous select the anonymous
+// registry entries' rows and Pollinations' array.
+type openAICatalog struct {
+	base        string
+	header      http.Header
+	observation *CredentialObservation
+	// timeout bounds a request, at ten seconds at most; zero never times out.
+	timeout    float64
+	registryID string
+	anonymous  bool
+}
+
+func (c openAICatalog) list() ([]ModelInfo, *CredentialObservation, error) {
+	observation := c.observation
+	timeout := c.timeout
 	if timeout > 10 {
 		timeout = 10
 	}
-	req, _ := http.NewRequest("GET", p.modelsURL(base), nil)
-	req.Header = headers
+	req, _ := http.NewRequest("GET", c.modelsURL(c.base), nil)
+	if c.header != nil {
+		req.Header = c.header.Clone()
+	}
 	resp, err := httpClient(timeout).Do(req)
 	if err != nil {
 		return nil, observation, catalogError(
@@ -245,8 +273,8 @@ func (p OpenAIProvider) ListModelsWithError() (
 			resp.StatusCode,
 		)
 	}
-	if p.registryID == "pollinations" {
-		rows, decodeErr := decodePollinationsCatalog(resp, p.anonymous)
+	if c.registryID == "pollinations" {
+		rows, decodeErr := decodePollinationsCatalog(resp, c.anonymous)
 		return rows, observation, decodeErr
 	}
 	body, err := decodeCatalogResponse(resp, "data", "id", "name")
@@ -283,8 +311,8 @@ func (p OpenAIProvider) ListModelsWithError() (
 		}
 		out = append(out, row)
 	}
-	if p.anonymous {
-		out, err = p.normalizeAnonymousCatalog(out, items)
+	if c.anonymous {
+		out, err = c.normalizeAnonymousCatalog(out, items)
 		if err != nil {
 			return nil, observation, err
 		}

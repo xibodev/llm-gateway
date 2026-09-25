@@ -10,8 +10,8 @@ import (
 // transport (OpenAIProvider) serves every OpenAI-compatible backend —
 // openai_compatible, bedrock, litellm — which differ ONLY in how a request is
 // authenticated + where it points. GitHub Copilot, whose session a 401 could
-// replace, is served by llmgw-core's Copilot vertical, and its catalog reaches
-// the transport with a session already exchanged (see copilotTarget).
+// replace, is served by llmgw-core's Copilot vertical, and lists its catalog
+// with a session already exchanged (see copilotTarget).
 type OpenAIAuth interface {
 	// Prepare resolves the base URL and headers for a request.
 	Prepare() (baseURL string, headers http.Header, err error)
@@ -61,12 +61,19 @@ func AnonymousAPIKey(value string) bool {
 }
 
 func (a bearerAuth) Prepare() (string, http.Header, error) {
+	return a.base, openAIHeader(a.apiKey), nil
+}
+
+// openAIHeader is what the gateway sends an OpenAI-compatible upstream it
+// calls on its own path, its catalog and the endpoints it proxies: JSON,
+// and the key as the bearer unless it normalizes to none.
+func openAIHeader(apiKey string) http.Header {
 	h := http.Header{}
 	h.Set("Content-Type", "application/json")
-	if key := normalizeBearerKey(a.apiKey); key != "" {
+	if key := normalizeBearerKey(apiKey); key != "" {
 		h.Set("Authorization", "Bearer "+key)
 	}
-	return a.base, h, nil
+	return h
 }
 
 func (a bearerAuth) PrepareObserved() (

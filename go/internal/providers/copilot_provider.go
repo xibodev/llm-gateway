@@ -177,7 +177,7 @@ func (p *copilotProvider) ListModelsWithError() ([]ModelInfo, *CredentialObserva
 			"catalog_authentication_failed", "Provider authentication failed before catalog access.", 0,
 		)
 	}
-	models, observation, err := OpenAIProvider{auth: target, Timeout: p.timeout}.ListModelsWithError()
+	models, observation, err := target.catalog(p.timeout).list()
 	if code, _, status := CatalogFailure(err); code != "catalog_http_error" || status != http.StatusUnauthorized {
 		return models, observation, err
 	}
@@ -186,7 +186,7 @@ func (p *copilotProvider) ListModelsWithError() ([]ModelInfo, *CredentialObserva
 			"catalog_refresh_failed", "Provider credential refresh failed.", http.StatusUnauthorized,
 		)
 	}
-	models, observation, err = OpenAIProvider{auth: target, Timeout: p.timeout}.ListModelsWithError()
+	models, observation, err = target.catalog(p.timeout).list()
 	if code, _, _ := CatalogFailure(err); code == "catalog_transport_error" {
 		err = catalogError(
 			"catalog_transport_error", "Provider catalog retry could not reach the upstream service.", 0,
@@ -211,11 +211,10 @@ type copilotTarget struct {
 	observation *CredentialObservation
 }
 
-// Prepare and PrepareObserved implement OpenAIAuth for the catalog.
-func (t copilotTarget) Prepare() (string, http.Header, error) { return t.base, t.headers.Clone(), nil }
-
-func (t copilotTarget) PrepareObserved() (string, http.Header, *CredentialObservation, error) {
-	return t.base, t.headers.Clone(), t.observation, nil
+// catalog is the session's catalog, whose requests time out after timeout
+// seconds, at ten at most.
+func (t copilotTarget) catalog(timeout float64) openAICatalog {
+	return openAICatalog{base: t.base, header: t.headers, observation: t.observation, timeout: timeout}
 }
 
 // target exchanges the caller's GitHub token, from Copilot's store as the
