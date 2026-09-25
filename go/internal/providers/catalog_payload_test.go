@@ -18,7 +18,7 @@ func TestCatalogPayloadValidationAndCache(t *testing.T) {
 	}{
 		{"anthropic", "data", "/v1/models", `{"id":"claude-fixture","display_name":"Fixture"}`, "id", `{"id":"claude-fixture","future":{"nested":[null,17]}}`,
 			func(base string) Provider {
-				return AnthropicNativeProvider{BaseURL: base, APIKey: "fixture-key", Timeout: 2}
+				return AnthropicNativeProvider{BaseURL: base, Auth: anthropicTestAuth(t, "fixture-key"), Timeout: 2}
 			}},
 		{"ollama", "models", "/api/tags", `{"model":"fixture-model","details":{"family":"fixture"}}`, "model", `{"name":"fixture-model:latest","future":[17]}`,
 			func(base string) Provider { return OllamaProvider{BaseURL: base, Timeout: 2} }},

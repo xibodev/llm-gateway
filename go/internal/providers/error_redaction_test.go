@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/base64"
 	"fmt"
+	"llmgw/internal/config"
 	"llmgw/internal/diagnostics"
 	"net/http"
 	"net/http/httptest"
@@ -152,32 +153,33 @@ func TestProviderNon2xxErrorsAreSanitizedAndKeepStatus(t *testing.T) {
 	defer server.Close()
 
 	messages := []Message{{"role": "user", "content": "hi"}}
-	cases := map[string]func() error{
-		"OpenAI-compatible completion": func() error {
+	two := 2.0
+	cases := map[string]func(*testing.T) error{
+		"OpenAI-compatible completion": func(*testing.T) error {
 			_, err := (OpenAIProvider{auth: bearerAuth{base: server.URL}, Timeout: 2}).Complete("model", messages, nil)
 			return err
 		},
-		"Azure completion": func() error {
+		"Azure completion": func(*testing.T) error {
 			_, err := (AzureOpenAIProvider{BaseURL: server.URL, Timeout: 2}).Complete("model", messages, nil)
 			return err
 		},
-		"Anthropic completion": func() error {
-			_, err := (AnthropicNativeProvider{BaseURL: server.URL, Timeout: 2}).Complete("model", messages, nil)
+		"Anthropic completion": func(t *testing.T) error {
+			_, err := anthropicFixture(t, &config.ProviderConfig{Type: "anthropic", BaseURL: server.URL, Timeout: &two}).Complete("model", messages, nil)
 			return err
 		},
-		"Anthropic stream setup": func() error {
-			_, err := (AnthropicNativeProvider{BaseURL: server.URL, Timeout: 2}).Stream("model", messages, nil)
+		"Anthropic stream setup": func(t *testing.T) error {
+			_, err := anthropicFixture(t, &config.ProviderConfig{Type: "anthropic", BaseURL: server.URL, Timeout: &two}).Stream("model", messages, nil)
 			return err
 		},
-		"Ollama completion": func() error {
+		"Ollama completion": func(*testing.T) error {
 			_, err := (OllamaProvider{BaseURL: server.URL, Timeout: 2}).Complete("model", messages, nil)
 			return err
 		},
-		"Ollama stream setup": func() error {
+		"Ollama stream setup": func(*testing.T) error {
 			_, err := (OllamaProvider{BaseURL: server.URL, Timeout: 2}).Stream("model", messages, nil)
 			return err
 		},
-		"Google completion": func() error {
+		"Google completion": func(*testing.T) error {
 			_, err := NewAIStudio(server.URL, "fixture", 2).Complete("model", messages, nil)
 			return err
 		},
@@ -185,7 +187,7 @@ func TestProviderNon2xxErrorsAreSanitizedAndKeepStatus(t *testing.T) {
 
 	for name, invoke := range cases {
 		t.Run(name, func(t *testing.T) {
-			err := invoke()
+			err := invoke(t)
 			if err == nil {
 				t.Fatal("non-2xx response returned no error")
 			}

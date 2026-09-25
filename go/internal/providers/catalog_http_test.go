@@ -62,7 +62,7 @@ func TestCatalogResponseSizeBoundaryAndCache(t *testing.T) {
 		new         func(string) Provider
 	}{
 		{"anthropic", `{"data":[{"id":"claude-fixture"}],"private":"fixture-secret"}`, catalogMaxResponseBytes, func(base string) Provider {
-			return AnthropicNativeProvider{BaseURL: base, APIKey: "fixture-key", Timeout: 5}
+			return AnthropicNativeProvider{BaseURL: base, Auth: anthropicTestAuth(t, "fixture-key"), Timeout: 5}
 		}},
 		{"openai", `{"data":[{"id":"fixture-model"}],"private":"fixture-secret"}`, catalogMaxResponseBytes, func(base string) Provider {
 			return OpenAIProvider{auth: catalogFixtureAuth{base: base}, Timeout: 5}

@@ -109,8 +109,11 @@ func (rt *Runtime) instantiate(
 		if err != nil {
 			return nil, err
 		}
+		// The core Runtime resolves each request's credential itself; the
+		// facade keeps the one resolved here for the catalog.
+		provider := AnthropicNativeProvider{BaseURL: cfg.BaseURL, Timeout: cfg.TimeoutOr(0), runtime: rt, instance: providerID, caller: caller}
 		if strings.TrimSpace(credential) == "" {
-			return AnthropicNativeProvider{BaseURL: cfg.BaseURL, Timeout: cfg.TimeoutOr(0)}, nil
+			return provider, nil
 		}
 		if kind != CredentialKindAPIKey && kind != string(anthropicauth.CredentialSetupToken) {
 			return nil, &ConfigError{Msg: fmt.Sprintf("provider '%s': connection kind %q is not usable for anthropic", providerID, kind)}
@@ -119,7 +122,8 @@ func (rt *Runtime) instantiate(
 		if err != nil {
 			return nil, &ConfigError{Msg: fmt.Sprintf("provider '%s': %v", providerID, err)}
 		}
-		return AnthropicNativeProvider{BaseURL: cfg.BaseURL, Auth: auth, Timeout: cfg.TimeoutOr(0)}, nil
+		provider.Auth = auth
+		return provider, nil
 	case "google_antigravity":
 		return rt.newAntigravityProvider(providerID, caller)
 	case "bedrock":

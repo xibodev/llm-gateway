@@ -1,6 +1,7 @@
 package providers
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -8,14 +9,81 @@ import (
 	"net/http/httptest"
 	"strconv"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	"llmgw/internal/config"
+	"llmgw/internal/iam"
 
 	anthropicauth "github.com/xibodev/llm-provider-auth/anthropic"
 	core "github.com/xibodev/llmgw-core"
 )
+
+const anthropicFixtureInstance = "anthropic-fixture"
+
+// anthropicFixture configures cfg as an Anthropic instance until the test
+// ends and returns the facade the provider factory builds for it, served by a
+// Runtime installed for the test. Without credential encryption the instance
+// resolves only its configured key.
+func anthropicFixture(t *testing.T, cfg *config.ProviderConfig) AnthropicNativeProvider {
+	t.Helper()
+	t.Setenv("LLMGW_STATE_DIR", t.TempDir())
+	iam.ResetForTests()
+	t.Cleanup(iam.ResetForTests)
+	runtime := InstallForTests(t)
+	oldKey, oldProviders := config.Get().CredentialEncryptionKey, config.Get().Providers
+	config.Update(func(s *config.Settings) {
+		s.CredentialEncryptionKey = ""
+		s.Providers = map[string]*config.ProviderConfig{anthropicFixtureInstance: cfg}
+	})
+	t.Cleanup(func() {
+		config.Update(func(s *config.Settings) { s.CredentialEncryptionKey, s.Providers = oldKey, oldProviders })
+	})
+	return anthropicFacade(t, runtime, gatewayCaller())
+}
+
+// anthropicFacade is the facade the provider factory builds for caller.
+func anthropicFacade(t *testing.T, runtime *Runtime, caller core.Caller) AnthropicNativeProvider {
+	t.Helper()
+	provider, err := runtime.instantiate(anthropicFixtureInstance, config.Get().Providers[anthropicFixtureInstance], caller)
+	if err != nil {
+		t.Fatal(err)
+	}
+	facade, ok := provider.(AnthropicNativeProvider)
+	if !ok {
+		t.Fatalf("provider=%T, want the Anthropic facade", provider)
+	}
+	return facade
+}
+
+// anthropicServer serves handler until the test ends and returns its URL.
+func anthropicServer(t *testing.T, handler http.HandlerFunc) string {
+	t.Helper()
+	server := httptest.NewServer(handler)
+	t.Cleanup(server.Close)
+	return server.URL
+}
+
+func anthropicTestAuth(t *testing.T, credential string) anthropicauth.HeaderSource {
+	t.Helper()
+	source, err := anthropicauth.NewHeaderSource(credential)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return source
+}
+
+func anthropicSetupToken() string { return anthropicauth.SetupTokenPrefix + strings.Repeat("a", 80) }
+
+// anthropicStreamFixture is a Messages stream that completes with "hello".
+const anthropicStreamFixture = "data: {\"type\":\"message_start\",\"message\":{\"id\":\"msg_1\",\"model\":\"model\",\"role\":\"assistant\",\"content\":[],\"usage\":{\"input_tokens\":2}}}\n\n" +
+	"data: {\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"text\",\"text\":\"\"}}\n\n" +
+	"data: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"text_delta\",\"text\":\"hello\"}}\n\n" +
+	"data: {\"type\":\"content_block_stop\",\"index\":0}\n\n" +
+	"data: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"end_turn\"},\"usage\":{\"output_tokens\":1}}\n\n" +
+	"data: {\"type\":\"message_stop\"}\n\n"
 
 func TestAnthropicDeclaresOnlyMessagesWireNative(t *testing.T) {
 	provider := AnthropicNativeProvider{}
@@ -28,7 +96,7 @@ func TestAnthropicDeclaresOnlyMessagesWireNative(t *testing.T) {
 }
 
 func TestAnthropicCredentialHeadersAcrossRequestSurfaces(t *testing.T) {
-	setupToken := anthropicauth.SetupTokenPrefix + strings.Repeat("a", 80)
+	setupToken := anthropicSetupToken()
 	for _, tc := range []struct {
 		name, credential, wantHeader, wantValue string
 		wantBeta                                bool
@@ -37,18 +105,14 @@ func TestAnthropicCredentialHeadersAcrossRequestSurfaces(t *testing.T) {
 		{name: "setup token", credential: setupToken, wantHeader: "Authorization", wantValue: "Bearer " + setupToken, wantBeta: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			source, err := anthropicauth.NewHeaderSource(tc.credential)
-			if err != nil {
-				t.Fatal(err)
-			}
-			calls := 0
-			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				calls++
+			var calls atomic.Int32
+			base := anthropicServer(t, func(w http.ResponseWriter, r *http.Request) {
+				calls.Add(1)
 				if got := r.Header.Get(tc.wantHeader); got != tc.wantValue {
-					t.Fatalf("%s=%q", tc.wantHeader, got)
+					t.Errorf("%s %s=%q", r.URL.Path, tc.wantHeader, got)
 				}
 				if got := strings.Contains(strings.Join(r.Header.Values("anthropic-beta"), ","), anthropicauth.OAuthBeta); got != tc.wantBeta {
-					t.Fatalf("oauth beta=%v", got)
+					t.Errorf("%s oauth beta=%v", r.URL.Path, got)
 				}
 				switch r.URL.Path {
 				case "/v1/models":
@@ -64,9 +128,8 @@ func TestAnthropicCredentialHeadersAcrossRequestSurfaces(t *testing.T) {
 						_, _ = w.Write([]byte(`{"content":[]}`))
 					}
 				}
-			}))
-			defer server.Close()
-			provider := AnthropicNativeProvider{BaseURL: server.URL, Auth: source}
+			})
+			provider := anthropicFixture(t, &config.ProviderConfig{Type: "anthropic", BaseURL: base, APIKey: tc.credential})
 			if _, err := provider.Complete("model", []Message{{"role": "user", "content": "hi"}}, nil); err != nil {
 				t.Fatal(err)
 			}
@@ -79,37 +142,111 @@ func TestAnthropicCredentialHeadersAcrossRequestSurfaces(t *testing.T) {
 			if _, _, err := provider.ListModelsWithError(); err != nil {
 				t.Fatal(err)
 			}
-			if calls != 4 {
-				t.Fatalf("calls=%d", calls)
+			if calls.Load() != 4 {
+				t.Fatalf("calls=%d", calls.Load())
 			}
 		})
 	}
 }
 
-func TestAnthropicSetupTokenCompleteAccumulatesNativeStream(t *testing.T) {
-	token := anthropicauth.SetupTokenPrefix + strings.Repeat("a", 80)
-	source, err := anthropicauth.NewHeaderSource(token)
+// Each request resolves its credential through Anthropic's store in the
+// provider factory's order: the caller's connection, the system connection,
+// the configured key, and without any the request is sent without one. A
+// stored setup token reaches core's Anthropic as a setup token, which it
+// sends as the OAuth bearer and assembles its completion from a stream.
+func TestAnthropicRequestsResolveTheFactoryPrecedence(t *testing.T) {
+	setupCodexProviderTest(t)
+	runtime := InstallForTests(t)
+	var mu sync.Mutex
+	last := ""
+	base := anthropicServer(t, func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		last = strings.TrimSpace(r.Header.Get("x-api-key") + " " + r.Header.Get("Authorization") + " " + strings.Join(r.Header.Values("anthropic-beta"), ","))
+		mu.Unlock()
+		if zenBody(t, r)["stream"] == true {
+			_, _ = fmt.Fprint(w, anthropicStreamFixture)
+			return
+		}
+		_, _ = fmt.Fprint(w, `{"content":[]}`)
+	})
+	cfg := &config.ProviderConfig{Type: "anthropic", BaseURL: base}
+	config.Update(func(s *config.Settings) {
+		s.Providers = map[string]*config.ProviderConfig{anthropicFixtureInstance: cfg}
+	})
+	human, err := iam.CreatePrincipal("human", "authentik:anthropic-owner", "", "Anthropic Owner")
 	if err != nil {
 		t.Fatal(err)
 	}
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		var request map[string]any
-		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
-			t.Fatal(err)
+	owner := core.Caller{ID: human.ID, Kind: core.CallerHuman}
+	send := func(provider AnthropicNativeProvider, want string) {
+		t.Helper()
+		_, err := provider.CompleteAnthropicMessages("claude-fixture", map[string]any{"messages": []any{}})
+		mu.Lock()
+		defer mu.Unlock()
+		if err != nil || last != want {
+			t.Fatalf("credential=%q err=%v, want %q", last, err, want)
 		}
-		if request["stream"] != true {
-			t.Fatalf("stream=%v", request["stream"])
+	}
+	expect := func(caller core.Caller, want string) AnthropicNativeProvider {
+		t.Helper()
+		provider := anthropicFacade(t, runtime, caller)
+		send(provider, want)
+		return provider
+	}
+
+	expect(owner, "")
+	config.Update(func(s *config.Settings) { s.Providers[anthropicFixtureInstance].APIKey = "configured-key" })
+	expect(owner, "configured-key")
+	token := anthropicSetupToken()
+	if _, err := iam.PutSystemProviderConnection(anthropicFixtureInstance, "setup_token", token); err != nil {
+		t.Fatal(err)
+	}
+	subscriber := "Bearer " + token + " " + anthropicauth.OAuthBeta
+	expect(owner, subscriber)
+	connection, err := iam.PutProviderConnection(iam.ProviderConnectionCreate{
+		PrincipalID: human.ID, ProviderID: anthropicFixtureInstance, Kind: "api_key", Secret: "personal-key", MakeDefault: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	personal := expect(owner, "personal-key")
+	expect(gatewayCaller(), subscriber)
+
+	// A request resolves its own credential, so one the connection no longer
+	// holds is never sent, whatever facade the cache still holds.
+	if err := iam.RevokeProviderConnection(human.ID, connection.ID); err != nil {
+		t.Fatal(err)
+	}
+	send(personal, subscriber)
+
+	// A connection of another kind is refused as the factory refused it.
+	oauth, err := iam.PutOAuthProviderConnection(iam.OAuthConnectionCreate{
+		PrincipalID: human.ID, ProviderID: anthropicFixtureInstance, Kind: "openai_codex_oauth", MakeDefault: true,
+		AccessToken: "oauth-access", ExpiresAt: time.Now().Add(time.Hour).Unix(),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := runtime.instantiate(anthropicFixtureInstance, cfg, owner); !IsConfig(err) {
+		t.Fatalf("an OAuth connection built an Anthropic facade: err=%v", err)
+	}
+	if _, err := runtime.verticals[anthropicCoreType].credentials.Load(context.Background(), oauth.ID); !IsConfig(err) {
+		t.Fatalf("Anthropic's store loaded an OAuth connection: err=%v", err)
+	}
+	if _, err := personal.CompleteAnthropicMessages("claude-fixture", map[string]any{"messages": []any{}}); !IsConfig(err) {
+		t.Fatalf("a request was sent with an OAuth connection: err=%v", err)
+	}
+}
+
+func TestAnthropicSetupTokenCompleteAccumulatesNativeStream(t *testing.T) {
+	base := anthropicServer(t, func(w http.ResponseWriter, r *http.Request) {
+		if request := zenBody(t, r); request["stream"] != true {
+			t.Errorf("stream=%v", request["stream"])
 		}
 		w.Header().Set("Content-Type", "text/event-stream")
-		_, _ = fmt.Fprint(w, "data: {\"type\":\"message_start\",\"message\":{\"id\":\"msg_1\",\"model\":\"model\",\"role\":\"assistant\",\"content\":[],\"usage\":{\"input_tokens\":2}}}\n\n")
-		_, _ = fmt.Fprint(w, "data: {\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"text\",\"text\":\"\"}}\n\n")
-		_, _ = fmt.Fprint(w, "data: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"text_delta\",\"text\":\"hello\"}}\n\n")
-		_, _ = fmt.Fprint(w, "data: {\"type\":\"content_block_stop\",\"index\":0}\n\n")
-		_, _ = fmt.Fprint(w, "data: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"end_turn\"},\"usage\":{\"output_tokens\":1}}\n\n")
-		_, _ = fmt.Fprint(w, "data: {\"type\":\"message_stop\"}\n\n")
-	}))
-	defer server.Close()
-	provider := AnthropicNativeProvider{BaseURL: server.URL, Auth: source}
+		_, _ = fmt.Fprint(w, anthropicStreamFixture)
+	})
+	provider := anthropicFixture(t, &config.ProviderConfig{Type: "anthropic", BaseURL: base, APIKey: anthropicSetupToken()})
 	response, err := provider.Complete("model", []Message{{"role": "user", "content": "hi"}}, nil)
 	if err != nil {
 		t.Fatal(err)
@@ -120,27 +257,29 @@ func TestAnthropicSetupTokenCompleteAccumulatesNativeStream(t *testing.T) {
 	}
 }
 
+// A streamed completion the transport could not use keeps the message and
+// the disposition it gave it: counted against the circuit, never retried.
 func TestAnthropicSetupTokenRejectsIncompleteOrMalformedStream(t *testing.T) {
-	token := anthropicauth.SetupTokenPrefix + strings.Repeat("a", 80)
-	source, err := anthropicauth.NewHeaderSource(token)
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, response := range []string{
-		"data: {\"type\":\"message_start\",\"message\":{\"content\":[]}}\n\n",
-		"data: not-json\n\n",
-		"data: {\"type\":\"message_stop\"}\n\ndata: {\"type\":\"message_start\",\"message\":{\"content\":[]}}\n\n",
+	const start = "data: {\"type\":\"message_start\",\"message\":{\"content\":[]}}\n\n"
+	const stop = "data: {\"type\":\"message_stop\"}\n\n"
+	for _, tc := range []struct{ response, want string }{
+		{start, "anthropic: incomplete streamed Messages response"},
+		{stop + start, "anthropic: incomplete streamed Messages response"},
+		{"data: not-json\n\n", "anthropic: invalid JSON in streamed Messages response"},
+		{start + stop + start, "anthropic: data followed streamed Messages terminal event"},
+		{"data: {\"type\":\"error\",\"error\":{\"type\":\"overloaded_error\"}}\n\n", "anthropic: streamed Messages response reported an error"},
 	} {
-		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-			w.Header().Set("Content-Type", "text/event-stream")
-			_, _ = fmt.Fprint(w, response)
-		}))
-		provider := AnthropicNativeProvider{BaseURL: server.URL, Auth: source}
-		_, err := provider.Complete("model", []Message{{"role": "user", "content": "hi"}}, nil)
-		server.Close()
-		if err == nil {
-			t.Fatalf("response %q was accepted", response)
-		}
+		t.Run(tc.response, func(t *testing.T) {
+			base := anthropicServer(t, func(w http.ResponseWriter, _ *http.Request) {
+				w.Header().Set("Content-Type", "text/event-stream")
+				_, _ = fmt.Fprint(w, tc.response)
+			})
+			provider := anthropicFixture(t, &config.ProviderConfig{Type: "anthropic", BaseURL: base, APIKey: anthropicSetupToken()})
+			_, err := provider.Complete("model", []Message{{"role": "user", "content": "hi"}}, nil)
+			if err == nil || err.Error() != tc.want || !InvocationCircuitFailure(err) || InvocationRetryable(err) {
+				t.Fatalf("response %q: err=%v", tc.response, err)
+			}
+		})
 	}
 }
 
@@ -190,6 +329,9 @@ func TestAnthropicNativePayloadTranslationLossPolicy(t *testing.T) {
 	}
 }
 
+// The Chat stream ends as the transport's did: without an error when
+// Anthropic ends it, message_stop or not, and with the gateway's size error
+// for a record over the limit.
 func TestAnthropicStreamNormalAndOversizedRecords(t *testing.T) {
 	for _, tc := range []struct {
 		name     string
@@ -202,16 +344,17 @@ func TestAnthropicStreamNormalAndOversizedRecords(t *testing.T) {
 		{name: "oversized", response: "data: " + strings.Repeat("x", maxStreamRecordWireSize) + "\n\n", wantErr: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			base := anthropicServer(t, func(w http.ResponseWriter, _ *http.Request) {
 				w.Header().Set("Content-Type", "text/event-stream")
 				_, _ = fmt.Fprint(w, tc.response)
-			}))
-			defer server.Close()
-
-			iter, err := (AnthropicNativeProvider{BaseURL: server.URL, Timeout: 2}).Stream("model", []Message{{"role": "user", "content": "hi"}}, nil)
+			})
+			two := 2.0
+			provider := anthropicFixture(t, &config.ProviderConfig{Type: "anthropic", BaseURL: base, Timeout: &two})
+			iter, err := provider.Stream("model", []Message{{"role": "user", "content": "hi"}}, nil)
 			if err != nil {
 				t.Fatal(err)
 			}
+			defer iter.Close()
 			var chunks strings.Builder
 			for chunk, ok := iter.Next(); ok; chunk, ok = iter.Next() {
 				chunks.WriteString(chunk)
@@ -220,10 +363,43 @@ func TestAnthropicStreamNormalAndOversizedRecords(t *testing.T) {
 				t.Fatalf("chunks = %s", chunks.String())
 			}
 			var sizeErr *StreamRecordTooLargeError
-			if errors.As(iter.Err(), &sizeErr) != tc.wantErr {
+			if errors.As(iter.Err(), &sizeErr) != tc.wantErr || (!tc.wantErr && iter.Err() != nil) {
 				t.Fatalf("error = %#v, want oversized %v", iter.Err(), tc.wantErr)
 			}
 		})
+	}
+}
+
+// A reader that stops reading and closes the stream releases the goroutine
+// that re-encodes it, which the transport's stream never did.
+func TestAnthropicStreamCloseReleasesTheReencoder(t *testing.T) {
+	var events strings.Builder
+	for range 64 {
+		events.WriteString("data: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"text_delta\",\"text\":\"x\"}}\n\n")
+	}
+	base := anthropicServer(t, func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = fmt.Fprint(w, events.String())
+	})
+	provider := anthropicFixture(t, &config.ProviderConfig{Type: "anthropic", BaseURL: base})
+	iter, err := provider.Stream("model", []Message{{"role": "user", "content": "hi"}}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := iter.Next(); !ok {
+		t.Fatal("the stream ended before its first chunk")
+	}
+	_ = iter.Close()
+	drained := make(chan struct{})
+	go func() {
+		for _, ok := iter.Next(); ok; _, ok = iter.Next() {
+		}
+		close(drained)
+	}()
+	select {
+	case <-drained:
+	case <-time.After(5 * time.Second):
+		t.Fatal("the re-encoder still runs after Close")
 	}
 }
 
@@ -254,26 +430,23 @@ func TestAnthropicListModelsDeclaresMessagesSurface(t *testing.T) {
 func TestAnthropicNativeMessagesPreservesOpaquePayloadAndResponse(t *testing.T) {
 	const response = `{"id":"msg_native","model":"upstream-model","stop_sequence":"END","content":[{"type":"thinking","thinking":"kept","signature":"sig"},{"type":"unknown","value":1}],"usage":{"input_tokens":9007199254740993,"cache_read_input_tokens":1}}`
 	var request map[string]any
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	base := anthropicServer(t, func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/v1/messages" {
-			t.Fatalf("path=%s", r.URL.Path)
+			t.Errorf("path=%s", r.URL.Path)
 		}
-		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
-			t.Fatal(err)
-		}
+		request = zenBody(t, r)
 		_, _ = w.Write([]byte(response))
-	}))
-	defer server.Close()
+	})
 	payload := map[string]any{
 		"model": "picker-alias", "stream": true, "system": []any{map[string]any{"type": "text", "text": "client"}},
 		"messages": []any{map[string]any{"role": "user", "content": "hi"}}, "thinking": map[string]any{"type": "enabled"},
 		"_llmgw_preamble": "policy",
 	}
-	got, err := (AnthropicNativeProvider{BaseURL: server.URL}).CompleteAnthropicMessages("resolved-model", payload)
+	got, err := anthropicFixture(t, &config.ProviderConfig{Type: "anthropic", BaseURL: base}).CompleteAnthropicMessages("resolved-model", payload)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if request["model"] != "resolved-model" || request["stream"] != false || request["thinking"] == nil {
+	if request["model"] != "resolved-model" || request["stream"] != false || request["thinking"] == nil || request["_llmgw_preamble"] != nil {
 		t.Fatalf("request=%#v", request)
 	}
 	system := request["system"].([]any)
@@ -289,11 +462,10 @@ func TestAnthropicNativeMessagesPreservesOpaquePayloadAndResponse(t *testing.T) 
 func TestAnthropicNativeMessagesRejectsStructurallyInvalidSuccessPayloads(t *testing.T) {
 	for _, body := range []string{"null", `{}`} {
 		t.Run(body, func(t *testing.T) {
-			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			base := anthropicServer(t, func(w http.ResponseWriter, _ *http.Request) {
 				_, _ = w.Write([]byte(body))
-			}))
-			defer server.Close()
-			_, err := (AnthropicNativeProvider{BaseURL: server.URL}).CompleteAnthropicMessages("model", map[string]any{"messages": []any{}})
+			})
+			_, err := anthropicFixture(t, &config.ProviderConfig{Type: "anthropic", BaseURL: base}).CompleteAnthropicMessages("model", map[string]any{"messages": []any{}})
 			if err == nil || !InvocationCircuitFailure(err) || InvocationRetryable(err) {
 				t.Fatalf("error=%v circuit=%v retry=%v", err, InvocationCircuitFailure(err), InvocationRetryable(err))
 			}

@@ -37,6 +37,7 @@ func (rt *Runtime) coreVerticals() map[string]coreVertical {
 		"google_antigravity": rt.antigravityCoreVertical(),
 		zenCoreType:          rt.zenCoreVertical(),
 		copilotCoreType:      rt.copilotCoreVertical(),
+		anthropicCoreType:    rt.anthropicCoreVertical(),
 	}
 }
 

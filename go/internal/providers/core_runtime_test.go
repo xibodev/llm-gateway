@@ -30,7 +30,8 @@ var coreVerticalCases = map[string]struct {
 	"copilot":          {&config.ProviderConfig{Type: "github_copilot"}, copilotCoreType},
 	"copilot by type":  {&config.ProviderConfig{Type: " GitHub_Copilot "}, copilotCoreType},
 	"copilot registry": {&config.ProviderConfig{Type: "openai_compatible", RegistryID: "github_copilot"}, ""},
-	"anthropic":        {&config.ProviderConfig{Type: "anthropic"}, ""},
+	"anthropic":        {&config.ProviderConfig{Type: "anthropic"}, anthropicCoreType},
+	"anthropic spaced": {&config.ProviderConfig{Type: " Anthropic ", RegistryID: "custom_anthropic"}, anthropicCoreType},
 }
 
 func TestCoreVerticalsServeDisjointInstances(t *testing.T) {
