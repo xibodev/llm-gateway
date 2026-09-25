@@ -1,0 +1,247 @@
+{
+  "schema_version": "1.0.0",
+  "mode": "change",
+  "contract": {
+    "digest": "31b393ab3e80162226619c441694573993ac618382d74642101484a0bf2e9c80"
+  },
+  "authoring_provenance": {
+    "status": "established",
+    "path": ".release-harness/drafts/llm-gateway.record.json",
+    "digest": "6732ddf3dc8236b974e2aae5f81b546d89c2a466b6fb0a368d76620955bf981e"
+  },
+  "sources": [
+    {
+      "source_id": "primary",
+      "status": "established",
+      "repository_identity": "https://github.com/xibodev/llm-gateway.git",
+      "base_ref": "origin/main",
+      "base_commit": "c2f94026ae922f3d03b5ee32c12b714ed630ad16",
+      "merge_base": "598ee3104433cf5b617cd78b5fd719d1c25a733a",
+      "head_commit": "528603b3f12c61fe50fc084673a8a2961c65e25f",
+      "head_tree": "6a48e5806e30bf76119298819da5365a9a557e4a",
+      "reviewed_source_digest": "8c8e57cf206351fe8b73263cb4d33b6b94f3bbf1f028ba413e991a73063e238b",
+      "changed_paths": [
+        {
+          "status": "modified",
+          "path": "go/go.mod",
+          "old_blob": "265d38989ef4d9914eaed6d8dcf1f39adc46afe6",
+          "new_blob": "ae35b9cbdb6318087d1b6d64cfaeb6d9c528e6bc"
+        },
+        {
+          "status": "modified",
+          "path": "go/go.sum",
+          "old_blob": "d7b018d1433bc39fba5eb812159e48a7eb6e9742",
+          "new_blob": "09082bbb3580128f3d41453b9670686e5d01ff01"
+        },
+        {
+          "status": "added",
+          "path": "go/internal/api/copilot_runtime_test.go",
+          "old_blob": "0000000000000000000000000000000000000000",
+          "new_blob": "b442e628752baf4ead069fcd93ef8eb85d04b6a4"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/architecture/boundary_test.go",
+          "old_blob": "742a5c2b04af744d1b9a45bd9758c0f017d246e3",
+          "new_blob": "da3dd1113790f0cad7faa56304fd364909e39c8e"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/providers/byoc_test.go",
+          "old_blob": "fe6ec52ea14d9f705685cf00e7cb12b243c8d8e0",
+          "new_blob": "487ac93b4d3151941f71c30eba4bbd40aae31497"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/providers/copilot_client_test.go",
+          "old_blob": "781459b62abbb8bd16e5fd2f4a166aada4380184",
+          "new_blob": "1b35df869f3a3c0e26c449753a308ecce29ce118"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/providers/copilot_client.go",
+          "old_blob": "c4e7888aef3230fabb876078d17bd8263621f313",
+          "new_blob": "bb2ee7dbc160a7a57085d18edcc8338f778c4f60"
+        },
+        {
+          "status": "added",
+          "path": "go/internal/providers/copilot_failure.go",
+          "old_blob": "0000000000000000000000000000000000000000",
+          "new_blob": "c0c827929b87adea77e237a979dd13c5d490ea64"
+        },
+        {
+          "status": "added",
+          "path": "go/internal/providers/copilot_provider.go",
+          "old_blob": "0000000000000000000000000000000000000000",
+          "new_blob": "ffd7688bff029c5e5418abb0de781e8471a7050a"
+        },
+        {
+          "status": "added",
+          "path": "go/internal/providers/copilot_runtime_test.go",
+          "old_blob": "0000000000000000000000000000000000000000",
+          "new_blob": "e802872da3c2bdad53d914214cd578811d4733a1"
+        },
+        {
+          "status": "added",
+          "path": "go/internal/providers/copilot_vertical.go",
+          "old_blob": "0000000000000000000000000000000000000000",
+          "new_blob": "5f7f92caffcd48d1b151f1fcc75757577d4f2392"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/providers/core_runtime_test.go",
+          "old_blob": "7a6f8555aeb91810d5d20c0df8f2a0846c4bc9f0",
+          "new_blob": "c59e1098afc4f63c675cd4ab92c252ae49f024d9"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/providers/core_runtime.go",
+          "old_blob": "72946336d17818e7588b15ff4c7ba00846989060",
+          "new_blob": "b715d046b08a16d39f078c5292dda1d22a6cc558"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/providers/factory.go",
+          "old_blob": "c27c1d263d9641118edd231b882e1567afef319e",
+          "new_blob": "7ead520f569294b9651e6cf04b965f940c1c50fe"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/providers/openai_auth.go",
+          "old_blob": "6d2b90c0a13d6aa6429751fa0b6e97aa0f759143",
+          "new_blob": "873f5060bc8c0d63ddeaa0817955d5791864228d"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/providers/openai_models_test.go",
+          "old_blob": "dbcf49b63fd9166b13c30a97b0e59a06130f901e",
+          "new_blob": "66dcda35724c677bff911862ea3369eded7e0981"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/providers/openai_v043_test.go",
+          "old_blob": "5194846b11c127fef8906abcf23da4748c980ce9",
+          "new_blob": "5972a26bc9ca0f56383a56c90287750b6e8d397c"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/providers/openai.go",
+          "old_blob": "9fedd13f115d0521c069572a3159d0396940a2c1",
+          "new_blob": "6d014e7860e8fa8c3e0151372649143c4a5d9a5f"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/providers/provider.go",
+          "old_blob": "aa6b103190c99280e4fdeccdf7414932aa4beffa",
+          "new_blob": "81a772900230887f3171542deae100d85b8341d6"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/providers/proxy.go",
+          "old_blob": "d259d52dc0fd622e6316a51362cce6796e935e69",
+          "new_blob": "12fb97c3bbce46ba4abfdd48451adbf6b1c5693f"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/providers/runtime.go",
+          "old_blob": "a80ce3d70da942c7524fb9e26edfd1166b7fd58f",
+          "new_blob": "bd6910b08977e836275155f42027c205ef378728"
+        }
+      ]
+    }
+  ],
+  "facts": [
+    {
+      "id": "deps",
+      "claim": "go.mod moves llmgw-core from v0.14.0 to v0.14.1, whose only change makes the Copilot vertical forward the gateway transport's full Chat field list.",
+      "status": "observed",
+      "evidence": {
+        "source": "go/go.mod; llmgw-core v0.14.1 release notes"
+      }
+    },
+    {
+      "id": "copilot-through-runtime",
+      "claim": "GitHub Copilot Chat, Responses and both streams go through the llmgw-core Runtime with core's Copilot vertical, built from the gateway's shared copilot client, integration ID, editor version and adaptation setting. Credentials resolve as before: a human's own connection then legacy credential, a service or system caller's project binding, and the gateway-wide token when the caller has no principal. copilotAuth, the OpenAIAuth refresh hooks and the transport's Copilot 401 replay branches are removed; console login flows and SetCopilotEndpointsForTests are unchanged.",
+      "status": "observed",
+      "evidence": {
+        "source": "go/internal/providers/copilot_vertical.go, openai.go, openai_auth.go; go/internal/api/testdata unchanged"
+      }
+    },
+    {
+      "id": "parity",
+      "claim": "Upstream Copilot request bytes are unchanged, including parallel_tool_calls, stream_options and thinking on the Messages-to-Chat path; copilotGuidance messages are kept; a Responses 404 or 405 still triggers the Chat fallback; the X-LLMGW-Adapted header is set exactly when Chat is served over Responses; the catalog stays on the gateway path.",
+      "status": "observed",
+      "evidence": {
+        "source": "go/internal/providers and go/internal/api Copilot tests"
+      }
+    },
+    {
+      "id": "deviations",
+      "claim": "Edge-case differences: error messages come from core and no longer quote upstream bodies; an HTTP-date Retry-After reaches the client as seconds; core lists /models once more after a restart or settings change; on the Messages path a number written like 1.0 is sent as 1.",
+      "status": "observed",
+      "evidence": {
+        "source": "go/internal/providers/copilot_vertical.go and tests"
+      }
+    },
+    {
+      "id": "suite",
+      "claim": "The full Go suite passes with HTTP_PROXY and HTTPS_PROXY unreachable with unchanged characterization goldens; the providers iam.* budget moves from 59 to 58; every commit builds and passes tests; gofmt, vet, govulncheck (0 reachable), check-docs and git diff --check pass.",
+      "status": "observed",
+      "evidence": {
+        "source": "local gate run on the reviewed head"
+      }
+    }
+  ],
+  "impact": {
+    "assertions": [
+      {
+        "id": "A1",
+        "impact": "unchanged",
+        "supported_by": [
+          "copilot-through-runtime",
+          "parity",
+          "suite"
+        ]
+      },
+      {
+        "id": "A2",
+        "impact": "unchanged",
+        "supported_by": [
+          "copilot-through-runtime",
+          "parity",
+          "suite"
+        ]
+      },
+      {
+        "id": "A3",
+        "impact": "unchanged",
+        "supported_by": [
+          "copilot-through-runtime",
+          "parity",
+          "suite"
+        ]
+      },
+      {
+        "id": "A4",
+        "impact": "unchanged",
+        "supported_by": [
+          "copilot-through-runtime",
+          "parity",
+          "suite"
+        ]
+      }
+    ],
+    "requires": [],
+    "possible_binding_changes": []
+  },
+  "questions": [],
+  "conclusion": {
+    "action": "reuse_contract",
+    "summary": "GitHub Copilot moves onto the llmgw-core Runtime and vertical with unchanged upstream bytes; CLI, health and models behavior is unchanged."
+  },
+  "proposed": {
+    "by": "copilot-core-runtime",
+    "at": "2026-09-25T11:15:47.03Z"
+  },
+  "digest": "2454f58bf2a187f50c37bbe26d57696c8195eda73a6fd29a67a6d88a8198edfe"
+}
