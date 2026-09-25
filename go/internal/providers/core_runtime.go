@@ -35,6 +35,7 @@ func (rt *Runtime) coreVerticals() map[string]coreVertical {
 	return map[string]coreVertical{
 		"openai_codex":       rt.codexCoreVertical(),
 		"google_antigravity": rt.antigravityCoreVertical(),
+		zenCoreType:          rt.zenCoreVertical(),
 	}
 }
 
@@ -152,17 +153,17 @@ func (c coreCredentials) Lease(ctx context.Context, key string) (func(), error) 
 
 // coreOperation is what an operation of a core-served type tells the stores
 // and providers the core Runtime calls for it, which their arguments do not:
-// the name of its vertical.
+// the name of its vertical, and the caller whose catalog a provider reads.
 type coreOperation struct {
 	vertical string
+	caller   core.Caller
 }
 
 type coreOperationKey struct{}
 
-// withCoreOperation returns ctx naming the vertical of the operation it
-// carries.
-func withCoreOperation(ctx context.Context, vertical string) context.Context {
-	return context.WithValue(ctx, coreOperationKey{}, coreOperation{vertical: vertical})
+// withCoreOperation returns ctx carrying an operation of vertical for caller.
+func withCoreOperation(ctx context.Context, vertical string, caller core.Caller) context.Context {
+	return context.WithValue(ctx, coreOperationKey{}, coreOperation{vertical: vertical, caller: caller})
 }
 
 // coreOperationFrom returns the operation ctx names, or the zero one.
@@ -174,16 +175,26 @@ func coreOperationFrom(ctx context.Context) coreOperation {
 // iamCredentialStore opens the IAM credential store over the database IAM
 // serves now. That handle follows the state directory, which tests change,
 // so each operation opens the store rather than keeping one; opening costs
-// no more than the store value. Only the OAuth store opens it, for the Codex
-// and Antigravity instances the core Runtime and the gateway's Coordinators
-// serve, and both resolve owner-private OAuth connections. Each read marks
-// the connection used, as both paths' reads did.
-func iamCredentialStore() (core.CredentialStore, error) {
+// no more than the store value.
+//
+// The OAuth store opens it with oauth set, for the Codex and Antigravity
+// instances the core Runtime and the gateway's Coordinators serve: both
+// types resolve owner-private OAuth connections, and each read marks the
+// connection used, as both paths' reads did. Zen's store opens it without:
+// a nil Precedence resolves every instance with ConnectionPrecedence, the
+// provider factory's order, and reads mark nothing, because the factory
+// marks the credential it builds a Zen facade with, which is where the Zen
+// path recorded a use.
+func iamCredentialStore(oauth bool) (core.CredentialStore, error) {
 	db, err := iam.DB()
 	if err != nil {
 		return nil, err
 	}
-	return iam.NewCredentialStore(db, iam.CredentialStoreOptions{Precedence: oauthPrecedence, MarkUsed: true})
+	options := iam.CredentialStoreOptions{MarkUsed: oauth}
+	if oauth {
+		options.Precedence = oauthPrecedence
+	}
+	return iam.NewCredentialStore(db, options)
 }
 
 func oauthPrecedence(string) iam.CredentialPrecedence { return iam.OAuthPrecedence }

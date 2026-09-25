@@ -2,7 +2,6 @@ package providers
 
 import (
 	"context"
-	"net/http"
 	"strings"
 
 	core "github.com/xibodev/llmgw-core"
@@ -13,19 +12,12 @@ func ensureZenInvocation(ctx context.Context) (context.Context, error) {
 	return corezen.EnsureInvocationIdentity(ctx, nil)
 }
 
-func applyZenInvocation(ctx context.Context, headers http.Header) {
-	if identity, ok := corezen.InvocationIdentityFromContext(ctx); ok {
-		corezen.ApplyInvocationHeaders(headers, identity)
-	}
-}
-
+// ensureProviderZenInvocation gives a Zen provider's operation the invocation
+// identity every request of it carries, retries included.
 func ensureProviderZenInvocation(ctx context.Context, provider Provider) (context.Context, error) {
 	for provider != nil {
-		if zen, ok := provider.(OpenAIProvider); ok {
-			if zen.isZen() {
-				return ensureZenInvocation(ctx)
-			}
-			return ctx, nil
+		if _, ok := provider.(*zenProvider); ok {
+			return ensureZenInvocation(ctx)
 		}
 		unwrapper, ok := provider.(interface{ Unwrap() Provider })
 		if !ok {
@@ -76,8 +68,11 @@ func newAnonymousZenClient(baseURL, metadataURL string, timeout float64) (*corez
 	})
 }
 
-func (p OpenAIProvider) filterAnonymousZenModels(_ []ModelInfo) ([]ModelInfo, error) {
-	client, err := newAnonymousZenClient(p.baseURL(), p.metadataURL, p.Timeout)
+// anonymousZenModels lists the models anonymous access admits: those the
+// models.dev catalog prices at zero and the live catalog lists, each marked
+// free and given the endpoint of its native surface.
+func anonymousZenModels(baseURL, metadataURL string, timeout float64) ([]ModelInfo, error) {
+	client, err := newAnonymousZenClient(baseURL, metadataURL, timeout)
 	if err != nil {
 		return nil, catalogError("catalog_metadata_transport_error", "OpenCode model metadata URL is invalid.", 0)
 	}
@@ -150,22 +145,7 @@ func zenLegacyCapabilities(capabilities *core.ModelCapabilities) map[string]any 
 	return out
 }
 
-func adaptAnonymousZenResponsesPayload(payload map[string]any) map[string]any {
-	out := corezen.AdmitResponses(payload)
-	out["stream"] = true
-	return out
-}
-
 func isZenBaseURL(base string) bool {
 	u := strings.ToLower(strings.TrimSpace(base))
 	return strings.HasPrefix(u, "https://opencode.ai/zen") || strings.HasPrefix(u, "http://opencode.ai/zen")
-}
-
-func adaptAnonymousZenChat(messages []Message, kw Kwargs) ([]Message, Kwargs) {
-	admitted := corezen.AdmitChat(messages, kw)
-	if admittedMessages, ok := admitted["messages"].([]map[string]any); ok {
-		messages = admittedMessages
-		delete(admitted, "messages")
-	}
-	return messages, Kwargs(admitted)
 }

@@ -46,9 +46,6 @@ func (p OpenAIProvider) normalizeAnonymousCatalog(rows []ModelInfo, items []any)
 	if !p.anonymous {
 		return rows, nil
 	}
-	if p.isAnonymousZen() {
-		return p.filterAnonymousZenModels(rows)
-	}
 	switch p.registryID {
 	case "kilo_code", "llm7", "ovh_ai_endpoints":
 	default:

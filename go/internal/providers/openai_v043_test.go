@@ -51,58 +51,6 @@ func TestChatToResponsesTranslationLossPolicy(t *testing.T) {
 	}
 }
 
-func TestExtractFinalResponsesObjectNeverInventsCompletedText(t *testing.T) {
-	raw := []byte("data: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_1\",\"output\":[]}}\n\n")
-	got := extractFinalResponsesObject(raw)
-	if output, ok := got["output"].([]any); !ok || len(output) != 0 {
-		t.Fatalf("terminal response=%+v", got)
-	}
-}
-
-func TestExtractFinalResponsesObjectUsesOnlyOutputTextDeltas(t *testing.T) {
-	raw := []byte("data: {\"type\":\"response.reasoning_summary_text.delta\",\"delta\":\"reasoning\"}\n\n" +
-		"data: {\"type\":\"response.function_call_arguments.delta\",\"delta\":\"arguments\"}\n\n" +
-		"data: {\"type\":\"response.output_text.delta\",\"delta\":\"answer\"}\n\n" +
-		"data: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_1\",\"status\":\"completed\",\"output\":[]}}\n\n")
-	response := extractFinalResponsesObject(raw)
-	output, _ := response["output"].([]any)
-	message, _ := output[0].(map[string]any)
-	content, _ := message["content"].([]any)
-	part, _ := content[0].(map[string]any)
-	if part["text"] != "answer" {
-		t.Fatalf("response=%v", response)
-	}
-}
-
-func TestExtractFinalResponsesObjectAcceptsNonTextTerminalOutput(t *testing.T) {
-	for _, output := range []string{
-		`[{"type":"function_call","name":"bash","arguments":"{}"}]`,
-		`[{"type":"reasoning","summary":[]}]`,
-	} {
-		raw := []byte("data: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_1\",\"status\":\"completed\",\"output\":" + output + "}}\n\n")
-		response := extractFinalResponsesObject(raw)
-		items, ok := response["output"].([]any)
-		if !ok || len(items) != 1 {
-			t.Fatalf("output=%s response=%v", output, response)
-		}
-	}
-}
-
-func TestExtractFinalResponsesObjectAppendsDeltaTextBesideReasoning(t *testing.T) {
-	raw := []byte("data: {\"type\":\"response.output_text.delta\",\"delta\":\"remembered\"}\n\n" +
-		"data: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_1\",\"status\":\"completed\",\"output\":[{\"type\":\"reasoning\",\"summary\":[]}]}}\n\n")
-	response := extractFinalResponsesObject(raw)
-	output, _ := response["output"].([]any)
-	if len(output) != 2 || output[0].(map[string]any)["type"] != "reasoning" {
-		t.Fatalf("response=%v", response)
-	}
-	message := output[1].(map[string]any)
-	content := message["content"].([]any)
-	if content[0].(map[string]any)["text"] != "remembered" {
-		t.Fatalf("response=%v", response)
-	}
-}
-
 func TestV043OpenAIRetryPreservesVisionHeaders(t *testing.T) {
 	for name, invoke := range map[string]func(OpenAIProvider) error{
 		"chat": func(provider OpenAIProvider) error {

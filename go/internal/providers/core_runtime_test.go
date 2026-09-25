@@ -19,16 +19,20 @@ var coreVerticalCases = map[string]struct {
 	cfg  *config.ProviderConfig
 	want string
 }{
-	"codex":         {&config.ProviderConfig{Type: "openai_compatible", RegistryID: "openai_codex"}, "openai_codex"},
-	"codex litellm": {&config.ProviderConfig{Type: "litellm", RegistryID: "openai_codex"}, "openai_codex"},
-	"antigravity":   {&config.ProviderConfig{Type: "google_antigravity"}, "google_antigravity"},
-	"plain":         {&config.ProviderConfig{Type: "openai_compatible", BaseURL: "https://api.example.test/v1"}, ""},
-	"copilot":       {&config.ProviderConfig{Type: "github_copilot"}, ""},
-	"anthropic":     {&config.ProviderConfig{Type: "anthropic"}, ""},
+	"codex":            {&config.ProviderConfig{Type: "openai_compatible", RegistryID: "openai_codex"}, "openai_codex"},
+	"codex litellm":    {&config.ProviderConfig{Type: "litellm", RegistryID: "openai_codex"}, "openai_codex"},
+	"codex at zen URL": {&config.ProviderConfig{Type: "openai_compatible", RegistryID: "openai_codex", BaseURL: "https://opencode.ai/zen/v1"}, "openai_codex"},
+	"antigravity":      {&config.ProviderConfig{Type: "google_antigravity"}, "google_antigravity"},
+	"zen":              {&config.ProviderConfig{Type: "openai_compatible", RegistryID: "opencode_zen"}, zenCoreType},
+	"zen by URL":       {&config.ProviderConfig{Type: "litellm", BaseURL: "https://opencode.ai/zen/v1"}, zenCoreType},
+	"bedrock at zen":   {&config.ProviderConfig{Type: "bedrock", BaseURL: "https://opencode.ai/zen/v1"}, ""},
+	"plain":            {&config.ProviderConfig{Type: "openai_compatible", BaseURL: "https://api.example.test/v1"}, ""},
+	"copilot":          {&config.ProviderConfig{Type: "github_copilot"}, ""},
+	"anthropic":        {&config.ProviderConfig{Type: "anthropic"}, ""},
 }
 
 func TestCoreVerticalsServeDisjointInstances(t *testing.T) {
-	runtime := newRuntime(func() (core.CredentialStore, error) { return core.NewMemoryCredentialStore(), nil })
+	runtime := newRuntime(func(bool) (core.CredentialStore, error) { return core.NewMemoryCredentialStore(), nil })
 	settings := config.Defaults()
 	settings.Providers = map[string]*config.ProviderConfig{}
 	for instance, fixture := range coreVerticalCases {
@@ -54,6 +58,18 @@ func TestCoreVerticalsServeDisjointInstances(t *testing.T) {
 	if refresh := runtime.coreRefresh(settings, "plain"); refresh != nil {
 		t.Fatal("an instance no type serves has a refresh")
 	}
+	if refresh := runtime.coreRefresh(settings, "zen"); refresh != nil {
+		t.Fatal("a Zen API key would refresh")
+	}
+	// An instance without a base URL of its own is Zen when the default is.
+	settings.OpenAICompatibleBaseURL = "https://opencode.ai/zen/v1"
+	if name, _, _ := runtime.vertical(settings, "plain-default"); name != "" {
+		t.Fatalf("an unconfigured instance is served by %q", name)
+	}
+	settings.Providers["plain-default"] = &config.ProviderConfig{Type: "openai_compatible"}
+	if name, _, _ := runtime.vertical(settings, "plain-default"); name != zenCoreType {
+		t.Fatalf("an instance at the Zen default is served by %q", name)
+	}
 }
 
 // Resolve reaches the store of the instance's type. The token-store methods
@@ -69,7 +85,12 @@ func TestCoreCredentialsDispatchesByType(t *testing.T) {
 	}
 	oauth.BindShared("codex", "key")
 	fixture.BindShared("fixture", "key")
-	runtime := newRuntime(func() (core.CredentialStore, error) { return oauth, nil })
+	runtime := newRuntime(func(oauthStore bool) (core.CredentialStore, error) {
+		if !oauthStore {
+			t.Error("the OAuth store opened another store")
+		}
+		return oauth, nil
+	})
 	runtime.verticals["fixture"] = coreVertical{
 		serves:      func(_ *config.Settings, instance string, _ *config.ProviderConfig) bool { return instance == "fixture" },
 		credentials: fixture,
@@ -90,7 +111,7 @@ func TestCoreCredentialsDispatchesByType(t *testing.T) {
 		t.Fatalf("an instance no type serves resolved: err=%v", err)
 	}
 	for vertical, want := range map[string]string{"": "oauth-token", "openai_codex": "oauth-token", "fixture": "fixture-token"} {
-		record, err := credentials.Load(withCoreOperation(ctx, vertical), "key")
+		record, err := credentials.Load(withCoreOperation(ctx, vertical, gatewayCaller()), "key")
 		if err != nil || record.AccessToken != want {
 			t.Fatalf("operation of %q: token=%q err=%v, want %q", vertical, record.AccessToken, err, want)
 		}

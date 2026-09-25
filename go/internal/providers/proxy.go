@@ -24,6 +24,10 @@ func (rt *Runtime) ProviderHTTPTarget(
 	if err != nil {
 		return "", nil, false
 	}
+	if zen, isZen := inst.(*zenProvider); isZen {
+		base, hdr := zen.httpTarget()
+		return base, hdr, true
+	}
 	op, isOpenAI := inst.(OpenAIProvider)
 	if !isOpenAI {
 		return "", nil, false

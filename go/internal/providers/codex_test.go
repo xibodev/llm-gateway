@@ -32,7 +32,7 @@ func codexFixture(t *testing.T, instance string, endpoints CodexEndpoints, clien
 		t.Fatal(err)
 	}
 	store.BindShared(instance, "fixture-connection")
-	runtime := newRuntime(func() (core.CredentialStore, error) { return store, nil })
+	runtime := newRuntime(func(bool) (core.CredentialStore, error) { return store, nil })
 	runtime.codexEndpoints.swap(endpoints)
 	provider, err := runtime.newCodexProvider(instance, gatewayCaller(), 5, nil, clientVersion)
 	if err != nil {

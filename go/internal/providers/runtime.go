@@ -28,6 +28,9 @@ type Runtime struct {
 	// verticals is the registration table of the provider types core
 	// serves; see coreVerticals.
 	verticals map[string]coreVertical
+	// openCredentials opens the IAM credential store a vertical's store
+	// wraps, once per operation; see iamCredentialStore.
+	openCredentials func(oauth bool) (core.CredentialStore, error)
 	// credentials is the OAuth store behind core's Codex and Antigravity
 	// and behind the gateway's own Coordinators: the Codex and Antigravity
 	// catalogs, Antigravity image generation and the console refreshes,
@@ -57,21 +60,23 @@ type Runtime struct {
 
 // NewRuntime returns a Runtime with empty caches and the built-in auth
 // adapters. The catalog loads catalog.json from the state directory on first
-// use, and Codex and Antigravity credentials are the IAM provider
-// connections.
+// use, and the credentials of the types core serves are the IAM provider
+// connections and configured keys.
 func NewRuntime() *Runtime { return newRuntime(iamCredentialStore) }
 
-// newRuntime returns a Runtime that opens the store of its Codex and
-// Antigravity credentials with credentials, once per operation. Tests pass an
-// in-memory store.
-func newRuntime(credentials func() (core.CredentialStore, error)) *Runtime {
+// newRuntime returns a Runtime that opens the stores of its credentials with
+// open, once per operation: the OAuth store of Codex and Antigravity with
+// oauth set, and any other vertical's without (see iamCredentialStore).
+// Tests pass in-memory stores.
+func newRuntime(open func(oauth bool) (core.CredentialStore, error)) *Runtime {
 	runtime := &Runtime{}
 	runtime.instances.instances = map[string]Provider{}
 	runtime.circuits.circuits = map[string]*circuitState{}
 	runtime.authAdapters.factories = builtInAuthAdapters()
 	runtime.quotaAdapters.values = map[string]QuotaAdapter{}
 	runtime.copilot = copilotauth.NewDynamic(runtime.copilotSettings)
-	runtime.credentials = oauthStore{runtime: runtime, open: credentials}
+	runtime.openCredentials = open
+	runtime.credentials = oauthStore{runtime: runtime, open: func() (core.CredentialStore, error) { return open(true) }}
 	runtime.verticals = runtime.coreVerticals()
 	coreRuntime, err := newCoreRuntime(runtime)
 	if err != nil {

@@ -12,66 +12,101 @@ import (
 	"testing"
 
 	"llmgw/internal/config"
+	"llmgw/internal/iam"
 
 	core "github.com/xibodev/llmgw-core"
 	corezen "github.com/xibodev/llmgw-core/providers/zen"
 )
 
-func TestAnonymousOpenCodeHeadersMatchCLIContract(t *testing.T) {
-	auth, err := newBearerAuth("https://opencode.ai/zen/v1", "", nil, true)
+const zenChatStreamFixture = "data: {\"id\":\"chat_1\",\"object\":\"chat.completion.chunk\",\"model\":\"chat\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"ok\"},\"finish_reason\":\"stop\"}]}\n\ndata: [DONE]\n\n"
+
+// zenFixture configures instance "zen" as OpenCode Zen at base with the
+// configured key, which "" leaves anonymous, in a new installed Runtime, and
+// returns the facade the provider factory builds for the gateway caller.
+func zenFixture(t *testing.T, base, key string) *zenProvider {
+	t.Helper()
+	return zenFixtureConfig(t, &config.ProviderConfig{Type: "openai_compatible", RegistryID: "opencode_zen", BaseURL: base, APIKey: key})
+}
+
+func zenFixtureConfig(t *testing.T, cfg *config.ProviderConfig) *zenProvider {
+	t.Helper()
+	t.Setenv("LLMGW_STATE_DIR", t.TempDir())
+	iam.ResetForTests()
+	t.Cleanup(iam.ResetForTests)
+	runtime := InstallForTests(t)
+	oldKey, oldProviders := config.Get().CredentialEncryptionKey, config.Get().Providers
+	config.Update(func(s *config.Settings) {
+		s.CredentialEncryptionKey = ""
+		s.Providers = map[string]*config.ProviderConfig{"zen": cfg}
+	})
+	t.Cleanup(func() {
+		config.Update(func(s *config.Settings) { s.CredentialEncryptionKey, s.Providers = oldKey, oldProviders })
+	})
+	return zenFacade(t, runtime, gatewayCaller())
+}
+
+func zenFacade(t *testing.T, runtime *Runtime, caller core.Caller) *zenProvider {
+	t.Helper()
+	provider, err := runtime.instantiate("zen", config.Get().Providers["zen"], caller)
 	if err != nil {
 		t.Fatal(err)
 	}
-	base, first, err := auth.Prepare()
-	if err != nil {
-		t.Fatal(err)
+	zen, ok := provider.(*zenProvider)
+	if !ok {
+		t.Fatalf("provider=%T, want the Zen facade", provider)
 	}
-	if base != "https://opencode.ai/zen/v1" || first.Get("Authorization") != "Bearer public" {
-		t.Fatalf("base=%q authorization=%q", base, first.Get("Authorization"))
+	return zen
+}
+
+// zenServer serves handler until the test ends and returns its URL.
+func zenServer(t *testing.T, handler http.HandlerFunc) string {
+	t.Helper()
+	server := httptest.NewServer(handler)
+	t.Cleanup(server.Close)
+	return server.URL
+}
+
+// zenBody decodes a request body, which fails the test unless it is JSON.
+func zenBody(t *testing.T, r *http.Request) map[string]any {
+	t.Helper()
+	var payload map[string]any
+	if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+		t.Error(err)
 	}
-	for _, key := range []string{"x-opencode-project", "x-opencode-session", "x-opencode-request", "x-opencode-client", "User-Agent"} {
-		if first.Get(key) != "" {
-			t.Fatalf("auth prepared invocation header %s=%q", key, first.Get(key))
+	return payload
+}
+
+// Proxied endpoints authenticate as the transport authenticated them: the
+// public bearer without a key, the key with one, and no invocation identity.
+func TestZenHTTPTargetMatchesCLIContract(t *testing.T) {
+	for key, want := range map[string]string{"": "Bearer public", "free": "Bearer public", "secret": "Bearer secret"} {
+		zen := zenFixture(t, "https://opencode.ai/zen/v1/", key)
+		base, headers, ok := zen.runtime.ProviderHTTPTarget("zen", gatewayCaller())
+		if !ok || base != "https://opencode.ai/zen/v1" || headers.Get("Authorization") != want {
+			t.Fatalf("key %q: ok=%v base=%q authorization=%q", key, ok, base, headers.Get("Authorization"))
+		}
+		for _, name := range []string{"x-opencode-project", "x-opencode-session", "x-opencode-request", "x-opencode-client", "User-Agent", "x-session-id"} {
+			if headers.Get(name) != "" {
+				t.Fatalf("key %q: proxied header %s=%q", key, name, headers.Get(name))
+			}
 		}
 	}
-	if first.Get("x-session-id") != "" {
-		t.Fatalf("legacy x-session-id leaked: %q", first.Get("x-session-id"))
-	}
-
-	keyed, err := newBearerAuth("https://opencode.ai/zen/v1", "secret", nil, true)
-	if err != nil {
-		t.Fatal(err)
-	}
-	_, headers, err := keyed.Prepare()
-	if err != nil || headers.Get("Authorization") != "Bearer secret" {
-		t.Fatalf("configured key changed: headers=%v err=%v", headers, err)
-	}
-	if headers.Get("x-opencode-client") != "" || headers.Get("User-Agent") != "" {
-		t.Fatalf("keyed auth prepared invocation headers=%v", headers)
-	}
-
-	ordinary, err := newBearerAuth("https://example.com/v1", "", nil, false)
-	if err != nil {
-		t.Fatal(err)
-	}
-	_, headers, err = ordinary.Prepare()
+	_, headers, err := bearerAuth{base: "https://example.com/v1"}.Prepare()
 	if err != nil || headers.Get("Authorization") != "" || headers.Get("x-opencode-session") != "" {
 		t.Fatalf("ordinary provider gained OpenCode headers: %v, err=%v", headers, err)
 	}
 }
 
 func TestZenInvocationHeadersPreserveCallerIdentity(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		for key, want := range map[string]string{"x-opencode-project": "project supplied", "x-opencode-session": "session supplied", "x-opencode-request": "request supplied", "x-opencode-client": "desktop supplied", "User-Agent": corezen.AnonymousUserAgent} {
+	base := zenServer(t, func(w http.ResponseWriter, r *http.Request) {
+		for key, want := range map[string]string{"x-opencode-project": "project supplied", "x-opencode-session": "session supplied", "x-opencode-request": "request supplied", "x-opencode-client": "desktop supplied", "User-Agent": corezen.AnonymousUserAgent, "Authorization": "Bearer public"} {
 			if got := r.Header.Get(key); got != want {
 				t.Errorf("%s=%q want %q", key, got, want)
 			}
 		}
-		_, _ = fmt.Fprint(w, "data: {\"id\":\"chat_1\",\"object\":\"chat.completion.chunk\",\"model\":\"chat\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"ok\"},\"finish_reason\":\"stop\"}]}\n\ndata: [DONE]\n\n")
-	}))
-	defer server.Close()
-	auth, _ := newBearerAuth(server.URL, "", nil, true)
-	provider := OpenAIProvider{auth: auth, Timeout: 2, providerID: "zen", registryID: "opencode_zen", anonymous: true}
+		_, _ = fmt.Fprint(w, zenChatStreamFixture)
+	})
+	provider := zenFixture(t, base, "")
 	headers := http.Header{}
 	headers.Set("x-opencode-project", "project supplied")
 	headers.Set("x-opencode-session", "session supplied")
@@ -88,28 +123,34 @@ func TestZenInvocationHeadersPreserveCallerIdentity(t *testing.T) {
 	}
 }
 
+// A keyed Chat request for a Responses-only model goes over Responses, and a
+// 400 naming a sampling parameter is retried once without it, as the same
+// logical invocation.
 func TestZenUnsupportedParameterRetryKeepsLogicalIdentity(t *testing.T) {
+	var mu sync.Mutex
 	var seen []http.Header
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		seen = append(seen, r.Header.Clone())
-		if len(seen) == 1 {
+	var bodies []map[string]any
+	base := zenServer(t, func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		seen, bodies = append(seen, r.Header.Clone()), append(bodies, zenBody(t, r))
+		attempt := len(seen)
+		mu.Unlock()
+		if attempt == 1 {
 			w.WriteHeader(http.StatusBadRequest)
 			_, _ = fmt.Fprint(w, `{"error":{"message":"Unsupported parameter: temperature"}}`)
 			return
 		}
-		_, _ = fmt.Fprint(w, `{"id":"resp_1","output":[]}`)
-	}))
-	defer server.Close()
-	auth, _ := newBearerAuth(server.URL, "secret", nil, true)
-	provider := OpenAIProvider{auth: auth, Timeout: 2, providerID: "zen", registryID: "opencode_zen"}
+		_, _ = fmt.Fprint(w, `{"id":"resp_1","object":"response","status":"completed","output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"ok"}]}]}`)
+	})
+	provider := zenFixture(t, base, "secret")
+	provider.runtime.catalogs.store("zen", []ModelInfo{{ID: "model", SupportedSurfaces: []string{"/responses"}}})
 	identity := corezen.InvocationIdentity{Project: "project", Session: "session", Request: "request", Client: "desktop", UserAgent: corezen.AnonymousUserAgent}
 	ctx := corezen.WithInvocationIdentity(context.Background(), identity)
-	_, _, err := provider.callResponsesPayloadContext(ctx, map[string]any{"model": "model", "input": "hi", "temperature": 0.2}, true)
-	if err != nil {
+	if _, err := provider.CompleteContext(ctx, "model", []Message{{"role": "user", "content": "hi"}}, Kwargs{"temperature": 0.2}); err != nil {
 		t.Fatal(err)
 	}
-	if len(seen) != 2 {
-		t.Fatalf("attempts=%d", len(seen))
+	if len(seen) != 2 || bodies[0]["temperature"] != 0.2 || bodies[1]["temperature"] != nil {
+		t.Fatalf("attempts=%d bodies=%+v", len(seen), bodies)
 	}
 	if got := seen[0].Get("User-Agent"); got != corezen.AnonymousUserAgent {
 		t.Fatalf("User-Agent=%q, want %q", got, corezen.AnonymousUserAgent)
@@ -122,19 +163,20 @@ func TestZenUnsupportedParameterRetryKeepsLogicalIdentity(t *testing.T) {
 }
 
 func TestZenProviderRetryKeepsLogicalIdentity(t *testing.T) {
+	var mu sync.Mutex
 	var seen []http.Header
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	base := zenServer(t, func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
 		seen = append(seen, r.Header.Clone())
-		if len(seen) == 1 {
+		attempt := len(seen)
+		mu.Unlock()
+		if attempt == 1 {
 			http.Error(w, "retry", http.StatusInternalServerError)
 			return
 		}
-		_, _ = fmt.Fprint(w, "data: {\"id\":\"chat_1\",\"object\":\"chat.completion.chunk\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"ok\"},\"finish_reason\":\"stop\"}]}\n\ndata: [DONE]\n\n")
-	}))
-	defer server.Close()
-	auth, _ := newBearerAuth(server.URL, "", nil, true)
-	inner := OpenAIProvider{auth: auth, Timeout: 2, providerID: "zen", registryID: "opencode_zen", anonymous: true}
-	provider := &ResilientProvider{inner: inner, name: "zen", policy: config.ProviderPolicy{RetryMaxAttempts: 2}}
+		_, _ = fmt.Fprint(w, zenChatStreamFixture)
+	})
+	provider := &ResilientProvider{inner: zenFixture(t, base, ""), name: "zen", policy: config.ProviderPolicy{RetryMaxAttempts: 2}}
 	if _, err := provider.CompleteContext(context.Background(), "chat", []Message{{"role": "user", "content": "hi"}}, nil); err != nil {
 		t.Fatal(err)
 	}
@@ -150,13 +192,11 @@ func TestZenProviderRetryKeepsLogicalIdentity(t *testing.T) {
 
 func TestZenConcurrentTitleInvocationsDoNotShareIdentity(t *testing.T) {
 	requests := make(chan string, 2)
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	base := zenServer(t, func(w http.ResponseWriter, r *http.Request) {
 		requests <- r.Header.Get("x-opencode-request")
 		_, _ = fmt.Fprint(w, "data: {\"id\":\"chat_1\",\"object\":\"chat.completion.chunk\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"title\"},\"finish_reason\":\"stop\"}]}\n\ndata: [DONE]\n\n")
-	}))
-	defer server.Close()
-	auth, _ := newBearerAuth(server.URL, "", nil, true)
-	provider := OpenAIProvider{auth: auth, Timeout: 2, providerID: "zen", registryID: "opencode_zen", anonymous: true}
+	})
+	provider := zenFixture(t, base, "")
 	var wg sync.WaitGroup
 	for _, requestID := range []string{"title-one", "title-two"} {
 		wg.Add(1)
@@ -193,7 +233,7 @@ func TestAnonymousAPIKeyRecognizesSentinels(t *testing.T) {
 }
 
 func TestAnonymousZenSurfacesAreNotWireNative(t *testing.T) {
-	provider := OpenAIProvider{registryID: "opencode_zen", anonymous: true}
+	provider := zenFixture(t, "https://opencode.ai/zen/v1", "public")
 	for _, surface := range []core.ModelSurface{core.ModelSurfaceChatCompletions, core.ModelSurfaceResponses} {
 		if PreservesWireNativeSurface(provider, "muse-spark-fixture", surface) {
 			t.Fatalf("anonymous Zen surface %q was certified as wire-native", surface)
@@ -232,13 +272,13 @@ func TestZenModeClassificationSeparatesAccessAndRequestIntent(t *testing.T) {
 }
 
 func TestAnonymousZenCatalogUsesActiveZeroCostMetadata(t *testing.T) {
-	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	upstream := zenServer(t, func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/models" {
 			http.NotFound(w, r)
 			return
 		}
 		if r.Header.Get("Authorization") != "Bearer public" || r.Header.Get("x-opencode-session") == "" {
-			t.Fatalf("missing anonymous OpenCode headers: %v", r.Header)
+			t.Errorf("missing anonymous OpenCode headers: %v", r.Header)
 		}
 		_, _ = fmt.Fprint(w, `{"data":[
 			{"id":"big-pickle"},
@@ -247,10 +287,8 @@ func TestAnonymousZenCatalogUsesActiveZeroCostMetadata(t *testing.T) {
 			{"id":"paid-model"},
 			{"id":"missing-output"}
 		]}`)
-	}))
-	defer upstream.Close()
-
-	metadata := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+	})
+	metadata := zenServer(t, func(w http.ResponseWriter, _ *http.Request) {
 		_, _ = fmt.Fprint(w, `{"opencode":{"npm":"@ai-sdk/openai-compatible","models":{
 			"big-pickle":{"id":"big-pickle","name":"Big Pickle","status":"active","cost":{"input":0,"output":0},"family":"pickle","reasoning":true,"tool_call":true,"limit":{"context":200000,"output":32000}},
 			"muse-spark-1.3-contributor-free":{"id":"muse-spark-1.3-contributor-free","name":"Muse Spark 1.3 Free","status":"active","provider":{"npm":"@ai-sdk/openai"},"cost":{"input":0,"output":0},"structured_output":true,"tool_call":true,"limit":{"context":1048576,"output":131072}},
@@ -261,23 +299,12 @@ func TestAnonymousZenCatalogUsesActiveZeroCostMetadata(t *testing.T) {
 			"missing-output":{"id":"missing-output","name":"Incomplete cost","status":"active","cost":{"input":0}},
 			"metadata-only":{"id":"metadata-only","name":"Not upstream","status":"active","cost":{"input":0,"output":0}}
 		}}}`)
-	}))
-	defer metadata.Close()
-
-	auth, err := newBearerAuth(upstream.URL, "", nil, true)
-	if err != nil {
-		t.Fatal(err)
-	}
-	provider := OpenAIProvider{
-		auth: auth, Timeout: 2, providerID: "zen", registryID: "opencode_zen",
-		anonymous: true, metadataURL: metadata.URL,
-	}
-	rows, _, err := provider.ListModelsWithError()
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(rows) != 3 {
-		t.Fatalf("rows=%+v", rows)
+	})
+	provider := zenFixture(t, upstream, "")
+	provider.metadataURL = metadata
+	rows, observation, err := provider.ListModelsWithError()
+	if err != nil || observation != nil || len(rows) != 3 {
+		t.Fatalf("rows=%+v observation=%+v err=%v", rows, observation, err)
 	}
 	if got := []string{rows[0].ID, rows[1].ID, rows[2].ID}; !slices.Equal(got, []string{"beta-free", "big-pickle", "muse-spark-1.3-contributor-free"}) {
 		t.Fatalf("rows=%+v", rows)
@@ -297,40 +324,26 @@ func TestAnonymousZenCatalogUsesActiveZeroCostMetadata(t *testing.T) {
 }
 
 func TestZenChatUsesPersistedCatalogSurface(t *testing.T) {
-	t.Setenv("LLMGW_STATE_DIR", t.TempDir())
-	resetCatalogForTest(t)
 	const responsesModel = "constellation-free"
-	Current().catalogs.store("zen", []ModelInfo{
-		{ID: responsesModel, SupportedSurfaces: []string{"/responses"}},
-		{ID: "big-pickle", SupportedSurfaces: []string{"/chat/completions"}},
-	})
 	var path string
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	base := zenServer(t, func(w http.ResponseWriter, r *http.Request) {
 		path = r.URL.Path
-		var payload map[string]any
-		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
-			t.Fatal(err)
-		}
+		payload := zenBody(t, r)
 		if r.URL.Path == "/responses" {
 			if payload["model"] != responsesModel || payload["messages"] != nil || payload["input"] == nil {
-				t.Fatalf("payload=%+v", payload)
+				t.Errorf("payload=%+v", payload)
 			}
 			_, _ = fmt.Fprint(w, `{"id":"resp_1","object":"response","status":"completed","model":"constellation-free","output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"hi"}]}]}`)
 			return
 		}
 		_, _ = fmt.Fprint(w, `{"id":"chat_1","object":"chat.completion"}`)
-	}))
-	defer server.Close()
-
-	provider := OpenAIProvider{
-		auth: bearerAuth{base: server.URL}, Timeout: 2,
-		providerID: "zen", registryID: "opencode_zen",
-	}
-	response, err := provider.Complete(
-		responsesModel,
-		[]Message{{"role": "user", "content": "hi"}},
-		Kwargs{"max_tokens": 64},
-	)
+	})
+	provider := zenFixture(t, base, "secret")
+	provider.runtime.catalogs.store("zen", []ModelInfo{
+		{ID: responsesModel, SupportedSurfaces: []string{"/responses"}},
+		{ID: "big-pickle", SupportedSurfaces: []string{"/chat/completions"}},
+	})
+	response, err := provider.Complete(responsesModel, []Message{{"role": "user", "content": "hi"}}, Kwargs{"max_tokens": 64})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -339,29 +352,24 @@ func TestZenChatUsesPersistedCatalogSurface(t *testing.T) {
 	}
 	choices, _ := response["choices"].([]any)
 	message, _ := choices[0].(map[string]any)["message"].(map[string]any)
-	if message["content"] != "hi" {
-		t.Fatalf("response=%+v", response)
+	if message["content"] != "hi" || response["forced_support"] == nil {
+		t.Fatalf("response=%+v, want the answer marked as served over Responses", response)
 	}
 
 	path = ""
 	_, err = provider.Complete("big-pickle", []Message{{"role": "user", "content": "hi"}}, nil)
-	if err == nil || !strings.Contains(err.Error(), "invalid chat response payload") || path != "/chat/completions" {
-		t.Fatalf("ordinary Zen path=%q err=%v", path, err)
+	if !InvocationCircuitFailure(err) || InvocationRetryable(err) || path != "/chat/completions" {
+		t.Fatalf("ordinary Zen path=%q err=%v, want a completion without choices refused", path, err)
 	}
 }
 
 func TestKeyedZenNativeSurfaceUsesPersistedCatalog(t *testing.T) {
-	t.Setenv("LLMGW_STATE_DIR", t.TempDir())
-	resetCatalogForTest(t)
-	Current().catalogs.store("zen", []ModelInfo{
+	provider := zenFixture(t, "https://opencode.ai/zen/v1", "secret")
+	provider.runtime.catalogs.store("zen", []ModelInfo{
 		{ID: "constellation-free", SupportedSurfaces: []string{"/responses"}},
 		{ID: "muse-spark-chat", SupportedSurfaces: []string{"/chat/completions"}},
 	})
-	provider := OpenAIProvider{
-		auth: bearerAuth{base: "https://opencode.ai/zen/v1"}, providerID: "zen",
-		registryID: "opencode_zen", anonymous: false,
-	}
-	if !provider.zenUsesResponses("constellation-free") || provider.zenUsesResponses("muse-spark-chat") {
+	if !provider.overResponses("constellation-free") || provider.overResponses("muse-spark-chat") {
 		t.Fatal("keyed Zen routing did not follow persisted surfaces")
 	}
 	if !provider.PreservesWireNativeSurface("constellation-free", core.ModelSurfaceResponses) ||
@@ -372,159 +380,131 @@ func TestKeyedZenNativeSurfaceUsesPersistedCatalog(t *testing.T) {
 }
 
 func TestAnonymousZenCompletePreservesOrdinaryAndExplicitTitlePrompts(t *testing.T) {
-	var capturedMessages []any
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		var payload map[string]any
-		_ = json.NewDecoder(r.Body).Decode(&payload)
-		if msgs, ok := payload["messages"].([]any); ok {
-			capturedMessages = msgs
-		}
-		if stream, _ := payload["stream"].(bool); stream {
+	var captured map[string]any
+	base := zenServer(t, func(w http.ResponseWriter, r *http.Request) {
+		captured = zenBody(t, r)
+		if stream, _ := captured["stream"].(bool); stream {
 			_, _ = fmt.Fprint(w, "data: {\"id\":\"chat_1\",\"object\":\"chat.completion.chunk\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"hello\"}}]}\n\ndata: [DONE]\n\n")
 		} else {
 			_, _ = fmt.Fprint(w, `{"id":"chat_1","object":"chat.completion","choices":[{"message":{"role":"assistant","content":"hello"}}]}`)
 		}
-	}))
-	defer server.Close()
+	})
+	messagesOf := func() []any { messages, _ := captured["messages"].([]any); return messages }
 
 	// Ordinary first turns retain their user content under the proven v0.6.6
-	// admission preamble.
-	anonZen := OpenAIProvider{
-		auth:       bearerAuth{base: server.URL},
-		Timeout:    2,
-		providerID: "zen",
-		registryID: "opencode_zen",
-		anonymous:  true,
-	}
-	_, err := anonZen.Complete("big-pickle", []Message{{"role": "user", "content": "test"}}, nil)
-	if err != nil {
+	// admission preamble, and gain no agent tools.
+	anonymous := zenFixture(t, base, "")
+	if _, err := anonymous.Complete("big-pickle", []Message{{"role": "user", "content": "test"}}, nil); err != nil {
 		t.Fatal(err)
 	}
-	if len(capturedMessages) != 2 || capturedMessages[0].(map[string]any)["content"] != corezen.AnonymousAssistantPreamble || capturedMessages[1].(map[string]any)["content"] != "test" {
-		t.Fatalf("ordinary prompt changed: %+v", capturedMessages)
+	if messages := messagesOf(); len(messages) != 2 || messages[0].(map[string]any)["content"] != corezen.AnonymousAssistantPreamble || messages[1].(map[string]any)["content"] != "test" {
+		t.Fatalf("ordinary prompt changed: %+v", captured)
 	}
-	adaptedMessages, adaptedKw := adaptAnonymousZenChat([]Message{{"role": "user", "content": "test"}}, nil)
-	if len(adaptedMessages) != 2 || adaptedMessages[0]["content"] != corezen.AnonymousAssistantPreamble || adaptedMessages[1]["content"] != "test" || adaptedKw["tool_choice"] != nil || adaptedKw["tools"] != nil {
-		t.Fatalf("ordinary agent admission shape: messages=%+v kwargs=%+v", adaptedMessages, adaptedKw)
+	if captured["tools"] != nil || captured["tool_choice"] != nil {
+		t.Fatalf("ordinary agent admission shape: %+v", captured)
 	}
-
-	capturedMessages = nil
 	title := []Message{{"role": "system", "content": "You are a title generator. Output one title."}, {"role": "user", "content": "test"}}
-	if _, err = anonZen.Complete("big-pickle", title, nil); err != nil {
+	if _, err := anonymous.Complete("big-pickle", title, nil); err != nil {
 		t.Fatal(err)
 	}
-	if len(capturedMessages) != 2 || capturedMessages[0].(map[string]any)["content"] != title[0]["content"] {
-		t.Fatalf("explicit title prompt changed: %+v", capturedMessages)
-	}
-	_, titleKw := adaptAnonymousZenChat(title, nil)
-	if titleKw["tools"] != nil || titleKw["tool_choice"] != nil {
-		t.Fatalf("explicit title request gained agent tools: %+v", titleKw)
+	if messages := messagesOf(); len(messages) != 2 || messages[0].(map[string]any)["content"] != title[0]["content"] || captured["tools"] != nil || captured["tool_choice"] != nil {
+		t.Fatalf("explicit title prompt changed: %+v", captured)
 	}
 
-	// Keyed Zen provider -> must NOT adapt messages
-	capturedMessages = nil
-	keyedZen := OpenAIProvider{
-		auth:       bearerAuth{base: server.URL},
-		Timeout:    2,
-		providerID: "zen",
-		registryID: "opencode_zen",
-		anonymous:  false,
-	}
-	_, err = keyedZen.Complete("big-pickle", []Message{{"role": "user", "content": "test"}}, nil)
-	if err != nil {
+	// Keyed Zen must not adapt messages.
+	if _, err := zenFixture(t, base, "secret").Complete("big-pickle", []Message{{"role": "user", "content": "test"}}, nil); err != nil {
 		t.Fatal(err)
 	}
-	if len(capturedMessages) != 1 {
-		t.Fatalf("expected 1 unadapted message, got %d: %+v", len(capturedMessages), capturedMessages)
+	if messages := messagesOf(); len(messages) != 1 || captured["stream"] != false {
+		t.Fatalf("keyed request was adapted: %+v", captured)
 	}
 
-	// Non-Zen anonymous provider -> must NOT adapt messages
-	capturedMessages = nil
-	nonZen := OpenAIProvider{
-		auth:       bearerAuth{base: server.URL},
-		Timeout:    2,
-		providerID: "other",
-		registryID: "kilo_code",
-		anonymous:  true,
-	}
-	_, err = nonZen.Complete("kilo-free", []Message{{"role": "user", "content": "test"}}, nil)
-	if err != nil {
+	// A non-Zen anonymous provider must not adapt messages.
+	nonZen := OpenAIProvider{auth: bearerAuth{base: base}, Timeout: 2, providerID: "other", registryID: "kilo_code", anonymous: true}
+	if _, err := nonZen.Complete("kilo-free", []Message{{"role": "user", "content": "test"}}, nil); err != nil {
 		t.Fatal(err)
 	}
-	if len(capturedMessages) != 1 {
-		t.Fatalf("expected 1 unadapted message, got %d: %+v", len(capturedMessages), capturedMessages)
+	if messages := messagesOf(); len(messages) != 1 {
+		t.Fatalf("non-Zen request was adapted: %+v", captured)
 	}
 }
 
+const zenCompletedFixture = "data: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_1\",\"object\":\"response\",\"status\":\"completed\",\"output\":[{\"type\":\"message\",\"role\":\"assistant\",\"content\":[{\"type\":\"output_text\",\"text\":\"ok\"}]}]}}\n\n"
+
 func TestAnonymousZenResponsesPreservesOrdinaryAndExplicitTitleInstructions(t *testing.T) {
-	ordinary := adaptAnonymousZenResponsesPayload(map[string]any{"input": "Explain this failure", "instructions": "Be concise"})
-	if ordinary["instructions"] != corezen.AnonymousAssistantPreamble+"\n\nBe concise" {
-		t.Fatalf("ordinary Responses instructions changed: %+v", ordinary)
+	var captured map[string]any
+	base := zenServer(t, func(w http.ResponseWriter, r *http.Request) {
+		captured = zenBody(t, r)
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = fmt.Fprint(w, zenCompletedFixture)
+	})
+	provider := zenFixture(t, base, "")
+	if _, _, err := provider.CompleteResponses("muse-spark-fixture", map[string]any{"input": "Explain this failure", "instructions": "Be concise"}); err != nil {
+		t.Fatal(err)
 	}
-	if ordinary["tools"] != nil || ordinary["tool_choice"] != nil {
-		t.Fatalf("ordinary Responses admission shape: %+v", ordinary)
+	if captured["instructions"] != corezen.AnonymousAssistantPreamble+"\n\nBe concise" || captured["stream"] != true {
+		t.Fatalf("ordinary Responses instructions changed: %+v", captured)
 	}
-	title := adaptAnonymousZenResponsesPayload(map[string]any{"input": "Explain this failure", "instructions": "You are a title generator"})
-	if title["instructions"] != "You are a title generator" {
-		t.Fatalf("explicit title instructions changed: %+v", title)
+	if captured["tools"] != nil || captured["tool_choice"] != nil {
+		t.Fatalf("ordinary Responses admission shape: %+v", captured)
 	}
-	if title["tools"] != nil || title["tool_choice"] != nil {
-		t.Fatalf("explicit title request gained agent tools: %+v", title)
+	if _, _, err := provider.CompleteResponses("muse-spark-fixture", map[string]any{"input": "Explain this failure", "instructions": "You are a title generator"}); err != nil {
+		t.Fatal(err)
+	}
+	if captured["instructions"] != "You are a title generator" || captured["tools"] != nil || captured["tool_choice"] != nil {
+		t.Fatalf("explicit title request changed: %+v", captured)
 	}
 }
 
 func TestAnonymousZenRecognizedByBaseURL(t *testing.T) {
 	// A provider configured as "zen" with base_url "https://opencode.ai/zen/v1"
 	// and NO explicit registry_id must still be recognized as Zen.
-	auth, err := newBearerAuth("https://opencode.ai/zen/v1", "", nil, true)
-	if err != nil {
-		t.Fatal(err)
+	provider := zenFixtureConfig(t, &config.ProviderConfig{Type: "openai_compatible", BaseURL: "https://opencode.ai/zen/v1"})
+	if !provider.anonymous {
+		t.Fatal("expected anonymous Zen access based on base_url")
 	}
-	p := OpenAIProvider{
-		auth:       auth,
-		providerID: "zen",
-		registryID: "",
-		anonymous:  true,
-		Timeout:    15,
-	}
-	if !p.isAnonymousZen() {
-		t.Fatal("expected isAnonymousZen to be true based on base_url")
-	}
-	if !p.zenUsesResponses("muse-spark-1.2-contributor-free") {
+	if !provider.overResponses("muse-spark-1.2-contributor-free") {
 		t.Fatal("cold-cache Muse fallback must preserve the v0.6.6 Responses surface")
 	}
 }
 
 func TestAnonymousZenToolsAndMultiTurn(t *testing.T) {
-	origMessages := []Message{
+	var captured map[string]any
+	base := zenServer(t, func(w http.ResponseWriter, r *http.Request) {
+		captured = zenBody(t, r)
+		_, _ = fmt.Fprint(w, zenChatStreamFixture)
+	})
+	provider := zenFixture(t, base, "")
+	messages := []Message{
 		{"role": "system", "content": "You are Pi, a personal AI coding agent."},
 		{"role": "user", "content": "What is the weather?"},
 	}
 	customTool := map[string]any{
 		"type": "function",
 		"function": map[string]any{
-			"name":        "get_weather",
-			"description": "get weather",
-			"parameters":  map[string]any{"type": "object"},
+			"name": "get_weather", "description": "get weather", "parameters": map[string]any{"type": "object"},
 		},
 	}
-	kw := Kwargs{"tools": []any{customTool}}
-
-	adaptedMessages, adaptedKw := adaptAnonymousZenChat(origMessages, kw)
-
-	// Ensure system prompt is preserved (NOT replaced with title generator preamble)
-	if sys, _ := adaptedMessages[0]["content"].(string); !strings.Contains(sys, "You are Pi") {
-		t.Fatalf("expected Pi system prompt preserved, got: %s", sys)
+	stream := func(kw Kwargs) {
+		t.Helper()
+		iterator, err := provider.Stream("big-pickle", messages, kw)
+		if err != nil {
+			t.Fatal(err)
+		}
+		_ = iterator.Close()
 	}
-	if sys, _ := adaptedMessages[0]["content"].(string); strings.Contains(sys, "You are a title generator") {
-		t.Fatal("title generator preamble must NOT be present when tools are used")
+
+	stream(Kwargs{"tools": []any{customTool}})
+	// The system prompt is preserved, not replaced with the title preamble.
+	sent, _ := captured["messages"].([]any)
+	system, _ := sent[0].(map[string]any)["content"].(string)
+	if !strings.Contains(system, "You are Pi") || strings.Contains(system, "You are a title generator") {
+		t.Fatalf("system prompt changed: %q", system)
 	}
 
 	// Caller tools and tool choice are preserved while compatibility tools return.
-	kw["tool_choice"] = "required"
-	_, adaptedKw = adaptAnonymousZenChat(origMessages, kw)
-	tools, ok := adaptedKw["tools"].([]any)
-	if !ok || len(tools) != 3 || adaptedKw["tool_choice"] != "required" {
-		t.Fatalf("caller tool contract changed: %+v", adaptedKw)
+	stream(Kwargs{"tools": []any{customTool}, "tool_choice": "required"})
+	if tools, ok := captured["tools"].([]any); !ok || len(tools) != 3 || captured["tool_choice"] != "required" {
+		t.Fatalf("caller tool contract changed: %+v", captured)
 	}
 }

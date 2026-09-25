@@ -84,10 +84,11 @@ func (e *ConfigError) ProviderErrorClassification() core.ProviderErrorClassifica
 
 func (e *ConfigError) errorClass() core.ProviderErrorClass { return core.ProviderErrorConfiguration }
 
-// ProviderErrorClassification is terminal. Routing meets this error when a
-// provider completes a request by reading a stream (completeViaStream): the
-// resilience wrapper returns it untouched and the generic chain stops on it,
-// although the Messages chain moves past it as it does past a ConfigError.
+// ProviderErrorClassification is terminal. A stream reports this error from
+// Err once it has been handed out, where nothing repeats or fails it over.
+// Were routing to meet it, the resilience wrapper would return it untouched
+// and the generic chain would stop on it, although the Messages chain moves
+// past it as it does past a ConfigError.
 func (e *StreamRecordTooLargeError) ProviderErrorClassification() core.ProviderErrorClassification {
 	return core.ProviderErrorClassification{}
 }

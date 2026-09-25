@@ -69,24 +69,20 @@ func (rt *Runtime) instantiate(
 			}
 			return rt.newCodexProvider(providerID, caller, timeout, nil, "")
 		}
+		base := openAICompatibleBase(s, cfg)
+		if zenInstance(s, providerID, cfg) {
+			return rt.newZenProvider(providerID, cfg, caller, base, timeout)
+		}
 		registryID := EffectiveRegistryID(providerID, cfg.RegistryID, cfg.Type)
 		apiKey, observation, err := resolveAPIKeyObserved(providerID, cfg, caller)
 		if err != nil {
 			return nil, err
 		}
-		base := cfg.BaseURL
-		if base == "" {
-			base = s.OpenAICompatibleBaseURL
-		}
 		registryEntry, _ := RegistryProviderByID(registryID)
-		isZen := registryID == "opencode_zen" || isZenBaseURL(base)
-		anonymous := (registryEntry.AnonymousAutomation || isZen) && AnonymousAPIKey(apiKey)
-		auth, authErr := newBearerAuth(base, apiKey, observation, isZen)
-		if authErr != nil {
-			return nil, &ConfigError{Msg: fmt.Sprintf("provider '%s': initialize request identity: %v", providerID, authErr)}
-		}
+		anonymous := registryEntry.AnonymousAutomation && AnonymousAPIKey(apiKey)
 		return OpenAIProvider{
-			auth: auth, Timeout: timeout, forceAdapt: cfg.ForceApiSupport,
+			auth:    bearerAuth{base: strings.TrimRight(base, "/"), apiKey: apiKey, observation: observation},
+			Timeout: timeout, forceAdapt: cfg.ForceApiSupport,
 			providerID: providerID, caller: caller, registryID: registryID,
 			anonymous: anonymous,
 		}, nil

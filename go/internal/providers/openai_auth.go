@@ -10,7 +10,6 @@ import (
 
 	copilotauth "github.com/xibodev/llm-provider-auth/copilot"
 	core "github.com/xibodev/llmgw-core"
-	corezen "github.com/xibodev/llmgw-core/providers/zen"
 )
 
 // OpenAIAuth decouples authentication from the OpenAI wire transport. It
@@ -66,11 +65,9 @@ func copilotInvocationError(err error) error {
 // bearerAuth is a static base URL + optional Bearer key: openai_compatible,
 // bedrock (token), litellm, localai, and any keyless local server.
 type bearerAuth struct {
-	base         string
-	apiKey       string
-	observation  *CredentialObservation
-	opencode     bool
-	zenAnonymous *corezen.Client
+	base        string
+	apiKey      string
+	observation *CredentialObservation
 }
 
 func normalizeBearerKey(value string) string {
@@ -89,37 +86,10 @@ func AnonymousAPIKey(value string) bool {
 	return key == "" || strings.EqualFold(key, "public")
 }
 
-func newBearerAuth(
-	base, apiKey string, observation *CredentialObservation, opencode bool,
-) (bearerAuth, error) {
-	auth := bearerAuth{
-		base: strings.TrimRight(base, "/"), apiKey: apiKey,
-		observation: observation, opencode: opencode,
-	}
-	if !opencode {
-		return auth, nil
-	}
-	if AnonymousAPIKey(apiKey) {
-		var err error
-		auth.zenAnonymous, err = newAnonymousZenClient(auth.base, "", 10)
-		if err != nil {
-			return bearerAuth{}, err
-		}
-		return auth, nil
-	}
-	return auth, nil
-}
-
 func (a bearerAuth) Prepare() (string, http.Header, error) {
 	h := http.Header{}
 	h.Set("Content-Type", "application/json")
-	key := normalizeBearerKey(a.apiKey)
-	if a.opencode {
-		if a.zenAnonymous != nil {
-			h.Set("Authorization", "Bearer public")
-		}
-	}
-	if key != "" {
+	if key := normalizeBearerKey(a.apiKey); key != "" {
 		h.Set("Authorization", "Bearer "+key)
 	}
 	return a.base, h, nil
