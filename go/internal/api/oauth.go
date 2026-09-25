@@ -2,21 +2,20 @@ package api
 
 import (
 	"context"
-	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/url"
 	"sort"
 	"strings"
-	"sync"
-	"time"
 
 	"llmgw/internal/config"
 	"llmgw/internal/diagnostics"
 	"llmgw/internal/iam"
 	"llmgw/internal/providers"
 
-	browseroauth "github.com/xibodev/llm-provider-auth/browseroauth"
+	core "github.com/xibodev/llmgw-core"
+	"github.com/xibodev/llmgw-core/oauthflow"
 )
 
 const maxOAuthDiagnosticChars = 300
@@ -139,182 +138,6 @@ func ensureOAuthProviderConfig(providerID, providerRef string) error {
 	return nil
 }
 
-type oauthFlowState struct {
-	PrincipalID  string
-	ProviderID   string
-	StartedAt    int64
-	ExpiresAt    int64
-	NextPollAt   int64
-	Interval     int
-	PrivateState string
-	Generation   uint64
-}
-
-type browserOAuthFlowState struct {
-	PrincipalID    string
-	ProviderID     string
-	Kind           string
-	ConnectionName string
-	Source         string
-	ExpectedState  string
-	PrivateState   string
-	ExpiresAt      int64
-	StartedAt      int64
-	Generation     uint64
-	CallbackID     string
-	Result         map[string]any
-	Completing     bool
-	Manual         bool
-	PersistConfig  bool
-	ManualConfig   providers.ProviderAuthManualConfig
-}
-
-var browserOAuthFlows = struct {
-	sync.Mutex
-	values         map[string]browserOAuthFlowState
-	nextGeneration uint64
-}{values: map[string]browserOAuthFlowState{}}
-
-const maxOAuthFlowsPerPrincipal = 5
-
-var oauthFlows = struct {
-	sync.Mutex
-	values         map[string]oauthFlowState
-	nextGeneration uint64
-}{values: map[string]oauthFlowState{}}
-
-var oauthFlowCleanupOnce sync.Once
-
-func oauthFlowKey(principalID, providerID, deviceCode string) string {
-	return principalID + "|" + providerID + "|" + deviceCode
-}
-
-func storeOAuthFlow(key string, flow oauthFlowState) {
-	ensureOAuthFlowCleanup()
-	now := time.Now().Unix()
-	oauthFlows.Lock()
-	pruneOAuthFlowsLocked(now)
-	oauthFlows.nextGeneration++
-	flow.Generation = oauthFlows.nextGeneration
-	for {
-		count := 0
-		oldestKey := ""
-		oldestAt := int64(0)
-		oldestGeneration := uint64(0)
-		for existingKey, existing := range oauthFlows.values {
-			if existing.PrincipalID != flow.PrincipalID {
-				continue
-			}
-			count++
-			if oldestKey == "" || existing.StartedAt < oldestAt ||
-				(existing.StartedAt == oldestAt && existing.Generation < oldestGeneration) {
-				oldestKey = existingKey
-				oldestAt = existing.StartedAt
-				oldestGeneration = existing.Generation
-			}
-		}
-		if count < maxOAuthFlowsPerPrincipal || oldestKey == "" {
-			break
-		}
-		delete(oauthFlows.values, oldestKey)
-	}
-	oauthFlows.values[key] = flow
-	oauthFlows.Unlock()
-}
-
-func ensureOAuthFlowCleanup() {
-	oauthFlowCleanupOnce.Do(func() {
-		go func() {
-			ticker := time.NewTicker(time.Minute)
-			defer ticker.Stop()
-			for now := range ticker.C {
-				oauthFlows.Lock()
-				pruneOAuthFlowsLocked(now.Unix())
-				oauthFlows.Unlock()
-				browserOAuthFlows.Lock()
-				pruneBrowserOAuthFlowsLocked(now.Unix())
-				browserOAuthFlows.Unlock()
-			}
-		}()
-	})
-}
-
-func pruneBrowserOAuthFlowsLocked(now int64) {
-	for key, flow := range browserOAuthFlows.values {
-		if flow.ExpiresAt > 0 && flow.ExpiresAt <= now {
-			delete(browserOAuthFlows.values, key)
-		}
-	}
-}
-
-func storeBrowserOAuthFlow(flowID string, flow browserOAuthFlowState) {
-	ensureOAuthFlowCleanup()
-	now := time.Now().Unix()
-	browserOAuthFlows.Lock()
-	defer browserOAuthFlows.Unlock()
-	pruneBrowserOAuthFlowsLocked(now)
-	browserOAuthFlows.nextGeneration++
-	flow.Generation = browserOAuthFlows.nextGeneration
-	for {
-		count := 0
-		oldestKey := ""
-		oldestAt := int64(0)
-		oldestGeneration := uint64(0)
-		for key, existing := range browserOAuthFlows.values {
-			if existing.PrincipalID != flow.PrincipalID {
-				continue
-			}
-			count++
-			if existing.Completing {
-				continue
-			}
-			if oldestKey == "" || existing.StartedAt < oldestAt || existing.StartedAt == oldestAt && existing.Generation < oldestGeneration {
-				oldestKey, oldestAt, oldestGeneration = key, existing.StartedAt, existing.Generation
-			}
-		}
-		if count < maxOAuthFlowsPerPrincipal || oldestKey == "" {
-			break
-		}
-		delete(browserOAuthFlows.values, oldestKey)
-	}
-	browserOAuthFlows.values[flowID] = flow
-}
-
-func pruneOAuthFlowsLocked(now int64) {
-	for key, flow := range oauthFlows.values {
-		if flow.ExpiresAt > 0 && flow.ExpiresAt <= now {
-			delete(oauthFlows.values, key)
-		}
-	}
-}
-
-func applyOAuthPollResult(
-	key string, observed oauthFlowState, result providers.ProviderAuthPoll, now int64,
-) bool {
-	oauthFlows.Lock()
-	defer oauthFlows.Unlock()
-	current, ok := oauthFlows.values[key]
-	if !ok || current.Generation != observed.Generation {
-		return false
-	}
-	if current.ExpiresAt > 0 && current.ExpiresAt <= now {
-		delete(oauthFlows.values, key)
-		return false
-	}
-	switch result.Status {
-	case "pending":
-		current.NextPollAt = now + int64(current.Interval)
-		oauthFlows.values[key] = current
-	case "slow_down":
-		current.Interval += 5
-		current.NextPollAt = now + int64(current.Interval)
-		oauthFlows.values[key] = current
-	default:
-		delete(oauthFlows.values, key)
-	}
-	return true
-}
-
 func oauthRegistryIDForRef(providerRef string) string {
 	reference := strings.ToLower(strings.TrimSpace(providerRef))
 	if providerConfig, ok := config.Get().Providers[reference]; ok {
@@ -351,7 +174,7 @@ func configureOAuthClientID(providerRef, clientID string, allowUpdate bool) erro
 	return nil
 }
 
-func startOAuthFlow(
+func (s *server) startOAuthFlow(
 	principal iam.Principal, providerRef, clientID string, allowClientIDUpdate bool,
 	request *http.Request, connectionName, source, preferredFlow string,
 ) (response map[string]any, err error) {
@@ -372,7 +195,7 @@ func startOAuthFlow(
 	if err := configureOAuthClientID(providerRef, clientID, allowClientIDUpdate); err != nil {
 		return nil, err
 	}
-	providerID, _, adapter, err := oauthAdapterFor(providerRef)
+	providerID, kind, adapter, err := oauthAdapterFor(providerRef)
 	if err != nil {
 		return nil, err
 	}
@@ -380,76 +203,59 @@ func startOAuthFlow(
 	if !providerConfigured && !allowClientIDUpdate {
 		return nil, fmt.Errorf("Only an administrator can configure this OAuth provider.")
 	}
-	browserAdapter, browserSupported := adapter.(providers.BrowserProviderAuthAdapter)
-	deviceAdapter, deviceSupported := adapter.(providers.DeviceProviderAuthAdapter)
+	_, browserSupported := adapter.(providers.BrowserProviderAuthAdapter)
+	_, deviceSupported := adapter.(providers.DeviceProviderAuthAdapter)
 	useBrowser := preferredFlow == "browser" || (!deviceSupported && browserSupported)
 	if preferredFlow != "" && preferredFlow != "browser" && preferredFlow != "device_code" {
 		return nil, fmt.Errorf("Unsupported OAuth flow.")
 	}
+	// The provider is configured only once its sign-in has started. A start
+	// whose configuration then fails leaves its flow behind unreturned: its
+	// ID never reaches the client, and the cap evicts it first.
+	ctx, startedAt := context.Background(), s.now()
 	if useBrowser && browserSupported {
 		callbackID := oauthRegistryIDForRef(providerRef)
 		redirectURI, err := oauthCallbackURL(request, callbackID)
 		if err != nil {
 			return nil, err
 		}
-		start, err := browserAdapter.StartBrowser(context.Background(), redirectURI)
+		view, err := s.oauth.Start(ctx, oauthCaller(principal), providerID, oauthflow.MethodBrowser,
+			oauthflow.WithRedirectURI(redirectURI), oauthflow.WithParams(oauthConnectionParams(connectionName, source, kind)))
 		if err != nil {
 			return nil, err
-		}
-		var private map[string]string
-		if json.Unmarshal([]byte(start.PrivateState), &private) != nil || private["state"] == "" || private["code_verifier"] == "" {
-			return nil, fmt.Errorf("official browser OAuth returned incomplete authorization data")
 		}
 		if !providerConfigured {
 			if err := ensureOAuthProviderConfig(providerID, providerRef); err != nil {
 				return nil, err
 			}
 		}
-		expiresIn := start.ExpiresIn
-		if expiresIn <= 0 {
-			expiresIn = 600
-		}
-		private["redirect_uri"] = redirectURI
-		storedPrivate, _ := json.Marshal(private)
-		expiresAt := time.Now().Add(time.Duration(expiresIn) * time.Second).Unix()
-		flowID := private["state"]
-		storeBrowserOAuthFlow(flowID, browserOAuthFlowState{
-			PrincipalID: principal.ID, ProviderID: providerID, Kind: adapter.CredentialKind(),
-			ConnectionName: connectionName, Source: source, ExpectedState: private["state"],
-			PrivateState: string(storedPrivate), ExpiresAt: expiresAt, StartedAt: time.Now().Unix(), CallbackID: callbackID,
-		})
 		flowStarted = true
 		return map[string]any{
-			"provider_id": providerID, "flow": "browser", "authorization_url": start.AuthorizationURL,
-			"flow_id": flowID, "expires_in": expiresIn, "expires_at": expiresAt,
+			"provider_id": providerID, "flow": "browser", "authorization_url": view.AuthorizationURL,
+			"flow_id": view.ID, "expires_in": oauthExpiresIn(view, startedAt), "expires_at": view.ExpiresAt.Unix(),
 		}, nil
 	}
 	if !deviceSupported {
 		return nil, fmt.Errorf("provider %q does not support device authorization", providerRef)
 	}
-	start, err := deviceAdapter.StartDevice(context.Background())
+	// The poll that completes a device flow names its connection.
+	view, err := s.oauth.Start(ctx, oauthCaller(principal), providerID, oauthflow.MethodDevice,
+		oauthflow.WithParams(map[string]string{oauthParamKind: kind}))
 	if err != nil {
 		return nil, err
-	}
-	if strings.TrimSpace(start.DeviceCode) == "" || strings.TrimSpace(start.UserCode) == "" {
-		return nil, fmt.Errorf("official OAuth device flow returned incomplete authorization data")
 	}
 	if !providerConfigured {
 		if err := ensureOAuthProviderConfig(providerID, providerRef); err != nil {
 			return nil, err
 		}
 	}
-	now := time.Now().Unix()
-	expiresAt := now + int64(start.ExpiresIn)
-	storeOAuthFlow(oauthFlowKey(principal.ID, providerID, start.DeviceCode), oauthFlowState{
-		PrincipalID: principal.ID, ProviderID: providerID, StartedAt: now, ExpiresAt: expiresAt,
-		NextPollAt: now + int64(start.Interval), Interval: start.Interval, PrivateState: start.PrivateState,
-	})
 	flowStarted = true
+	// device_code carries the flow ID: the provider's device code stays on
+	// the server, and clients only echo the value back.
 	return map[string]any{
-		"provider_id": providerID, "flow": "device_code", "device_code": start.DeviceCode,
-		"user_code": start.UserCode, "verification_uri": start.VerificationURI,
-		"interval": start.Interval, "expires_in": start.ExpiresIn, "expires_at": expiresAt,
+		"provider_id": providerID, "flow": "device_code", "device_code": view.ID,
+		"user_code": view.UserCode, "verification_uri": view.VerificationURI,
+		"interval": view.Interval, "expires_in": oauthExpiresIn(view, startedAt), "expires_at": view.ExpiresAt.Unix(),
 	}, nil
 }
 
@@ -497,15 +303,20 @@ const antigravityManualProfile = "consumer_manual"
 const codexBrowserManualProfile = "browser_pkce"
 const codexBrowserLoopbackRedirectURI = "http://localhost:1455/auth/callback"
 
-var startManualProviderOAuth = func(ctx context.Context, adapter providers.ManualProviderAuthAdapter, input providers.ProviderAuthManualConfig) (providers.ProviderAuthBrowserStart, error) {
-	return adapter.StartManual(ctx, input)
+// manualOAuthParams are a manual flow's start parameters: the connection it
+// stores and the OAuth client the owner signs in with.
+func manualOAuthParams(connectionName, source, kind string, client providers.ProviderAuthManualConfig, persistProfile bool) map[string]string {
+	params := oauthConnectionParams(connectionName, source, kind)
+	for key, value := range client.OAuthParams() {
+		params[key] = value
+	}
+	if persistProfile {
+		params[oauthParamPersistProfile] = "true"
+	}
+	return params
 }
 
-var completeManualProviderOAuth = func(ctx context.Context, adapter providers.ManualProviderAuthAdapter, code, privateState string, input providers.ProviderAuthManualConfig) (providers.ProviderAuthPoll, error) {
-	return adapter.CompleteManual(ctx, code, privateState, input)
-}
-
-func startManualOAuthFlow(
+func (s *server) startManualOAuthFlow(
 	principal iam.Principal, providerRef, connectionName, source string,
 	input providers.ProviderAuthManualConfig, persistConfig bool,
 ) (map[string]any, error) {
@@ -513,42 +324,27 @@ func startManualOAuthFlow(
 	if err != nil {
 		return nil, err
 	}
-	manual, ok := adapter.(providers.ManualProviderAuthAdapter)
-	if !ok {
+	if _, ok := adapter.(providers.ManualProviderAuthAdapter); !ok {
 		return nil, fmt.Errorf("provider %q does not support manual authorization", providerRef)
 	}
 	configured, err := antigravityManualConfig(providerID, input, persistConfig)
 	if err != nil {
 		return nil, err
 	}
-	start, err := startManualProviderOAuth(context.Background(), manual, configured)
+	startedAt := s.now()
+	view, err := s.oauth.Start(context.Background(), oauthCaller(principal), providerID, oauthflow.MethodManual,
+		oauthflow.WithParams(manualOAuthParams(connectionName, source, kind, configured, persistConfig)))
 	if err != nil {
 		return nil, err
 	}
-	var private map[string]string
-	if json.Unmarshal([]byte(start.PrivateState), &private) != nil || private["state"] == "" || private["code_verifier"] == "" {
-		return nil, fmt.Errorf("official manual OAuth returned incomplete authorization data")
-	}
-	expiresIn := start.ExpiresIn
-	if expiresIn <= 0 {
-		expiresIn = 600
-	}
-	now := time.Now()
-	flowID := private["state"]
-	storeBrowserOAuthFlow(flowID, browserOAuthFlowState{
-		PrincipalID: principal.ID, ProviderID: providerID, Kind: kind,
-		ConnectionName: connectionName, Source: source, ExpectedState: flowID,
-		PrivateState: start.PrivateState, ExpiresAt: now.Add(time.Duration(expiresIn) * time.Second).Unix(),
-		StartedAt: now.Unix(), Manual: true, PersistConfig: persistConfig, ManualConfig: configured,
-	})
 	return map[string]any{
 		"provider_id": providerID, "flow": "consumer_manual", "profile": antigravityManualProfile,
-		"authorization_url": start.AuthorizationURL, "flow_id": flowID,
-		"expires_in": expiresIn, "expires_at": now.Add(time.Duration(expiresIn) * time.Second).Unix(),
+		"authorization_url": view.AuthorizationURL, "flow_id": view.ID,
+		"expires_in": oauthExpiresIn(view, startedAt), "expires_at": view.ExpiresAt.Unix(),
 	}, nil
 }
 
-func startCodexBrowserFlow(principal iam.Principal, providerRef, clientID string, allowClientIDUpdate bool, connectionName, source string) (map[string]any, error) {
+func (s *server) startCodexBrowserFlow(principal iam.Principal, providerRef, clientID string, allowClientIDUpdate bool, connectionName, source string) (map[string]any, error) {
 	providerID, _, _, adapterErr := oauthAdapterFor(providerRef)
 	if adapterErr != nil {
 		return nil, adapterErr
@@ -573,125 +369,64 @@ func startCodexBrowserFlow(principal iam.Principal, providerRef, clientID string
 	if err != nil {
 		return nil, err
 	}
-	manual, ok := adapter.(providers.ManualProviderAuthAdapter)
-	if !ok {
+	if _, ok := adapter.(providers.ManualProviderAuthAdapter); !ok {
 		return nil, fmt.Errorf("provider %q does not support manual browser authorization", providerRef)
 	}
+	// The flow captures the client configured now: the owner's grant, and
+	// the connection that keeps it, belong to that client.
 	capturedConfig := providers.ProviderAuthManualConfig{ClientID: providers.EffectiveCodexClientID(), ClientMode: "public", RedirectURI: codexBrowserLoopbackRedirectURI}
-	start, err := manual.StartManual(context.Background(), capturedConfig)
+	startedAt := s.now()
+	view, err := s.oauth.Start(context.Background(), oauthCaller(principal), providerID, oauthflow.MethodManual,
+		oauthflow.WithParams(manualOAuthParams(connectionName, source, kind, capturedConfig, false)))
 	if err != nil {
 		return nil, err
 	}
-	private := map[string]string{}
-	if json.Unmarshal([]byte(start.PrivateState), &private) != nil || private["state"] == "" || private["code_verifier"] == "" {
-		return nil, fmt.Errorf("official Codex browser OAuth returned incomplete authorization data")
-	}
-	now := time.Now()
-	flowID := private["state"]
-	storeBrowserOAuthFlow(flowID, browserOAuthFlowState{
-		PrincipalID: principal.ID, ProviderID: providerID, Kind: kind,
-		ConnectionName: connectionName, Source: source, ExpectedState: flowID,
-		PrivateState: start.PrivateState, ExpiresAt: now.Add(10 * time.Minute).Unix(),
-		StartedAt: now.Unix(), Manual: true, ManualConfig: capturedConfig,
-	})
 	flowStarted = true
 	return map[string]any{
 		"provider_id": providerID, "flow": codexBrowserManualProfile, "profile": codexBrowserManualProfile,
-		"authorization_url": start.AuthorizationURL, "flow_id": flowID,
-		"expires_in": 600, "expires_at": now.Add(10 * time.Minute).Unix(),
+		"authorization_url": view.AuthorizationURL, "flow_id": view.ID,
+		"expires_in": oauthExpiresIn(view, startedAt), "expires_at": view.ExpiresAt.Unix(),
 	}, nil
 }
 
-func completeManualOAuthFlow(principal iam.Principal, providerRef, flowID, authorizationResponse string) map[string]any {
+func (s *server) completeManualOAuthFlow(principal iam.Principal, providerRef, flowID, authorizationResponse string) map[string]any {
 	providerID, _, adapter, err := oauthAdapterFor(providerRef)
 	if err != nil {
 		return safeOAuthPollResponse("error", err.Error())
 	}
-	manual, ok := adapter.(providers.ManualProviderAuthAdapter)
-	if !ok {
+	if _, ok := adapter.(providers.ManualProviderAuthAdapter); !ok {
 		return safeOAuthPollResponse("error", "Provider does not support manual authorization.")
 	}
 	flowID = strings.TrimSpace(flowID)
-	browserOAuthFlows.Lock()
-	flow, exists := browserOAuthFlows.values[flowID]
-	valid := exists && flow.Manual && !flow.Completing && flow.Result == nil &&
-		flow.PrincipalID == principal.ID && flow.ProviderID == providerID && flow.ExpiresAt > time.Now().Unix()
-	if valid {
-		flow.Completing = true
-		browserOAuthFlows.values[flowID] = flow
+	ctx, caller := context.Background(), oauthCaller(principal)
+	inactive := safeOAuthPollResponse("expired", "Manual authorization is no longer active. Start again.")
+	view, err := s.oauth.Get(ctx, caller, flowID)
+	if err != nil || view.Method != oauthflow.MethodManual || view.Status != oauthflow.StatusPending || view.Instance != providerID {
+		return inactive
 	}
-	browserOAuthFlows.Unlock()
-	if !valid {
-		return safeOAuthPollResponse("expired", "Manual authorization is no longer active. Start again.")
-	}
-	failed := func(detail string) map[string]any {
-		browserOAuthFlows.Lock()
-		if current, currentExists := browserOAuthFlows.values[flowID]; currentExists && current.Generation == flow.Generation {
-			current.Completing = false
-			browserOAuthFlows.values[flowID] = current
-		}
-		browserOAuthFlows.Unlock()
-		return safeOAuthPollResponse("error", detail)
-	}
+	// A paste that is not a code, or whose state is another attempt's,
+	// spends nothing: the owner may paste again.
 	code, returnedState, fromURL, err := manualAuthorizationCode(authorizationResponse)
 	if err != nil {
-		return failed(err.Error())
+		return safeOAuthPollResponse("error", err.Error())
 	}
-	if fromURL && browseroauth.ValidateState(flow.ExpectedState, returnedState) != nil {
-		return failed("The returned OAuth state did not match this authorization flow.")
+	input := oauthflow.CompleteInput{Code: code}
+	if fromURL {
+		input.State = returnedState
 	}
-	result, err := completeManualProviderOAuth(context.Background(), manual, code, flow.PrivateState, flow.ManualConfig)
-	if err != nil || result.Status != "authorized" {
-		return failed("Manual authorization failed.")
+	completion := &oauthCompletion{providerRef: providerRef}
+	_, err = s.oauth.Complete(withOAuthCompletion(ctx, completion), caller, flowID, input)
+	switch {
+	case err == nil && completion.connection != nil:
+		return map[string]any{"status": "authorized", "connection": *completion.connection}
+	case errors.Is(err, oauthflow.ErrStateMismatch):
+		return safeOAuthPollResponse("error", "The returned OAuth state did not match this authorization flow.")
+	case completion.failure != "":
+		return safeOAuthPollResponse("error", completion.failure)
+	case errors.Is(err, oauthflow.ErrFlowNotFound), errors.Is(err, oauthflow.ErrFlowExpired):
+		return inactive
 	}
-	profile := antigravityManualProfile
-	clientID, clientMode, redirectURI, clientSecret := flow.ManualConfig.ClientID, flow.ManualConfig.ClientMode, flow.ManualConfig.RedirectURI, flow.ManualConfig.ClientSecret
-	if oauthRegistryIDForRef(providerRef) == "openai_codex" {
-		profile = codexBrowserManualProfile
-		clientID = strings.TrimSpace(flow.ManualConfig.ClientID)
-		clientMode, redirectURI, clientSecret = "public", "http://localhost:1455/auth/callback", ""
-	}
-	connection, err := iam.PutOAuthProviderConnection(iam.OAuthConnectionCreate{
-		PrincipalID: principal.ID, ProviderID: providerID, Name: flow.ConnectionName,
-		Kind: flow.Kind, Source: flow.Source, MakeDefault: true,
-		AccessToken: result.AccessToken, RefreshToken: result.RefreshToken, IDToken: result.IDToken,
-		TokenType: result.TokenType, ExpiresAt: result.ExpiresAt, AccountID: result.AccountID,
-		AccountLabel: result.AccountLabel, ProjectID: result.ProjectID, Status: "active",
-		OAuthProfile: profile, OAuthClientID: clientID,
-		OAuthClientMode: clientMode, OAuthRedirectURI: redirectURI,
-		OAuthClientSecret: clientSecret,
-	})
-	if err != nil {
-		return failed("Could not store the private OAuth connection.")
-	}
-	if flow.PersistConfig && profile == antigravityManualProfile {
-		if err := iam.PutOAuthClientProfile(iam.OAuthClientProfile{
-			ProviderID: "google_antigravity", Profile: antigravityManualProfile,
-			ClientID: flow.ManualConfig.ClientID, ClientSecret: flow.ManualConfig.ClientSecret,
-			ClientMode: flow.ManualConfig.ClientMode, RedirectURI: flow.ManualConfig.RedirectURI,
-		}); err != nil {
-			envelope, stored, ok, loadErr := iam.OAuthProviderConnectionSecret(principal.ID, providerID, connection.Name)
-			if loadErr == nil && ok {
-				_, _ = iam.RevokeOAuthProviderConnectionIfCurrent(stored, envelope)
-			}
-			return failed("Could not store the encrypted consumer_manual OAuth profile.")
-		}
-	}
-	if _, configured := config.Get().Providers[providerID]; !configured {
-		if err := ensureOAuthProviderConfig(providerID, providerRef); err != nil {
-			envelope, stored, ok, loadErr := iam.OAuthProviderConnectionSecret(principal.ID, providerID, connection.Name)
-			if loadErr == nil && ok {
-				_, _ = iam.RevokeOAuthProviderConnectionIfCurrent(stored, envelope)
-			}
-			return failed(err.Error())
-		}
-	}
-	browserOAuthFlows.Lock()
-	delete(browserOAuthFlows.values, flowID)
-	browserOAuthFlows.Unlock()
-	providers.ForgetProviderForPrincipal(providerID, principal.ID)
-	providers.ForgetCatalogForPrincipal(providerID, principal.ID)
-	return map[string]any{"status": "authorized", "connection": connection}
+	return safeOAuthPollResponse("error", "Manual authorization failed.")
 }
 
 func manualAuthorizationCode(value string) (code, state string, fromURL bool, err error) {
@@ -738,153 +473,115 @@ func oauthCallbackURL(r *http.Request, providerRef string) (string, error) {
 	return parsed.String(), nil
 }
 
-func pollBrowserOAuthFlow(principal iam.Principal, providerRef, flowID string) (map[string]any, bool) {
-	providerID, _, adapter, err := oauthAdapterFor(providerRef)
-	if err != nil {
-		return safeOAuthPollResponse("error", err.Error()), true
+// pollBrowserOAuthFlow answers a poll of a browser or manual flow, which the
+// provider's redirect or the owner's paste finishes rather than the poll.
+func (s *server) pollBrowserOAuthFlow(ctx context.Context, caller core.Caller, providerID string, view oauthflow.View) map[string]any {
+	if view.Instance != providerID {
+		return safeOAuthPollResponse("expired", "Browser authorization is no longer active. Start again.")
 	}
-	if _, ok := adapter.(providers.BrowserProviderAuthAdapter); !ok {
-		return nil, false
+	switch {
+	case view.Status == oauthflow.StatusPending:
+		return map[string]any{"status": "pending"}
+	case view.Method != oauthflow.MethodBrowser:
+		// The paste that finished a manual flow answered for it.
+	case view.Status == oauthflow.StatusFailed:
+		return safeOAuthPollResponse("error", "Browser authorization failed.")
+	case view.Status == oauthflow.StatusComplete:
+		if key, ok := s.takeOAuthOutcome(ctx, caller, view.ID); ok {
+			principalID, _ := iam.CallerPrincipalID(caller)
+			if connection, found := oauthConnection(principalID, providerID, key); found {
+				return map[string]any{"status": "authorized", "connection": connection}
+			}
+			return safeOAuthPollResponse("error", "Could not load the private OAuth connection.")
+		}
 	}
-	browserOAuthFlows.Lock()
-	defer browserOAuthFlows.Unlock()
-	flow, ok := browserOAuthFlows.values[strings.TrimSpace(flowID)]
-	if !ok {
-		return nil, false
-	}
-	if !ok || flow.PrincipalID != principal.ID || flow.ProviderID != providerID {
-		return safeOAuthPollResponse("expired", "Browser authorization is no longer active. Start again."), true
-	}
-	if flow.ExpiresAt <= time.Now().Unix() {
-		delete(browserOAuthFlows.values, flowID)
-		return safeOAuthPollResponse("expired", "Browser authorization expired. Start again."), true
-	}
-	if flow.Result == nil {
-		return map[string]any{"status": "pending"}, true
-	}
-	result := flow.Result
-	delete(browserOAuthFlows.values, flowID)
-	return result, true
+	return safeOAuthPollResponse("expired", "Device authorization is no longer active. Start again.")
 }
 
-func handleOAuthBrowserCallback(w http.ResponseWriter, r *http.Request) {
-	flowID := strings.TrimSpace(r.URL.Query().Get("state"))
-	browserOAuthFlows.Lock()
-	flow, ok := browserOAuthFlows.values[flowID]
-	valid := ok && !flow.Completing && flow.Result == nil && flow.ExpiresAt > time.Now().Unix() && browseroauth.ValidateState(flow.ExpectedState, flowID) == nil && r.PathValue("provider_id") == flow.CallbackID
-	if valid {
-		flow.Completing = true
-		browserOAuthFlows.values[flowID] = flow
-	}
-	browserOAuthFlows.Unlock()
-	if !valid {
+// handleOAuthBrowserCallback finishes a browser flow from the provider's
+// redirect. The redirect carries no session: its state finds the flow and
+// its owner, and a redirect that arrived anywhere but the flow's own
+// callback spends nothing.
+func (s *server) handleOAuthBrowserCallback(w http.ResponseWriter, r *http.Request) {
+	redirectURI, err := oauthCallbackURL(r, r.PathValue("provider_id"))
+	if err != nil {
 		http.Error(w, "OAuth authorization is no longer active.", http.StatusBadRequest)
 		return
 	}
-	_, _, adapter, err := oauthAdapterFor(flow.ProviderID)
-	if err != nil {
-		finishBrowserOAuthFlow(flowID, flow, safeOAuthPollResponse("error", "OAuth provider is unavailable."))
-		http.Error(w, "OAuth provider is unavailable.", http.StatusBadRequest)
-		return
-	}
-	browserAdapter, ok := adapter.(providers.BrowserProviderAuthAdapter)
-	if !ok {
-		finishBrowserOAuthFlow(flowID, flow, safeOAuthPollResponse("error", "OAuth provider does not support browser authorization."))
-		http.Error(w, "OAuth provider does not support browser authorization.", http.StatusBadRequest)
-		return
-	}
-	result, err := browserAdapter.CompleteBrowser(r.Context(), r.URL.Query().Get("code"), flow.PrivateState)
-	response := safeOAuthPollResponse("error", "Browser authorization failed.")
-	if err == nil && result.Status == "authorized" {
-		connection, storeErr := iam.PutOAuthProviderConnection(iam.OAuthConnectionCreate{
-			PrincipalID: flow.PrincipalID, ProviderID: flow.ProviderID, Name: flow.ConnectionName,
-			Kind: flow.Kind, Source: flow.Source, MakeDefault: true, AccessToken: result.AccessToken,
-			RefreshToken: result.RefreshToken, IDToken: result.IDToken, TokenType: result.TokenType,
-			ExpiresAt: result.ExpiresAt, AccountID: result.AccountID, AccountLabel: result.AccountLabel, ProjectID: result.ProjectID, Status: "active",
-			OAuthProfile: result.OAuthProfile, OAuthClientID: result.OAuthClientID,
-		})
-		if storeErr == nil {
-			response = map[string]any{"status": "authorized", "connection": connection}
-			providers.ForgetProviderForPrincipal(flow.ProviderID, flow.PrincipalID)
-			providers.ForgetCatalogForPrincipal(flow.ProviderID, flow.PrincipalID)
-		}
-	}
-	finishBrowserOAuthFlow(flowID, flow, response)
-	if response["status"] != "authorized" {
+	query := r.URL.Query()
+	completion := &oauthCompletion{providerRef: r.PathValue("provider_id")}
+	_, err = s.oauth.Callback(withOAuthCompletion(r.Context(), completion), oauthflow.CompleteInput{
+		Code: query.Get("code"), State: query.Get("state"), Error: query.Get("error"), RedirectURI: redirectURI,
+	})
+	switch {
+	case err == nil && completion.connection != nil:
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		_, _ = w.Write([]byte("<!doctype html><title>Provider connected</title><p>Authorization received. You can close this window and return to the gateway.</p>"))
+	case errors.Is(err, oauthflow.ErrFlowNotFound), errors.Is(err, oauthflow.ErrFlowExpired), errors.Is(err, oauthflow.ErrWrongMethod):
+		http.Error(w, "OAuth authorization is no longer active.", http.StatusBadRequest)
+	default:
 		http.Error(w, "Browser authorization failed. Return to the gateway and try again.", http.StatusBadRequest)
-		return
-	}
-	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	_, _ = w.Write([]byte("<!doctype html><title>Provider connected</title><p>Authorization received. You can close this window and return to the gateway.</p>"))
-}
-
-func finishBrowserOAuthFlow(flowID string, flow browserOAuthFlowState, response map[string]any) {
-	browserOAuthFlows.Lock()
-	defer browserOAuthFlows.Unlock()
-	if current, exists := browserOAuthFlows.values[flowID]; exists && current.ExpectedState == flow.ExpectedState {
-		current.Result = response
-		browserOAuthFlows.values[flowID] = current
 	}
 }
 
-func pollOAuthFlow(principal iam.Principal, providerRef, deviceCode, name, source string) map[string]any {
-	if result, handled := pollBrowserOAuthFlow(principal, providerRef, deviceCode); handled {
-		return result
-	}
-	providerID, kind, adapter, err := oauthAdapterFor(providerRef)
+// pollOAuthFlow answers a poll of the flow flowID names: a device_code or a
+// flow_id, which both carry the flow's ID. A device poll asks the provider,
+// no more often than its interval, and stores the connection name and
+// source the poll carries once the owner approved.
+func (s *server) pollOAuthFlow(principal iam.Principal, providerRef, flowID, name, source string) map[string]any {
+	providerID, _, adapter, err := oauthAdapterFor(providerRef)
 	if err != nil {
 		return safeOAuthPollResponse("error", err.Error())
 	}
-	deviceCode = strings.TrimSpace(deviceCode)
-	if deviceCode == "" {
+	flowID = strings.TrimSpace(flowID)
+	if flowID == "" {
 		return safeOAuthPollResponse("error", "device_code is required")
 	}
-	now := time.Now().Unix()
-	key := oauthFlowKey(principal.ID, providerID, deviceCode)
-	oauthFlows.Lock()
-	flow, tracked := oauthFlows.values[key]
-	if tracked && flow.ExpiresAt > 0 && now >= flow.ExpiresAt {
-		delete(oauthFlows.values, key)
-		oauthFlows.Unlock()
-		return safeOAuthPollResponse("expired", "Device authorization expired. Start again.")
+	ctx, caller := context.Background(), oauthCaller(principal)
+	inactive := safeOAuthPollResponse("expired", "Device authorization is no longer active. Start again.")
+	view, err := s.oauth.Get(ctx, caller, flowID)
+	if errors.Is(err, oauthflow.ErrFlowExpired) {
+		// An expired flow no longer names its method. The console polls a
+		// browser flow only for a provider without device authorization.
+		if _, device := adapter.(providers.DeviceProviderAuthAdapter); device {
+			return safeOAuthPollResponse("expired", "Device authorization expired. Start again.")
+		}
+		return safeOAuthPollResponse("expired", "Browser authorization expired. Start again.")
 	}
-	if tracked && flow.NextPollAt > now {
-		oauthFlows.Unlock()
-		return safeOAuthPollResponse("slow_down", "Wait for the provider polling interval before retrying.")
-	}
-	if !tracked {
-		oauthFlows.Unlock()
-		return safeOAuthPollResponse("expired", "Device authorization is no longer active. Start again.")
-	}
-	privateState := flow.PrivateState
-	oauthFlows.Unlock()
-
-	deviceAdapter, ok := adapter.(providers.DeviceProviderAuthAdapter)
-	if !ok {
-		return safeOAuthPollResponse("error", "Provider does not support device authorization.")
-	}
-	result := providers.SafeProviderAuthPoll(deviceAdapter.PollDevice(context.Background(), deviceCode, privateState))
-	if !applyOAuthPollResult(key, flow, result, time.Now().Unix()) {
-		return safeOAuthPollResponse("expired", "Device authorization is no longer active. Start again.")
-	}
-
-	out := safeOAuthPollResponse(result.Status, result.Error)
-	if result.Status != "authorized" {
-		return out
-	}
-	connection, err := iam.PutOAuthProviderConnection(iam.OAuthConnectionCreate{
-		PrincipalID: principal.ID, ProviderID: providerID, Name: name, Kind: kind, Source: source,
-		MakeDefault: true, AccessToken: result.AccessToken, RefreshToken: result.RefreshToken,
-		IDToken: result.IDToken, TokenType: result.TokenType, ExpiresAt: result.ExpiresAt, AccountID: result.AccountID, AccountLabel: result.AccountLabel, ProjectID: result.ProjectID, Status: "active",
-		OAuthProfile: result.OAuthProfile, OAuthClientID: result.OAuthClientID,
-	})
 	if err != nil {
-		return safeOAuthPollResponse("error", "Could not store the private OAuth connection.")
+		return inactive
 	}
-	providers.ForgetProviderForPrincipal(providerID, principal.ID)
-	providers.ForgetCatalogForPrincipal(providerID, principal.ID)
-	out["connection"] = connection
-	return out
+	if view.Method != oauthflow.MethodDevice {
+		return s.pollBrowserOAuthFlow(ctx, caller, providerID, view)
+	}
+	if view.Instance != providerID {
+		return inactive
+	}
+	ctx, note := providers.WithOAuthPollNote(ctx)
+	completion := &oauthCompletion{providerRef: providerRef, name: name, source: source}
+	_, err = s.oauth.Poll(withOAuthCompletion(ctx, completion), caller, flowID)
+	switch {
+	case err == nil && completion.connection != nil:
+		response := safeOAuthPollResponse("authorized", note.Detail)
+		response["connection"] = *completion.connection
+		return response
+	case completion.failure != "":
+		return safeOAuthPollResponse("error", completion.failure)
+	case errors.Is(err, oauthflow.ErrFlowNotFound), note.Status == "authorized":
+		// Another request ended the flow first, or the cap evicted it.
+		return inactive
+	case note.Polled:
+		// The provider answered; its answer is the owner's.
+		return safeOAuthPollResponse(note.Status, note.Detail)
+	case errors.Is(err, oauthflow.ErrSlowDown):
+		return safeOAuthPollResponse("slow_down", "Wait for the provider polling interval before retrying.")
+	case errors.Is(err, oauthflow.ErrFlowExpired):
+		return safeOAuthPollResponse("expired", "Device authorization expired. Start again.")
+	case err != nil:
+		return safeOAuthPollResponse("error", err.Error())
+	}
+	// The flow ended in an earlier poll, which answered for it.
+	return inactive
 }
 
 func refreshOAuthFlow(principal iam.Principal, providerRef, name string) map[string]any {
@@ -1061,7 +758,7 @@ func oauthCompleteInput(r *http.Request) (string, string, bool) {
 	return body.FlowID, body.AuthorizationResponse, body.FlowID != "" && body.AuthorizationResponse != ""
 }
 
-func handleUserOAuthStart(w http.ResponseWriter, r *http.Request) {
+func (s *server) handleUserOAuthStart(w http.ResponseWriter, r *http.Request) {
 	principal, ok := requireSSOUser(w, r)
 	if !ok {
 		return
@@ -1070,11 +767,11 @@ func handleUserOAuthStart(w http.ResponseWriter, r *http.Request) {
 	var response map[string]any
 	var err error
 	if input.Flow == "browser" && oauthRegistryIDForRef(r.PathValue("provider_id")) == "openai_codex" {
-		response, err = startCodexBrowserFlow(principal, r.PathValue("provider_id"), "", false, input.ConnectionName, iam.ConnectionSourceUser)
+		response, err = s.startCodexBrowserFlow(principal, r.PathValue("provider_id"), "", false, input.ConnectionName, iam.ConnectionSourceUser)
 	} else if input.Profile == antigravityManualProfile {
-		response, err = startManualOAuthFlow(principal, r.PathValue("provider_id"), input.ConnectionName, iam.ConnectionSourceUser, providers.ProviderAuthManualConfig{}, false)
+		response, err = s.startManualOAuthFlow(principal, r.PathValue("provider_id"), input.ConnectionName, iam.ConnectionSourceUser, providers.ProviderAuthManualConfig{}, false)
 	} else {
-		response, err = startOAuthFlow(principal, r.PathValue("provider_id"), "", false, r, input.ConnectionName, iam.ConnectionSourceUser, input.Flow)
+		response, err = s.startOAuthFlow(principal, r.PathValue("provider_id"), "", false, r, input.ConnectionName, iam.ConnectionSourceUser, input.Flow)
 	}
 	if err != nil {
 		writeError(w, 400, oauthErrorText(err.Error()))
@@ -1083,7 +780,7 @@ func handleUserOAuthStart(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, response)
 }
 
-func handleUserOAuthComplete(w http.ResponseWriter, r *http.Request) {
+func (s *server) handleUserOAuthComplete(w http.ResponseWriter, r *http.Request) {
 	principal, ok := requireSSOUser(w, r)
 	if !ok {
 		return
@@ -1093,14 +790,14 @@ func handleUserOAuthComplete(w http.ResponseWriter, r *http.Request) {
 		writeError(w, 400, "flow_id and authorization_response required")
 		return
 	}
-	response := completeManualOAuthFlow(principal, r.PathValue("provider_id"), flowID, authorizationResponse)
+	response := s.completeManualOAuthFlow(principal, r.PathValue("provider_id"), flowID, authorizationResponse)
 	if response["status"] == "authorized" {
 		_ = iam.RecordAudit(iam.AuditEvent{ActorPrincipalID: principal.ID, Action: "oauth_connection.connect", TargetType: "principal", TargetID: principal.ID, Result: "success", Detail: map[string]any{"provider": r.PathValue("provider_id"), "source": "self-service", "profile": manualOAuthAuditProfile(r.PathValue("provider_id"))}})
 	}
 	writeJSON(w, http.StatusOK, response)
 }
 
-func handleUserOAuthPoll(w http.ResponseWriter, r *http.Request) {
+func (s *server) handleUserOAuthPoll(w http.ResponseWriter, r *http.Request) {
 	principal, ok := requireSSOUser(w, r)
 	if !ok {
 		return
@@ -1110,7 +807,7 @@ func handleUserOAuthPoll(w http.ResponseWriter, r *http.Request) {
 		writeError(w, 400, "device_code required")
 		return
 	}
-	response := pollOAuthFlow(principal, r.PathValue("provider_id"), deviceCode, name, iam.ConnectionSourceUser)
+	response := s.pollOAuthFlow(principal, r.PathValue("provider_id"), deviceCode, name, iam.ConnectionSourceUser)
 	if response["status"] == "authorized" {
 		_ = iam.RecordAudit(iam.AuditEvent{ActorPrincipalID: principal.ID, Action: "oauth_connection.connect", TargetType: "principal", TargetID: principal.ID, Result: "success", Detail: map[string]any{"provider": r.PathValue("provider_id"), "source": "self-service"}})
 	}
@@ -1125,7 +822,7 @@ func handleUserOAuthRefresh(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, refreshOAuthFlow(principal, r.PathValue("provider_id"), r.URL.Query().Get("connection_name")))
 }
 
-func handlePrincipalOAuthStart(w http.ResponseWriter, r *http.Request) {
+func (s *server) handlePrincipalOAuthStart(w http.ResponseWriter, r *http.Request) {
 	if !adminAuthed(w, r) {
 		return
 	}
@@ -1137,14 +834,14 @@ func handlePrincipalOAuthStart(w http.ResponseWriter, r *http.Request) {
 	input := oauthStartInput(r)
 	var response map[string]any
 	if input.Flow == "browser" && oauthRegistryIDForRef(r.PathValue("provider_id")) == "openai_codex" {
-		response, err = startCodexBrowserFlow(principal, r.PathValue("provider_id"), input.ClientID, true, input.ConnectionName, iam.ConnectionSourceAdmin)
+		response, err = s.startCodexBrowserFlow(principal, r.PathValue("provider_id"), input.ClientID, true, input.ConnectionName, iam.ConnectionSourceAdmin)
 	} else if input.Profile == antigravityManualProfile {
-		response, err = startManualOAuthFlow(principal, r.PathValue("provider_id"), input.ConnectionName, iam.ConnectionSourceAdmin, providers.ProviderAuthManualConfig{
+		response, err = s.startManualOAuthFlow(principal, r.PathValue("provider_id"), input.ConnectionName, iam.ConnectionSourceAdmin, providers.ProviderAuthManualConfig{
 			ClientID: input.ClientID, ClientSecret: input.ClientSecret,
 			ClientMode: input.ClientMode, RedirectURI: input.RedirectURI,
 		}, input.ClientID != "" || input.ClientSecret != "" || input.ClientMode != "" || input.RedirectURI != "")
 	} else {
-		response, err = startOAuthFlow(principal, r.PathValue("provider_id"), input.ClientID, true, r, input.ConnectionName, iam.ConnectionSourceAdmin, input.Flow)
+		response, err = s.startOAuthFlow(principal, r.PathValue("provider_id"), input.ClientID, true, r, input.ConnectionName, iam.ConnectionSourceAdmin, input.Flow)
 	}
 	if err != nil {
 		writeError(w, 400, oauthErrorText(err.Error()))
@@ -1153,7 +850,7 @@ func handlePrincipalOAuthStart(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, response)
 }
 
-func handlePrincipalOAuthComplete(w http.ResponseWriter, r *http.Request) {
+func (s *server) handlePrincipalOAuthComplete(w http.ResponseWriter, r *http.Request) {
 	if !adminAuthed(w, r) {
 		return
 	}
@@ -1167,7 +864,7 @@ func handlePrincipalOAuthComplete(w http.ResponseWriter, r *http.Request) {
 		writeError(w, 400, "flow_id and authorization_response required")
 		return
 	}
-	response := completeManualOAuthFlow(principal, r.PathValue("provider_id"), flowID, authorizationResponse)
+	response := s.completeManualOAuthFlow(principal, r.PathValue("provider_id"), flowID, authorizationResponse)
 	if response["status"] == "authorized" {
 		auditAdmin(r, "oauth_connection.connect", "principal", principal.ID, map[string]any{"provider": r.PathValue("provider_id"), "profile": manualOAuthAuditProfile(r.PathValue("provider_id"))})
 	}
@@ -1181,7 +878,7 @@ func manualOAuthAuditProfile(providerRef string) string {
 	return antigravityManualProfile
 }
 
-func handlePrincipalOAuthPoll(w http.ResponseWriter, r *http.Request) {
+func (s *server) handlePrincipalOAuthPoll(w http.ResponseWriter, r *http.Request) {
 	if !adminAuthed(w, r) {
 		return
 	}
@@ -1195,7 +892,7 @@ func handlePrincipalOAuthPoll(w http.ResponseWriter, r *http.Request) {
 		writeError(w, 400, "device_code required")
 		return
 	}
-	response := pollOAuthFlow(principal, r.PathValue("provider_id"), deviceCode, name, iam.ConnectionSourceAdmin)
+	response := s.pollOAuthFlow(principal, r.PathValue("provider_id"), deviceCode, name, iam.ConnectionSourceAdmin)
 	if response["status"] == "authorized" {
 		auditAdmin(r, "oauth_connection.connect", "principal", principal.ID, map[string]any{"provider": r.PathValue("provider_id")})
 	}

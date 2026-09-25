@@ -9,6 +9,8 @@ import (
 	"llmgw/internal/providers"
 	"llmgw/internal/router"
 	"llmgw/internal/web"
+
+	"github.com/xibodev/llmgw-core/oauthflow"
 )
 
 // pathAliases rewrites bare CLI paths onto their /v1 equivalents so tools that
@@ -34,11 +36,46 @@ type Runtime struct {
 	Router    *router.Runtime
 }
 
-// server owns the Runtime it serves. Handlers become its methods as they take
-// their state from it: so far the usage, telemetry, Copilot sign-in and
-// free-provider handlers. The rest reach the same state through the installed
-// runtimes, which the process installs before it serves.
-type server struct{ runtime Runtime }
+// server owns the Runtime it serves and the console's OAuth flows. Handlers
+// become its methods as they take their state from it: so far the usage,
+// telemetry, Copilot sign-in, OAuth connection and free-provider handlers.
+// The rest reach the same state through the installed runtimes, which the
+// process installs before it serves.
+type server struct {
+	runtime Runtime
+	// now is the clock of the OAuth flows and their responses.
+	now func() time.Time
+	// oauth runs the OAuth connection flows over oauthStore, which keeps
+	// them bound to their caller for as long as the server serves.
+	oauth      *oauthflow.Service
+	oauthStore *oauthflow.MemoryFlowStore
+	// oauthDrivers resolves the driver of each flow. Tests replace it to
+	// stand in for a provider no fixture endpoint can reach.
+	oauthDrivers func(instance string, method oauthflow.Method) (oauthflow.Driver, error)
+}
+
+// newServer returns a server acting on runtime whose OAuth flows read time
+// from now.
+func newServer(runtime Runtime, now func() time.Time) *server {
+	s := &server{runtime: runtime, now: now}
+	s.oauthDrivers = s.oauthDriver
+	s.oauthStore = oauthflow.NewMemoryFlowStore(oauthflow.MemoryFlowStoreOptions{
+		Now: now, MaxFlowsPerCaller: maxOAuthFlowsPerPrincipal,
+	})
+	service, err := oauthflow.New(oauthflow.Options{
+		Store: s.oauthStore, Credentials: oauthConnectionStore{},
+		Drivers: func(instance string, method oauthflow.Method) (oauthflow.Driver, error) {
+			return s.oauthDrivers(instance, method)
+		},
+		CredentialKey: storeOAuthConnection, Now: now,
+	})
+	if err != nil {
+		// New fails only without a required option, and every one is set.
+		panic("api: build the OAuth flow service: " + err.Error())
+	}
+	s.oauth = service
+	return s
+}
 
 func (s *server) providers() *providers.Runtime {
 	if s.runtime.Providers != nil {
@@ -56,13 +93,15 @@ func (s *server) router() *router.Runtime {
 
 // NewServer builds the http.Handler with all routes registered, acting on
 // runtime.
-func NewServer(runtime Runtime) http.Handler {
-	s := &server{runtime: runtime}
+func NewServer(runtime Runtime) http.Handler { return newServer(runtime, time.Now).handler() }
+
+// handler registers every route on a new mux.
+func (s *server) handler() http.Handler {
 	mux := http.NewServeMux()
 
 	// health (no auth)
 	mux.HandleFunc("GET /health", handleHealth)
-	mux.HandleFunc("GET /oauth/callback/{provider_id}", handleOAuthBrowserCallback)
+	mux.HandleFunc("GET /oauth/callback/{provider_id}", s.handleOAuthBrowserCallback)
 
 	// OpenAI facade
 	mux.HandleFunc("POST /v1/chat/completions", handleChat)
@@ -138,9 +177,9 @@ func NewServer(runtime Runtime) http.Handler {
 	mux.HandleFunc("GET /user/api/connections", handleUserConnections)
 	mux.HandleFunc("POST /user/api/connections", handleUserCreateConnection)
 	mux.HandleFunc("DELETE /user/api/connections/{connection_id}", handleUserRevokeConnection)
-	mux.HandleFunc("POST /user/api/connections/{provider_id}/oauth/start", handleUserOAuthStart)
-	mux.HandleFunc("POST /user/api/connections/{provider_id}/oauth/poll", handleUserOAuthPoll)
-	mux.HandleFunc("POST /user/api/connections/{provider_id}/oauth/complete", handleUserOAuthComplete)
+	mux.HandleFunc("POST /user/api/connections/{provider_id}/oauth/start", s.handleUserOAuthStart)
+	mux.HandleFunc("POST /user/api/connections/{provider_id}/oauth/poll", s.handleUserOAuthPoll)
+	mux.HandleFunc("POST /user/api/connections/{provider_id}/oauth/complete", s.handleUserOAuthComplete)
 	mux.HandleFunc("POST /user/api/connections/{provider_id}/oauth/refresh", handleUserOAuthRefresh)
 	mux.HandleFunc("POST /user/api/connections/{provider_id}/oauth/revoke", handleUserOAuthRevoke)
 	mux.HandleFunc("POST /user/api/playground", handleUserPlayground)
@@ -205,9 +244,9 @@ func NewServer(runtime Runtime) http.Handler {
 	mux.HandleFunc("GET /admin/api/principals/{id}/connections", handleListPrincipalConnections)
 	mux.HandleFunc("POST /admin/api/principals/{id}/connections", handleCreatePrincipalConnection)
 	mux.HandleFunc("DELETE /admin/api/principals/{id}/connections/{connection_id}", handleRevokePrincipalConnection)
-	mux.HandleFunc("POST /admin/api/principals/{id}/connections/{provider_id}/oauth/start", handlePrincipalOAuthStart)
-	mux.HandleFunc("POST /admin/api/principals/{id}/connections/{provider_id}/oauth/poll", handlePrincipalOAuthPoll)
-	mux.HandleFunc("POST /admin/api/principals/{id}/connections/{provider_id}/oauth/complete", handlePrincipalOAuthComplete)
+	mux.HandleFunc("POST /admin/api/principals/{id}/connections/{provider_id}/oauth/start", s.handlePrincipalOAuthStart)
+	mux.HandleFunc("POST /admin/api/principals/{id}/connections/{provider_id}/oauth/poll", s.handlePrincipalOAuthPoll)
+	mux.HandleFunc("POST /admin/api/principals/{id}/connections/{provider_id}/oauth/complete", s.handlePrincipalOAuthComplete)
 	mux.HandleFunc("POST /admin/api/principals/{id}/connections/{provider_id}/oauth/refresh", handlePrincipalOAuthRefresh)
 	mux.HandleFunc("POST /admin/api/principals/{id}/connections/{provider_id}/oauth/revoke", handlePrincipalOAuthRevoke)
 	mux.HandleFunc("POST /admin/api/principals/{id}/copilot/login/start", handlePrincipalCopilotLoginStart)

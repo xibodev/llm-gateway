@@ -1,7 +1,6 @@
 package api
 
 import (
-	"context"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
@@ -20,6 +19,8 @@ import (
 
 	codexauth "github.com/xibodev/llm-provider-auth/codex"
 	copilotauth "github.com/xibodev/llm-provider-auth/copilot"
+	"github.com/xibodev/llm-provider-auth/tokenstore"
+	"github.com/xibodev/llmgw-core/oauthflow"
 )
 
 func TestOAuthCallbackURLRequiresConfiguredOriginOutsideLoopback(t *testing.T) {
@@ -163,7 +164,7 @@ func TestOAuthStartSurfacesProviderPersistenceFailure(t *testing.T) {
 		settings.OpenAICodexClientID = "fixture-codex-client"
 	})
 
-	_, err := startOAuthFlow(
+	_, err := newServer(Runtime{}, time.Now).startOAuthFlow(
 		iam.Principal{ID: "owner", Kind: "human"}, "openai_codex", "", true,
 		httptest.NewRequest(http.MethodPost, "http://127.0.0.1/oauth/start", nil),
 		"personal", iam.ConnectionSourceUser, "device_code",
@@ -189,7 +190,7 @@ func TestUserOAuthStartCannotCreateGlobalProvider(t *testing.T) {
 		settings.Providers = map[string]*config.ProviderConfig{}
 		settings.OpenAICodexClientID = "fixture-client"
 	})
-	_, err := startOAuthFlow(
+	_, err := newServer(Runtime{}, time.Now).startOAuthFlow(
 		iam.Principal{ID: "owner", Kind: "human"}, "openai_codex", "", false,
 		httptest.NewRequest(http.MethodPost, "http://127.0.0.1/oauth/start", nil),
 		"personal", iam.ConnectionSourceUser, "device_code",
@@ -223,7 +224,7 @@ func TestAdminCodexClientIDRollsBackWhenFlowStartFails(t *testing.T) {
 	defer server.Close()
 	providers.SetCodexEndpointsForTests(t, providers.CodexEndpoints{OAuth: codexauth.Endpoints{UserCodeURL: server.URL}})
 
-	_, err := startOAuthFlow(
+	_, err := newServer(Runtime{}, time.Now).startOAuthFlow(
 		iam.Principal{ID: "owner", Kind: "human"}, "codex", "replacement-client", true,
 		httptest.NewRequest(http.MethodPost, "http://127.0.0.1/oauth/start", nil),
 		"personal", iam.ConnectionSourceAdmin, "device_code",
@@ -251,7 +252,7 @@ func TestCodexOAuthStartUsesRequestedBrowserFlow(t *testing.T) {
 		}
 		settings.OpenAICodexClientID = "fixture-client"
 	})
-	response, err := startCodexBrowserFlow(
+	response, err := newServer(Runtime{}, time.Now).startCodexBrowserFlow(
 		iam.Principal{ID: "owner", Kind: "human"}, "codex", "fixture-client", true, "personal", iam.ConnectionSourceAdmin,
 	)
 	if err != nil {
@@ -266,78 +267,6 @@ func TestCodexOAuthStartUsesRequestedBrowserFlow(t *testing.T) {
 	}
 }
 
-func TestOAuthFlowStoreCapsOutstandingFlowsPerPrincipal(t *testing.T) {
-	oauthFlows.Lock()
-	oldFlows := oauthFlows.values
-	oldGeneration := oauthFlows.nextGeneration
-	oauthFlows.values = map[string]oauthFlowState{}
-	oauthFlows.nextGeneration = 0
-	oauthFlows.Unlock()
-	t.Cleanup(func() {
-		oauthFlows.Lock()
-		oauthFlows.values = oldFlows
-		oauthFlows.nextGeneration = oldGeneration
-		oauthFlows.Unlock()
-	})
-	now := time.Now().Unix()
-	for index := 0; index < maxOAuthFlowsPerPrincipal+1; index++ {
-		key := oauthFlowKey("principal", "copilot", fmt.Sprintf("device-%d", index))
-		storeOAuthFlow(key, oauthFlowState{
-			PrincipalID: "principal", ProviderID: "copilot",
-			StartedAt: now + int64(index), ExpiresAt: now + 3600,
-		})
-	}
-	oauthFlows.Lock()
-	defer oauthFlows.Unlock()
-	count := 0
-	for _, flow := range oauthFlows.values {
-		if flow.PrincipalID == "principal" {
-			count++
-		}
-	}
-	if count != maxOAuthFlowsPerPrincipal {
-		t.Fatalf("outstanding flow count=%d want %d", count, maxOAuthFlowsPerPrincipal)
-	}
-	if _, exists := oauthFlows.values[oauthFlowKey("principal", "copilot", "device-0")]; exists {
-		t.Fatal("oldest outstanding OAuth flow was not evicted")
-	}
-}
-
-func TestBrowserOAuthFlowStoreCapsOutstandingFlowsPerPrincipal(t *testing.T) {
-	browserOAuthFlows.Lock()
-	oldFlows := browserOAuthFlows.values
-	oldGeneration := browserOAuthFlows.nextGeneration
-	browserOAuthFlows.values = map[string]browserOAuthFlowState{}
-	browserOAuthFlows.nextGeneration = 0
-	browserOAuthFlows.Unlock()
-	t.Cleanup(func() {
-		browserOAuthFlows.Lock()
-		browserOAuthFlows.values = oldFlows
-		browserOAuthFlows.nextGeneration = oldGeneration
-		browserOAuthFlows.Unlock()
-	})
-	now := time.Now().Unix()
-	for index := 0; index < maxOAuthFlowsPerPrincipal+1; index++ {
-		storeBrowserOAuthFlow(fmt.Sprintf("state-%d", index), browserOAuthFlowState{
-			PrincipalID: "principal", ProviderID: "google-antigravity", StartedAt: now + int64(index), ExpiresAt: now + 3600,
-		})
-	}
-	browserOAuthFlows.Lock()
-	defer browserOAuthFlows.Unlock()
-	count := 0
-	for _, flow := range browserOAuthFlows.values {
-		if flow.PrincipalID == "principal" {
-			count++
-		}
-	}
-	if count != maxOAuthFlowsPerPrincipal {
-		t.Fatalf("outstanding browser flow count=%d want %d", count, maxOAuthFlowsPerPrincipal)
-	}
-	if _, exists := browserOAuthFlows.values["state-0"]; exists {
-		t.Fatal("oldest outstanding browser OAuth flow was not evicted")
-	}
-}
-
 func TestAntigravityOAuthUsesStableRegistryCallbackForCustomInstance(t *testing.T) {
 	oldProviders := config.Get().Providers
 	t.Cleanup(func() { config.Update(func(s *config.Settings) { s.Providers = oldProviders }) })
@@ -348,73 +277,6 @@ func TestAntigravityOAuthUsesStableRegistryCallbackForCustomInstance(t *testing.
 	callback, err := oauthCallbackURL(request, oauthRegistryIDForRef("antigravity-work"))
 	if err != nil || callback != "http://127.0.0.1:9791/oauth/callback/google_antigravity" {
 		t.Fatalf("callback=%q err=%v", callback, err)
-	}
-}
-
-func TestBrowserOAuthWrongCallbackPathDoesNotConsumeFlow(t *testing.T) {
-	browserOAuthFlows.Lock()
-	oldFlows := browserOAuthFlows.values
-	browserOAuthFlows.values = map[string]browserOAuthFlowState{
-		"state": {
-			ExpectedState: "state", CallbackID: "google_antigravity", ExpiresAt: time.Now().Add(time.Minute).Unix(),
-		},
-	}
-	browserOAuthFlows.Unlock()
-	t.Cleanup(func() {
-		browserOAuthFlows.Lock()
-		browserOAuthFlows.values = oldFlows
-		browserOAuthFlows.Unlock()
-	})
-	request := httptest.NewRequest(http.MethodGet, "/oauth/callback/wrong?state=state", nil)
-	request.SetPathValue("provider_id", "wrong")
-	recorder := httptest.NewRecorder()
-	handleOAuthBrowserCallback(recorder, request)
-	if recorder.Code != http.StatusBadRequest {
-		t.Fatalf("status=%d", recorder.Code)
-	}
-	browserOAuthFlows.Lock()
-	flow := browserOAuthFlows.values["state"]
-	browserOAuthFlows.Unlock()
-	if flow.Completing {
-		t.Fatal("wrong callback path consumed browser OAuth flow")
-	}
-}
-
-func TestOAuthPollCannotResurrectEvictedFlow(t *testing.T) {
-	oauthFlows.Lock()
-	oldFlows := oauthFlows.values
-	oldGeneration := oauthFlows.nextGeneration
-	oauthFlows.values = map[string]oauthFlowState{}
-	oauthFlows.nextGeneration = 0
-	oauthFlows.Unlock()
-	t.Cleanup(func() {
-		oauthFlows.Lock()
-		oauthFlows.values = oldFlows
-		oauthFlows.nextGeneration = oldGeneration
-		oauthFlows.Unlock()
-	})
-
-	key := oauthFlowKey("principal", "copilot", "device")
-	storeOAuthFlow(key, oauthFlowState{
-		PrincipalID: "principal", ProviderID: "copilot",
-		StartedAt: time.Now().Unix(), ExpiresAt: time.Now().Add(time.Hour).Unix(),
-		Interval: 5,
-	})
-	oauthFlows.Lock()
-	observed := oauthFlows.values[key]
-	delete(oauthFlows.values, key)
-	oauthFlows.Unlock()
-
-	if applyOAuthPollResult(
-		key, observed, providers.ProviderAuthPoll{Status: "pending"}, time.Now().Unix(),
-	) {
-		t.Fatal("evicted OAuth flow was reinserted")
-	}
-	oauthFlows.Lock()
-	_, exists := oauthFlows.values[key]
-	oauthFlows.Unlock()
-	if exists {
-		t.Fatal("evicted OAuth flow remains stored")
 	}
 }
 
@@ -470,7 +332,8 @@ func TestOAuthHandlersSanitizeMaliciousPollDiagnostics(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	gateway := httptest.NewServer(NewServer(Runtime{}))
+	clock := newOAuthTestClock()
+	gateway := httptest.NewServer(newServer(Runtime{}, clock.Now).handler())
 	defer gateway.Close()
 
 	checks := []struct {
@@ -492,20 +355,19 @@ func TestOAuthHandlersSanitizeMaliciousPollDiagnostics(t *testing.T) {
 				return jsonRequest(t, gateway.URL+path, http.MethodPost, check.token, body)
 			}
 			status, started := request(check.startPath, map[string]any{})
-			if status != http.StatusOK || started["device_code"] != "safe-device" || started["user_code"] != "SAFE-CODE" || started["verification_uri"] != "https://example.test/verify" || started["interval"] != float64(1) || started["expires_in"] != float64(60) {
+			// The generic routes keep the provider's device code on the
+			// server and hand out the flow's ID in its place.
+			deviceCode, _ := started["device_code"].(string)
+			if check.generic == (deviceCode == "safe-device") || deviceCode == "" {
+				t.Fatalf("start device_code=%q", deviceCode)
+			}
+			if status != http.StatusOK || started["user_code"] != "SAFE-CODE" || started["verification_uri"] != "https://example.test/verify" || started["interval"] != float64(1) || started["expires_in"] != float64(60) {
 				t.Fatalf("start status=%d payload=%+v", status, started)
 			}
 			if check.generic {
-				oauthFlows.Lock()
-				for key, flow := range oauthFlows.values {
-					if strings.HasSuffix(key, "|safe-device") {
-						flow.NextPollAt = 0
-						oauthFlows.values[key] = flow
-					}
-				}
-				oauthFlows.Unlock()
+				clock.Advance(time.Second)
 			}
-			status, response := request(check.pollPath, map[string]any{"device_code": "safe-device"})
+			status, response := request(check.pollPath, map[string]any{"device_code": deviceCode})
 			if status != http.StatusOK || response["status"] != "denied" {
 				t.Fatalf("poll status=%d payload=%+v", status, response)
 			}
@@ -575,7 +437,7 @@ func TestOAuthPollRejectsUntrackedDeviceCode(t *testing.T) {
 			"copilot": {Type: "github_copilot", RegistryID: "github_copilot"},
 		}
 	})
-	response := pollOAuthFlow(
+	response := newServer(Runtime{}, time.Now).pollOAuthFlow(
 		iam.Principal{ID: "principal", Kind: "human"},
 		"copilot", "untracked-device", "", iam.ConnectionSourceUser,
 	)
@@ -798,7 +660,8 @@ func TestUserCodexOAuthStoresBoundProfileAndSurvivesReload(t *testing.T) {
 	if _, err := iam.Initialize(); err != nil {
 		t.Fatal(err)
 	}
-	gateway := httptest.NewServer(NewServer(Runtime{}))
+	clock := newOAuthTestClock()
+	gateway := httptest.NewServer(newServer(Runtime{}, clock.Now).handler())
 	defer gateway.Close()
 
 	status, started := ssoConnectionRequest(t, gateway.URL, "codex-user", http.MethodPost, "/user/api/connections/openai_codex/oauth/start", map[string]any{})
@@ -806,20 +669,10 @@ func TestUserCodexOAuthStoresBoundProfileAndSurvivesReload(t *testing.T) {
 		t.Fatalf("start status=%d payload=%+v", status, started)
 	}
 	deviceCode, _ := started["device_code"].(string)
-	oauthFlows.Lock()
-	flowKey := oauthFlowKey("", "", "")
-	for key, flow := range oauthFlows.values {
-		if strings.Contains(key, deviceCode) {
-			flow.NextPollAt = 0
-			oauthFlows.values[key] = flow
-			flowKey = key
-			break
-		}
+	if deviceCode == "" || deviceCode == "codex-device" {
+		t.Fatalf("Codex device code was not kept server-side: %q", deviceCode)
 	}
-	oauthFlows.Unlock()
-	if flowKey == oauthFlowKey("", "", "") {
-		t.Fatal("Codex flow state was not retained server-side")
-	}
+	clock.Advance(time.Second)
 	status, authorized := ssoConnectionRequest(t, gateway.URL, "codex-user", http.MethodPost, "/user/api/connections/openai_codex/oauth/poll", map[string]any{"device_code": deviceCode})
 	if status != http.StatusOK || authorized["status"] != "authorized" || deviceCalls != 1 {
 		t.Fatalf("poll status=%d payload=%+v calls=%d", status, authorized, deviceCalls)
@@ -886,16 +739,36 @@ func stringValueForTest(value any) string {
 }
 
 func TestCodexOAuthFlowExpiresBeforePoll(t *testing.T) {
-	oldClientID := config.Get().OpenAICodexClientID
-	config.Update(func(s *config.Settings) { s.OpenAICodexClientID = "fixture-codex-client" })
-	t.Cleanup(func() { config.Update(func(s *config.Settings) { s.OpenAICodexClientID = oldClientID }) })
+	oldSettings := *config.Get()
+	t.Cleanup(func() { config.Update(func(settings *config.Settings) { *settings = oldSettings }) })
+	config.Update(func(s *config.Settings) {
+		s.OpenAICodexClientID = "fixture-codex-client"
+		s.Providers = map[string]*config.ProviderConfig{"codex": {Type: "openai_compatible", RegistryID: "openai_codex"}}
+	})
+	var polls atomic.Int32
+	mock := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/usercode" {
+			polls.Add(1)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"device_auth_id":"expired-device","user_code":"CODEX-EXP","interval":1,"expires_in":60}`))
+	}))
+	defer mock.Close()
+	providers.SetCodexEndpointsForTests(t, providers.CodexEndpoints{OAuth: codexauth.Endpoints{
+		UserCodeURL: mock.URL + "/usercode", DeviceTokenURL: mock.URL + "/device-token",
+	}})
+	clock := newOAuthTestClock()
+	s := newServer(Runtime{}, clock.Now)
 	principal := iam.Principal{ID: "prn-expire", Kind: "human"}
-	oauthFlows.Lock()
-	oauthFlows.values[oauthFlowKey(principal.ID, "codex", "expired-device")] = oauthFlowState{PrincipalID: principal.ID, ProviderID: "codex", ExpiresAt: time.Now().Add(-time.Second).Unix()}
-	oauthFlows.Unlock()
-	response := pollOAuthFlow(principal, "codex", "expired-device", "", iam.ConnectionSourceUser)
-	if response["status"] != "expired" {
-		t.Fatalf("expired flow response=%+v", response)
+	started, err := s.startOAuthFlow(principal, "codex", "", false,
+		httptest.NewRequest(http.MethodPost, "http://127.0.0.1/oauth/start", nil), "", iam.ConnectionSourceUser, "device_code")
+	if err != nil {
+		t.Fatal(err)
+	}
+	clock.Advance(61 * time.Second)
+	response := s.pollOAuthFlow(principal, "codex", stringValueForTest(started["device_code"]), "", iam.ConnectionSourceUser)
+	if response["status"] != "expired" || polls.Load() != 0 {
+		t.Fatalf("expired flow response=%+v provider polls=%d", response, polls.Load())
 	}
 }
 
@@ -939,24 +812,21 @@ func TestConsumerManualFlowCreatesProviderOnlyAfterSuccessfulCompletion(t *testi
 	if err != nil {
 		t.Fatal(err)
 	}
-	oldStart, oldComplete := startManualProviderOAuth, completeManualProviderOAuth
-	t.Cleanup(func() { startManualProviderOAuth, completeManualProviderOAuth = oldStart, oldComplete })
-	startManualProviderOAuth = func(_ context.Context, _ providers.ManualProviderAuthAdapter, input providers.ProviderAuthManualConfig) (providers.ProviderAuthBrowserStart, error) {
-		if input.ClientMode != "public" || input.RedirectURI != "https://callback.example.test/oauth" {
-			t.Fatalf("manual config=%+v", input)
-		}
-		return providers.ProviderAuthBrowserStart{
-			AuthorizationURL: "https://accounts.example.test/authorize?state=fixture-state&code_challenge=fixture-challenge",
-			PrivateState:     `{"state":"fixture-state","code_verifier":"fixture-verifier"}`, ExpiresIn: 600,
-		}, nil
-	}
-	completeManualProviderOAuth = func(_ context.Context, _ providers.ManualProviderAuthAdapter, code, privateState string, input providers.ProviderAuthManualConfig) (providers.ProviderAuthPoll, error) {
-		if code != "fixture-code" || !strings.Contains(privateState, "fixture-verifier") || input.ClientID != "fixture-client" {
-			t.Fatalf("completion code=%q state=%q config=%+v", code, privateState, input)
-		}
-		return providers.ProviderAuthPoll{Status: "authorized", AccessToken: "fixture-access", RefreshToken: "fixture-refresh", ProjectID: "fixture-project"}, nil
-	}
-	started, err := startManualOAuthFlow(principal, "google_antigravity", "personal", iam.ConnectionSourceAdmin, providers.ProviderAuthManualConfig{}, false)
+	s := newServer(Runtime{}, time.Now)
+	useOAuthDriver(s, oauthflow.MethodManual, &fixtureCodeDriver{
+		start: func(request oauthflow.StartRequest) {
+			if input := providers.OAuthManualConfig(request.Params); input.ClientMode != "public" || input.RedirectURI != "https://callback.example.test/oauth" {
+				t.Fatalf("manual config=%+v", input)
+			}
+		},
+		exchange: func(flow oauthflow.Flow, code string) (tokenstore.Record, error) {
+			if input := providers.OAuthManualConfig(flow.Secrets.Params); code != "fixture-code" || flow.Secrets.Verifier != "fixture-verifier" || input.ClientID != "fixture-client" {
+				t.Fatalf("completion code=%q verifier=%q config=%+v", code, flow.Secrets.Verifier, input)
+			}
+			return fixtureManualRecord("fixture-access", "fixture-refresh", "fixture-project"), nil
+		},
+	})
+	started, err := s.startManualOAuthFlow(principal, "google_antigravity", "personal", iam.ConnectionSourceAdmin, providers.ProviderAuthManualConfig{}, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -967,7 +837,7 @@ func TestConsumerManualFlowCreatesProviderOnlyAfterSuccessfulCompletion(t *testi
 	if err != nil || len(connections) != 0 {
 		t.Fatalf("manual start created connections=%+v err=%v", connections, err)
 	}
-	wrong := completeManualOAuthFlow(principal, "google_antigravity", stringValueForTest(started["flow_id"]), "https://callback.example.test/oauth?code=fixture-code&state=wrong")
+	wrong := s.completeManualOAuthFlow(principal, "google_antigravity", stringValueForTest(started["flow_id"]), "https://callback.example.test/oauth?code=fixture-code&state=wrong")
 	if wrong["status"] != "error" || config.Get().Providers["google-antigravity"] != nil {
 		t.Fatalf("wrong-state completion=%+v provider=%+v", wrong, config.Get().Providers["google-antigravity"])
 	}
@@ -978,7 +848,7 @@ func TestConsumerManualFlowCreatesProviderOnlyAfterSuccessfulCompletion(t *testi
 	if err != nil || len(connections) != 0 {
 		t.Fatalf("wrong-state completion created connections=%+v err=%v", connections, err)
 	}
-	authorized := completeManualOAuthFlow(principal, "google_antigravity", stringValueForTest(started["flow_id"]), "https://callback.example.test/oauth?code=fixture-code&state=fixture-state")
+	authorized := s.completeManualOAuthFlow(principal, "google_antigravity", stringValueForTest(started["flow_id"]), "https://callback.example.test/oauth?code=fixture-code&state=fixture-state")
 	if authorized["status"] != "authorized" || config.Get().Providers["google-antigravity"] == nil {
 		t.Fatalf("authorized=%+v provider=%+v", authorized, config.Get().Providers["google-antigravity"])
 	}
@@ -1015,19 +885,17 @@ func TestConsumerManualCompletionRollsBackConnectionWhenProviderPersistenceFails
 	if err != nil {
 		t.Fatal(err)
 	}
-	oldStart, oldComplete := startManualProviderOAuth, completeManualProviderOAuth
-	t.Cleanup(func() { startManualProviderOAuth, completeManualProviderOAuth = oldStart, oldComplete })
-	startManualProviderOAuth = func(context.Context, providers.ManualProviderAuthAdapter, providers.ProviderAuthManualConfig) (providers.ProviderAuthBrowserStart, error) {
-		return providers.ProviderAuthBrowserStart{AuthorizationURL: "https://accounts.example.test/authorize", PrivateState: `{"state":"rollback-state","code_verifier":"fixture-verifier"}`, ExpiresIn: 600}, nil
-	}
-	completeManualProviderOAuth = func(context.Context, providers.ManualProviderAuthAdapter, string, string, providers.ProviderAuthManualConfig) (providers.ProviderAuthPoll, error) {
-		return providers.ProviderAuthPoll{Status: "authorized", AccessToken: "fixture-access"}, nil
-	}
-	started, err := startManualOAuthFlow(principal, "google_antigravity", "personal", iam.ConnectionSourceAdmin, providers.ProviderAuthManualConfig{}, false)
+	s := newServer(Runtime{}, time.Now)
+	useOAuthDriver(s, oauthflow.MethodManual, &fixtureCodeDriver{
+		exchange: func(oauthflow.Flow, string) (tokenstore.Record, error) {
+			return fixtureManualRecord("fixture-access", "", ""), nil
+		},
+	})
+	started, err := s.startManualOAuthFlow(principal, "google_antigravity", "personal", iam.ConnectionSourceAdmin, providers.ProviderAuthManualConfig{}, false)
 	if err != nil {
 		t.Fatal(err)
 	}
-	response := completeManualOAuthFlow(principal, "google_antigravity", stringValueForTest(started["flow_id"]), "fixture-code")
+	response := s.completeManualOAuthFlow(principal, "google_antigravity", stringValueForTest(started["flow_id"]), "fixture-code")
 	if response["status"] != "error" || config.Get().Providers["google-antigravity"] != nil {
 		t.Fatalf("completion=%+v provider=%+v", response, config.Get().Providers["google-antigravity"])
 	}
