@@ -17,6 +17,9 @@ import (
 //go:embed registry_overlay.json
 var registryOverlayJSON []byte
 
+// providerRegistry is the effective registry: the core registry with the
+// overlay applied, validated once at init. It is constant after init: nothing
+// writes it, and an invalid overlay stops the process before it serves.
 var providerRegistry = mustLoadProviderRegistry(registryOverlayJSON)
 
 var registryIdentifierPattern = regexp.MustCompile(`^[a-z0-9][a-z0-9._-]*$`)

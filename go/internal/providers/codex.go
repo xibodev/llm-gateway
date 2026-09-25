@@ -566,6 +566,8 @@ func codexChatPayload(model string, messages []Message, kw Kwargs) (map[string]a
 	return payload, nil
 }
 
+// codexStructuralChatFields are the Chat fields that change the structure of
+// the answer. It is constant after init: nothing writes it.
 var codexStructuralChatFields = map[string]bool{
 	"response_format": true, "n": true, "logprobs": true, "top_logprobs": true, "audio": true,
 	"modalities": true, "prediction": true, "tool_choice": true, "parallel_tool_calls": true,

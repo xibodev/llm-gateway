@@ -6,7 +6,8 @@ import "strings"
 type priceEntry struct{ in, out float64 }
 
 // A small built-in price catalog keyed by model-name substring. Overrides from
-// settings.savings.price_catalog take precedence. Unknown models cost 0.
+// settings.savings.price_catalog take precedence. Unknown models cost 0. It is
+// constant after init: nothing writes it.
 var defaultPrices = map[string]priceEntry{
 	"claude-opus":    {15.0, 75.0},
 	"claude-sonnet":  {3.0, 15.0},
