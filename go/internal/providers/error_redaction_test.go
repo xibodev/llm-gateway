@@ -154,6 +154,7 @@ func TestProviderNon2xxErrorsAreSanitizedAndKeepStatus(t *testing.T) {
 
 	messages := []Message{{"role": "user", "content": "hi"}}
 	two := 2.0
+	google := studioFixture(t, server.URL, "fixture")
 	cases := map[string]func(*testing.T) error{
 		"OpenAI-compatible completion": func(*testing.T) error {
 			_, err := (OpenAIProvider{auth: bearerAuth{base: server.URL}, Timeout: 2}).Complete("model", messages, nil)
@@ -180,7 +181,7 @@ func TestProviderNon2xxErrorsAreSanitizedAndKeepStatus(t *testing.T) {
 			return err
 		},
 		"Google completion": func(*testing.T) error {
-			_, err := NewAIStudio(server.URL, "fixture", 2).Complete("model", messages, nil)
+			_, err := google.Complete("model", messages, nil)
 			return err
 		},
 	}

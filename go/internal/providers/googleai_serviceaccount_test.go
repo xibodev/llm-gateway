@@ -1,14 +1,15 @@
 package providers
 
 import (
+	"context"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
 )
 
-// captureAuth runs one Vertex call against a stub and returns the auth headers
-// the provider sent.
+// captureAuth runs one Vertex call on the transport that serves video and the
+// catalog against a stub and returns the auth headers it sent.
 func captureAuth(t *testing.T, provider GoogleAIProvider) (string, string) {
 	t.Helper()
 	var authorization, apiKey string
@@ -20,7 +21,7 @@ func captureAuth(t *testing.T, provider GoogleAIProvider) (string, string) {
 	}))
 	defer server.Close()
 
-	_, _, _ = provider.do(http.MethodPost, server.URL, map[string]any{"contents": []any{}})
+	_, _, _ = provider.doContext(context.Background(), http.MethodPost, server.URL, map[string]any{"contents": []any{}})
 	return authorization, apiKey
 }
 

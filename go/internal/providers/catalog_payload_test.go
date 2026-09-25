@@ -23,12 +23,12 @@ func TestCatalogPayloadValidationAndCache(t *testing.T) {
 		{"ollama", "models", "/api/tags", `{"model":"fixture-model","details":{"family":"fixture"}}`, "model", `{"name":"fixture-model:latest","future":[17]}`,
 			func(base string) Provider { return OllamaProvider{BaseURL: base, Timeout: 2} }},
 		{"studio-v1", "models", "/v1/models", `{"name":"models/gemini-fixture","supportedGenerationMethods":["generateContent"]}`, "name", `{"name":"models/gemini-fixture","supportedGenerationMethods":["futureMethod","generateContent"],"future":{"nested":true}}`,
-			func(base string) Provider { return NewAIStudio(base+"/v1", "fixture-key", 2) }},
+			func(base string) Provider { return googleCatalog(NewAIStudio(base+"/v1", "fixture-key", 2)) }},
 		{"studio-v1beta", "models", "/v1beta/models", `{"name":"models/gemini-fixture","displayName":"Fixture","supportedGenerationMethods":["generateContent"],"inputTokenLimit":1024}`, "name", `{"name":"models/gemini-fixture","supportedGenerationMethods":["generateContent"],"version":"future","future":false}`,
-			func(base string) Provider { return NewAIStudio(base+"/v1beta", "fixture-key", 2) }},
+			func(base string) Provider { return googleCatalog(NewAIStudio(base+"/v1beta", "fixture-key", 2)) }},
 		{"vertex", "publisherModels", "/v1beta1/publishers/google/models", `{"name":"publishers/google/models/gemini-fixture","supportedActions":{"openGenerationAiStudio":{}}}`, "name", `{"name":"publishers/google/models/gemini-fixture","versionId":"future","supportedActions":{"requestAccess":{},"futureAction":{"value":17}},"future":[]}`,
 			func(base string) Provider {
-				return NewVertexAIWithAccessToken(base+"/v1", "fixture-token", "fixture-project", "global", 2)
+				return googleCatalog(NewVertexAIWithAccessToken(base+"/v1", "fixture-token", "fixture-project", "global", 2))
 			}},
 		{"openai", "data", "/models", `{"id":"fixture-model","owned_by":"fixture"}`, "id", `{"name":"fixture-model","future":{"nested":[null,17]}}`,
 			func(base string) Provider { return OpenAIProvider{auth: catalogFixtureAuth{base: base}, Timeout: 2} }},
@@ -294,9 +294,9 @@ func TestCatalogIdentityVariantsAndFiltering(t *testing.T) {
 			case "openai":
 				p = OpenAIProvider{auth: catalogFixtureAuth{base: server.URL}, Timeout: 2}
 			case "studio":
-				p = NewAIStudio(server.URL+"/v1beta", "fixture-key", 2)
+				p = googleCatalog(NewAIStudio(server.URL+"/v1beta", "fixture-key", 2))
 			case "vertex":
-				p = NewVertexAIWithAccessToken(server.URL+"/v1", "fixture-token", "fixture-project", "global", 2)
+				p = googleCatalog(NewVertexAIWithAccessToken(server.URL+"/v1", "fixture-token", "fixture-project", "global", 2))
 			}
 			models, _, err := listModelsWithError(p)
 			if tc.valid {
@@ -357,7 +357,7 @@ func TestGoogleCatalogPagesRetainStaleCacheOnInvalidPayload(t *testing.T) {
 					if version == "vertex" {
 						p = NewVertexAIWithAccessToken(server.URL+"/v1", "fixture-token", "fixture-project", "global", 2)
 					}
-					putProvider("catalog-read", p)
+					putProvider("catalog-read", googleCatalog(p))
 					stale := time.Now().Add(-2 * catalogTTL)
 					putCatalogEntry("catalog-read", catalogEntry{SchemaVersion: catalogSchemaVersion, Models: []ModelInfo{{ID: "old"}}, RefreshedAt: stale})
 					result := ReadCatalogForPrincipal("catalog-read", gatewayCaller())
@@ -429,7 +429,7 @@ func TestVertexCatalogActionValuesAndCache(t *testing.T) {
 				}))
 				defer server.Close()
 				setupCatalogReadTest(t, server.URL)
-				putProvider("catalog-read", NewVertexAIWithAccessToken(server.URL+"/v1", "fixture-token", "fixture-project", "global", 2))
+				putProvider("catalog-read", googleCatalog(NewVertexAIWithAccessToken(server.URL+"/v1", "fixture-token", "fixture-project", "global", 2)))
 				stale := time.Now().Add(-2 * catalogTTL)
 				putCatalogEntry("catalog-read", catalogEntry{SchemaVersion: catalogSchemaVersion, Models: []ModelInfo{{ID: "old"}}, RefreshedAt: stale})
 				result := ReadCatalogForPrincipal("catalog-read", gatewayCaller())

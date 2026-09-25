@@ -18,6 +18,10 @@ package providers
 //
 // Long-running operations also differ: AI Studio polls with GET on the
 // operation resource, Vertex with POST to the model's fetchPredictOperation.
+//
+// Chat, embeddings and image generation on either surface go through core's
+// Google (see googleProvider). This file is the gateway's own transport,
+// which still serves video generation and the catalog.
 
 import (
 	"bytes"
@@ -49,9 +53,10 @@ const (
 	SurfaceVertex   GoogleAISurface = "vertex_ai"
 )
 
-// GoogleAIProvider speaks the Gemini generateContent grammar against either
-// surface. Requests carry the key in x-goog-api-key; the value never appears in
-// a URL, so it cannot leak through logs or referrers.
+// GoogleAIProvider is the gateway's transport for either surface, which the
+// facade keeps for video and the catalog. Requests carry the key in
+// x-goog-api-key; the value never appears in a URL, so it cannot leak through
+// logs or referrers.
 type GoogleAIProvider struct {
 	surface GoogleAISurface
 	apiKey  string
@@ -134,8 +139,6 @@ func googleTimeout(seconds float64) time.Duration {
 	return time.Duration(seconds * float64(time.Second))
 }
 
-func (p GoogleAIProvider) IsStub() bool { return false }
-
 func (p GoogleAIProvider) currentBearerToken() (string, error) {
 	if p.bearerTokenFor != nil {
 		token, err := p.bearerTokenFor()
@@ -179,10 +182,6 @@ func (p GoogleAIProvider) modelURL(model, action string) (string, error) {
 	}
 	return fmt.Sprintf("%s/projects/%s/locations/%s/publishers/google/models/%s:%s",
 		base, p.project, p.location, model, action), nil
-}
-
-func (p GoogleAIProvider) do(method, url string, body any) (map[string]any, int, error) {
-	return p.doContext(context.Background(), method, url, body)
 }
 
 func (p GoogleAIProvider) doContext(ctx context.Context, method, url string, body any) (map[string]any, int, error) {
@@ -264,259 +263,10 @@ func (p GoogleAIProvider) label() string {
 	return "ai_studio"
 }
 
-// ---- chat ---------------------------------------------------------------- //
-
-// Complete translates OpenAI-shaped messages into Gemini contents and maps the
-// reply back, so the gateway's routing and translation layers are unchanged.
-func (p GoogleAIProvider) Complete(model string, messages []Message, kw Kwargs) (map[string]any, error) {
-	return p.CompleteContext(context.Background(), model, messages, kw)
-}
-
-func (p GoogleAIProvider) CompleteContext(ctx context.Context, model string, messages []Message, kw Kwargs) (map[string]any, error) {
-	url, err := p.modelURL(model, "generateContent")
-	if err != nil {
-		return nil, err
-	}
-	decoded, _, err := p.doContext(ctx, http.MethodPost, url, googleContentRequest(messages, kw, nil))
-	if err != nil {
-		return nil, err
-	}
-	if err := googleEmptyReplyError(p.label(), decoded); err != nil {
-		return nil, err
-	}
-	return googleToOpenAIChat(model, decoded), nil
-}
-
-// googleEmptyReplyError explains a reply that contains no text. Gemini's
-// thinking models spend maxOutputTokens on reasoning before writing an answer,
-// so a small max_tokens yields a successful HTTP 200 carrying an empty string —
-// a silent failure the caller cannot diagnose. Name the cause instead.
-func googleEmptyReplyError(label string, decoded map[string]any) error {
-	for _, part := range googleParts(decoded) {
-		if text, ok := part["text"].(string); ok && strings.TrimSpace(text) != "" {
-			return nil
-		}
-		if _, ok := part["inlineData"]; ok {
-			return nil
-		}
-	}
-	usage, _ := decoded["usageMetadata"].(map[string]any)
-	thoughts, _ := usage["thoughtsTokenCount"].(float64)
-	finish := ""
-	if candidates, ok := decoded["candidates"].([]any); ok && len(candidates) > 0 {
-		if first, ok := candidates[0].(map[string]any); ok {
-			finish, _ = first["finishReason"].(string)
-		}
-	}
-	if thoughts > 0 {
-		return &InvocationError{Msg: fmt.Sprintf(
-			"%s: the model spent its entire output budget on reasoning (%d thinking tokens) and returned no text — raise max_tokens or omit it",
-			label, int(thoughts))}
-	}
-	if finish != "" && finish != "STOP" {
-		return &InvocationError{Msg: fmt.Sprintf("%s: the model returned no text (finish reason %s)", label, finish)}
-	}
-	return &InvocationError{Msg: label + ": the model returned no text"}
-}
-
-func (p GoogleAIProvider) Stream(model string, messages []Message, kw Kwargs) (StreamIter, error) {
-	return nil, &ConfigError{Msg: p.label() + ": streaming is not implemented for this provider yet; use a non-streaming request"}
-}
-
-// googleContentRequest maps chat messages to Gemini's contents/parts grammar.
-// Gemini has no "system" role: system text becomes systemInstruction.
-func googleContentRequest(messages []Message, kw Kwargs, modalities []string) map[string]any {
-	contents := make([]map[string]any, 0, len(messages))
-	var systemParts []map[string]any
-	for _, message := range messages {
-		role, _ := message["role"].(string)
-		text, _ := message["content"].(string)
-		if role == "system" || role == "developer" {
-			systemParts = append(systemParts, map[string]any{"text": text})
-			continue
-		}
-		if role == "assistant" {
-			role = "model"
-		}
-		if role == "" {
-			role = "user"
-		}
-		contents = append(contents, map[string]any{
-			"role": role, "parts": []map[string]any{{"text": text}},
-		})
-	}
-	request := map[string]any{"contents": contents}
-	if len(systemParts) > 0 {
-		request["systemInstruction"] = map[string]any{"parts": systemParts}
-	}
-	generation := map[string]any{}
-	if value, ok := kw["max_tokens"]; ok && value != nil {
-		generation["maxOutputTokens"] = value
-	} else if value, ok := kw["_max_output_tokens"]; ok && value != nil {
-		generation["maxOutputTokens"] = value
-	}
-	if value, ok := kw["temperature"]; ok && value != nil {
-		generation["temperature"] = value
-	}
-	if len(modalities) > 0 {
-		generation["responseModalities"] = modalities
-	}
-	if len(generation) > 0 {
-		request["generationConfig"] = generation
-	}
-	return request
-}
-
-// googleToOpenAIChat reshapes a generateContent reply into the Chat Completions
-// envelope the gateway already understands.
-func googleToOpenAIChat(model string, decoded map[string]any) map[string]any {
-	text := strings.Builder{}
-	for _, part := range googleParts(decoded) {
-		if value, ok := part["text"].(string); ok {
-			text.WriteString(value)
-		}
-	}
-	inputTokens, outputTokens, totalTokens := googleUsage(decoded)
-	served := model
-	if value, ok := decoded["modelVersion"].(string); ok && value != "" {
-		served = value
-	}
-	return map[string]any{
-		"id":     "chatcmpl-google",
-		"object": "chat.completion",
-		"model":  served,
-		"choices": []any{map[string]any{
-			"index":         0,
-			"finish_reason": "stop",
-			"message":       map[string]any{"role": "assistant", "content": text.String()},
-		}},
-		"usage": map[string]any{
-			"prompt_tokens": inputTokens, "completion_tokens": outputTokens, "total_tokens": totalTokens,
-		},
-	}
-}
-
-func googleParts(decoded map[string]any) []map[string]any {
-	candidates, _ := decoded["candidates"].([]any)
-	if len(candidates) == 0 {
-		return nil
-	}
-	first, _ := candidates[0].(map[string]any)
-	content, _ := first["content"].(map[string]any)
-	rawParts, _ := content["parts"].([]any)
-	parts := make([]map[string]any, 0, len(rawParts))
-	for _, raw := range rawParts {
-		if part, ok := raw.(map[string]any); ok {
-			parts = append(parts, part)
-		}
-	}
-	return parts
-}
-
-// googleUsage reads usageMetadata. Google reports image cost as token counts
-// tagged with modality, so image and text accounting stay uniform.
-func googleUsage(decoded map[string]any) (int, int, int) {
-	usage, _ := decoded["usageMetadata"].(map[string]any)
-	number := func(key string) int {
-		if value, ok := usage[key].(float64); ok {
-			return int(value)
-		}
-		return 0
-	}
-	input := number("promptTokenCount")
-	output := number("candidatesTokenCount") + number("thoughtsTokenCount")
-	total := number("totalTokenCount")
-	if total == 0 {
-		total = input + output
-	}
-	return input, output, total
-}
-
 // EmbeddingProvider is implemented by native providers that can return an
 // OpenAI-shaped embedding envelope without an OpenAI-compatible HTTP surface.
 type EmbeddingProvider interface {
 	Embed(context.Context, string, any) (map[string]any, error)
-}
-
-func (p GoogleAIProvider) Embed(ctx context.Context, model string, input any) (map[string]any, error) {
-	values := make([]string, 0, 1)
-	switch typed := input.(type) {
-	case string:
-		if strings.TrimSpace(typed) != "" {
-			values = append(values, typed)
-		}
-	case []string:
-		values = append(values, typed...)
-	case []any:
-		for _, raw := range typed {
-			text, ok := raw.(string)
-			if !ok {
-				return nil, &InvocationError{Msg: p.label() + ": embedding input must contain only strings"}
-			}
-			values = append(values, text)
-		}
-	default:
-		return nil, &InvocationError{Msg: p.label() + ": embedding input must be a string or array of strings"}
-	}
-	if len(values) == 0 {
-		return nil, &InvocationError{Msg: p.label() + ": embedding input is required"}
-	}
-	data := make([]any, 0, len(values))
-	totalTokens := 0
-	for index, text := range values {
-		var endpoint string
-		var body map[string]any
-		var err error
-		if p.surface == SurfaceVertex && !strings.HasPrefix(strings.ToLower(strings.TrimPrefix(model, "models/")), "gemini-embedding-2") {
-			endpoint, err = p.modelURL(model, "predict")
-			body = map[string]any{"instances": []any{map[string]any{"content": text}}}
-		} else {
-			endpoint, err = p.modelURL(model, "embedContent")
-			body = map[string]any{"content": map[string]any{"parts": []any{map[string]any{"text": text}}}}
-		}
-		if err != nil {
-			return nil, err
-		}
-		decoded, _, err := p.doContext(ctx, http.MethodPost, endpoint, body)
-		if err != nil {
-			return nil, err
-		}
-		vector, tokens := googleEmbedding(decoded)
-		if len(vector) == 0 {
-			return nil, &InvocationError{Msg: p.label() + ": embedding response contained no vector"}
-		}
-		totalTokens += tokens
-		data = append(data, map[string]any{"object": "embedding", "index": index, "embedding": vector})
-	}
-	return map[string]any{
-		"object": "list", "data": data, "model": strings.TrimPrefix(strings.TrimSpace(model), "models/"),
-		"usage": map[string]any{"prompt_tokens": totalTokens, "total_tokens": totalTokens},
-	}, nil
-}
-
-func googleEmbedding(decoded map[string]any) ([]any, int) {
-	if embedding, ok := decoded["embedding"].(map[string]any); ok {
-		values, _ := embedding["values"].([]any)
-		usage, _ := decoded["usageMetadata"].(map[string]any)
-		tokens := 0
-		if count, ok := usage["promptTokenCount"].(float64); ok {
-			tokens = int(count)
-		}
-		return values, tokens
-	}
-	predictions, _ := decoded["predictions"].([]any)
-	if len(predictions) == 0 {
-		return nil, 0
-	}
-	prediction, _ := predictions[0].(map[string]any)
-	embeddings, _ := prediction["embeddings"].(map[string]any)
-	values, _ := embeddings["values"].([]any)
-	statistics, _ := embeddings["statistics"].(map[string]any)
-	tokens := 0
-	if count, ok := statistics["token_count"].(float64); ok {
-		tokens = int(count)
-	}
-	return values, tokens
 }
 
 // ---- image --------------------------------------------------------------- //
@@ -534,49 +284,6 @@ type ImageGenerator interface {
 
 type ContextImageGenerator interface {
 	GenerateImagesContext(context.Context, string, string, int) ([]GeneratedImage, map[string]any, error)
-}
-
-// GenerateImages asks an image-capable Gemini model for inline image bytes.
-func (p GoogleAIProvider) GenerateImages(model, prompt string, count int) ([]GeneratedImage, map[string]any, error) {
-	return p.GenerateImagesContext(context.Background(), model, prompt, count)
-}
-
-func (p GoogleAIProvider) GenerateImagesContext(ctx context.Context, model, prompt string, count int) ([]GeneratedImage, map[string]any, error) {
-	if strings.TrimSpace(prompt) == "" {
-		return nil, nil, &InvocationError{Msg: p.label() + ": a prompt is required"}
-	}
-	url, err := p.modelURL(model, "generateContent")
-	if err != nil {
-		return nil, nil, err
-	}
-	messages := []Message{{"role": "user", "content": prompt}}
-	body := googleContentRequest(messages, Kwargs{}, []string{"TEXT", "IMAGE"})
-	decoded, _, err := p.doContext(ctx, http.MethodPost, url, body)
-	if err != nil {
-		return nil, nil, err
-	}
-	images := make([]GeneratedImage, 0, 1)
-	for _, part := range googleParts(decoded) {
-		inline, ok := part["inlineData"].(map[string]any)
-		if !ok {
-			continue
-		}
-		encoded, _ := inline["data"].(string)
-		mime, _ := inline["mimeType"].(string)
-		raw, decodeErr := base64.StdEncoding.DecodeString(encoded)
-		if decodeErr != nil || len(raw) == 0 {
-			continue
-		}
-		images = append(images, GeneratedImage{Data: raw, MimeType: mime})
-		if count > 0 && len(images) >= count {
-			break
-		}
-	}
-	if len(images) == 0 {
-		return nil, nil, &InvocationError{Msg: p.label() + ": the model returned no image data — it may be a text-only model"}
-	}
-	usage, _ := decoded["usageMetadata"].(map[string]any)
-	return images, usage, nil
 }
 
 // ---- video --------------------------------------------------------------- //

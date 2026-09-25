@@ -61,13 +61,8 @@ func setupVertexIAM(t *testing.T) {
 	t.Helper()
 	t.Setenv("LLMGW_STATE_DIR", t.TempDir())
 	iam.ResetForTests()
-	ResetProviders()
-	Current().gcpTokens.Reset()
-	t.Cleanup(func() {
-		iam.ResetForTests()
-		ResetProviders()
-		Current().gcpTokens.Reset()
-	})
+	InstallForTests(t)
+	t.Cleanup(iam.ResetForTests)
 	key := make([]byte, 32)
 	for index := range key {
 		key[index] = byte(index + 7)
@@ -82,6 +77,52 @@ func setupVertexIAM(t *testing.T) {
 	})
 }
 
+// vertexModelServer serves the Vertex AI instance until the test ends and
+// records each request it answers.
+func vertexModelServer(t *testing.T) *googleUpstream {
+	t.Helper()
+	upstream := &googleUpstream{}
+	server := httptest.NewServer(upstream)
+	t.Cleanup(server.Close)
+	config.Update(func(s *config.Settings) { s.Providers["vertex_ai"].BaseURL = server.URL + "/v1" })
+	return upstream
+}
+
+// expectVertexServiceAccount sends a completion through provider and checks
+// that it authenticated as the minted token in the project the key names,
+// and that the transport serving video and the catalog holds the same
+// credential, never as an API key.
+func expectVertexServiceAccount(t *testing.T, provider Provider, upstream *googleUpstream) {
+	t.Helper()
+	vertex, ok := provider.(*googleProvider)
+	if !ok {
+		t.Fatalf("provider type=%T", provider)
+	}
+	if _, err := vertex.Complete("gemini-test", []Message{{"role": "user", "content": "hi"}}, nil); err != nil {
+		t.Fatal(err)
+	}
+	want := googleCall{
+		credential: "Bearer ya29.stored-path",
+		path:       "/v1/projects/fixture-project/locations/global/publishers/google/models/gemini-test:generateContent",
+	}
+	if got := upstream.last(); got != want {
+		t.Fatalf("upstream call=%+v, want %+v", got, want)
+	}
+	if vertex.legacy.bearerTokenFor == nil {
+		t.Fatal("stored service account did not retain a refreshable token source")
+	}
+	if token, err := vertex.legacy.currentBearerToken(); err != nil || token != "ya29.stored-path" {
+		t.Fatalf("bearer token=%q error=%v", token, err)
+	}
+	if vertex.legacy.apiKey != "" {
+		t.Fatalf("apiKey=%q, want empty so no x-goog-api-key is sent", vertex.legacy.apiKey)
+	}
+	// The project must come from the key when none is configured.
+	if vertex.legacy.project != "fixture-project" {
+		t.Fatalf("project=%q, want it taken from the key", vertex.legacy.project)
+	}
+}
+
 // TestVertexUsesStoredServiceAccountConnection covers the seam between storage
 // and the provider: a key that was uploaded, encrypted and read back must end
 // up authenticating as a Bearer token. Unit tests exercise minting and the
@@ -89,6 +130,7 @@ func setupVertexIAM(t *testing.T) {
 func TestVertexUsesStoredServiceAccountConnection(t *testing.T) {
 	setupVertexIAM(t)
 	server := stubTokenEndpoint(t)
+	upstream := vertexModelServer(t)
 
 	human, err := iam.CreatePrincipal("human", "authentik:vertex-owner", "", "Owner")
 	if err != nil {
@@ -108,23 +150,7 @@ func TestVertexUsesStoredServiceAccountConnection(t *testing.T) {
 	if err != nil {
 		t.Fatalf("build provider from stored connection: %v", err)
 	}
-	vertex, ok := provider.(GoogleAIProvider)
-	if !ok {
-		t.Fatalf("provider type=%T", provider)
-	}
-	if vertex.bearerTokenFor == nil {
-		t.Fatal("stored service account did not retain a refreshable token source")
-	}
-	if token, err := vertex.currentBearerToken(); err != nil || token != "ya29.stored-path" {
-		t.Fatalf("bearer token=%q error=%v", token, err)
-	}
-	if vertex.apiKey != "" {
-		t.Fatalf("apiKey=%q, want empty so no x-goog-api-key is sent", vertex.apiKey)
-	}
-	// The project must come from the key when none is configured.
-	if vertex.project != "fixture-project" {
-		t.Fatalf("project=%q, want it taken from the key", vertex.project)
-	}
+	expectVertexServiceAccount(t, provider, upstream)
 }
 
 // TestVertexWithoutAnyCredentialFailsClearly is the regression test for the
@@ -163,6 +189,7 @@ func TestVertexWithoutAnyCredentialFailsClearly(t *testing.T) {
 func TestVertexSystemConnectionServesAPIKeyCallers(t *testing.T) {
 	setupVertexIAM(t)
 	server := stubTokenEndpoint(t)
+	upstream := vertexModelServer(t)
 
 	if _, err := iam.PutSystemProviderConnection(
 		"vertex_ai", gcpauth.CredentialKind, serviceAccountFixture(t, server.URL),
@@ -177,27 +204,22 @@ func TestVertexSystemConnectionServesAPIKeyCallers(t *testing.T) {
 	if err != nil {
 		t.Fatalf("build provider for an API-key caller: %v", err)
 	}
-	vertex, ok := provider.(GoogleAIProvider)
-	if !ok {
-		t.Fatalf("provider type=%T", provider)
-	}
-	if vertex.bearerTokenFor == nil {
-		t.Fatal("system service account did not retain a refreshable token source")
-	}
-	if token, err := vertex.currentBearerToken(); err != nil || token != "ya29.stored-path" {
-		t.Fatalf("bearer token=%q error=%v", token, err)
-	}
-	if vertex.apiKey != "" {
-		t.Fatalf("apiKey=%q, want empty", vertex.apiKey)
-	}
+	expectVertexServiceAccount(t, provider, upstream)
 }
 
+// A cached provider keeps no token past its time: core's Google mints a new
+// one when the one it holds is about to expire, and reuses one that is not.
 func TestVertexCachedProviderRefreshesServiceAccountToken(t *testing.T) {
 	setupVertexIAM(t)
 	var exchanges atomic.Int32
 	tokenServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		index := exchanges.Add(1)
-		_, _ = fmt.Fprintf(w, `{"access_token":"token-%d","expires_in":3600}`, index)
+		// The first token expires inside the cache's refresh margin.
+		lifetime := 30
+		if index > 1 {
+			lifetime = 3600
+		}
+		_, _ = fmt.Fprintf(w, `{"access_token":"token-%d","expires_in":%d}`, index, lifetime)
 	}))
 	defer tokenServer.Close()
 	modelServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -220,10 +242,7 @@ func TestVertexCachedProviderRefreshesServiceAccountToken(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for index, want := range []string{"token-1", "token-2"} {
-		if index == 1 {
-			Current().gcpTokens.Reset()
-		}
+	for index, want := range []string{"token-1", "token-2", "token-2"} {
 		response, err := provider.Complete("gemini-test", []Message{{"role": "user", "content": "hi"}}, nil)
 		if err != nil {
 			t.Fatal(err)

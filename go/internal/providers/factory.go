@@ -49,9 +49,13 @@ func (rt *Runtime) instantiate(
 		if err != nil {
 			return nil, err
 		}
-		return NewAIStudio(cfg.BaseURL, apiKey, cfg.TimeoutOr(120)), nil
+		return rt.newGoogleProvider(providerID, cfg, caller, NewAIStudio(cfg.BaseURL, apiKey, cfg.TimeoutOr(120)))
 	case "vertex_ai":
-		return newVertexProvider(&rt.gcpTokens, providerID, cfg, caller)
+		legacy, err := newVertexProvider(&rt.gcpTokens, providerID, cfg, caller)
+		if err != nil {
+			return nil, err
+		}
+		return rt.newGoogleProvider(providerID, cfg, caller, legacy)
 	case "edge_tts":
 		// The access token is optional: a baked-in public default applies.
 		// resolveAPIKey still runs so a stored override (config secret or
@@ -330,31 +334,32 @@ func resolveCredentialObserved(
 	return config.ResolveProviderAPIKey(providerID, cfg), CredentialKindAPIKey, nil, nil
 }
 
-// newVertexProvider builds the Vertex provider for whichever credential kind is
-// stored. An API key keeps the existing x-goog-api-key path untouched; a
-// service-account key is exchanged for a short-lived OAuth2 access token,
-// cached in tokens.
+// newVertexProvider builds the gateway's Vertex transport, which serves the
+// facade's video and catalog, for whichever credential kind is stored. It is
+// also where a Vertex facade refuses a credential it cannot use, before any
+// request. An API key keeps the x-goog-api-key path; a service-account key is
+// exchanged for a short-lived OAuth2 access token, cached in tokens.
 func newVertexProvider(
 	tokens *gcpauth.TokenCache, providerID string, cfg *config.ProviderConfig, caller core.Caller,
-) (Provider, error) {
+) (GoogleAIProvider, error) {
 	requestType := strings.ToLower(strings.TrimSpace(cfg.VertexRequestType))
 	switch requestType {
 	case "", "default", "paygo", "dedicated":
 	default:
-		return nil, &ConfigError{Msg: fmt.Sprintf(
+		return GoogleAIProvider{}, &ConfigError{Msg: fmt.Sprintf(
 			"provider '%s': vertex_request_type must be default, paygo, or dedicated", providerID,
 		)}
 	}
 	secret, kind, _, err := resolveCredentialObserved(providerID, cfg, caller)
 	if err != nil {
-		return nil, err
+		return GoogleAIProvider{}, err
 	}
 	kind = strings.TrimSpace(kind)
 	// Fail here rather than sending an unauthenticated request. Vertex answers a
 	// missing credential with 401, which reads as "credential rejected" and points
 	// at a bad key instead of an absent one.
 	if strings.TrimSpace(secret) == "" {
-		return nil, &ConfigError{Msg: fmt.Sprintf(
+		return GoogleAIProvider{}, &ConfigError{Msg: fmt.Sprintf(
 			"provider '%s': no credential configured — vertex_ai needs an API key or a "+
 				"Google service account key; add one before sending requests",
 			providerID,
@@ -362,17 +367,16 @@ func newVertexProvider(
 	}
 	if !strings.EqualFold(kind, CredentialKindServiceAccount) {
 		if !strings.EqualFold(kind, CredentialKindAPIKey) {
-			return nil, &ConfigError{Msg: fmt.Sprintf(
+			return GoogleAIProvider{}, &ConfigError{Msg: fmt.Sprintf(
 				"provider '%s': connection kind %q is not usable for vertex_ai", providerID, kind,
 			)}
 		}
-		provider := NewVertexAI(cfg.BaseURL, secret, cfg.Project, cfg.Location, cfg.TimeoutOr(120)).withVertexRequestType(requestType)
-		return provider, nil
+		return NewVertexAI(cfg.BaseURL, secret, cfg.Project, cfg.Location, cfg.TimeoutOr(120)).withVertexRequestType(requestType), nil
 	}
 
 	credential, err := gcpauth.Parse([]byte(secret))
 	if err != nil {
-		return nil, &ConfigError{Msg: fmt.Sprintf("provider '%s': %v", providerID, err)}
+		return GoogleAIProvider{}, &ConfigError{Msg: fmt.Sprintf("provider '%s': %v", providerID, err)}
 	}
 	// The key names the project it belongs to, so an unset project is filled in
 	// from it and a contradicting one fails here rather than as an opaque 403.
@@ -381,7 +385,7 @@ func newVertexProvider(
 	case project == "":
 		project = credential.ProjectID()
 	case !strings.EqualFold(project, credential.ProjectID()):
-		return nil, &ConfigError{Msg: fmt.Sprintf(
+		return GoogleAIProvider{}, &ConfigError{Msg: fmt.Sprintf(
 			"provider '%s': configured project %q does not match the service account project %q",
 			providerID, project, credential.ProjectID(),
 		)}
@@ -389,24 +393,32 @@ func newVertexProvider(
 	tokenSource := func() (string, error) {
 		token, tokenErr := tokens.AccessToken(credential, gcpauth.CloudPlatformScope)
 		if tokenErr != nil {
-			var exchangeErr *gcpauth.TokenError
-			if errors.As(tokenErr, &exchangeErr) {
-				message := fmt.Sprintf("provider '%s': service account token refresh failed", providerID)
-				if exchangeErr.StatusCode != 0 {
-					return "", failoverInvocationStatus(message, exchangeErr.StatusCode)
-				}
-				if exchangeErr.Code == "transport" {
-					return "", retryableInvocation(message)
-				}
-			}
-			return "", invocation(fmt.Sprintf("provider '%s': service account token refresh failed", providerID))
+			return "", vertexTokenFailure(providerID, tokenErr)
 		}
 		return token, nil
 	}
-	provider := NewVertexAIWithTokenSource(
+	return NewVertexAIWithTokenSource(
 		cfg.BaseURL, project, cfg.Location, cfg.TimeoutOr(120), tokenSource,
-	).withVertexRequestType(requestType)
-	return provider, nil
+	).withVertexRequestType(requestType), nil
+}
+
+// vertexTokenFailure is the error of a service-account token exchange that
+// failed for instance, on the transport or in core's Google: a refusal keeps
+// its status and permits failover, a token endpoint out of reach may repeat,
+// and any other failure is the request's. The message never quotes the
+// exchange.
+func vertexTokenFailure(instance string, err error) error {
+	message := fmt.Sprintf("provider '%s': service account token refresh failed", instance)
+	var exchangeErr *gcpauth.TokenError
+	if errors.As(err, &exchangeErr) {
+		if exchangeErr.StatusCode != 0 {
+			return failoverInvocationStatus(message, exchangeErr.StatusCode)
+		}
+		if exchangeErr.Code == "transport" {
+			return retryableInvocation(message)
+		}
+	}
+	return invocation(message)
 }
 
 // providerCacheKey scopes an instance to the principal whose credentials it

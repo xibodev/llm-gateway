@@ -41,9 +41,10 @@ type Runtime struct {
 	// guards.
 	circuits circuits
 
-	// gcpTokens caches service-account access tokens for every Vertex
-	// provider. Providers are rebuilt on each settings change and per
-	// principal, so the cache lives here, where tokens outlive those rebuilds.
+	// gcpTokens caches service-account access tokens for the gateway's Vertex
+	// transport, which serves video and the catalog; core's Google caches its
+	// own. Providers are rebuilt on each settings change and per principal,
+	// so the cache lives here, where tokens outlive those rebuilds.
 	gcpTokens gcpauth.TokenCache
 	// copilot reads the live settings at the start of every operation, so hot
 	// reload keeps working, and it is shared so concurrent polls of one device

@@ -5,14 +5,62 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
+
+	"llmgw/internal/config"
+	"llmgw/internal/iam"
 )
 
 // The response fixtures below are the real shapes captured from the live
 // services during UAT, not invented ones.
+
+// googleFixture configures instance "google" as cfg in a new installed
+// Runtime, with the configured key its only credential, and returns the
+// facade the provider factory builds for the gateway caller.
+func googleFixture(t *testing.T, cfg *config.ProviderConfig) *googleProvider {
+	t.Helper()
+	t.Setenv("LLMGW_STATE_DIR", t.TempDir())
+	iam.ResetForTests()
+	t.Cleanup(iam.ResetForTests)
+	runtime := InstallForTests(t)
+	oldKey, oldProviders := config.Get().CredentialEncryptionKey, config.Get().Providers
+	config.Update(func(s *config.Settings) {
+		s.CredentialEncryptionKey = ""
+		s.Providers = map[string]*config.ProviderConfig{"google": cfg}
+	})
+	t.Cleanup(func() {
+		config.Update(func(s *config.Settings) { s.CredentialEncryptionKey, s.Providers = oldKey, oldProviders })
+	})
+	provider, err := runtime.instantiate("google", cfg, gatewayCaller())
+	if err != nil {
+		t.Fatal(err)
+	}
+	google, ok := provider.(*googleProvider)
+	if !ok {
+		t.Fatalf("provider=%T, want the Google facade", provider)
+	}
+	return google
+}
+
+// studioFixture is googleFixture for AI Studio at base with the configured
+// key, and vertexFixture for Vertex AI at base in project and location.
+func studioFixture(t *testing.T, base, key string) *googleProvider {
+	return googleFixture(t, &config.ProviderConfig{Type: "ai_studio", BaseURL: base, APIKey: key})
+}
+
+func vertexFixture(t *testing.T, base, key, project, location string) *googleProvider {
+	return googleFixture(t, &config.ProviderConfig{
+		Type: "vertex_ai", BaseURL: base, APIKey: key, Project: project, Location: location,
+	})
+}
+
+// googleCatalog is a facade that serves only transport's catalog, as the
+// facades the factory builds serve theirs.
+func googleCatalog(transport GoogleAIProvider) Provider { return &googleProvider{legacy: transport} }
 
 func TestModelURLDiffersPerSurface(t *testing.T) {
 	studio := NewAIStudio("", "k", 0)
@@ -48,42 +96,58 @@ func TestModelURLDiffersPerSurface(t *testing.T) {
 	}
 }
 
+// Google's refusals keep the message and status the transport gave them, and
+// its routing: the status decides, and no Retry-After is passed on.
 func TestUpstreamErrorsNameTheRealCause(t *testing.T) {
 	cases := []struct {
 		name, body string
 		status     int
 		want       string
+		retryable  bool
 	}{
 		{
-			name:   "billing exhausted",
-			status: 429,
-			body:   `{"error":{"code":429,"status":"RESOURCE_EXHAUSTED","message":"Your prepayment credits are depleted."}}`,
-			want:   "provider billing exhausted",
+			name:      "billing exhausted",
+			status:    429,
+			body:      `{"error":{"code":429,"status":"RESOURCE_EXHAUSTED","message":"Your prepayment credits are depleted."}}`,
+			want:      "ai_studio: provider billing exhausted — Your prepayment credits are depleted.",
+			retryable: true,
 		},
 		{
 			name:   "model not available",
 			status: 404,
 			body:   `{"error":{"code":404,"status":"NOT_FOUND","message":"Publisher model ... was not found or your project does not have access to it."}}`,
-			want:   "model not available to this project or location",
+			want:   "ai_studio: model not available to this project or location — Publisher model ... was not found or your project does not have access to it.",
 		},
 		{
 			name:   "credential rejected",
 			status: 403,
 			body:   `{"error":{"code":403,"status":"PERMISSION_DENIED","message":"denied"}}`,
-			want:   "credential rejected",
+			want:   "ai_studio: credential rejected — denied",
+		},
+		{
+			name:   "unclassified refusal",
+			status: 400,
+			body:   `{"error":{"code":400,"status":"INVALID_ARGUMENT","message":"bad request"}}`,
+			want:   "ai_studio: bad request",
 		},
 	}
 	for _, testCase := range cases {
 		t.Run(testCase.name, func(t *testing.T) {
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("Retry-After", "7")
 				w.WriteHeader(testCase.status)
 				_, _ = w.Write([]byte(testCase.body))
 			}))
 			defer server.Close()
-			provider := NewAIStudio(server.URL, "k", 5)
+			provider := studioFixture(t, server.URL, "k")
 			_, err := provider.Complete("gemini-3.5-flash", []Message{{"role": "user", "content": "hi"}}, nil)
-			if err == nil || !strings.Contains(err.Error(), testCase.want) {
-				t.Fatalf("error = %v, want it to mention %q", err, testCase.want)
+			if err == nil || err.Error() != testCase.want || UpstreamStatus(err) != testCase.status {
+				t.Fatalf("error = %v (status %d), want %q with status %d", err, UpstreamStatus(err), testCase.want, testCase.status)
+			}
+			if InvocationRetryAfter(err) != "" || InvocationRetryable(err) != testCase.retryable ||
+				InvocationFailoverEligible(err) != testCase.retryable || InvocationCircuitFailure(err) != testCase.retryable {
+				t.Fatalf("status %d: retry-after=%q retryable=%v failover=%v circuit=%v", testCase.status, InvocationRetryAfter(err),
+					InvocationRetryable(err), InvocationFailoverEligible(err), InvocationCircuitFailure(err))
 			}
 		})
 	}
@@ -91,6 +155,7 @@ func TestUpstreamErrorsNameTheRealCause(t *testing.T) {
 
 func TestCompleteTranslatesGeminiShape(t *testing.T) {
 	var captured map[string]any
+	var raw []byte
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Header.Get("x-goog-api-key") == "" {
 			t.Error("api key must travel in the x-goog-api-key header, never the url")
@@ -98,7 +163,8 @@ func TestCompleteTranslatesGeminiShape(t *testing.T) {
 		if strings.Contains(r.URL.RawQuery, "key=") {
 			t.Error("api key leaked into the query string")
 		}
-		_ = json.NewDecoder(r.Body).Decode(&captured)
+		raw, _ = io.ReadAll(r.Body)
+		_ = json.Unmarshal(raw, &captured)
 		_, _ = w.Write([]byte(`{
           "candidates":[{"content":{"role":"model","parts":[{"text":"VERTEX OK"}]}}],
           "usageMetadata":{"promptTokenCount":7,"candidatesTokenCount":2,"totalTokenCount":95},
@@ -106,14 +172,19 @@ func TestCompleteTranslatesGeminiShape(t *testing.T) {
 	}))
 	defer server.Close()
 
-	provider := NewAIStudio(server.URL, "secret", 5)
+	provider := studioFixture(t, server.URL, "secret")
 	out, err := provider.Complete("gemini-3.5-flash", []Message{
 		{"role": "system", "content": "be terse"},
 		{"role": "user", "content": "hi"},
 		{"role": "assistant", "content": "hello"},
-	}, Kwargs{"max_tokens": 16})
+	}, Kwargs{"max_tokens": 16, "top_p": 0.9, "stream": false})
 	if err != nil {
 		t.Fatal(err)
+	}
+	// The body the transport encoded: only what it mapped reaches Google.
+	if want := `{"contents":[{"parts":[{"text":"hi"}],"role":"user"},{"parts":[{"text":"hello"}],"role":"model"}],` +
+		`"generationConfig":{"maxOutputTokens":16},"systemInstruction":{"parts":[{"text":"be terse"}]}}`; string(raw) != want {
+		t.Fatalf("upstream body = %s\nwant %s", raw, want)
 	}
 	// System messages become systemInstruction; assistant becomes "model".
 	if _, ok := captured["systemInstruction"]; !ok {
@@ -134,11 +205,12 @@ func TestCompleteTranslatesGeminiShape(t *testing.T) {
 
 	choices, _ := out["choices"].([]any)
 	message, _ := choices[0].(map[string]any)["message"].(map[string]any)
-	if message["content"] != "VERTEX OK" {
-		t.Fatalf("content = %v", message["content"])
+	if message["content"] != "VERTEX OK" || out["model"] != "gemini-3.5-flash" || out["id"] != "chatcmpl-google" {
+		t.Fatalf("completion = %+v", out)
 	}
+	// The completion is decoded JSON now, so its numbers are float64.
 	usage, _ := out["usage"].(map[string]any)
-	if usage["prompt_tokens"] != 7 || usage["total_tokens"] != 95 {
+	if usage["prompt_tokens"] != float64(7) || usage["total_tokens"] != float64(95) {
 		t.Fatalf("usage = %+v", usage)
 	}
 }
@@ -160,7 +232,9 @@ func TestVertexRequestTypeHeaderIsExplicitAndInvocationOnly(t *testing.T) {
 				_, _ = w.Write([]byte(`{"candidates":[{"content":{"parts":[{"text":"ok"}]}}]}`))
 			}))
 			defer server.Close()
-			provider := NewVertexAI(server.URL, "key", "project", "global", 5).withVertexRequestType(testCase.mode)
+			provider := googleFixture(t, &config.ProviderConfig{
+				Type: "vertex_ai", BaseURL: server.URL, APIKey: "key", Project: "project", Location: "global", VertexRequestType: testCase.mode,
+			})
 			if _, err := provider.Complete("gemini-3.5-flash", []Message{{"role": "user", "content": "hi"}}, nil); err != nil {
 				t.Fatal(err)
 			}
@@ -172,13 +246,13 @@ func TestVertexRequestTypeHeaderIsExplicitAndInvocationOnly(t *testing.T) {
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if got := r.Header.Get("X-Vertex-AI-LLM-Request-Type"); got != "" {
-			t.Fatalf("AI Studio received Vertex request header %q", got)
+			t.Errorf("AI Studio received Vertex request header %q", got)
 		}
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`{"candidates":[{"content":{"parts":[{"text":"ok"}]}}]}`))
 	}))
 	defer server.Close()
-	provider := NewAIStudio(server.URL, "key", 5).withVertexRequestType("dedicated")
+	provider := googleFixture(t, &config.ProviderConfig{Type: "ai_studio", BaseURL: server.URL, APIKey: "key", VertexRequestType: "dedicated"})
 	if _, err := provider.Complete("gemini-3.5-flash", []Message{{"role": "user", "content": "hi"}}, nil); err != nil {
 		t.Fatal(err)
 	}
@@ -193,7 +267,7 @@ func TestGoogleEmbeddingTransportsNormalizeOpenAIEnvelope(t *testing.T) {
 			_, _ = w.Write([]byte(`{"embedding":{"values":[0.1,0.2,0.3]}}`))
 		}))
 		defer server.Close()
-		result, err := NewAIStudio(server.URL, "key", 5).Embed(context.Background(), "gemini-embedding-001", "hello")
+		result, err := studioFixture(t, server.URL, "key").Embed(context.Background(), "gemini-embedding-001", "hello")
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -210,13 +284,14 @@ func TestGoogleEmbeddingTransportsNormalizeOpenAIEnvelope(t *testing.T) {
 			_, _ = fmt.Fprintf(w, `{"predictions":[{"embeddings":{"values":[%d,0.5],"statistics":{"token_count":%d}}}]}`, calls, calls+1)
 		}))
 		defer server.Close()
-		result, err := NewVertexAI(server.URL, "key", "project", "global", 5).Embed(context.Background(), "text-embedding-005", []any{"first", "second"})
+		result, err := vertexFixture(t, server.URL, "key", "project", "global").Embed(context.Background(), "text-embedding-005", []any{"first", "second"})
 		if err != nil {
 			t.Fatal(err)
 		}
 		data := result["data"].([]any)
 		usage := result["usage"].(map[string]any)
-		if calls != 2 || data[0].(map[string]any)["index"] != 0 || data[1].(map[string]any)["index"] != 1 || usage["prompt_tokens"] != 5 {
+		if calls != 2 || data[0].(map[string]any)["index"] != float64(0) || data[1].(map[string]any)["index"] != float64(1) ||
+			data[1].(map[string]any)["embedding"].([]any)[0] != float64(2) || usage["prompt_tokens"] != float64(5) {
 			t.Fatalf("calls=%d result=%+v", calls, result)
 		}
 	})
@@ -229,11 +304,11 @@ func TestGoogleEmbeddingTransportsNormalizeOpenAIEnvelope(t *testing.T) {
 			_, _ = w.Write([]byte(`{"embedding":{"values":[0.1,0.2]},"usageMetadata":{"promptTokenCount":3}}`))
 		}))
 		defer server.Close()
-		result, err := NewVertexAI(server.URL, "key", "project", "global", 5).Embed(context.Background(), "gemini-embedding-2", "hello")
+		result, err := vertexFixture(t, server.URL, "key", "project", "global").Embed(context.Background(), "gemini-embedding-2", "hello")
 		if err != nil {
 			t.Fatal(err)
 		}
-		if !strings.HasSuffix(path, "/gemini-embedding-2:embedContent") || result["usage"].(map[string]any)["prompt_tokens"] != 3 {
+		if !strings.HasSuffix(path, "/gemini-embedding-2:embedContent") || result["usage"].(map[string]any)["prompt_tokens"] != float64(3) {
 			t.Fatalf("path=%q result=%+v", path, result)
 		}
 	})
@@ -252,7 +327,7 @@ func TestGenerateImagesDecodesInlineData(t *testing.T) {
 	}))
 	defer server.Close()
 
-	provider := NewVertexAI(server.URL, "k", "proj", "global", 5)
+	provider := vertexFixture(t, server.URL, "k", "proj", "global")
 	images, usage, err := provider.GenerateImages("gemini-3.1-flash-image", "an origami crane", 1)
 	if err != nil {
 		t.Fatal(err)
@@ -276,8 +351,8 @@ func TestGenerateImagesRefusesTextOnlyModel(t *testing.T) {
 		_, _ = w.Write([]byte(`{"candidates":[{"content":{"parts":[{"text":"I cannot draw"}]}}]}`))
 	}))
 	defer server.Close()
-	_, _, err := NewAIStudio(server.URL, "k", 5).GenerateImages("gemini-3.5-flash", "a crane", 1)
-	if err == nil || !strings.Contains(err.Error(), "no image data") {
+	_, _, err := studioFixture(t, server.URL, "k").GenerateImages("gemini-3.5-flash", "a crane", 1)
+	if err == nil || err.Error() != "ai_studio: the model returned no image data — it may be a text-only model" || UpstreamStatus(err) != 0 {
 		t.Fatalf("err = %v, want a clear text-only-model message", err)
 	}
 }
@@ -402,46 +477,53 @@ func TestEmptyReplyExplainsItself(t *testing.T) {
           "usageMetadata":{"promptTokenCount":7,"candidatesTokenCount":0,"totalTokenCount":36,"thoughtsTokenCount":29}}`))
 	}))
 	defer server.Close()
-	_, err := NewVertexAI(server.URL, "k", "p", "global", 5).Complete(
+	_, err := vertexFixture(t, server.URL, "k", "p", "global").Complete(
 		"gemini-3.5-flash", []Message{{"role": "user", "content": "hi"}}, Kwargs{"max_tokens": 32})
 	if err == nil {
 		t.Fatal("an empty reply must not be reported as success")
 	}
-
-	for _, want := range []string{"reasoning", "29 thinking tokens", "raise max_tokens"} {
-		if !strings.Contains(err.Error(), want) {
-			t.Fatalf("error %q should mention %q", err, want)
-		}
+	want := "vertex_ai: the model spent its entire output budget on reasoning (29 thinking tokens) and returned no text — raise max_tokens or omit it"
+	if err.Error() != want || UpstreamStatus(err) != 0 || !InvocationFailoverEligible(err) || InvocationRetryable(err) || InvocationCircuitFailure(err) {
+		t.Fatalf("error %q, want %q, failing over without a retry", err, want)
 	}
 }
 
 func TestGoogleUsageIncludesThinkingTokens(t *testing.T) {
-	input, output, total := googleUsage(map[string]any{
-		"usageMetadata": map[string]any{
-			"promptTokenCount":     float64(7),
-			"candidatesTokenCount": float64(3),
-			"thoughtsTokenCount":   float64(29),
-			"totalTokenCount":      float64(39),
-		},
-	})
-	if input != 7 || output != 32 || total != 39 {
-		t.Fatalf("usage=(%d,%d,%d)", input, output, total)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`{"candidates":[{"content":{"parts":[{"text":"ok"}]}}],"usageMetadata":` +
+			`{"promptTokenCount":7,"candidatesTokenCount":3,"thoughtsTokenCount":29,"totalTokenCount":39}}`))
+	}))
+	defer server.Close()
+	out, err := studioFixture(t, server.URL, "k").Complete("m", []Message{{"role": "user", "content": "hi"}}, nil)
+	if err != nil {
+		t.Fatal(err)
 	}
-
+	usage, _ := out["usage"].(map[string]any)
+	if usage["prompt_tokens"] != float64(7) || usage["completion_tokens"] != float64(32) || usage["total_tokens"] != float64(39) {
+		t.Fatalf("usage=%+v", usage)
+	}
 }
 
 func TestGoogleMapsDeveloperMessageToSystemInstruction(t *testing.T) {
-	payload := googleContentRequest([]Message{
+	var payload map[string]any
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewDecoder(r.Body).Decode(&payload)
+		_, _ = w.Write([]byte(`{"candidates":[{"content":{"parts":[{"text":"ok"}]}}]}`))
+	}))
+	defer server.Close()
+	if _, err := studioFixture(t, server.URL, "k").Complete("m", []Message{
 		{"role": "developer", "content": "developer policy"},
 		{"role": "user", "content": "hello"},
-	}, Kwargs{}, nil)
+	}, nil); err != nil {
+		t.Fatal(err)
+	}
 	system, _ := payload["systemInstruction"].(map[string]any)
-	parts, _ := system["parts"].([]map[string]any)
-	if len(parts) != 1 || parts[0]["text"] != "developer policy" {
+	parts, _ := system["parts"].([]any)
+	if len(parts) != 1 || parts[0].(map[string]any)["text"] != "developer policy" {
 		t.Fatalf("systemInstruction=%+v", system)
 	}
-	contents, _ := payload["contents"].([]map[string]any)
-	if len(contents) != 1 || contents[0]["role"] != "user" {
+	contents, _ := payload["contents"].([]any)
+	if len(contents) != 1 || contents[0].(map[string]any)["role"] != "user" {
 		t.Fatalf("contents=%+v", contents)
 	}
 }
@@ -451,8 +533,8 @@ func TestEmptyReplyWithoutThinkingReportsFinishReason(t *testing.T) {
 		_, _ = w.Write([]byte(`{"candidates":[{"content":{"role":"model"},"finishReason":"SAFETY"}]}`))
 	}))
 	defer server.Close()
-	_, err := NewAIStudio(server.URL, "k", 5).Complete("m", []Message{{"role": "user", "content": "hi"}}, nil)
-	if err == nil || !strings.Contains(err.Error(), "SAFETY") {
+	_, err := studioFixture(t, server.URL, "k").Complete("m", []Message{{"role": "user", "content": "hi"}}, nil)
+	if err == nil || err.Error() != "ai_studio: the model returned no text (finish reason SAFETY)" {
 		t.Fatalf("err = %v, want the finish reason surfaced", err)
 	}
 }
