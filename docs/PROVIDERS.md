@@ -55,7 +55,7 @@ registry card.
 
 ## Connection resolution
 
-Generic API-key transports resolve:
+Generic API-key providers resolve:
 
 1. the calling human's active default private connection;
 2. the encrypted system connection;

@@ -6,8 +6,8 @@ build-time dependency only.
 
 The application composes three standalone, modular libraries:
 - `github.com/xibodev/llm-translate`: protocol translation for Anthropic, OpenAI Chat, and Responses APIs.
-- `github.com/xibodev/llm-provider-auth`: provider authentication flows, OAuth device codes, and key parsing.
-- `github.com/xibodev/llmgw-core`: headless proxy engine, target resolution, and circuit breaking.
+- `github.com/xibodev/llm-provider-auth`: provider sign-in flows, token storage and refresh, and key parsing.
+- `github.com/xibodev/llmgw-core`: the provider runtime: provider verticals and transports, the catalog service, failover and health tracking, the OAuth flow service, and the anonymous-provider orchestrator.
 
 These external modules are versioned Go dependencies in `go.mod`, not vendored directories.
 See [`docs/ARCHITECTURE.md`](../docs/ARCHITECTURE.md) for module boundaries and dependency rules.
@@ -22,7 +22,7 @@ internal/config       settings, provider instances, endpoints, local detection
 internal/diagnostics  secret-redaction, text-limiting utilities
 internal/iam          SQLite IAM, keys, quotas, usage, audit, alerts, retention
 internal/operations   locked backup, inspection, restore, and recovery journal
-internal/providers    transports, auth adapters, core adapters, catalogs, retries, circuit state
+internal/providers    core runtime assembly and verticals, facades, stores over IAM, catalogs, sign-in, retries and circuits
 internal/roster       provider catalog synchronization and metadata
 internal/router       target resolution, ordered failover, telemetry, usage bridge
 internal/web          embedded Preact bundle and legacy compatibility documents
