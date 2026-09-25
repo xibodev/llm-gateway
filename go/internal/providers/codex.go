@@ -588,7 +588,7 @@ func codexChatPayload(model string, messages []Message, kw Kwargs) (map[string]a
 			return nil, &ConfigError{Msg: "openai_codex: Chat field " + field + " is not supported by the Codex Responses transport"}
 		}
 	}
-	payload := map[string]any{"model": model, "messages": messages}
+	payload := map[string]any{"model": model, "messages": withoutThoughtSignatures(messages)}
 	if tools := kw["tools"]; tools != nil {
 		payload["tools"] = tools
 	}

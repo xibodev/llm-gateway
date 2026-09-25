@@ -66,7 +66,7 @@ func (p AnthropicNativeProvider) applyHeaders(req *http.Request) error {
 
 func (p AnthropicNativeProvider) payload(model string, messages []Message, stream bool, kw Kwargs) (map[string]any, error) {
 	conversion := translate.OpenAIMessagesToAnthropicWithReport(messages)
-	if err := conversion.RejectMaterialLoss(); err != nil {
+	if err := RejectMaterialLossExceptThoughtSignatures(conversion.Report); err != nil {
 		return nil, &ConfigError{Msg: err.Error()}
 	}
 	system, anthropicMessages := conversion.Value.System, conversion.Value.Messages

@@ -585,7 +585,7 @@ func (p OpenAIProvider) completeViaResponsesContextWithObservation(
 		kw["reasoning_effort"] = "minimal"
 	}
 	conversion := chatToResponsesWithReport(model, messages, kw)
-	if err := conversion.RejectMaterialLoss(); err != nil {
+	if err := RejectMaterialLossExceptThoughtSignatures(conversion.Report); err != nil {
 		return nil, nil, &ConfigError{Msg: err.Error()}
 	}
 	payload := conversion.Value
@@ -739,7 +739,7 @@ func (p OpenAIProvider) streamViaResponses(model string, messages []Message, kw 
 
 func (p OpenAIProvider) streamViaResponsesContext(ctx context.Context, model string, messages []Message, kw Kwargs) (StreamIter, error) {
 	conversion := chatToResponsesWithReport(model, messages, kw)
-	if err := conversion.RejectMaterialLoss(); err != nil {
+	if err := RejectMaterialLossExceptThoughtSignatures(conversion.Report); err != nil {
 		return nil, &ConfigError{Msg: err.Error()}
 	}
 	payload := conversion.Value
@@ -766,7 +766,7 @@ func (p OpenAIProvider) callResponsesWithObservation(
 	model string, messages []Message, kw Kwargs,
 ) (map[string]any, *iam.ProviderAccountObservation, error) {
 	conversion := chatToResponsesWithReport(model, messages, kw)
-	if err := conversion.RejectMaterialLoss(); err != nil {
+	if err := RejectMaterialLossExceptThoughtSignatures(conversion.Report); err != nil {
 		return nil, nil, &ConfigError{Msg: err.Error()}
 	}
 	return p.callResponsesPayload(conversion.Value, true)

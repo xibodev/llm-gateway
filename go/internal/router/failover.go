@@ -650,7 +650,7 @@ func ExecuteResponsesContext(
 			chat, chatErr := providers.CompleteProviderContext(ctx, provider, target.Model, chatMessages, chatKw)
 			if chatErr == nil {
 				converted := translate.ChatResponseToResponsesWithRequestAndReport(target.Model, chat, payload)
-				if lossErr := converted.RejectMaterialLoss(); lossErr != nil {
+				if lossErr := providers.RejectMaterialLossExceptThoughtSignatures(converted.Report); lossErr != nil {
 					chatErr = &providers.ConfigError{Msg: lossErr.Error()}
 				} else {
 					result = converted.Value
@@ -750,7 +750,7 @@ func ExecuteAnthropicMessagesContext(
 			chat, err = providers.CompleteProviderContext(ctx, provider, target.Model, messages, kw)
 			if err == nil {
 				converted := translate.OpenAIResponseToAnthropicWithReport(chat, target.Model)
-				if lossErr := converted.RejectMaterialLoss(); lossErr != nil {
+				if lossErr := providers.RejectMaterialLossExceptThoughtSignatures(converted.Report); lossErr != nil {
 					err = &providers.ConfigError{Msg: lossErr.Error()}
 				} else {
 					result = converted.Value
