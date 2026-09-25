@@ -18,17 +18,20 @@ import (
 //
 // The first group is the state llmgw-core's runtime.Runtime also keeps, so
 // that value can take it over from here; the rest has no core counterpart.
-// For Codex and Antigravity it has taken over: core holds their providers
+// For the types in verticals it has taken over: core holds their providers
 // and the coordinators that refresh their credentials, so no refresh lock is
 // kept here.
 type Runtime struct {
 	instances providerCache
 	catalogs  catalogCache
 	core      *coreruntime.Runtime[*config.Settings]
-	// credentials is the credential store behind core and behind the
-	// gateway's own Coordinators: the Codex and Antigravity catalogs,
-	// Antigravity image generation and the console refreshes, which refresh
-	// outside core.
+	// verticals is the registration table of the provider types core
+	// serves; see coreVerticals.
+	verticals map[string]coreVertical
+	// credentials is the OAuth store behind core's Codex and Antigravity
+	// and behind the gateway's own Coordinators: the Codex and Antigravity
+	// catalogs, Antigravity image generation and the console refreshes,
+	// which refresh outside core.
 	credentials oauthStore
 
 	circuits circuitBreakers
@@ -69,6 +72,7 @@ func newRuntime(credentials func() (core.CredentialStore, error)) *Runtime {
 	runtime.quotaAdapters.values = map[string]QuotaAdapter{}
 	runtime.copilot = copilotauth.NewDynamic(runtime.copilotSettings)
 	runtime.credentials = oauthStore{runtime: runtime, open: credentials}
+	runtime.verticals = runtime.coreVerticals()
 	coreRuntime, err := newCoreRuntime(runtime)
 	if err != nil {
 		// New fails only without settings or a provider factory, and

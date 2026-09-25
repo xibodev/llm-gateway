@@ -3,43 +3,181 @@ package providers
 import (
 	"context"
 	"fmt"
-	"net/http"
-	"strings"
 
 	"llmgw/internal/config"
 	"llmgw/internal/iam"
 
 	"github.com/xibodev/llm-provider-auth/tokenstore"
 	core "github.com/xibodev/llmgw-core"
-	coreproviders "github.com/xibodev/llmgw-core/providers"
 	coreruntime "github.com/xibodev/llmgw-core/runtime"
 )
 
+// coreVertical is one provider type the llmgw-core Runtime serves: which
+// configured instances are of the type, and what the Runtime needs for them.
+// Adding a type is a file that builds its coreVertical and a line in
+// coreVerticals.
+type coreVertical struct {
+	// serves reports whether an instance configured as cfg is of the type.
+	// No two types serve one instance, so the table has no order.
+	serves func(settings *config.Settings, instance string, cfg *config.ProviderConfig) bool
+	// provider builds the core provider of an instance.
+	provider coreruntime.ProviderFactory[*config.Settings]
+	// refresh returns how an instance refreshes an OAuth credential. Nil
+	// means credentials of the type never refresh.
+	refresh coreruntime.RefreshFactory[*config.Settings]
+	// credentials resolves and stores the credentials of the type.
+	credentials core.CredentialStore
+}
+
+// coreVerticals is the registration table of the provider types the core
+// Runtime serves, one line per type. The Runtime holds what it returns.
+func (rt *Runtime) coreVerticals() map[string]coreVertical {
+	return map[string]coreVertical{
+		"openai_codex":       rt.codexCoreVertical(),
+		"google_antigravity": rt.antigravityCoreVertical(),
+	}
+}
+
 // newCoreRuntime builds the llmgw-core Runtime that serves the provider
-// instances whose vertical core owns, Codex and Antigravity: the Runtime
-// holds their providers and the coordinators that refresh their credentials,
-// while the gateway supplies the settings, the connections, the refresh and
-// the evidence sink.
+// instances whose vertical core owns: the Runtime holds their providers and
+// the coordinators that refresh their credentials, while the gateway
+// supplies the settings, the connections, the refresh and the evidence sink,
+// each through the vertical of the instance.
 func newCoreRuntime(rt *Runtime) (*coreruntime.Runtime[*config.Settings], error) {
+	settings := config.Source{}
 	return coreruntime.New(coreruntime.Options[*config.Settings]{
-		Settings:    config.Source{},
+		Settings:    settings,
 		Providers:   rt.coreProvider,
-		Credentials: rt.credentials,
+		Credentials: coreCredentials{runtime: rt, settings: settings},
 		Refresh:     rt.coreRefresh,
 		Evidence:    credentialEvidence{},
-		// Catalogs stays nil. The gateway lists Codex and Antigravity
-		// models on its own catalog path and never asks the Runtime, so
-		// the Runtime's in-memory catalog stays empty.
+		// Catalogs stays nil. The gateway lists the models of these
+		// instances on its own catalog path and never asks the Runtime,
+		// so the Runtime's in-memory catalog stays empty.
 	})
+}
+
+// vertical returns the name and the entry of the type that serves instance
+// under settings.
+func (rt *Runtime) vertical(settings *config.Settings, instance string) (string, coreVertical, bool) {
+	if cfg := settings.Providers[instance]; cfg != nil {
+		for name, vertical := range rt.verticals {
+			if vertical.serves(settings, instance, cfg) {
+				return name, vertical, true
+			}
+		}
+	}
+	return "", coreVertical{}, false
+}
+
+func errNotServedByCore(instance string) error {
+	return &ConfigError{Msg: fmt.Sprintf("provider '%s' is not served by the core runtime", instance)}
+}
+
+// coreProvider is the Runtime's ProviderFactory: the provider of the
+// instance's vertical. Other instances are not routed through the Runtime.
+func (rt *Runtime) coreProvider(settings *config.Settings, instance string) (core.Provider, error) {
+	_, vertical, ok := rt.vertical(settings, instance)
+	if !ok {
+		return nil, errNotServedByCore(instance)
+	}
+	return vertical.provider(settings, instance)
+}
+
+// coreRefresh is the Runtime's RefreshFactory: the refresh of the instance's
+// vertical, if it has one.
+func (rt *Runtime) coreRefresh(settings *config.Settings, instance string) tokenstore.RefreshFunc {
+	_, vertical, ok := rt.vertical(settings, instance)
+	if !ok || vertical.refresh == nil {
+		return nil
+	}
+	return vertical.refresh(settings, instance)
+}
+
+// coreCredentials is the Runtime's one credential store, which is each
+// vertical's store in turn. Resolve names an instance, so it asks the store
+// of the instance's type. The token-store methods name only a key; they use
+// the store of the vertical the operation's context names (see
+// withCoreOperation), and without one the OAuth store, which every operation
+// used before a vertical had a store of its own. The Runtime hands each
+// operation's context to Resolve and to the Coordinator it then asks.
+type coreCredentials struct {
+	runtime  *Runtime
+	settings coreruntime.SettingsSource[*config.Settings]
+}
+
+var _ core.CredentialStore = coreCredentials{}
+
+// Resolve implements core.CredentialStore.
+func (c coreCredentials) Resolve(ctx context.Context, caller core.Caller, instance string) (string, error) {
+	settings, _ := c.settings.Snapshot()
+	_, vertical, ok := c.runtime.vertical(settings, instance)
+	if !ok {
+		return "", errNotServedByCore(instance)
+	}
+	return vertical.credentials.Resolve(ctx, caller, instance)
+}
+
+func (c coreCredentials) store(ctx context.Context) core.CredentialStore {
+	if vertical, ok := c.runtime.verticals[coreOperationFrom(ctx).vertical]; ok {
+		return vertical.credentials
+	}
+	return c.runtime.credentials
+}
+
+// Load implements tokenstore.Store.
+func (c coreCredentials) Load(ctx context.Context, key string) (tokenstore.Record, error) {
+	return c.store(ctx).Load(ctx, key)
+}
+
+// Save implements tokenstore.Store.
+func (c coreCredentials) Save(ctx context.Context, key string, record tokenstore.Record) (tokenstore.Record, error) {
+	return c.store(ctx).Save(ctx, key, record)
+}
+
+// ReplaceIfCurrent implements tokenstore.Store.
+func (c coreCredentials) ReplaceIfCurrent(ctx context.Context, key, revision string, record tokenstore.Record) (tokenstore.Record, error) {
+	return c.store(ctx).ReplaceIfCurrent(ctx, key, revision, record)
+}
+
+// RevokeIfCurrent implements tokenstore.Store.
+func (c coreCredentials) RevokeIfCurrent(ctx context.Context, key, revision string) error {
+	return c.store(ctx).RevokeIfCurrent(ctx, key, revision)
+}
+
+// Lease implements tokenstore.Store.
+func (c coreCredentials) Lease(ctx context.Context, key string) (func(), error) {
+	return c.store(ctx).Lease(ctx, key)
+}
+
+// coreOperation is what an operation of a core-served type tells the stores
+// and providers the core Runtime calls for it, which their arguments do not:
+// the name of its vertical.
+type coreOperation struct {
+	vertical string
+}
+
+type coreOperationKey struct{}
+
+// withCoreOperation returns ctx naming the vertical of the operation it
+// carries.
+func withCoreOperation(ctx context.Context, vertical string) context.Context {
+	return context.WithValue(ctx, coreOperationKey{}, coreOperation{vertical: vertical})
+}
+
+// coreOperationFrom returns the operation ctx names, or the zero one.
+func coreOperationFrom(ctx context.Context) coreOperation {
+	operation, _ := ctx.Value(coreOperationKey{}).(coreOperation)
+	return operation
 }
 
 // iamCredentialStore opens the IAM credential store over the database IAM
 // serves now. That handle follows the state directory, which tests change,
 // so each operation opens the store rather than keeping one; opening costs
-// no more than the store value. Only Codex and Antigravity instances reach
-// the core Runtime and the gateway's Coordinators over this store, and both
-// resolve owner-private OAuth connections. Each read marks the connection
-// used, as both paths' reads did.
+// no more than the store value. Only the OAuth store opens it, for the Codex
+// and Antigravity instances the core Runtime and the gateway's Coordinators
+// serve, and both resolve owner-private OAuth connections. Each read marks
+// the connection used, as both paths' reads did.
 func iamCredentialStore() (core.CredentialStore, error) {
 	db, err := iam.DB()
 	if err != nil {
@@ -49,108 +187,3 @@ func iamCredentialStore() (core.CredentialStore, error) {
 }
 
 func oauthPrecedence(string) iam.CredentialPrecedence { return iam.OAuthPrecedence }
-
-// coreProvider is the Runtime's ProviderFactory. It builds core's Codex for a
-// Codex instance, with the gateway's instructions and verified client version
-// and this Runtime's Codex endpoints, and core's Antigravity for an
-// Antigravity instance, with this Runtime's Cloud Code Assist endpoint; other
-// instances are not routed through the Runtime yet.
-func (rt *Runtime) coreProvider(settings *config.Settings, instance string) (core.Provider, error) {
-	cfg := settings.Providers[instance]
-	if cfg != nil && antigravityInstance(cfg) {
-		antigravity, err := rt.newCoreAntigravity()
-		if err != nil {
-			return nil, err
-		}
-		return antigravityCoreProvider{Antigravity: antigravity}, nil
-	}
-	if cfg == nil || !codexInstance(instance, cfg) {
-		return nil, &ConfigError{Msg: fmt.Sprintf("provider '%s' is not served by the core runtime", instance)}
-	}
-	timeout := settings.OpenAICompatibleTimeoutSeconds
-	if cfg.Timeout != nil {
-		timeout = *cfg.Timeout
-	}
-	client := rt.codexEndpoints.get().HTTPClient
-	if client == nil {
-		client = httpClient(timeout)
-	}
-	codex, err := rt.newCoreCodex(client, codexCatalogClientVersion)
-	if err != nil {
-		return nil, err
-	}
-	return codexCoreProvider{Codex: codex}, nil
-}
-
-// codexCoreProvider is core's Codex as the core Runtime serves it. Each
-// request the Runtime sends upstream, its replay included, starts a new
-// account pin scope on the operation's oauthCall.
-type codexCoreProvider struct{ *coreproviders.Codex }
-
-func (p codexCoreProvider) Invoke(ctx context.Context, request core.Request) (core.Response, error) {
-	oauthCallFrom(ctx).attempt()
-	return p.Codex.Invoke(ctx, request)
-}
-
-func (p codexCoreProvider) Stream(ctx context.Context, request core.Request) (core.StreamIter, error) {
-	oauthCallFrom(ctx).attempt()
-	return p.Codex.Stream(ctx, request)
-}
-
-// antigravityCoreProvider is core's Antigravity as the core Runtime serves
-// it. Each request the Runtime sends upstream, its replay included, counts
-// on the operation's oauthCall, so a 401 the Runtime did not replay tells
-// that the refresh after it failed. The facade never streams through the
-// Runtime, which Antigravity refuses anyway.
-type antigravityCoreProvider struct{ *coreproviders.Antigravity }
-
-func (p antigravityCoreProvider) Invoke(ctx context.Context, request core.Request) (core.Response, error) {
-	oauthCallFrom(ctx).attempt()
-	return p.Antigravity.Invoke(ctx, request)
-}
-
-// coreRefresh is the Runtime's RefreshFactory. A Codex grant that names no
-// client would refresh with the effective client ID, but refreshCodexRecord
-// refuses such a grant first; antigravityGrantRefusal does the same for
-// Antigravity.
-func (rt *Runtime) coreRefresh(settings *config.Settings, instance string) tokenstore.RefreshFunc {
-	cfg := settings.Providers[instance]
-	switch {
-	case cfg == nil:
-		return nil
-	case antigravityInstance(cfg):
-		return rt.antigravityRefresh(settings, instance)
-	case codexInstance(instance, cfg):
-		return rt.codexRefresh(effectiveCodexClientID(settings))
-	}
-	return nil
-}
-
-// newCoreAntigravity builds core's Antigravity against this Runtime's Cloud
-// Code Assist endpoint. It stores each project it discovers with the
-// connection that discovered it.
-func (rt *Runtime) newCoreAntigravity() (*coreproviders.Antigravity, error) {
-	endpoint := rt.antigravityEndpoint.get()
-	antigravity, err := coreproviders.NewAntigravity(coreproviders.AntigravityConfig{
-		BaseURL: endpoint.BaseURL, Client: endpoint.HTTPClient, ProjectResolved: rt.storeAntigravityProject,
-	})
-	if err != nil {
-		return nil, &ConfigError{Msg: "google_antigravity: initialize transport: " + err.Error()}
-	}
-	return antigravity, nil
-}
-
-// newCoreCodex builds core's Codex provider against this Runtime's Codex
-// endpoints. clientVersion is sent only to the catalog.
-func (rt *Runtime) newCoreCodex(client *http.Client, clientVersion string) (*coreproviders.Codex, error) {
-	endpoints := rt.codexEndpoints.get().withDefaults()
-	codex, err := coreproviders.NewCodex(coreproviders.CodexConfig{
-		Instructions: codexInstructions, ClientVersion: clientVersion,
-		ResponsesURL: strings.TrimRight(endpoints.ResponsesBaseURL, "/") + "/responses",
-		ModelsURL:    endpoints.ModelsURL, Client: client,
-	})
-	if err != nil {
-		return nil, &ConfigError{Msg: "openai_codex: initialize shared transport: " + err.Error()}
-	}
-	return codex, nil
-}
