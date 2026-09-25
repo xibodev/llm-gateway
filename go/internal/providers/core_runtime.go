@@ -181,7 +181,9 @@ func coreOperationFrom(ctx context.Context) coreOperation {
 // The OAuth store opens it with oauth set, for the Codex and Antigravity
 // instances the core Runtime and the gateway's Coordinators serve: both
 // types resolve owner-private OAuth connections, and each read marks the
-// connection used, as both paths' reads did. Zen's store opens it without:
+// connection used, as both paths' reads did. Copilot's store opens it with
+// oauth set too: OAuthPrecedence is the Copilot resolver's order, and that
+// resolver marked each credential it read. Zen's store opens it without:
 // a nil Precedence resolves every instance with ConnectionPrecedence, the
 // provider factory's order, and reads mark nothing, because the factory
 // marks the credential it builds a Zen facade with, which is where the Zen

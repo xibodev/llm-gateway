@@ -1,12 +1,8 @@
 package providers
 
 import (
-	"bytes"
 	"context"
-	"encoding/json"
 	"errors"
-	"io"
-	"net/http"
 	"os"
 	"strings"
 	"sync"
@@ -65,12 +61,11 @@ func copilotForceAdapt(cfg *config.ProviderConfig) bool {
 // transport's did.
 func (rt *Runtime) coreCopilot(settings *config.Settings, instance string) (core.Provider, error) {
 	cfg := settings.Providers[instance]
-	client := httpClient(cfg.TimeoutOr(settings.GithubCopilotTimeoutSeconds))
-	client.Transport = copilotWire{}
 	copilot, err := coreproviders.NewCopilot(coreproviders.CopilotConfig{
 		Auth: rt.copilot, IntegrationID: settings.GithubCopilotIntegrationID,
 		EditorVersion: settings.GithubCopilotEditorVersion, EditorPluginVersion: copilotPluginVersion,
-		UserAgent: copilotUserAgent, Client: client, DisableAdaptation: !copilotForceAdapt(cfg),
+		UserAgent: copilotUserAgent, Client: httpClient(cfg.TimeoutOr(settings.GithubCopilotTimeoutSeconds)),
+		DisableAdaptation: !copilotForceAdapt(cfg),
 	})
 	if err != nil {
 		return nil, &ConfigError{Msg: "github_copilot: initialize transport: " + err.Error()}
@@ -166,8 +161,8 @@ func copilotCredentialKey(credential *core.Credential) string {
 	return credential.ConnectionID
 }
 
-// copilotChat is what the facade tells the vertical's provider and transport
-// about one Chat request that its body does not say.
+// copilotChat is what the facade tells the vertical's provider about one
+// Chat request that its body does not say.
 type copilotChat struct {
 	// adapt is the request's force_api_support: whether core may serve it
 	// over Responses.
@@ -175,9 +170,6 @@ type copilotChat struct {
 	// refuse is the gateway's conversion of the request to Responses, which
 	// refuses what Responses cannot carry.
 	refuse func() error
-	// fields are the fields the gateway sent that core drops; see
-	// copilotWire.
-	fields map[string]any
 }
 
 type copilotChatKey struct{}
@@ -190,72 +182,6 @@ func withCopilotChat(ctx context.Context, chat copilotChat) context.Context {
 func copilotChatFrom(ctx context.Context) copilotChat {
 	chat, _ := ctx.Value(copilotChatKey{}).(copilotChat)
 	return chat
-}
-
-// copilotDroppedFields returns the fields of a Chat payload that the OpenAI
-// transport sent Copilot and core's Copilot does not carry. The router puts
-// them in a Chat request it serves another surface over: parallel_tool_calls
-// and stream_options for Responses, and thinking for Messages.
-// stream_options' include_usage is what makes Copilot report a stream's
-// usage.
-func copilotDroppedFields(payload map[string]any) map[string]any {
-	fields := map[string]any{}
-	for _, field := range []string{"parallel_tool_calls", "stream_options", "thinking"} {
-		if value, ok := payload[field]; ok {
-			fields[field] = value
-		}
-	}
-	return fields
-}
-
-// copilotWire is the transport of core's Copilot. Core sends the Chat fields
-// the gateway's Chat facade forwards and drops every other, so the transport
-// adds back to a Chat body the dropped fields the facade names in the
-// request's context. Core and the gateway both encode with sorted keys, HTML
-// unescaped and no trailing newline, and the body keeps core's numbers, so
-// Copilot receives the bytes the OpenAI transport sent. Core carries none of
-// the fields, so none is replaced.
-type copilotWire struct{}
-
-func (copilotWire) RoundTrip(request *http.Request) (*http.Response, error) {
-	fields := copilotChatFrom(request.Context()).fields
-	if len(fields) == 0 || request.Body == nil || request.Method != http.MethodPost ||
-		!strings.HasSuffix(request.URL.Path, "/chat/completions") {
-		return http.DefaultTransport.RoundTrip(request)
-	}
-	body, err := io.ReadAll(request.Body)
-	_ = request.Body.Close()
-	if err != nil {
-		return nil, err
-	}
-	body = copilotWithFields(body, fields)
-	sent := request.Clone(request.Context())
-	sent.Body, sent.ContentLength = io.NopCloser(bytes.NewReader(body)), int64(len(body))
-	sent.GetBody = func() (io.ReadCloser, error) { return io.NopCloser(bytes.NewReader(body)), nil }
-	return http.DefaultTransport.RoundTrip(sent)
-}
-
-// copilotWithFields adds fields to a Chat body. A body that does not decode
-// is sent as it is.
-func copilotWithFields(body []byte, fields map[string]any) []byte {
-	decoder := json.NewDecoder(bytes.NewReader(body))
-	decoder.UseNumber()
-	var payload map[string]any
-	if decoder.Decode(&payload) != nil || payload == nil {
-		return body
-	}
-	for field, value := range fields {
-		if _, sent := payload[field]; !sent {
-			payload[field] = value
-		}
-	}
-	var buffer bytes.Buffer
-	encoder := json.NewEncoder(&buffer)
-	encoder.SetEscapeHTML(false)
-	if encoder.Encode(payload) != nil {
-		return body
-	}
-	return bytes.TrimRight(buffer.Bytes(), "\n")
 }
 
 // copilotStore is the credential store of Copilot instances: the IAM store

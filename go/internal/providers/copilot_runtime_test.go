@@ -209,10 +209,11 @@ func assertCopilotHeaders(t *testing.T, call copilotAPICall, session, accept str
 }
 
 // Chat reaches Copilot as the OpenAI transport sent it: the payload it built,
-// the fields core does not carry included, with the editor identity and the
-// vision header. The provider lists the catalog it routes by once for the
-// credential, renames max_tokens for a reasoning model and serves a model that
-// lists only Responses over Responses, marked as the transport marked it.
+// the fields a request served over Chat from Responses or Messages carries
+// included, with the editor identity and the vision header. The provider
+// lists the catalog it routes by once for the credential, renames max_tokens
+// for a reasoning model and serves a model that lists only Responses over
+// Responses, marked as the transport marked it.
 func TestCopilotChatSendsTheTransportsRequest(t *testing.T) {
 	upstream := newCopilotUpstream(t)
 	provider := copilotFacade(t, installCopilot(t, upstream, &config.ProviderConfig{Type: "github_copilot"}), gatewayCaller())

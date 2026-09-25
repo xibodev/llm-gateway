@@ -104,13 +104,12 @@ func (p *copilotProvider) chat(
 	kw = withOpenAIOutputLimit(kw)
 	adapt := adaptEnabled(kw, p.forceAdapt)
 	payload := buildOpenAIPayload(model, messages, stream, kw)
-	fields := copilotDroppedFields(payload)
 	payload["force_api_support"] = adapt
 	request, err := copilotRequest(core.ModelSurfaceChatCompletions, model, payload)
 	if err != nil {
 		return nil, core.Request{}, err
 	}
-	return withCopilotChat(ctx, copilotChat{adapt: adapt, fields: fields, refuse: func() error {
+	return withCopilotChat(ctx, copilotChat{adapt: adapt, refuse: func() error {
 		conversion := chatToResponsesWithReport(model, messages, kw)
 		if err := RejectMaterialLossExceptThoughtSignatures(conversion.Report); err != nil {
 			return &ConfigError{Msg: err.Error()}
