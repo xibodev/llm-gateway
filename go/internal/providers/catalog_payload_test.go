@@ -101,7 +101,7 @@ func TestCatalogPayloadValidationAndCache(t *testing.T) {
 					catData["catalog-read"] = catalogEntry{SchemaVersion: catalogSchemaVersion,
 						Models: []ModelInfo{{ID: "old"}}, RefreshedAt: stale}
 					catMu.Unlock()
-					result := ReadCatalogForPrincipal("catalog-read", nil)
+					result := ReadCatalogForPrincipal("catalog-read", gatewayCaller())
 					cached, refreshed := CatalogCached("catalog-read")
 					if tc.code != "" {
 						code, detail, status := CatalogFailure(result.Err)
@@ -135,7 +135,7 @@ func TestCatalogPayloadValidationAndCache(t *testing.T) {
 						(tc.count > 0 && cached[0].ID == "old") {
 						t.Fatalf("success did not replace stale cache: %+v, cache=%+v", result, cached)
 					}
-					second := ReadCatalogForPrincipal("catalog-read", nil)
+					second := ReadCatalogForPrincipal("catalog-read", gatewayCaller())
 					if second.Err != nil || !second.Diagnostics.FromCache || second.Diagnostics.Status != wantStatus ||
 						len(second.Models) != tc.count || calls.Load() != 1 {
 						t.Fatalf("success was not cached: %+v, calls=%d", second, calls.Load())
@@ -213,7 +213,7 @@ func TestCodexCatalogPayloadValidationAndCache(t *testing.T) {
 			}
 			catMu.Unlock()
 
-			result := ReadCatalogForPrincipal("catalog-read", nil)
+			result := ReadCatalogForPrincipal("catalog-read", gatewayCaller())
 			cached, refreshed := CatalogCached("catalog-read")
 			if tc.code != "" {
 				code, detail, status := CatalogFailure(result.Err)
@@ -246,7 +246,7 @@ func TestCodexCatalogPayloadValidationAndCache(t *testing.T) {
 					t.Fatalf("model identity changed: result=%+v cache=%+v", result.Models, cached)
 				}
 			}
-			second := ReadCatalogForPrincipal("catalog-read", nil)
+			second := ReadCatalogForPrincipal("catalog-read", gatewayCaller())
 			if second.Err != nil || !second.Diagnostics.FromCache || second.Diagnostics.Status != wantStatus ||
 				len(second.Models) != len(tc.wantIDs) || calls.Load() != 1 {
 				t.Fatalf("success was not cached: %+v, calls=%d", second, calls.Load())
@@ -372,7 +372,7 @@ func TestGoogleCatalogPagesRetainStaleCacheOnInvalidPayload(t *testing.T) {
 					catMu.Lock()
 					catData["catalog-read"] = catalogEntry{SchemaVersion: catalogSchemaVersion, Models: []ModelInfo{{ID: "old"}}, RefreshedAt: stale}
 					catMu.Unlock()
-					result := ReadCatalogForPrincipal("catalog-read", nil)
+					result := ReadCatalogForPrincipal("catalog-read", gatewayCaller())
 					cached, refreshed := CatalogCached("catalog-read")
 					if calls.Load() != 2 {
 						t.Fatalf("pages fetched=%d, want 2", calls.Load())
@@ -448,7 +448,7 @@ func TestVertexCatalogActionValuesAndCache(t *testing.T) {
 				catMu.Lock()
 				catData["catalog-read"] = catalogEntry{SchemaVersion: catalogSchemaVersion, Models: []ModelInfo{{ID: "old"}}, RefreshedAt: stale}
 				catMu.Unlock()
-				result := ReadCatalogForPrincipal("catalog-read", nil)
+				result := ReadCatalogForPrincipal("catalog-read", gatewayCaller())
 				cached, refreshed := CatalogCached("catalog-read")
 				if valid {
 					count := 1

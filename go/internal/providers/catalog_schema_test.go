@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"llmgw/internal/config"
+	core "github.com/xibodev/llmgw-core"
 )
 
 func resetCatalogForTest(t *testing.T) {
@@ -77,7 +77,7 @@ func TestCurrentSchemaCatalogEntriesSurviveAReload(t *testing.T) {
 	t.Setenv("LLMGW_STATE_DIR", dir)
 	resetCatalogForTest(t)
 
-	owner := &config.Principal{PrincipalID: "prn_owner", PrincipalKind: "human"}
+	owner := core.Caller{ID: "prn_owner", Kind: core.CallerHuman}
 	storeEntry(catalogCacheKey("copilot", owner), []ModelInfo{
 		{ID: "gpt-5.5", SupportedSurfaces: []string{"/responses"}},
 	})

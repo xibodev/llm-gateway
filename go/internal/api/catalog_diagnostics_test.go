@@ -219,9 +219,9 @@ func TestCatalogReadinessDoesNotBorrowAnotherScopeVerification(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	if _, _, err := providers.RefreshCatalogForPrincipalWithError("diagnostic", &config.Principal{
+	if _, _, err := providers.RefreshCatalogForPrincipalWithError("diagnostic", callerOf(&config.Principal{
 		PrincipalID: owner.ID, PrincipalKind: owner.Kind,
-	}); err != nil {
+	})); err != nil {
 		t.Fatal(err)
 	}
 	for _, id := range []string{owner.ID, other.ID} {

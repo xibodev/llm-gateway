@@ -99,7 +99,7 @@ func handleEmbeddings(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	requestedModel := req.Model
-	if instance, providerErr := providers.GetProviderForPrincipal(provider, principal); providerErr == nil {
+	if instance, providerErr := providers.GetProviderForPrincipal(provider, callerOf(principal)); providerErr == nil {
 		if embedder, supported := providers.AsEmbeddingProvider(instance); supported {
 			if !nativeEmbeddingInputValid(req.Input) {
 				recordFailureUsage("openai.embeddings", requestedModel, principal, http.StatusBadRequest, "invalid_input", started)
@@ -142,7 +142,7 @@ func handleEmbeddings(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	base, headers, okp := providers.ProviderHTTPTarget(provider, principal)
+	base, headers, okp := providers.ProviderHTTPTarget(provider, callerOf(principal))
 	if !okp {
 		recordFailureUsage("openai.embeddings", req.Model, principal, 400, "embeddings_unsupported", started)
 		writeError(w, 400, "provider '"+provider+"' does not support embeddings "+

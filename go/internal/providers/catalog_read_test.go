@@ -11,6 +11,8 @@ import (
 
 	"llmgw/internal/config"
 	"llmgw/internal/iam"
+
+	core "github.com/xibodev/llmgw-core"
 )
 
 func setupCatalogReadTest(t *testing.T, url string) {
@@ -47,7 +49,7 @@ func TestCatalogReadEmptyReplacesStaleRowsAndCachesSuccess(t *testing.T) {
 		Models: []ModelInfo{{ID: "old"}}, RefreshedAt: time.Now().Add(-2 * catalogTTL)}
 	catMu.Unlock()
 	for i := 0; i < 2; i++ {
-		result := ReadCatalogForPrincipal("catalog-read", nil)
+		result := ReadCatalogForPrincipal("catalog-read", gatewayCaller())
 		if result.Err != nil || len(result.Models) != 0 || result.RefreshedAt.IsZero() ||
 			result.Diagnostics.Status != "empty" || result.Diagnostics.Stale || result.Diagnostics.FromCache != (i == 1) {
 			t.Fatalf("read %d: %+v", i, result)
@@ -64,8 +66,8 @@ func TestCatalogReadStaleFailureIsScopedAndRedacted(t *testing.T) {
 	}))
 	defer upstream.Close()
 	setupCatalogReadTest(t, upstream.URL)
-	owner := &config.Principal{PrincipalID: "fixture-owner", PrincipalKind: "human"}
-	other := &config.Principal{PrincipalID: "fixture-other", PrincipalKind: "human"}
+	owner := core.Caller{ID: "fixture-owner", Kind: core.CallerHuman}
+	other := core.Caller{ID: "fixture-other", Kind: core.CallerHuman}
 	refreshed := time.Now().Add(-2 * catalogTTL)
 	catMu.Lock()
 	catData[catalogCacheKey("catalog-read", owner)] = catalogEntry{
@@ -82,7 +84,7 @@ func TestCatalogReadStaleFailureIsScopedAndRedacted(t *testing.T) {
 		t.Fatalf("other scope borrowed cache: %+v", second)
 	}
 	raw, _ := json.Marshal(result.Diagnostics)
-	for _, private := range []string{"fixture-secret", "fixture-token", owner.PrincipalID, other.PrincipalID} {
+	for _, private := range []string{"fixture-secret", "fixture-token", owner.ID, other.ID} {
 		if strings.Contains(string(raw), private) {
 			t.Fatalf("diagnostics disclosed %q", private)
 		}
@@ -97,9 +99,9 @@ func TestCatalogReadServiceProjectCacheBoundary(t *testing.T) {
 	}))
 	defer upstream.Close()
 	setupCatalogReadTest(t, upstream.URL)
-	first := &config.Principal{PrincipalID: "service", PrincipalKind: "service", ProjectID: "first"}
-	second := &config.Principal{PrincipalID: "service", PrincipalKind: "service", ProjectID: "second"}
-	for _, principal := range []*config.Principal{first, second, first} {
+	first := core.Caller{ID: "service", Kind: core.CallerService, ProjectID: "first"}
+	second := core.Caller{ID: "service", Kind: core.CallerService, ProjectID: "second"}
+	for _, principal := range []core.Caller{first, second, first} {
 		result := ReadCatalogForPrincipal("catalog-read", principal)
 		if result.Err != nil || result.Diagnostics.SourceScope != "service_project" {
 			t.Fatalf("result: %+v", result)
@@ -124,7 +126,7 @@ func TestCatalogReadFailedRefreshCannotRestoreInvalidatedRows(t *testing.T) {
 		Models: []ModelInfo{{ID: "old"}}, RefreshedAt: time.Now().Add(-2 * catalogTTL)}
 	catMu.Unlock()
 	done := make(chan CatalogReadResult, 1)
-	go func() { done <- ReadCatalogForPrincipal("catalog-read", nil) }()
+	go func() { done <- ReadCatalogForPrincipal("catalog-read", gatewayCaller()) }()
 	<-started
 	ForgetCatalog("catalog-read")
 	close(release)
@@ -142,14 +144,14 @@ func TestCatalogReadSuccessfulRefreshUsesAuthoritativeSnapshot(t *testing.T) {
 			}))
 			defer upstream.Close()
 			setupCatalogReadTest(t, upstream.URL)
-			principal := &config.Principal{PrincipalID: "fixture-owner", PrincipalKind: "human"}
+			principal := core.Caller{ID: "fixture-owner", Kind: core.CallerHuman}
 			key := catalogCacheKey("catalog-read", principal)
 			current := catalogEntry{SchemaVersion: catalogSchemaVersion,
 				Models: []ModelInfo{{ID: "replacement-model"}}}
 			if scenario == "empty" {
 				current.Models = []ModelInfo{}
 			}
-			result := readCatalogForPrincipal("catalog-read", principal, func(providerID string, caller *config.Principal) ([]ModelInfo, *iam.ProviderAccountObservation, error) {
+			result := readCatalogForPrincipal("catalog-read", principal, func(providerID string, caller core.Caller) ([]ModelInfo, *iam.ProviderAccountObservation, error) {
 				models, observation, err := RefreshCatalogForPrincipalWithError(providerID, caller)
 				if err != nil || len(models) != 1 || models[0].ID != "fetched-model" {
 					t.Fatalf("refresh: %+v %v", models, err)
@@ -158,7 +160,7 @@ func TestCatalogReadSuccessfulRefreshUsesAuthoritativeSnapshot(t *testing.T) {
 				// before the read takes its final snapshot, without scheduler timing.
 				if scenario == "invalidated" {
 					generation := catalogGenerationFor(key)
-					ForgetCatalogForPrincipal(providerID, caller.PrincipalID)
+					ForgetCatalogForPrincipal(providerID, caller.ID)
 					if storeEntryIfGeneration(key, models, generation) {
 						t.Fatal("invalidation accepted a stale write")
 					}
@@ -207,7 +209,7 @@ func TestCatalogReadUsesDiagnosticSanitizer(t *testing.T) {
 	cacheMu.Lock()
 	cache["catalog-read"] = catalogReadErrorProvider{}
 	cacheMu.Unlock()
-	result := ReadCatalogForPrincipal("catalog-read", nil)
+	result := ReadCatalogForPrincipal("catalog-read", gatewayCaller())
 	if result.Err == nil || result.Diagnostics.FailureCode != "catalog_http_error" {
 		t.Fatalf("result: %+v", result)
 	}
@@ -225,7 +227,7 @@ func TestCachedCatalogReadNeverContactsUpstream(t *testing.T) {
 	defer upstream.Close()
 	setupCatalogReadTest(t, upstream.URL)
 
-	result := ReadCachedCatalogForPrincipal("catalog-read", nil)
+	result := ReadCachedCatalogForPrincipal("catalog-read", gatewayCaller())
 	if result.Err != nil || len(result.Models) != 0 || result.Diagnostics.Status != "not_synced" || !result.Diagnostics.FromCache {
 		t.Fatalf("empty cached read: %+v", result)
 	}
@@ -233,10 +235,10 @@ func TestCachedCatalogReadNeverContactsUpstream(t *testing.T) {
 		t.Fatalf("cached read contacted upstream %d times", calls.Load())
 	}
 
-	if _, _, err := RefreshCatalogForPrincipalWithError("catalog-read", nil); err != nil {
+	if _, _, err := RefreshCatalogForPrincipalWithError("catalog-read", gatewayCaller()); err != nil {
 		t.Fatal(err)
 	}
-	result = ReadCachedCatalogForPrincipal("catalog-read", nil)
+	result = ReadCachedCatalogForPrincipal("catalog-read", gatewayCaller())
 	if len(result.Models) != 1 || result.Models[0].ID != "network-model" || calls.Load() != 1 {
 		t.Fatalf("synced cached read: calls=%d result=%+v", calls.Load(), result)
 	}

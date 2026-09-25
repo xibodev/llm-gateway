@@ -8,7 +8,6 @@ import (
 	"time"
 
 	"llmgw/internal/config"
-	"llmgw/internal/iam"
 
 	core "github.com/xibodev/llmgw-core"
 	coreproviders "github.com/xibodev/llmgw-core/providers"
@@ -127,28 +126,6 @@ func (GatewayPolicyGate) Allows(ctx context.Context, principal *core.Principal, 
 	return true, targetCandidate
 }
 
-// GatewayCredentialResolver implements core.CredentialResolver backed by gateway credentials.
-type GatewayCredentialResolver struct{}
-
-func (GatewayCredentialResolver) Resolve(ctx context.Context, principal *core.Principal, providerID string) (*core.Credential, error) {
-	if principal == nil || principal.ID == "" {
-		return nil, nil
-	}
-	secret, ok, err := iam.ResolveProviderCredentialSecret(
-		&config.Principal{PrincipalID: principal.ID, ProjectID: principal.ProjectID},
-		providerID,
-	)
-	if err != nil {
-		return nil, err
-	}
-	if !ok {
-		return nil, nil
-	}
-	return &core.Credential{
-		APIKey: secret,
-	}, nil
-}
-
 // GatewayUsageHook implements core.UsageHook backed by gateway usage tracking.
 type GatewayUsageHook struct{}
 
@@ -181,13 +158,14 @@ func BuildCoreRoutes() map[string]core.RouteConfig {
 }
 
 // BuildCoreEngine creates a headless reusable core.Engine initialized with
-// the current gateway routes and adapters.
+// the current gateway routes and adapters. It configures no credential
+// resolver: the adapters ignore the credential, and the resolver it had built
+// a Principal without a kind, so it could never resolve one.
 func BuildCoreEngine() *core.Engine {
 	engine := core.NewEngine(core.Config{
-		Routes:             BuildCoreRoutes(),
-		PolicyGate:         GatewayPolicyGate{},
-		CredentialResolver: GatewayCredentialResolver{},
-		UsageHook:          GatewayUsageHook{},
+		Routes:     BuildCoreRoutes(),
+		PolicyGate: GatewayPolicyGate{},
+		UsageHook:  GatewayUsageHook{},
 	})
 
 	s := config.Get()

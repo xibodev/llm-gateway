@@ -54,7 +54,7 @@ func TestCoreClassificationMatchesGatewayRouting(t *testing.T) {
 		"plain":          errors.New("fixture"),
 		"transport":      transport,
 		"factory config": factory,
-		"router config":  responsesFallbackCompatibility(Target{Provider: "missing", Model: "m"}, nil, nil, nil),
+		"router config":  responsesFallbackCompatibility(Target{Provider: "missing", Model: "m"}, anonymous, nil, nil),
 		"config":         &providers.ConfigError{Msg: "fixture"},
 		"stream record":  &providers.StreamRecordTooLargeError{Format: "SSE", Limit: 4 << 20},
 	}

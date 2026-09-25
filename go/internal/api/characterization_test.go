@@ -294,7 +294,7 @@ func setupCharacterization(t *testing.T) *characterizationFixture {
 	// so warm the owner's view the way a console catalog sync would.
 	owner := &config.Principal{PrincipalID: human.ID, PrincipalKind: "human", ProjectID: project.ID, Project: project.Slug}
 	for _, provider := range []string{"fixture", "fixture-a", "fixture-b", "native", "codex"} {
-		if rows := providers.RefreshCatalogForPrincipal(provider, owner); len(rows) == 0 {
+		if rows := providers.RefreshCatalogForPrincipal(provider, callerOf(owner)); len(rows) == 0 {
 			t.Fatalf("%s catalog for the human owner is empty", provider)
 		}
 	}

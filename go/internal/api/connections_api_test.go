@@ -50,7 +50,7 @@ func TestAdminProviderConnectionLifecycle(t *testing.T) {
 		t.Fatal(err)
 	}
 	cachedBeforeCreate, err := providers.GetProviderForPrincipal(
-		"gemini", &config.Principal{PrincipalID: human.ID},
+		"gemini", callerOf(&config.Principal{PrincipalID: human.ID}),
 	)
 	if err != nil {
 		t.Fatalf("cache provider before connection: %v", err)
@@ -75,7 +75,7 @@ func TestAdminProviderConnectionLifecycle(t *testing.T) {
 	}
 	connectionID, _ := connection["id"].(string)
 	cachedAfterCreate, err := providers.GetProviderForPrincipal(
-		"gemini", &config.Principal{PrincipalID: human.ID},
+		"gemini", callerOf(&config.Principal{PrincipalID: human.ID}),
 	)
 	if err != nil {
 		t.Fatalf("cache provider after connection: %v", err)
@@ -105,7 +105,7 @@ func TestAdminProviderConnectionLifecycle(t *testing.T) {
 		t.Fatalf("revoked connection available: ok=%v err=%v", ok, err)
 	}
 	cachedAfterRevoke, err := providers.GetProviderForPrincipal(
-		"gemini", &config.Principal{PrincipalID: human.ID},
+		"gemini", callerOf(&config.Principal{PrincipalID: human.ID}),
 	)
 	if err != nil {
 		t.Fatalf("cache provider after revoke: %v", err)

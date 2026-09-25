@@ -760,7 +760,7 @@ func handleProviderModels(w http.ResponseWriter, r *http.Request) {
 		writeError(w, 400, err.Error())
 		return
 	}
-	result := providers.ReadCachedCatalogForPrincipal(pid, principal)
+	result := providers.ReadCachedCatalogForPrincipal(pid, callerOf(principal))
 	rows := result.Models
 	ids := []string{}
 	for _, row := range rows {
@@ -816,7 +816,7 @@ func handleProviderCatalog(w http.ResponseWriter, r *http.Request) {
 		writeError(w, 400, err.Error())
 		return
 	}
-	result := providers.ReadCachedCatalogForPrincipal(pid, principal)
+	result := providers.ReadCachedCatalogForPrincipal(pid, callerOf(principal))
 	rows := catalogRowsWithLegacySurfaces(result.Models)
 	automationManaged, automationErr := providers.AutomationManagedAnonymousProvider(pid)
 	if automationErr != nil {
@@ -860,7 +860,9 @@ func handleProviderCatalog(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 200, resp)
 }
 
-var catalogLookupForPrincipal = providers.CatalogLookupForPrincipal
+var catalogLookupForPrincipal = func(providerID, model string, principal *config.Principal) (providers.ModelInfo, bool) {
+	return providers.CatalogLookupForPrincipal(providerID, model, callerOf(principal))
+}
 
 // POST /admin/api/providers/{id}/refresh â€” force a catalog refresh with an explicit result.
 func handleRefreshProvider(w http.ResponseWriter, r *http.Request) {

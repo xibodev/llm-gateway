@@ -493,9 +493,9 @@ func TestUserModelsUsesOnlyOwnerScopedPortalEndpoint(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if rows := providers.RefreshCatalogForPrincipal("echo", &config.Principal{
+	if rows := providers.RefreshCatalogForPrincipal("echo", callerOf(&config.Principal{
 		PrincipalID: owner.ID, PrincipalKind: owner.Kind,
-	}); len(rows) == 0 {
+	})); len(rows) == 0 {
 		t.Fatal("owner refresh returned no models")
 	}
 	server := httptest.NewServer(NewServer())

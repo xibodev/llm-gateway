@@ -119,7 +119,7 @@ func handleMessages(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if transportMode == "transparent" {
-		target, transparentErr := exactNativeTransparentTarget(req.Model, "/v1/messages", resolution, principal)
+		target, transparentErr := exactNativeTransparentTarget(req.Model, "/v1/messages", resolution, callerOf(principal))
 		if transparentErr != nil {
 			recordFailureUsage("anthropic.messages", req.Model, principal, 400, "transparent_contract", started)
 			writeError(w, http.StatusBadRequest, transparentErr.Error())
@@ -129,7 +129,7 @@ func handleMessages(w http.ResponseWriter, r *http.Request) {
 			recordFailureUsage("anthropic.messages", req.Model, principal, 400, "transparent_stream", started)
 			return
 		}
-		provider, providerErr := providers.GetProviderForPrincipal(target.Provider, principal)
+		provider, providerErr := providers.GetProviderForPrincipal(target.Provider, callerOf(principal))
 		if providerErr != nil || !providers.SupportsAnthropicMessages(provider) {
 			writeError(w, http.StatusBadRequest, "provider does not implement its catalog-declared native Messages surface")
 			return
@@ -176,7 +176,7 @@ func handleMessages(w http.ResponseWriter, r *http.Request) {
 		"anthropic.messages", req.Model, served, principal, response,
 		time.Since(started).Milliseconds(),
 	)
-	w.Header().Set(transportModeHeader, targetTransportMode(*served, principal, "/v1/messages"))
+	w.Header().Set(transportModeHeader, targetTransportMode(*served, callerOf(principal), "/v1/messages"))
 	writeJSON(w, 200, response)
 }
 
@@ -293,7 +293,7 @@ func handleCountTokens(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	target := targets[0]
-	provider, err := providers.GetProviderForPrincipal(target.Provider, principal)
+	provider, err := providers.GetProviderForPrincipal(target.Provider, callerOf(principal))
 	if err != nil {
 		writeUpstreamError(w, err)
 		return

@@ -6,6 +6,8 @@ import (
 
 	"llmgw/internal/config"
 	"llmgw/internal/iam"
+
+	core "github.com/xibodev/llmgw-core"
 )
 
 func TestPersonalAPIKeyConnectionOverridesSystemProviderKey(t *testing.T) {
@@ -38,7 +40,7 @@ func TestPersonalAPIKeyConnectionOverridesSystemProviderKey(t *testing.T) {
 		t.Fatal(err)
 	}
 	baseURL, headers, ok := ProviderHTTPTarget(
-		"gemini", &config.Principal{PrincipalID: human.ID},
+		"gemini", core.Caller{ID: human.ID, Kind: core.CallerHuman},
 	)
 	if !ok {
 		t.Fatal("personal Gemini provider target unavailable")
@@ -47,7 +49,7 @@ func TestPersonalAPIKeyConnectionOverridesSystemProviderKey(t *testing.T) {
 		headers.Get("Authorization") != "Bearer personal-key" {
 		t.Fatalf("target base=%q authorization=%q", baseURL, headers.Get("Authorization"))
 	}
-	_, headers, ok = ProviderHTTPTarget("gemini", nil)
+	_, headers, ok = ProviderHTTPTarget("gemini", gatewayCaller())
 	if !ok || headers.Get("Authorization") != "Bearer system-key" {
 		t.Fatalf("system authorization=%q ok=%v", headers.Get("Authorization"), ok)
 	}
@@ -79,7 +81,7 @@ func TestAPIKeyRuntimeRejectsOAuthConnectionEnvelope(t *testing.T) {
 		t.Fatal(err)
 	}
 	if _, err := GetProviderForPrincipal(
-		"custom", &config.Principal{PrincipalID: human.ID},
+		"custom", core.Caller{ID: human.ID, Kind: core.CallerHuman},
 	); err == nil {
 		t.Fatal("generic API-key runtime accepted an OAuth connection envelope")
 	}

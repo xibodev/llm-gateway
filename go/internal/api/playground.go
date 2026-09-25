@@ -222,7 +222,7 @@ func executePlayground(w http.ResponseWriter, r *http.Request, body playgroundBo
 		writeError(w, status, message)
 		return
 	}
-	targets, err = router.FilterCompatibleTargets(targets, principal, router.CompatibilityRequest{
+	targets, err = router.FilterCompatibleTargets(targets, callerOf(principal), router.CompatibilityRequest{
 		Surface: core.ModelSurfaceChatCompletions, Tools: requestHasTools(body.Tools), Vision: requestIsMultimodal(body.Messages),
 	})
 	if err != nil {
@@ -256,7 +256,7 @@ func executePlayground(w http.ResponseWriter, r *http.Request, body playgroundBo
 		"served":     map[string]any{"provider": served.Provider, "model": served.Model},
 		"latency_ms": latency, "usage": safePlaygroundValue(response["usage"]),
 		"fallback_trace": trace, "raw_response": safePlaygroundValue(response),
-		"transport_mode": targetTransportMode(*served, principal, "/v1/chat/completions"),
+		"transport_mode": targetTransportMode(*served, callerOf(principal), "/v1/chat/completions"),
 	})
 }
 
@@ -299,7 +299,7 @@ func executePlaygroundSurface(w http.ResponseWriter, r *http.Request, payload ma
 			return
 		}
 	}
-	targets, err = router.FilterCompatibleTargets(targets, principal, router.CompatibilityRequest{
+	targets, err = router.FilterCompatibleTargets(targets, callerOf(principal), router.CompatibilityRequest{
 		Surface: surface, Tools: requestHasTools(payload["tools"]), Vision: playgroundPayloadIsMultimodal(surface, payload),
 	})
 	if err != nil {
@@ -351,7 +351,7 @@ func executePlaygroundSurface(w http.ResponseWriter, r *http.Request, payload ma
 		"served":     map[string]any{"provider": served.Provider, "model": served.Model},
 		"latency_ms": latency, "usage": safePlaygroundValue(response["usage"]),
 		"fallback_trace": trace, "raw_response": safePlaygroundValue(response),
-		"transport_mode": targetTransportMode(*served, principal, playgroundSurfacePath(surface)),
+		"transport_mode": targetTransportMode(*served, callerOf(principal), playgroundSurfacePath(surface)),
 		"surface":        playgroundSurfacePath(surface),
 	})
 }
@@ -429,7 +429,7 @@ func responseUsage(response map[string]any) (int, int) {
 }
 
 func playgroundStub(providerID string, principal *config.Principal) bool {
-	provider, err := providers.GetProviderForPrincipal(providerID, principal)
+	provider, err := providers.GetProviderForPrincipal(providerID, callerOf(principal))
 	return err == nil && provider.IsStub()
 }
 

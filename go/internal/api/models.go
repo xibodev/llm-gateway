@@ -114,9 +114,11 @@ func handleAdminModels(w http.ResponseWriter, r *http.Request) {
 }
 
 var catalogModelsForPrincipal = func(providerID string, principal *config.Principal) []providers.ModelInfo {
-	return providers.ReadCachedCatalogForPrincipal(providerID, principal).Models
+	return providers.ReadCachedCatalogForPrincipal(providerID, callerOf(principal)).Models
 }
-var catalogRefreshedAtForPrincipal = providers.CatalogRefreshedAtForPrincipal
+var catalogRefreshedAtForPrincipal = func(providerID string, principal *config.Principal) time.Time {
+	return providers.CatalogRefreshedAtForPrincipal(providerID, callerOf(principal))
+}
 
 func hasEndpointCaseFold(endpoints map[string]*config.EndpointConfig, name string) bool {
 	for ep := range endpoints {
@@ -161,7 +163,7 @@ func buildModelListWithDiagnostics(principal *config.Principal, includeUnpublish
 		if s.Providers[providerID].Disabled || !providerAllowed(principal, projectPolicy, providerID) {
 			continue
 		}
-		authorized, err := providers.ProviderCredentialAuthorized(providerID, principal)
+		authorized, err := providers.ProviderCredentialAuthorized(providerID, callerOf(principal))
 		if err != nil {
 			return nil, err
 		}
@@ -240,7 +242,7 @@ func buildModelListWithDiagnostics(principal *config.Principal, includeUnpublish
 			}
 			setSurfaces(entry, surfaces)
 			native, emulated, unknown := modelTransportSurfaces(
-				providerID, principal, row, discoveredAt, capabilities, surfaces, time.Now(),
+				providerID, callerOf(principal), row, discoveredAt, capabilities, surfaces, time.Now(),
 			)
 			if len(native) > 0 {
 				entry["native_surfaces"] = native

@@ -40,3 +40,13 @@ func CallerPrincipalID(caller core.Caller) string {
 	}
 	return caller.ID
 }
+
+// ResolveCallerOAuthCredentialSecretWithObservation is
+// ResolveProviderOAuthCredentialSecretWithObservation for a core.Caller: a
+// human gets their own connection or legacy credential, a service gets its
+// project's binding, and a shared-only caller resolves nothing.
+func ResolveCallerOAuthCredentialSecretWithObservation(
+	caller core.Caller, providerID string,
+) (string, *ProviderAccountObservation, bool, error) {
+	return ResolveProviderOAuthCredentialSecretWithObservation(callerPrincipal(caller), providerID)
+}

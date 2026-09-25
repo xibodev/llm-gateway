@@ -49,23 +49,23 @@ func resolveAudioTarget(principal *config.Principal, model string, operation cor
 		return "", "", 404, "no routable target for '" + model + "'"
 	}
 	for _, target := range targets {
-		row, found := providers.CatalogCachedLookupForPrincipal(target.Provider, target.Model, principal)
+		row, found := providers.CatalogCachedLookupForPrincipal(target.Provider, target.Model, callerOf(principal))
 		if found && providers.ModelOperationSupport(row, operation) == core.SupportUnsupported {
 			continue
 		}
 		if operation == core.ModelOperationAudioOut {
-			if _, native := providers.SpeechSynthesizerForPrincipal(target.Provider, principal); native {
+			if _, native := providers.SpeechSynthesizerForPrincipal(target.Provider, callerOf(principal)); native {
 				return target.Provider, target.Model, 0, ""
 			}
 		}
 		if operation == core.ModelOperationEmbeddings {
-			if instance, err := providers.GetProviderForPrincipal(target.Provider, principal); err == nil {
+			if instance, err := providers.GetProviderForPrincipal(target.Provider, callerOf(principal)); err == nil {
 				if _, native := providers.AsEmbeddingProvider(instance); native {
 					return target.Provider, target.Model, 0, ""
 				}
 			}
 		}
-		if _, _, ok := providers.ProviderHTTPTarget(target.Provider, principal); ok {
+		if _, _, ok := providers.ProviderHTTPTarget(target.Provider, callerOf(principal)); ok {
 			return target.Provider, target.Model, 0, ""
 		}
 	}
@@ -147,7 +147,7 @@ func handleTranscriptions(w http.ResponseWriter, r *http.Request) {
 		writeError(w, status, msg)
 		return
 	}
-	base, headers, okp := providers.ProviderHTTPTarget(provider, principal)
+	base, headers, okp := providers.ProviderHTTPTarget(provider, callerOf(principal))
 	if !okp {
 		recordFailureUsage("openai.transcriptions", r.FormValue("model"), principal, 400, "audio_unsupported", started)
 		writeError(w, 400, "provider '"+provider+"' does not support audio (use an OpenAI-compatible provider such as LocalAI)")
@@ -218,11 +218,11 @@ func handleSpeech(w http.ResponseWriter, r *http.Request) {
 		writeError(w, status, msg)
 		return
 	}
-	if synthesizer, native := providers.SpeechSynthesizerForPrincipal(provider, principal); native {
+	if synthesizer, native := providers.SpeechSynthesizerForPrincipal(provider, callerOf(principal)); native {
 		serveNativeSpeech(r.Context(), w, body, synthesizer, provider, upstreamModel, principal, started, reqModel)
 		return
 	}
-	base, headers, okp := providers.ProviderHTTPTarget(provider, principal)
+	base, headers, okp := providers.ProviderHTTPTarget(provider, callerOf(principal))
 	if !okp {
 		recordFailureUsage("openai.speech", reqModel, principal, 400, "audio_unsupported", started)
 		writeError(w, 400, "provider '"+provider+"' does not support audio (use an OpenAI-compatible provider such as LocalAI)")

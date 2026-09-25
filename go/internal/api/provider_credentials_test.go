@@ -80,10 +80,10 @@ func TestServiceProviderCredentialControlsModelsAndRoutes(t *testing.T) {
 	if chatRequests.Load() != 0 {
 		t.Fatal("unbound service reached provider route")
 	}
-	if rows := providers.RefreshCatalogForPrincipal("copilot", authorizedPrincipal); len(rows) != 2 {
+	if rows := providers.RefreshCatalogForPrincipal("copilot", callerOf(authorizedPrincipal)); len(rows) != 2 {
 		t.Fatalf("service project refresh returned %+v", rows)
 	}
-	if rows := providers.RefreshCatalogForPrincipal("copilot", humanPrincipal); len(rows) != 2 {
+	if rows := providers.RefreshCatalogForPrincipal("copilot", callerOf(humanPrincipal)); len(rows) != 2 {
 		t.Fatalf("human refresh returned %+v", rows)
 	}
 
@@ -210,7 +210,7 @@ func TestServiceBindingPreservesUnrelatedHumanCatalog(t *testing.T) {
 	)
 	server := httptest.NewServer(NewServer())
 	defer server.Close()
-	if rows := providers.RefreshCatalogForPrincipal("copilot", humanPrincipal); len(rows) != 1 {
+	if rows := providers.RefreshCatalogForPrincipal("copilot", callerOf(humanPrincipal)); len(rows) != 1 {
 		t.Fatalf("human refresh returned %+v", rows)
 	}
 	assertModelIDs(t, server.URL, humanToken, []string{"copilot/existing-human-model"})

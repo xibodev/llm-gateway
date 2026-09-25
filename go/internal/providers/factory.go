@@ -12,6 +12,7 @@ import (
 
 	anthropicauth "github.com/xibodev/llm-provider-auth/anthropic"
 	gcpauth "github.com/xibodev/llm-provider-auth/gcp"
+	core "github.com/xibodev/llmgw-core"
 )
 
 var (
@@ -28,7 +29,7 @@ var ProviderTypes = []string{
 }
 
 func instantiate(
-	providerID string, cfg *config.ProviderConfig, principal *config.Principal,
+	providerID string, cfg *config.ProviderConfig, caller core.Caller,
 ) (Provider, error) {
 	ptype := strings.ToLower(strings.TrimSpace(cfg.Type))
 	if cfg.Disabled {
@@ -41,18 +42,18 @@ func instantiate(
 	}
 	switch ptype {
 	case "ai_studio":
-		apiKey, err := resolveAPIKey(providerID, cfg, principal)
+		apiKey, err := resolveAPIKey(providerID, cfg, caller)
 		if err != nil {
 			return nil, err
 		}
 		return NewAIStudio(cfg.BaseURL, apiKey, cfg.TimeoutOr(120)), nil
 	case "vertex_ai":
-		return newVertexProvider(providerID, cfg, principal)
+		return newVertexProvider(providerID, cfg, caller)
 	case "edge_tts":
 		// The access token is optional: a baked-in public default applies.
 		// resolveAPIKey still runs so a stored override (config secret or
 		// encrypted connection) wins when present.
-		token, err := resolveAPIKey(providerID, cfg, principal)
+		token, err := resolveAPIKey(providerID, cfg, caller)
 		if err != nil {
 			token = ""
 		}
@@ -60,15 +61,16 @@ func instantiate(
 	case "openai_compatible", "openai", "litellm":
 		registryID := EffectiveRegistryID(providerID, cfg.RegistryID, cfg.Type)
 		if registryID == "openai_codex" {
-			if principal == nil || strings.TrimSpace(principal.PrincipalID) == "" {
+			principalID := callerPrincipalID(caller)
+			if strings.TrimSpace(principalID) == "" {
 				return nil, &ConfigError{Msg: "openai_codex: a human principal private connection is required"}
 			}
 			clientID := EffectiveCodexClientID()
 			return newCodexProvider(codexAuth{
-				principalID: principal.PrincipalID, providerID: providerID, clientID: clientID,
+				principalID: principalID, providerID: providerID, clientID: clientID,
 			}, timeout, nil, "")
 		}
-		apiKey, observation, err := resolveAPIKeyObserved(providerID, cfg, principal)
+		apiKey, observation, err := resolveAPIKeyObserved(providerID, cfg, caller)
 		if err != nil {
 			return nil, err
 		}
@@ -85,7 +87,7 @@ func instantiate(
 		}
 		return OpenAIProvider{
 			auth: auth, Timeout: timeout, forceAdapt: cfg.ForceApiSupport,
-			providerID: providerID, principal: principal, registryID: registryID,
+			providerID: providerID, caller: caller, registryID: registryID,
 			anonymous: anonymous,
 		}, nil
 	case "azure_openai":
@@ -97,7 +99,7 @@ func instantiate(
 		if err != nil {
 			return nil, &ConfigError{Msg: fmt.Sprintf("provider '%s': %v", providerID, err)}
 		}
-		apiKey, observation, err := resolveAPIKeyObserved(providerID, cfg, principal)
+		apiKey, observation, err := resolveAPIKeyObserved(providerID, cfg, caller)
 		if err != nil {
 			return nil, err
 		}
@@ -108,7 +110,7 @@ func instantiate(
 			observation: observation,
 		}, nil
 	case "anthropic":
-		credential, kind, _, err := resolveCredentialObserved(providerID, cfg, principal)
+		credential, kind, _, err := resolveCredentialObserved(providerID, cfg, caller)
 		if err != nil {
 			return nil, err
 		}
@@ -124,9 +126,9 @@ func instantiate(
 		}
 		return AnthropicNativeProvider{BaseURL: cfg.BaseURL, Auth: auth, Timeout: cfg.TimeoutOr(0)}, nil
 	case "google_antigravity":
-		return newAntigravityProvider(providerID, principal)
+		return newAntigravityProvider(providerID, caller)
 	case "bedrock":
-		apiKey, observation, err := resolveAPIKeyObserved(providerID, cfg, principal)
+		apiKey, observation, err := resolveAPIKeyObserved(providerID, cfg, caller)
 		if err != nil {
 			return nil, err
 		}
@@ -135,14 +137,14 @@ func instantiate(
 		)
 		bp.forceAdapt = cfg.ForceApiSupport
 		bp.providerID = providerID
-		bp.principal = principal
+		bp.caller = caller
 		return bp, nil
 	case "github_copilot":
 		forceAdapt := true
 		if cfg != nil && !cfg.ForceApiSupport && os.Getenv("LLMGW_DISABLE_COPILOT_API_ADAPTATION") == "1" {
 			forceAdapt = false
 		}
-		return OpenAIProvider{auth: copilotAuth{providerID: providerID, principal: principal}, Timeout: cfg.TimeoutOr(s.GithubCopilotTimeoutSeconds), forceAdapt: forceAdapt, providerID: providerID, principal: principal}, nil
+		return OpenAIProvider{auth: copilotAuth{providerID: providerID, caller: caller}, Timeout: cfg.TimeoutOr(s.GithubCopilotTimeoutSeconds), forceAdapt: forceAdapt, providerID: providerID, caller: caller}, nil
 	case "ollama":
 		base := cfg.BaseURL
 		if base == "" {
@@ -165,20 +167,20 @@ func policyFor(providerID string) config.ProviderPolicy {
 
 // GetProvider builds (and caches) the provider instance for an id.
 func GetProvider(providerID string) (Provider, error) {
-	return GetProviderForPrincipal(providerID, nil)
+	return GetProviderForPrincipal(providerID, gatewayCaller())
 }
 
 // GetProviderForPrincipal returns a provider instance bound to the caller's
-// private credential context. A principal-specific cache entry prevents API-key
+// private credential context. A caller-specific cache entry prevents API-key
 // and OAuth connections from leaking across callers.
 func GetProviderForPrincipal(
-	providerID string, principal *config.Principal,
+	providerID string, caller core.Caller,
 ) (Provider, error) {
 	// Any provider can carry a personal connection, so a caller-identified
 	// instance is never shared: one principal's private credential must not be
 	// served to another from cache. providerCacheKey adds the project dimension
 	// for service principals resolving shared credential bindings.
-	cacheKey := providerCacheKey(providerID, principal)
+	cacheKey := providerCacheKey(providerID, caller)
 	for attempt := 0; attempt < 3; attempt++ {
 		// A cached transport must not bypass a provider being taken offline.
 		if cfg := config.Get().Providers[providerID]; cfg != nil && cfg.Disabled {
@@ -196,7 +198,7 @@ func GetProviderForPrincipal(
 		if !ok {
 			return nil, &ConfigError{Msg: fmt.Sprintf("unknown provider '%s'; add it under 'providers:'", providerID)}
 		}
-		instance, err := instantiate(providerID, cfg, principal)
+		instance, err := instantiate(providerID, cfg, caller)
 		var provider Provider
 		if err == nil {
 			policy := policyFor(providerID)
@@ -250,8 +252,8 @@ func AsSpeechSynthesizer(provider Provider) (SpeechSynthesizer, bool) {
 
 // SpeechSynthesizerForPrincipal resolves a provider and reports whether it can
 // synthesize speech natively (e.g. edge_tts) rather than via HTTP proxying.
-func SpeechSynthesizerForPrincipal(providerID string, principal *config.Principal) (SpeechSynthesizer, bool) {
-	provider, err := GetProviderForPrincipal(providerID, principal)
+func SpeechSynthesizerForPrincipal(providerID string, caller core.Caller) (SpeechSynthesizer, bool) {
+	provider, err := GetProviderForPrincipal(providerID, caller)
 	if err != nil {
 		return nil, false
 	}
@@ -259,9 +261,9 @@ func SpeechSynthesizerForPrincipal(providerID string, principal *config.Principa
 }
 
 func resolveAPIKey(
-	providerID string, cfg *config.ProviderConfig, principal *config.Principal,
+	providerID string, cfg *config.ProviderConfig, caller core.Caller,
 ) (string, error) {
-	secret, _, err := resolveAPIKeyObserved(providerID, cfg, principal)
+	secret, _, err := resolveAPIKeyObserved(providerID, cfg, caller)
 	return secret, err
 }
 
@@ -276,9 +278,9 @@ const (
 
 // resolveAPIKeyObserved resolves a credential and requires it to be an API key.
 func resolveAPIKeyObserved(
-	providerID string, cfg *config.ProviderConfig, principal *config.Principal,
+	providerID string, cfg *config.ProviderConfig, caller core.Caller,
 ) (string, *iam.ProviderAccountObservation, error) {
-	secret, kind, observation, err := resolveCredentialObserved(providerID, cfg, principal)
+	secret, kind, observation, err := resolveCredentialObserved(providerID, cfg, caller)
 	if err != nil {
 		return "", nil, err
 	}
@@ -293,14 +295,14 @@ func resolveAPIKeyObserved(
 // resolveCredentialObserved applies the credential resolution order and reports
 // the stored kind alongside the secret.
 func resolveCredentialObserved(
-	providerID string, cfg *config.ProviderConfig, principal *config.Principal,
+	providerID string, cfg *config.ProviderConfig, caller core.Caller,
 ) (string, string, *iam.ProviderAccountObservation, error) {
 	if strings.TrimSpace(config.Get().CredentialEncryptionKey) == "" {
 		return config.ResolveProviderAPIKey(providerID, cfg), CredentialKindAPIKey, nil, nil
 	}
-	if principal != nil && principal.PrincipalID != "" {
+	if principalID := callerPrincipalID(caller); principalID != "" {
 		secret, connection, observation, ok, err := iam.ProviderConnectionSecretWithObservation(
-			principal.PrincipalID, providerID, "",
+			principalID, providerID, "",
 		)
 		if err != nil {
 			return "", "", nil, &ConfigError{Msg: fmt.Sprintf(
@@ -336,7 +338,7 @@ var gcpTokens gcpauth.TokenCache
 // stored. An API key keeps the existing x-goog-api-key path untouched; a
 // service-account key is exchanged for a short-lived OAuth2 access token.
 func newVertexProvider(
-	providerID string, cfg *config.ProviderConfig, principal *config.Principal,
+	providerID string, cfg *config.ProviderConfig, caller core.Caller,
 ) (Provider, error) {
 	requestType := strings.ToLower(strings.TrimSpace(cfg.VertexRequestType))
 	switch requestType {
@@ -346,7 +348,7 @@ func newVertexProvider(
 			"provider '%s': vertex_request_type must be default, paygo, or dedicated", providerID,
 		)}
 	}
-	secret, kind, _, err := resolveCredentialObserved(providerID, cfg, principal)
+	secret, kind, _, err := resolveCredentialObserved(providerID, cfg, caller)
 	if err != nil {
 		return nil, err
 	}
@@ -410,13 +412,18 @@ func newVertexProvider(
 	return provider, nil
 }
 
-func providerCacheKey(providerID string, principal *config.Principal) string {
-	if principal == nil || principal.PrincipalID == "" {
+// providerCacheKey scopes an instance to the principal whose credentials it
+// holds: the gateway-wide key for shared-only callers, the principal for a
+// human, and the principal in its project for a service, whose credential
+// bindings are per project.
+func providerCacheKey(providerID string, caller core.Caller) string {
+	principalID := callerPrincipalID(caller)
+	if principalID == "" {
 		return providerID
 	}
-	key := providerID + "@" + principal.PrincipalID
-	if principal.PrincipalKind == "service" && principal.ProjectID != "" {
-		key += "#" + principal.ProjectID
+	key := providerID + "@" + principalID
+	if caller.Kind == core.CallerService && caller.ProjectID != "" {
+		key += "#" + caller.ProjectID
 	}
 	return key
 }
@@ -425,7 +432,7 @@ func providerCacheKey(providerID string, principal *config.Principal) string {
 // credential context for a provider. Static providers retain their existing
 // gateway-managed behavior; principal-scoped providers fail closed.
 func ProviderCredentialAuthorized(
-	providerID string, principal *config.Principal,
+	providerID string, caller core.Caller,
 ) (bool, error) {
 	cfg, ok := config.Get().Providers[providerID]
 	if !ok {
@@ -435,11 +442,11 @@ func ProviderCredentialAuthorized(
 	if !strings.EqualFold(cfg.Type, "github_copilot") && !privateCatalog {
 		return true, nil
 	}
-	if principal == nil || principal.PrincipalID == "" {
+	if callerPrincipalID(caller) == "" {
 		return !privateCatalog, nil
 	}
-	_, _, found, err := iam.ResolveProviderOAuthCredentialSecretWithObservation(
-		principal, providerID,
+	_, _, found, err := iam.ResolveCallerOAuthCredentialSecretWithObservation(
+		caller, providerID,
 	)
 	if err != nil {
 		return false, err
@@ -464,7 +471,7 @@ func AdaptsChatToNativeResponses(providerID string, cfg *config.ProviderConfig) 
 
 // AnonymousZenForPrincipal reports the effective OpenCode Zen access mode
 // without exposing the resolved credential.
-func AnonymousZenForPrincipal(providerID string, principal *config.Principal) (bool, error) {
+func AnonymousZenForPrincipal(providerID string, caller core.Caller) (bool, error) {
 	cfg, ok := config.Get().Providers[providerID]
 	if !ok || cfg == nil {
 		return false, &ConfigError{Msg: fmt.Sprintf("provider '%s': not configured", providerID)}
@@ -473,7 +480,7 @@ func AnonymousZenForPrincipal(providerID string, principal *config.Principal) (b
 	if registryID != "opencode_zen" && !isZenBaseURL(cfg.BaseURL) {
 		return false, nil
 	}
-	key, _, err := resolveAPIKeyObserved(providerID, cfg, principal)
+	key, _, err := resolveAPIKeyObserved(providerID, cfg, caller)
 	if err != nil {
 		return false, err
 	}
@@ -482,13 +489,13 @@ func AnonymousZenForPrincipal(providerID string, principal *config.Principal) (b
 
 // ListProviderModels returns a fresh catalog for one provider ([] on any failure).
 func ListProviderModels(providerID string) []ModelInfo {
-	return ListProviderModelsForPrincipal(providerID, nil)
+	return ListProviderModelsForPrincipal(providerID, gatewayCaller())
 }
 
 func ListProviderModelsForPrincipal(
-	providerID string, principal *config.Principal,
+	providerID string, caller core.Caller,
 ) []ModelInfo {
-	models, _, _ := ListProviderModelsForPrincipalWithError(providerID, principal)
+	models, _, _ := ListProviderModelsForPrincipalWithError(providerID, caller)
 	return models
 }
 
@@ -496,14 +503,14 @@ func ListProviderModelsForPrincipal(
 // details for lifecycle checks while the public model-list APIs remain
 // backward-compatible and return an empty list on failure.
 func ListProviderModelsForPrincipalWithError(
-	providerID string, principal *config.Principal,
+	providerID string, caller core.Caller,
 ) ([]ModelInfo, *iam.ProviderAccountObservation, error) {
 	if issue := ProviderConfigurationIssue(providerID); issue != "" {
 		return nil, nil, catalogError(
 			"catalog_configuration_incomplete", issue, 0,
 		)
 	}
-	p, err := GetProviderForPrincipal(providerID, principal)
+	p, err := GetProviderForPrincipal(providerID, caller)
 	if err != nil {
 		return nil, nil, catalogError(
 			"catalog_provider_unavailable",

@@ -18,6 +18,7 @@ import (
 	"llmgw/internal/iam"
 
 	gcpauth "github.com/xibodev/llm-provider-auth/gcp"
+	core "github.com/xibodev/llmgw-core"
 )
 
 // serviceAccountFixture builds a service-account key whose token endpoint is a
@@ -102,7 +103,7 @@ func TestVertexUsesStoredServiceAccountConnection(t *testing.T) {
 	}
 
 	provider, err := GetProviderForPrincipal(
-		"vertex_ai", &config.Principal{PrincipalID: human.ID, PrincipalKind: human.Kind},
+		"vertex_ai", core.Caller{ID: human.ID, Kind: core.CallerHuman},
 	)
 	if err != nil {
 		t.Fatalf("build provider from stored connection: %v", err)
@@ -143,7 +144,7 @@ func TestVertexWithoutAnyCredentialFailsClearly(t *testing.T) {
 		t.Fatal(err)
 	}
 	_, err = GetProviderForPrincipal(
-		"vertex_ai", &config.Principal{PrincipalID: human.ID, PrincipalKind: human.Kind},
+		"vertex_ai", core.Caller{ID: human.ID, Kind: core.CallerHuman},
 	)
 	if err == nil {
 		t.Fatal("expected an error when no credential is configured")
@@ -171,7 +172,7 @@ func TestVertexSystemConnectionServesAPIKeyCallers(t *testing.T) {
 
 	// An admin-key request: project and key set, principal id deliberately empty.
 	provider, err := GetProviderForPrincipal(
-		"vertex_ai", &config.Principal{Project: "admin", Key: "admin"},
+		"vertex_ai", core.Caller{ID: iam.AdminCallerID, Kind: core.CallerService},
 	)
 	if err != nil {
 		t.Fatalf("build provider for an API-key caller: %v", err)
@@ -215,7 +216,7 @@ func TestVertexCachedProviderRefreshesServiceAccountToken(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	provider, err := GetProviderForPrincipal("vertex_ai", &config.Principal{PrincipalID: human.ID, PrincipalKind: human.Kind})
+	provider, err := GetProviderForPrincipal("vertex_ai", core.Caller{ID: human.ID, Kind: core.CallerHuman})
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -4,6 +4,8 @@ import (
 	"testing"
 
 	"llmgw/internal/config"
+
+	core "github.com/xibodev/llmgw-core"
 )
 
 // Catalogs are cached per principal so credentials never leak between callers,
@@ -17,7 +19,7 @@ func TestCatalogSnapshotSeesPrincipalScopedEntries(t *testing.T) {
 	ForgetCatalog("copilot")
 	ForgetCatalog("other")
 
-	owner := &config.Principal{PrincipalID: "prn_owner", PrincipalKind: "human"}
+	owner := core.Caller{ID: "prn_owner", Kind: core.CallerHuman}
 	storeEntry(catalogCacheKey("copilot", owner), []ModelInfo{{ID: "gpt-5-mini"}, {ID: "gpt-4o"}})
 
 	if models, _ := CatalogCached("copilot"); len(models) != 0 {
@@ -59,7 +61,7 @@ func TestCatalogInvalidationRejectsInFlightStaleWrite(t *testing.T) {
 		t.Fatal("invalidated catalog accepted an in-flight stale write")
 	}
 	if models, _ := CatalogCachedForPrincipal(
-		"copilot", &config.Principal{PrincipalID: "owner", PrincipalKind: "human"},
+		"copilot", core.Caller{ID: "owner", Kind: core.CallerHuman},
 	); len(models) != 0 {
 		t.Fatalf("stale catalog was restored: %+v", models)
 	}

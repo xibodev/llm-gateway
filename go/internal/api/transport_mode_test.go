@@ -26,16 +26,16 @@ func TestTransparentDecisionContractRejectsRoutesAndNonNativeSurfaces(t *testing
 			"fixture": {Type: "echo"},
 		}
 	})
-	principal := &config.Principal{}
+	caller := core.Caller{Kind: core.CallerAnonymous}
 
 	if _, err := exactNativeTransparentTarget("route", "/v1/chat/completions", router.Resolution{
 		Category: "route", Targets: []router.Target{{Provider: "fixture", Model: "model"}},
-	}, principal); err == nil || !strings.Contains(err.Error(), "exact provider/model") {
+	}, caller); err == nil || !strings.Contains(err.Error(), "exact provider/model") {
 		t.Fatalf("route error = %v", err)
 	}
 	if _, err := exactNativeTransparentTarget("fixture/model", "/v1/responses", router.Resolution{
 		Targets: []router.Target{{Provider: "fixture", Model: "model"}},
-	}, principal); err == nil || !strings.Contains(err.Error(), "catalog-confirmed") {
+	}, caller); err == nil || !strings.Contains(err.Error(), "catalog-confirmed") {
 		t.Fatalf("catalog error = %v", err)
 	}
 }
@@ -307,7 +307,7 @@ func TestModelTransportSurfacesUsesConcreteDeclarationAndTrustedFreshPlan(t *tes
 	for _, test := range []struct {
 		name       string
 		providerID string
-		principal  *config.Principal
+		caller     core.Caller
 		model      providers.ModelInfo
 		wantNative []string
 	}{
@@ -326,12 +326,12 @@ func TestModelTransportSurfacesUsesConcreteDeclarationAndTrustedFreshPlan(t *tes
 		},
 		{
 			name: "Antigravity Chat adaptation", providerID: "antigravity",
-			principal: &config.Principal{PrincipalID: "owner"},
-			model:     providers.ModelInfo{ID: "gemini", TypedCapabilities: trusted(core.ModelSurfaceChatCompletions), SupportedSurfaces: []string{"/v1/chat/completions"}},
+			caller: core.Caller{ID: "owner", Kind: core.CallerHuman},
+			model:  providers.ModelInfo{ID: "gemini", TypedCapabilities: trusted(core.ModelSurfaceChatCompletions), SupportedSurfaces: []string{"/v1/chat/completions"}},
 		},
 		{
 			name: "Codex Responses declaration", providerID: "codex",
-			principal:  &config.Principal{PrincipalID: "owner"},
+			caller:     core.Caller{ID: "owner", Kind: core.CallerHuman},
 			model:      providers.ModelInfo{ID: "codex", TypedCapabilities: trusted(core.ModelSurfaceResponses), SupportedSurfaces: []string{"/v1/responses"}},
 			wantNative: []string{"/v1/responses"},
 		},
@@ -343,7 +343,7 @@ func TestModelTransportSurfacesUsesConcreteDeclarationAndTrustedFreshPlan(t *tes
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			native, emulated, unknown := modelTransportSurfaces(
-				test.providerID, test.principal, test.model, now,
+				test.providerID, test.caller, test.model, now,
 				map[string]any{"chat": true}, test.model.SupportedSurfaces, now,
 			)
 			if strings.Join(native, ",") != strings.Join(test.wantNative, ",") {
@@ -360,7 +360,7 @@ func TestModelTransportSurfacesUsesConcreteDeclarationAndTrustedFreshPlan(t *tes
 		SupportedSurfaces: []string{"/v1/chat/completions"},
 	}
 	native, _, _ := modelTransportSurfaces(
-		"openai", nil, model, now.Add(-transportCatalogFreshness),
+		"openai", callerOf(nil), model, now.Add(-transportCatalogFreshness),
 		map[string]any{"chat": true}, model.SupportedSurfaces, now,
 	)
 	if len(native) != 1 || native[0] != "/v1/chat/completions" {
@@ -377,8 +377,8 @@ func TestTargetTransportModeReportsExecutedProviderPathDespiteStaleCatalog(t *te
 	})
 	providers.ResetProviders()
 	t.Cleanup(providers.ResetProviders)
-	principal := &config.Principal{PrincipalID: "owner", PrincipalKind: "human"}
-	if got := targetTransportMode(router.Target{Provider: "codex", Model: "fixture"}, principal, "/v1/responses"); got != "native" {
+	caller := core.Caller{ID: "owner", Kind: core.CallerHuman}
+	if got := targetTransportMode(router.Target{Provider: "codex", Model: "fixture"}, caller, "/v1/responses"); got != "native" {
 		t.Fatalf("mode=%q, want native", got)
 	}
 }
@@ -403,10 +403,10 @@ func TestTargetTransportModeUsesModelScopedAdaptation(t *testing.T) {
 		t.Fatalf("catalog rows=%+v", rows)
 	}
 	target := router.Target{Provider: "fixture", Model: "chat-only"}
-	if got := targetTransportMode(target, nil, "/v1/chat/completions"); got != "native" {
+	if got := targetTransportMode(target, callerOf(nil), "/v1/chat/completions"); got != "native" {
 		t.Fatalf("chat mode=%q, want native", got)
 	}
-	if got := targetTransportMode(target, nil, "/v1/responses"); got != "translated" {
+	if got := targetTransportMode(target, callerOf(nil), "/v1/responses"); got != "translated" {
 		t.Fatalf("responses mode=%q, want translated", got)
 	}
 }
@@ -415,7 +415,7 @@ func TestModelTransportSurfacesKeepsPlannerRejectsUnknown(t *testing.T) {
 	now := time.Date(2026, time.September, 21, 12, 0, 0, 0, time.UTC)
 	model := providers.ModelInfo{ID: "unknown", Capabilities: map[string]any{"chat": true}}
 	native, emulated, unknown := modelTransportSurfaces(
-		"missing", nil, model, time.Time{}, model.Capabilities, nil, now,
+		"missing", callerOf(nil), model, time.Time{}, model.Capabilities, nil, now,
 	)
 	if len(native) != 0 || len(emulated) != 0 || len(unknown) != 3 {
 		t.Fatalf("native=%v emulated=%v unknown=%v", native, emulated, unknown)
@@ -435,7 +435,7 @@ func TestModelTransportSurfacesUsesInferredSurfaceArgument(t *testing.T) {
 	capabilities.Provenance = core.ModelCapabilityProvenance{Source: core.ModelCapabilitySourceUpstreamReported, Confidence: core.ModelCapabilityConfidenceHigh}
 	model := providers.ModelInfo{ID: "chat", TypedCapabilities: capabilities}
 	native, _, _ := modelTransportSurfaces(
-		"openai", nil, model, now, map[string]any{"chat": true}, []string{"/v1/chat/completions"}, now,
+		"openai", callerOf(nil), model, now, map[string]any{"chat": true}, []string{"/v1/chat/completions"}, now,
 	)
 	if len(native) != 1 || native[0] != "/v1/chat/completions" {
 		t.Fatalf("inferred surface was not used for interface planning: %v", native)

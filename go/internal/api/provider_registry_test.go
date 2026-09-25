@@ -502,7 +502,7 @@ func TestPortalProviderStatusUsesOnlyItsPrincipalCatalog(t *testing.T) {
 		t.Fatal(err)
 	}
 	firstPrincipal := &config.Principal{PrincipalID: first.ID, PrincipalKind: first.Kind}
-	if models := providers.RefreshCatalogForPrincipal("echo", firstPrincipal); len(models) == 0 {
+	if models := providers.RefreshCatalogForPrincipal("echo", callerOf(firstPrincipal)); len(models) == 0 {
 		t.Fatal("first principal catalog did not refresh")
 	}
 	firstRows, err := providerStatusSnapshots(settings, nil, nil, first.ID)
@@ -576,7 +576,7 @@ func TestPortalNotDiscoverableSurvivesAnotherPrincipalsNewerCatalog(t *testing.T
 	// Another principal then listed models. That catalog is newer than the
 	// viewer's failure and belongs to somebody else's credential.
 	otherPrincipal := &config.Principal{PrincipalID: other.ID, PrincipalKind: other.Kind}
-	if models := providers.RefreshCatalogForPrincipal("echo", otherPrincipal); len(models) == 0 {
+	if models := providers.RefreshCatalogForPrincipal("echo", callerOf(otherPrincipal)); len(models) == 0 {
 		t.Fatal("other principal catalog did not refresh")
 	}
 

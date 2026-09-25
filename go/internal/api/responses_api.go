@@ -111,7 +111,7 @@ func responsesDispatch(
 			return
 		}
 	}
-	targets, err = router.FilterCompatibleTargets(targets, principal, router.CompatibilityRequest{
+	targets, err = router.FilterCompatibleTargets(targets, callerOf(principal), router.CompatibilityRequest{
 		Surface: core.ModelSurfaceResponses, Tools: requestHasTools(request.Tools),
 		Vision: responsesRequestIsMultimodal(payload), Streaming: request.Stream,
 	})
@@ -121,7 +121,7 @@ func responsesDispatch(
 		return
 	}
 	if mode, _ := requestedTransportMode(r); mode == "transparent" {
-		target, transparentErr := exactNativeTransparentTarget(request.Model, "/v1/responses", resolution, principal)
+		target, transparentErr := exactNativeTransparentTarget(request.Model, "/v1/responses", resolution, callerOf(principal))
 		if transparentErr != nil {
 			recordFailureUsage("openai.responses", request.Model, principal, 400, "transparent_contract", started)
 			writeError(w, http.StatusBadRequest, transparentErr.Error())
@@ -131,7 +131,7 @@ func responsesDispatch(
 			recordFailureUsage("openai.responses", request.Model, principal, 400, "transparent_stream", started)
 			return
 		}
-		provider, providerErr := providers.GetProviderForPrincipal(target.Provider, principal)
+		provider, providerErr := providers.GetProviderForPrincipal(target.Provider, callerOf(principal))
 		if providerErr != nil {
 			writeUpstreamError(w, providerErr)
 			return
@@ -171,7 +171,7 @@ func responsesDispatch(
 		request.Model, served, principal, response,
 		time.Since(started).Milliseconds(),
 	)
-	w.Header().Set(transportModeHeader, targetTransportMode(*served, principal, "/v1/responses"))
+	w.Header().Set(transportModeHeader, targetTransportMode(*served, callerOf(principal), "/v1/responses"))
 	writeJSON(w, http.StatusOK, response)
 }
 

@@ -312,7 +312,7 @@ func TestAntigravityCatalogAcceptsProjectPersistenceFromSameOperation(t *testing
 	}))
 	defer server.Close()
 
-	principal := &config.Principal{PrincipalID: human.ID, PrincipalKind: "human"}
+	principal := core.Caller{ID: human.ID, Kind: core.CallerHuman}
 	provider, err := newAntigravityProvider("antigravity", principal)
 	if err != nil {
 		t.Fatal(err)
@@ -365,7 +365,7 @@ func TestAntigravityCatalogAcceptsCredentialRefreshFromSameOperation(t *testing.
 	}))
 	defer upstream.Close()
 
-	principal := &config.Principal{PrincipalID: human.ID, PrincipalKind: "human"}
+	principal := core.Caller{ID: human.ID, Kind: core.CallerHuman}
 	provider, err := newAntigravityProvider("antigravity", principal)
 	if err != nil {
 		t.Fatal(err)

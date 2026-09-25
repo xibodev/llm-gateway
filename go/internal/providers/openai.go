@@ -31,7 +31,7 @@ type OpenAIProvider struct {
 	Timeout     float64
 	forceAdapt  bool
 	providerID  string
-	principal   *config.Principal
+	caller      core.Caller
 	registryID  string
 	anonymous   bool
 	metadataURL string
@@ -499,7 +499,7 @@ func (p OpenAIProvider) planAdapt(model string) adaptPlan {
 	if p.providerID == "" {
 		return adaptPlan{endpoint: "chat"}
 	}
-	mi, ok := CatalogLookupForPrincipal(p.providerID, model, p.principal)
+	mi, ok := CatalogLookupForPrincipal(p.providerID, model, p.caller)
 	if !ok {
 		return adaptPlan{endpoint: "chat"}
 	}
@@ -832,7 +832,7 @@ func (p OpenAIProvider) supportsNativeResponses(model string) bool {
 			return true
 		}
 	}
-	info, ok := CatalogLookupForPrincipal(p.providerID, model, p.principal)
+	info, ok := CatalogLookupForPrincipal(p.providerID, model, p.caller)
 	if !ok {
 		return false
 	}
@@ -870,7 +870,7 @@ func (p OpenAIProvider) zenNativeSurface(model string) (core.ModelSurface, bool)
 	if !p.isZen() {
 		return "", false
 	}
-	info, ok := CatalogCachedLookupForPrincipal(p.providerID, model, p.principal)
+	info, ok := CatalogCachedLookupForPrincipal(p.providerID, model, p.caller)
 	if !ok {
 		// v0.6.6's proven cold-cache contract identified Muse as Responses-native.
 		// Keep this narrow: any catalog evidence below takes precedence.

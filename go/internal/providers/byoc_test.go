@@ -6,6 +6,8 @@ import (
 
 	"llmgw/internal/config"
 	"llmgw/internal/iam"
+
+	core "github.com/xibodev/llmgw-core"
 )
 
 func TestCopilotProviderCacheIsPrincipalScoped(t *testing.T) {
@@ -21,13 +23,13 @@ func TestCopilotProviderCacheIsPrincipalScoped(t *testing.T) {
 	t.Cleanup(ResetProviders)
 
 	first, err := GetProviderForPrincipal(
-		"copilot", &config.Principal{PrincipalID: "prn_one"},
+		"copilot", core.Caller{ID: "prn_one", Kind: core.CallerHuman},
 	)
 	if err != nil {
 		t.Fatal(err)
 	}
 	second, err := GetProviderForPrincipal(
-		"copilot", &config.Principal{PrincipalID: "prn_two"},
+		"copilot", core.Caller{ID: "prn_two", Kind: core.CallerHuman},
 	)
 	if err != nil {
 		t.Fatal(err)
@@ -42,7 +44,7 @@ func TestCopilotProviderCacheIsPrincipalScoped(t *testing.T) {
 			t.Fatalf("provider type=%T", provider)
 		}
 		auth, ok := openai.auth.(copilotAuth)
-		if !ok || auth.principal == nil || auth.principal.PrincipalID != want {
+		if !ok || auth.caller.ID != want {
 			t.Fatalf("copilot auth=%#v, want principal %q", openai.auth, want)
 		}
 	}
@@ -62,7 +64,7 @@ func TestCopilotUsesProviderTimeoutOverride(t *testing.T) {
 	ResetProviders()
 	t.Cleanup(ResetProviders)
 
-	provider, err := GetProviderForPrincipal("copilot", &config.Principal{PrincipalID: "prn_timeout"})
+	provider, err := GetProviderForPrincipal("copilot", core.Caller{ID: "prn_timeout", Kind: core.CallerHuman})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -105,7 +107,7 @@ func TestBedrockCarriesPersonalCredentialObservation(t *testing.T) {
 		t.Fatal(err)
 	}
 	provider, err := GetProviderForPrincipal(
-		"bedrock", &config.Principal{PrincipalID: human.ID, PrincipalKind: human.Kind},
+		"bedrock", core.Caller{ID: human.ID, Kind: core.CallerHuman},
 	)
 	if err != nil {
 		t.Fatal(err)
@@ -156,14 +158,14 @@ func TestCopilotProviderCacheIsProjectScoped(t *testing.T) {
 	})
 	ResetProviders()
 	t.Cleanup(ResetProviders)
-	first, err := GetProviderForPrincipal("copilot", &config.Principal{
-		PrincipalID: "prn_shared", PrincipalKind: "service", ProjectID: "prj_one",
+	first, err := GetProviderForPrincipal("copilot", core.Caller{
+		ID: "prn_shared", Kind: core.CallerService, ProjectID: "prj_one",
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	second, err := GetProviderForPrincipal("copilot", &config.Principal{
-		PrincipalID: "prn_shared", PrincipalKind: "service", ProjectID: "prj_two",
+	second, err := GetProviderForPrincipal("copilot", core.Caller{
+		ID: "prn_shared", Kind: core.CallerService, ProjectID: "prj_two",
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -183,14 +185,14 @@ func TestHumanCopilotProviderCacheRemainsPrincipalScoped(t *testing.T) {
 	})
 	ResetProviders()
 	t.Cleanup(ResetProviders)
-	first, err := GetProviderForPrincipal("copilot", &config.Principal{
-		PrincipalID: "prn_human", PrincipalKind: "human", ProjectID: "prj_one",
+	first, err := GetProviderForPrincipal("copilot", core.Caller{
+		ID: "prn_human", Kind: core.CallerHuman, ProjectID: "prj_one",
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	second, err := GetProviderForPrincipal("copilot", &config.Principal{
-		PrincipalID: "prn_human", PrincipalKind: "human", ProjectID: "prj_two",
+	second, err := GetProviderForPrincipal("copilot", core.Caller{
+		ID: "prn_human", Kind: core.CallerHuman, ProjectID: "prj_two",
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -216,9 +218,7 @@ func TestHumanCopilotCatalogReusesPrincipalScopedEntry(t *testing.T) {
 	project, _ := iam.CreateProject("catalog-human", "Human")
 	_ = iam.SetMembership(project.ID, human.ID, "member")
 	_, _ = iam.PutProviderCredential(human.ID, "copilot", "github_oauth", "human-secret")
-	principal := &config.Principal{
-		PrincipalID: human.ID, PrincipalKind: human.Kind, ProjectID: project.ID,
-	}
+	principal := core.Caller{ID: human.ID, Kind: core.CallerHuman, ProjectID: project.ID}
 	storeEntry("copilot@"+human.ID, []ModelInfo{{ID: "existing-model"}})
 	models := CatalogModelsForPrincipal("copilot", principal)
 	if len(models) != 1 || models[0].ID != "existing-model" {
@@ -243,9 +243,7 @@ func TestCopilotCatalogRevalidatesBoundCredential(t *testing.T) {
 	_ = iam.SetMembership(project.ID, service.ID, "member")
 	credential, _ := iam.PutGatewayProviderCredential("copilot", "github_oauth", "shared-secret")
 	_, _ = iam.SetProviderCredentialBinding(project.ID, "copilot", "service", credential.ID)
-	principal := &config.Principal{
-		PrincipalID: service.ID, PrincipalKind: service.Kind, ProjectID: project.ID,
-	}
+	principal := core.Caller{ID: service.ID, Kind: core.CallerService, ProjectID: project.ID}
 	storeEntry(catalogCacheKey("copilot", principal), []ModelInfo{{ID: "cached-model"}})
 	if models := CatalogModelsForPrincipal("copilot", principal); len(models) != 1 {
 		t.Fatalf("active credential models=%+v", models)

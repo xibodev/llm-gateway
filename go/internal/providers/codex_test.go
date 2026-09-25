@@ -104,7 +104,7 @@ func TestCodexCatalogRefreshStoresModelsAfterCredentialRotation(t *testing.T) {
 	t.Cleanup(func() {
 		codexauth.ModelsURL, codexauth.OAuthTokenURL = oldModels, oldToken
 	})
-	principal := &config.Principal{PrincipalID: human.ID, PrincipalKind: human.Kind}
+	principal := core.Caller{ID: human.ID, Kind: core.CallerHuman}
 	models, observation, err := RefreshCatalogForPrincipalWithError("codex", principal)
 	if err != nil || len(models) != 1 || observation == nil {
 		t.Fatalf("models=%+v observation=%+v err=%v", models, observation, err)

@@ -606,9 +606,9 @@ func TestModelListRespectsKeyAndProjectPolicy(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if rows := providers.RefreshCatalogForPrincipal("echo", &config.Principal{
+	if rows := providers.RefreshCatalogForPrincipal("echo", callerOf(&config.Principal{
 		PrincipalID: principal.ID, PrincipalKind: principal.Kind, ProjectID: project.ID, Project: project.Slug,
-	}); len(rows) == 0 {
+	})); len(rows) == 0 {
 		t.Fatal("service project refresh returned no models")
 	}
 	server := httptest.NewServer(NewServer())

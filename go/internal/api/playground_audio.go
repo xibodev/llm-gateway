@@ -82,23 +82,23 @@ func audioPlaygroundTarget(principal *config.Principal, model string, operation 
 		return "", "", http.StatusNotFound, "no routable target for '" + model + "'"
 	}
 	for _, target := range targets {
-		row, found := providers.CatalogCachedLookupForPrincipal(target.Provider, target.Model, principal)
+		row, found := providers.CatalogCachedLookupForPrincipal(target.Provider, target.Model, callerOf(principal))
 		if found && providers.ModelOperationSupport(row, operation) == core.SupportUnsupported {
 			continue
 		}
 		if operation == core.ModelOperationAudioOut {
-			if _, native := providers.SpeechSynthesizerForPrincipal(target.Provider, principal); native {
+			if _, native := providers.SpeechSynthesizerForPrincipal(target.Provider, callerOf(principal)); native {
 				return target.Provider, target.Model, 0, ""
 			}
 		}
 		if operation == core.ModelOperationEmbeddings {
-			if instance, err := providers.GetProviderForPrincipal(target.Provider, principal); err == nil {
+			if instance, err := providers.GetProviderForPrincipal(target.Provider, callerOf(principal)); err == nil {
 				if _, native := providers.AsEmbeddingProvider(instance); native {
 					return target.Provider, target.Model, 0, ""
 				}
 			}
 		}
-		if _, _, ok := providers.ProviderHTTPTarget(target.Provider, principal); ok {
+		if _, _, ok := providers.ProviderHTTPTarget(target.Provider, callerOf(principal)); ok {
 			return target.Provider, target.Model, 0, ""
 		}
 	}
@@ -122,7 +122,7 @@ func mediaPlaygroundTarget(principal *config.Principal, model string, operation 
 		return "", "", status, message
 	}
 	for _, target := range targets {
-		row, found := providers.CatalogCachedLookupForPrincipal(target.Provider, target.Model, principal)
+		row, found := providers.CatalogCachedLookupForPrincipal(target.Provider, target.Model, callerOf(principal))
 		if found && !providers.ModelSupportsOperation(row, operation) {
 			continue
 		}
@@ -236,7 +236,7 @@ func handleAdminPlaygroundEmbeddings(w http.ResponseWriter, r *http.Request) {
 		writeError(w, status, message)
 		return
 	}
-	if instance, providerErr := providers.GetProviderForPrincipal(providerID, principal); providerErr == nil {
+	if instance, providerErr := providers.GetProviderForPrincipal(providerID, callerOf(principal)); providerErr == nil {
 		if embedder, supported := providers.AsEmbeddingProvider(instance); supported {
 			if !nativeEmbeddingInputValid(body.Input) {
 				writeError(w, http.StatusBadRequest, "native embedding input must be a string or array of strings")
@@ -259,7 +259,7 @@ func handleAdminPlaygroundEmbeddings(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	base, headers, ok := providers.ProviderHTTPTarget(providerID, principal)
+	base, headers, ok := providers.ProviderHTTPTarget(providerID, callerOf(principal))
 	if !ok {
 		writeError(w, http.StatusBadRequest, "provider does not expose an OpenAI-compatible embeddings endpoint")
 		return
@@ -324,7 +324,7 @@ func playgroundSpeechAudio(
 	principal *config.Principal,
 ) ([]byte, string, string, int, error) {
 	if synthesizer, native := providers.SpeechSynthesizerForPrincipal(
-		providerID, principal,
+		providerID, callerOf(principal),
 	); native {
 		var audio []byte
 		var format string
@@ -336,7 +336,7 @@ func playgroundSpeechAudio(
 		}
 		return audio, format, "audio/mpeg", 0, err
 	}
-	base, headers, ok := providers.ProviderHTTPTarget(providerID, principal)
+	base, headers, ok := providers.ProviderHTTPTarget(providerID, callerOf(principal))
 	if !ok {
 		return nil, "", "", http.StatusBadRequest, fmt.Errorf(
 			"provider does not expose an OpenAI-compatible speech endpoint",
@@ -401,7 +401,7 @@ func handleAdminPlaygroundTranscription(w http.ResponseWriter, r *http.Request) 
 		writeError(w, status, message)
 		return
 	}
-	base, headers, ok := providers.ProviderHTTPTarget(providerID, principal)
+	base, headers, ok := providers.ProviderHTTPTarget(providerID, callerOf(principal))
 	if !ok {
 		writeError(w, http.StatusBadRequest, "provider '"+providerID+"' does not expose an OpenAI-compatible transcription endpoint")
 		return

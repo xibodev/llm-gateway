@@ -9,6 +9,7 @@ import (
 	"llmgw/internal/iam"
 
 	copilotauth "github.com/xibodev/llm-provider-auth/copilot"
+	core "github.com/xibodev/llmgw-core"
 	corezen "github.com/xibodev/llmgw-core/providers/zen"
 )
 
@@ -139,7 +140,7 @@ func (bearerAuth) Refresh() error   { return nil }
 // session; a 401 is retried after forcing a new session token.
 type copilotAuth struct {
 	providerID string
-	principal  *config.Principal
+	caller     core.Caller
 }
 
 func (a copilotAuth) Prepare() (string, http.Header, error) {
@@ -180,12 +181,12 @@ func (a copilotAuth) Refresh() error {
 func (a copilotAuth) session(
 	force bool,
 ) (*copilotauth.Session, *iam.ProviderAccountObservation, error) {
-	if a.principal == nil || a.principal.PrincipalID == "" {
+	if callerPrincipalID(a.caller) == "" {
 		session, err := copilotClient.GetSession(force)
 		return session, nil, err
 	}
-	oauth, observation, ok, err := iam.ResolveProviderOAuthCredentialSecretWithObservation(
-		a.principal, a.providerID,
+	oauth, observation, ok, err := iam.ResolveCallerOAuthCredentialSecretWithObservation(
+		a.caller, a.providerID,
 	)
 	if err != nil {
 		return nil, observation, invocation("github_copilot: load BYOC credential: " + err.Error())

@@ -119,7 +119,7 @@ func authorizeKeyPolicy(p *config.Principal, requestedModel, resolvedCategory st
 	}
 	credentialTargets := make([]router.Target, 0, len(targets))
 	for _, target := range targets {
-		authorized, err := providers.ProviderCredentialAuthorized(target.Provider, p)
+		authorized, err := providers.ProviderCredentialAuthorized(target.Provider, callerOf(p))
 		if err != nil {
 			return nil, 500, "Provider credential store unavailable."
 		}

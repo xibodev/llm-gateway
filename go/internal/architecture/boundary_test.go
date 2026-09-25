@@ -47,19 +47,19 @@ var coreBound = []boundUnit{
 	{
 		path:    "internal/providers",
 		allowed: []string{"llmgw/internal/config", "llmgw/internal/iam"},
-		budget:  map[string]int{metricIAM: 154, metricConfigGet: 21, metricConfigPrincipal: 29},
+		budget:  map[string]int{metricIAM: 154, metricConfigGet: 21, metricConfigPrincipal: 0},
 	},
 	{
 		// Telemetry and the savings ledger own the SQLite imports; they stay
 		// in the gateway when the routing primitives move.
 		path:    "internal/router",
 		allowed: []string{"database/sql", "llmgw/internal/config", "llmgw/internal/iam", "modernc.org/sqlite"},
-		budget:  map[string]int{metricIAM: 6, metricConfigGet: 15, metricConfigPrincipal: 26},
+		budget:  map[string]int{metricIAM: 6, metricConfigGet: 15, metricConfigPrincipal: 22},
 	},
 	{
 		path:    "internal/api/transport_mode.go",
 		allowed: []string{"llmgw/internal/config"},
-		budget:  map[string]int{metricIAM: 0, metricConfigGet: 1, metricConfigPrincipal: 4},
+		budget:  map[string]int{metricIAM: 0, metricConfigGet: 1, metricConfigPrincipal: 0},
 	},
 }
 

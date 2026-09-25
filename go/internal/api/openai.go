@@ -244,7 +244,7 @@ func chatDispatch(w http.ResponseWriter, r *http.Request, req *chatRequest, prin
 		writeError(w, polStatus, polMsg)
 		return
 	}
-	targets, err = router.FilterCompatibleTargets(targets, principal, router.CompatibilityRequest{
+	targets, err = router.FilterCompatibleTargets(targets, callerOf(principal), router.CompatibilityRequest{
 		Surface: core.ModelSurfaceChatCompletions, Tools: requestHasTools(req.Tools),
 		Vision: requestIsMultimodal(req.Messages), Streaming: req.Stream,
 	})
@@ -254,7 +254,7 @@ func chatDispatch(w http.ResponseWriter, r *http.Request, req *chatRequest, prin
 		return
 	}
 	if transportMode == "transparent" {
-		target, transparentErr := exactNativeTransparentTarget(req.Model, "/v1/chat/completions", resolution, principal)
+		target, transparentErr := exactNativeTransparentTarget(req.Model, "/v1/chat/completions", resolution, callerOf(principal))
 		if transparentErr != nil {
 			recordFailureUsage(endpoint, req.Model, principal, 400, "transparent_contract", started)
 			writeError(w, http.StatusBadRequest, transparentErr.Error())
@@ -264,7 +264,7 @@ func chatDispatch(w http.ResponseWriter, r *http.Request, req *chatRequest, prin
 			recordFailureUsage(endpoint, req.Model, principal, 400, "transparent_stream", started)
 			return
 		}
-		provider, providerErr := providers.GetProviderForPrincipal(target.Provider, principal)
+		provider, providerErr := providers.GetProviderForPrincipal(target.Provider, callerOf(principal))
 		if providerErr != nil {
 			writeUpstreamError(w, providerErr)
 			return
@@ -313,7 +313,7 @@ func chatDispatch(w http.ResponseWriter, r *http.Request, req *chatRequest, prin
 	response["model"] = served.Model
 	normalizeChatResponseEnvelope(response)
 	recordFromResponse(endpoint, req.Model, served, principal, response, time.Since(started).Milliseconds())
-	w.Header().Set(transportModeHeader, targetTransportMode(*served, principal, "/v1/chat/completions"))
+	w.Header().Set(transportModeHeader, targetTransportMode(*served, callerOf(principal), "/v1/chat/completions"))
 	writeJSON(w, 200, response)
 }
 

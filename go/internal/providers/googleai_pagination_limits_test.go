@@ -152,7 +152,7 @@ func TestGoogleCatalogPaginationLimits(t *testing.T) {
 					catData["catalog-read"] = catalogEntry{SchemaVersion: catalogSchemaVersion, Models: []ModelInfo{{ID: "old"}}, RefreshedAt: stale}
 					catMu.Unlock()
 					calls.Store(0)
-					result := ReadCatalogForPrincipal("catalog-read", nil)
+					result := ReadCatalogForPrincipal("catalog-read", gatewayCaller())
 					cached, refreshed := CatalogCached("catalog-read")
 					if result.Err == nil || result.Diagnostics.Status != "error" || !result.Diagnostics.Stale || !result.Diagnostics.FromCache ||
 						result.Diagnostics.FailureCode != code || result.Diagnostics.Detail != detail || result.Diagnostics.UpstreamStatus != wantStatus ||

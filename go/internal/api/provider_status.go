@@ -278,7 +278,7 @@ func catalogRefreshForScope(providerID, scopeKey string) time.Time {
 		return providers.CatalogRefreshedAt(providerID)
 	}
 	return providers.CatalogRefreshedAtForPrincipal(
-		providerID, &config.Principal{PrincipalID: scopeKey, PrincipalKind: "human"},
+		providerID, callerOf(&config.Principal{PrincipalID: scopeKey, PrincipalKind: "human"}),
 	)
 }
 
@@ -310,7 +310,7 @@ func providerStatusSnapshots(
 		} else {
 			models, refreshed = providers.CatalogCachedForPrincipal(
 				providerID,
-				&config.Principal{PrincipalID: checkScope, PrincipalKind: "human"},
+				callerOf(&config.Principal{PrincipalID: checkScope, PrincipalKind: "human"}),
 			)
 		}
 		systemConnection, err := iam.SystemProviderConnectionExists(providerID)
@@ -624,7 +624,7 @@ func runProviderProbe(providerID, operation string, principal *config.Principal)
 		}
 	}
 	rows, observation, catalogErr := providers.RefreshCatalogForPrincipalWithError(
-		providerID, principal,
+		providerID, callerOf(principal),
 	)
 	checkGeneration = refreshedProviderCheckGeneration(
 		providerID, checkScope, checkGeneration,
@@ -680,7 +680,7 @@ func runProviderProbe(providerID, operation string, principal *config.Principal)
 		"catalog_evidence":     evidence.Catalog, "completion_evidence": evidence.Completion,
 		"owner_scope": providerOwnerScope(principal),
 	}
-	if refreshed := providers.CatalogRefreshedAtForPrincipal(providerID, principal); !refreshed.IsZero() {
+	if refreshed := providers.CatalogRefreshedAtForPrincipal(providerID, callerOf(principal)); !refreshed.IsZero() {
 		result["catalog_refreshed"] = refreshed.UTC().Format(time.RFC3339)
 	}
 	return result
@@ -901,7 +901,7 @@ func runProviderVerifyWithContext(
 		return fail("Model publication evidence is unavailable.", "evidence_unavailable")
 	}
 
-	provider, err := providers.GetProviderForPrincipal(providerID, principal)
+	provider, err := providers.GetProviderForPrincipal(providerID, callerOf(principal))
 	if err != nil {
 		return fail(
 			fmt.Sprintf("Provider could not be instantiated: %v", err),
@@ -946,7 +946,7 @@ func runProviderVerifyWithContext(
 	catalogRefreshed := false
 	if model == "" {
 		rows, catalogObservation, _ := providers.RefreshCatalogForPrincipalWithError(
-			providerID, principal,
+			providerID, callerOf(principal),
 		)
 		catalogRefreshed = true
 		if catalogObservation != nil {
@@ -966,7 +966,7 @@ func runProviderVerifyWithContext(
 		model = selectVerificationModel(rows, providerConfig)
 	}
 	if catalogRefreshed {
-		provider, err = providers.GetProviderForPrincipal(providerID, principal)
+		provider, err = providers.GetProviderForPrincipal(providerID, callerOf(principal))
 		if err != nil {
 			return fail(
 				fmt.Sprintf("Provider could not be re-initialized after catalog refresh: %v", err),
@@ -990,7 +990,7 @@ func runProviderVerifyWithContext(
 		registry, _ := providers.RegistryProviderByID(registryID)
 		if registry.AnonymousAutomation {
 			verifyKw["max_tokens"] = 512
-			if row, found := providers.CatalogCachedLookupForPrincipal(providerID, model, principal); found && modelHasSurface(row, "/responses") {
+			if row, found := providers.CatalogCachedLookupForPrincipal(providerID, model, callerOf(principal)); found && modelHasSurface(row, "/responses") {
 				verifyKw["max_tokens"] = 2048
 			}
 		} else {
@@ -1083,7 +1083,7 @@ func runVerificationCompletion(
 	messages []providers.Message,
 	kwargs providers.Kwargs,
 ) (map[string]any, *iam.ProviderAccountObservation, error) {
-	row, found := providers.CatalogCachedLookupForPrincipal(providerID, model, principal)
+	row, found := providers.CatalogCachedLookupForPrincipal(providerID, model, callerOf(principal))
 	return runVerificationCompletionForCatalogModel(
 		ctx, providerID, provider, model, messages, kwargs, row, found,
 	)

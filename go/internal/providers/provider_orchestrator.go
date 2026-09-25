@@ -47,7 +47,7 @@ func usesApplicationAnonymousAdapter(registryID string) bool {
 
 func applicationModelDiscoverer(providerID string) core.ProviderModelDiscoverer {
 	return func(ctx context.Context, _ core.ProviderConnection) ([]core.ModelInfo, error) {
-		rows, _, err := RefreshCatalogForPrincipalWithError(providerID, nil)
+		rows, _, err := RefreshCatalogForPrincipalWithError(providerID, gatewayCaller())
 		if err != nil {
 			_, _, status := CatalogFailure(err)
 			return nil, core.NewProviderOperationError("provider catalog", status, "", err)

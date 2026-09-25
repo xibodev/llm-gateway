@@ -77,10 +77,10 @@ type CompatibilityRequest struct {
 
 // FilterCompatibleTargets removes targets with explicit typed incompatibility.
 // It returns a 400-style configuration error when every target is excluded.
-func FilterCompatibleTargets(targets []Target, principal *config.Principal, request CompatibilityRequest) ([]Target, error) {
+func FilterCompatibleTargets(targets []Target, caller core.Caller, request CompatibilityRequest) ([]Target, error) {
 	compatible := make([]Target, 0, len(targets))
 	for _, target := range targets {
-		model, ok := providers.CatalogCachedLookupForPrincipal(target.Provider, target.Model, principal)
+		model, ok := providers.CatalogCachedLookupForPrincipal(target.Provider, target.Model, caller)
 		if !ok || model.TypedCapabilities == nil {
 			compatible = append(compatible, target)
 			continue
@@ -271,7 +271,7 @@ func ResolveForPrincipal(
 			if cfg := config.Get().Providers[m.Provider]; cfg != nil && cfg.Disabled {
 				continue
 			}
-			published, err := routeMemberPublished(m, principal)
+			published, err := routeMemberPublished(m, principalCaller(principal))
 			if err != nil {
 				return Resolution{}, err
 			}
@@ -285,7 +285,7 @@ func ResolveForPrincipal(
 			// In a mixed route, disabled members must not mask an enabled
 			// member's provider-policy or credential denial.
 			for _, m := range cat.Failover {
-				published, err := routeMemberPublished(m, principal)
+				published, err := routeMemberPublished(m, principalCaller(principal))
 				if err != nil {
 					return Resolution{}, err
 				}
@@ -306,14 +306,14 @@ func ResolveForPrincipal(
 	if head, tail, ok := strings.Cut(name, "/"); ok {
 		if _, exists := config.Get().Providers[head]; exists && tail != "" {
 			if providers.CatalogRequiresPrincipal(head) {
-				authorized, err := providers.ProviderCredentialAuthorized(head, principal)
+				authorized, err := providers.ProviderCredentialAuthorized(head, principalCaller(principal))
 				if err != nil {
 					return Resolution{}, err
 				}
 				if !authorized {
 					return Resolution{}, &ModelNotFoundError{Requested: name, Unavailable: true}
 				}
-				if _, found := providers.CatalogCachedLookupForPrincipal(head, tail, principal); !found {
+				if _, found := providers.CatalogCachedLookupForPrincipal(head, tail, principalCaller(principal)); !found {
 					return Resolution{}, &ModelNotFoundError{Requested: name, Unavailable: true}
 				}
 			}
@@ -331,16 +331,16 @@ func ResolveForPrincipal(
 	return Resolution{}, &ModelNotFoundError{Requested: name}
 }
 
-func routeMemberPublished(member config.EndpointMember, principal *config.Principal) (bool, error) {
+func routeMemberPublished(member config.EndpointMember, caller core.Caller) (bool, error) {
 	if providers.CatalogRequiresPrincipal(member.Provider) {
-		authorized, err := providers.ProviderCredentialAuthorized(member.Provider, principal)
+		authorized, err := providers.ProviderCredentialAuthorized(member.Provider, caller)
 		if err != nil {
 			return false, err
 		}
 		if !authorized {
 			return false, nil
 		}
-		if _, found := providers.CatalogCachedLookupForPrincipal(member.Provider, member.Model, principal); !found {
+		if _, found := providers.CatalogCachedLookupForPrincipal(member.Provider, member.Model, caller); !found {
 			return false, nil
 		}
 	}
@@ -427,14 +427,14 @@ func NativeAliasCandidates(principal *config.Principal) (map[string][]Target, er
 		if !aliasProviderAllowed(principal, project, pid) {
 			continue
 		}
-		authorized, err := providers.ProviderCredentialAuthorized(pid, principal)
+		authorized, err := providers.ProviderCredentialAuthorized(pid, principalCaller(principal))
 		if err != nil {
 			return nil, err
 		}
 		if !authorized {
 			continue
 		}
-		models := append([]providers.ModelInfo(nil), providers.CatalogModelsForPrincipal(pid, principal)...)
+		models := append([]providers.ModelInfo(nil), providers.CatalogModelsForPrincipal(pid, principalCaller(principal))...)
 		sort.Slice(models, func(i, j int) bool { return models[i].ID < models[j].ID })
 		for _, m := range models {
 			if _, published, evidenceErr := providers.AnonymousModelPublication(pid, m.ID); evidenceErr != nil || !published {
@@ -604,7 +604,7 @@ func ExecuteResponsesContext(
 			break
 		}
 		target := targets[index]
-		provider, err := providers.GetProviderForPrincipal(target.Provider, principal)
+		provider, err := providers.GetProviderForPrincipal(target.Provider, principalCaller(principal))
 		if err != nil {
 			attempts = append(attempts, attempt{
 				Provider: target.Provider, Model: target.Model,
@@ -637,7 +637,7 @@ func ExecuteResponsesContext(
 				break
 			}
 			if compatibilityErr := responsesFallbackCompatibility(
-				target, principal, chatMessages, chatKw,
+				target, principalCaller(principal), chatMessages, chatKw,
 			); compatibilityErr != nil {
 				lastErr = compatibilityErr
 				lastStatus = 400
@@ -716,7 +716,7 @@ func ExecuteAnthropicMessagesContext(
 	if requiresNative {
 		hasNative := false
 		for _, target := range targets {
-			provider, err := providers.GetProviderForPrincipal(target.Provider, principal)
+			provider, err := providers.GetProviderForPrincipal(target.Provider, principalCaller(principal))
 			if err == nil && providers.SupportsAnthropicMessages(provider) {
 				hasNative = true
 				break
@@ -734,7 +734,7 @@ func ExecuteAnthropicMessagesContext(
 			lastErr = ctx.Err()
 			break
 		}
-		provider, err := providers.GetProviderForPrincipal(target.Provider, principal)
+		provider, err := providers.GetProviderForPrincipal(target.Provider, principalCaller(principal))
 		if err != nil {
 			lastErr = err
 			attempts = append(attempts, attempt{Provider: target.Provider, Model: target.Model, Error: truncate(err.Error())})
@@ -745,7 +745,7 @@ func ExecuteAnthropicMessagesContext(
 			result, err = providers.CompleteAnthropicMessages(provider, target.Model, payload)
 		} else if requiresNative {
 			continue
-		} else if err = anthropicFallbackCompatibility(target, principal, messages, kw); err == nil {
+		} else if err = anthropicFallbackCompatibility(target, principalCaller(principal), messages, kw); err == nil {
 			var chat map[string]any
 			chat, err = providers.CompleteProviderContext(ctx, provider, target.Model, messages, kw)
 			if err == nil {
@@ -784,8 +784,8 @@ func ExecuteAnthropicMessagesContext(
 	return nil, nil, &AllTargetsFailed{Msg: message, Status: lastStatus}
 }
 
-func anthropicFallbackCompatibility(target Target, principal *config.Principal, messages []map[string]any, kw providers.Kwargs) error {
-	if err := anthropicControlsCompatibility(target, principal, kw); err != nil {
+func anthropicFallbackCompatibility(target Target, caller core.Caller, messages []map[string]any, kw providers.Kwargs) error {
+	if err := anthropicControlsCompatibility(target, caller, kw); err != nil {
 		return err
 	}
 	hasImages := false
@@ -801,7 +801,7 @@ func anthropicFallbackCompatibility(target Target, principal *config.Principal, 
 	if !hasImages {
 		return nil
 	}
-	model, ok := providers.CatalogLookupForPrincipal(target.Provider, target.Model, principal)
+	model, ok := providers.CatalogLookupForPrincipal(target.Provider, target.Model, caller)
 	if !ok {
 		return &providers.ConfigError{Msg: "Anthropic image adaptation requires verified model vision capability"}
 	}
@@ -811,7 +811,7 @@ func anthropicFallbackCompatibility(target Target, principal *config.Principal, 
 	return nil
 }
 
-func anthropicControlsCompatibility(target Target, principal *config.Principal, kw providers.Kwargs) error {
+func anthropicControlsCompatibility(target Target, caller core.Caller, kw providers.Kwargs) error {
 	providerConfig := config.Get().Providers[target.Provider]
 	if providerConfig == nil {
 		return &providers.ConfigError{Msg: "provider is not configured"}
@@ -825,7 +825,7 @@ func anthropicControlsCompatibility(target Target, principal *config.Principal, 
 			return &providers.ConfigError{Msg: "selected provider cannot preserve Anthropic thinking"}
 		}
 		if providerConfig.ForceApiSupport {
-			model, ok := providers.CatalogLookupForPrincipal(target.Provider, target.Model, principal)
+			model, ok := providers.CatalogLookupForPrincipal(target.Provider, target.Model, caller)
 			if !ok || translate.PreferredEndpoint(model.SupportedSurfaces) != "chat" {
 				return &providers.ConfigError{Msg: "selected provider cannot preserve Anthropic thinking on a Responses-only model"}
 			}
@@ -900,7 +900,7 @@ func ExecuteResponsesStreamContext(
 			break
 		}
 		target := targets[index]
-		provider, err := providers.GetProviderForPrincipal(target.Provider, principal)
+		provider, err := providers.GetProviderForPrincipal(target.Provider, principalCaller(principal))
 		if ctxErr := ctx.Err(); ctxErr != nil {
 			lastErr = ctxErr
 			lastStatus = deadlineStatus(ctxErr)
@@ -948,7 +948,7 @@ func ExecuteResponsesStreamContext(
 				break
 			}
 			if compatibilityErr := responsesFallbackCompatibility(
-				target, principal, chatMessages, chatKw,
+				target, principalCaller(principal), chatMessages, chatKw,
 			); compatibilityErr != nil {
 				lastErr = compatibilityErr
 				lastStatus = 400
@@ -1008,7 +1008,7 @@ func ExecuteResponsesStreamContext(
 
 func responsesFallbackCompatibility(
 	target Target,
-	principal *config.Principal,
+	caller core.Caller,
 	messages []providers.Message,
 	kw providers.Kwargs,
 ) error {
@@ -1030,7 +1030,7 @@ func responsesFallbackCompatibility(
 		switch providerType {
 		case "openai_compatible", "openai", "github_copilot", "bedrock", "litellm":
 			model, ok := providers.CatalogLookupForPrincipal(
-				target.Provider, target.Model, principal,
+				target.Provider, target.Model, caller,
 			)
 			if !ok {
 				return &providers.ConfigError{
@@ -1116,7 +1116,7 @@ func executeCompleteWithTrace(ctx context.Context, targets []Target, messages []
 		}
 		t := targets[i]
 		attemptStarted := time.Now()
-		prov, err := providers.GetProviderForPrincipal(t.Provider, principal)
+		prov, err := providers.GetProviderForPrincipal(t.Provider, principalCaller(principal))
 		if err != nil {
 			throttled := providers.IsThrottle(err)
 			attempts = append(attempts, attempt{Provider: t.Provider, Model: t.Model, OK: false, Error: truncate(err.Error()), Throttled: throttled})
@@ -1166,7 +1166,7 @@ func ExecuteStreamContext(ctx context.Context, targets []Target, messages []prov
 
 func ExecuteAnthropicStreamContext(ctx context.Context, targets []Target, messages []providers.Message, requested string, principal *config.Principal, kw providers.Kwargs) (providers.StreamIter, *Target, error) {
 	return executeStreamContext(ctx, targets, messages, requested, principal, kw, func(target Target) error {
-		return anthropicControlsCompatibility(target, principal, kw)
+		return anthropicControlsCompatibility(target, principalCaller(principal), kw)
 	})
 }
 
@@ -1190,7 +1190,7 @@ func executeStreamContext(ctx context.Context, targets []Target, messages []prov
 				continue
 			}
 		}
-		prov, err := providers.GetProviderForPrincipal(t.Provider, principal)
+		prov, err := providers.GetProviderForPrincipal(t.Provider, principalCaller(principal))
 		if ctxErr := ctx.Err(); ctxErr != nil {
 			lastErr = ctxErr
 			lastStatus = deadlineStatus(ctxErr)
@@ -1242,4 +1242,21 @@ func executeStreamContext(ctx context.Context, targets []Target, messages []prov
 
 func truncate(s string) string {
 	return providers.SanitizeDiagnosticTextLimit(s, 200)
+}
+
+// principalCaller bridges the router's Principal to the Caller providers take
+// until the router takes a Caller itself. It honours the Caller the api layer
+// recorded; otherwise only a PrincipalID reaches private credentials.
+func principalCaller(principal *config.Principal) core.Caller {
+	if principal != nil && principal.Caller.Kind != "" {
+		return principal.Caller
+	}
+	if principal == nil || principal.PrincipalID == "" {
+		return core.Caller{Kind: core.CallerAnonymous}
+	}
+	kind := core.CallerService
+	if principal.PrincipalKind == "human" {
+		kind = core.CallerHuman
+	}
+	return core.Caller{ID: principal.PrincipalID, Kind: kind, ProjectID: principal.ProjectID}
 }

@@ -113,7 +113,7 @@ func TestCatalogResponseSizeBoundaryAndCache(t *testing.T) {
 				catMu.Lock()
 				catData["catalog-read"] = catalogEntry{SchemaVersion: catalogSchemaVersion, Models: []ModelInfo{{ID: "old"}}, RefreshedAt: stale}
 				catMu.Unlock()
-				result := ReadCatalogForPrincipal("catalog-read", nil)
+				result := ReadCatalogForPrincipal("catalog-read", gatewayCaller())
 				cached, refreshed := CatalogCached("catalog-read")
 				if oversized {
 					code, detail, status := CatalogFailure(result.Err)
@@ -153,7 +153,7 @@ func TestAzureOversizedLaterPagePreservesCache(t *testing.T) {
 	catMu.Lock()
 	catData["catalog-read"] = catalogEntry{SchemaVersion: catalogSchemaVersion, Models: []ModelInfo{{ID: "old"}}, RefreshedAt: stale}
 	catMu.Unlock()
-	result := ReadCatalogForPrincipal("catalog-read", nil)
+	result := ReadCatalogForPrincipal("catalog-read", gatewayCaller())
 	cached, refreshed := CatalogCached("catalog-read")
 	code, detail, status := CatalogFailure(result.Err)
 	if code != "catalog_not_discoverable" || status != 200 || detail != "Provider catalog response exceeded the size limit." ||

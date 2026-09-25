@@ -10,6 +10,8 @@ import (
 
 	"llmgw/internal/config"
 	"llmgw/internal/iam"
+
+	core "github.com/xibodev/llmgw-core"
 )
 
 // A persisted, per-provider model catalog. It is the single source of truth for
@@ -254,13 +256,13 @@ func catalogModelsWithTypedCapabilities(models []ModelInfo, discoveredAt time.Ti
 // when missing or stale. The upstream fetch runs OUTSIDE the lock; a failed
 // refresh keeps whatever was cached.
 func CatalogModels(providerID string) []ModelInfo {
-	return CatalogModelsForPrincipal(providerID, nil)
+	return CatalogModelsForPrincipal(providerID, gatewayCaller())
 }
 
 func CatalogModelsForPrincipal(
-	providerID string, principal *config.Principal,
+	providerID string, caller core.Caller,
 ) []ModelInfo {
-	return ReadCatalogForPrincipal(providerID, principal).Models
+	return ReadCatalogForPrincipal(providerID, caller).Models
 }
 
 // CatalogReadResult preserves discovery failures without discarding usable rows.
@@ -287,32 +289,33 @@ type CatalogDiagnostics struct {
 
 // ReadCatalogForPrincipal never borrows another caller's cache or runs inference.
 // A successful empty discovery replaces old rows and is cached for the same TTL.
-func ReadCatalogForPrincipal(providerID string, principal *config.Principal) CatalogReadResult {
-	return readCatalogForPrincipal(providerID, principal, RefreshCatalogForPrincipalWithError)
+func ReadCatalogForPrincipal(providerID string, caller core.Caller) CatalogReadResult {
+	return readCatalogForPrincipal(providerID, caller, RefreshCatalogForPrincipalWithError)
 }
 
 // ReadCachedCatalogForPrincipal returns the caller-scoped snapshot without
 // contacting the provider. Catalog synchronization is an explicit lifecycle
 // operation; read endpoints must remain safe when an upstream is slow or down.
-func ReadCachedCatalogForPrincipal(providerID string, principal *config.Principal) CatalogReadResult {
+func ReadCachedCatalogForPrincipal(providerID string, caller core.Caller) CatalogReadResult {
 	result := CatalogReadResult{Diagnostics: CatalogDiagnostics{SourceScope: "gateway", OwnerScope: "gateway", FromCache: true}}
-	if principal != nil && principal.PrincipalID != "" {
+	principalID := callerPrincipalID(caller)
+	if principalID != "" {
 		result.Diagnostics.SourceScope = "principal"
 		result.Diagnostics.OwnerScope = "human_owner"
-		if principal.PrincipalKind == "service" && principal.ProjectID != "" {
+		if caller.Kind == core.CallerService && caller.ProjectID != "" {
 			result.Diagnostics.SourceScope = "service_project"
 			result.Diagnostics.OwnerScope = "service_project"
 		}
 	}
 	if issue := ProviderConfigurationIssue(providerID); issue != "" {
 		result.Err = catalogError("catalog_configuration_incomplete", issue, 0)
-	} else if CatalogRequiresPrincipal(providerID) && (principal == nil || strings.TrimSpace(principal.PrincipalID) == "") {
+	} else if CatalogRequiresPrincipal(providerID) && strings.TrimSpace(principalID) == "" {
 		result.Err = catalogError("catalog_principal_required", "An active human principal is required for this private provider catalog.", 0)
-	} else if authorized, err := ProviderCredentialAuthorized(providerID, principal); err != nil || !authorized {
+	} else if authorized, err := ProviderCredentialAuthorized(providerID, caller); err != nil || !authorized {
 		result.Err = catalogError("catalog_authentication_failed", "Provider credential is unavailable for catalog access.", 0)
 	}
 	if result.Err == nil {
-		if entry, ok := cachedEntry(catalogCacheKey(providerID, principal)); ok {
+		if entry, ok := cachedEntry(catalogCacheKey(providerID, caller)); ok {
 			result.Models, result.RefreshedAt = entry.Models, entry.RefreshedAt
 		}
 	}
@@ -331,33 +334,34 @@ func ReadCachedCatalogForPrincipal(providerID string, principal *config.Principa
 }
 
 func readCatalogForPrincipal(
-	providerID string, principal *config.Principal,
-	refresh func(string, *config.Principal) ([]ModelInfo, *iam.ProviderAccountObservation, error),
+	providerID string, caller core.Caller,
+	refresh func(string, core.Caller) ([]ModelInfo, *iam.ProviderAccountObservation, error),
 ) CatalogReadResult {
 	result := CatalogReadResult{Diagnostics: CatalogDiagnostics{SourceScope: "gateway", OwnerScope: "gateway"}}
-	if principal != nil && principal.PrincipalID != "" {
+	principalID := callerPrincipalID(caller)
+	if principalID != "" {
 		result.Diagnostics.SourceScope = "principal"
 		result.Diagnostics.OwnerScope = "human_owner"
-		if principal.PrincipalKind == "service" && principal.ProjectID != "" {
+		if caller.Kind == core.CallerService && caller.ProjectID != "" {
 			result.Diagnostics.SourceScope = "service_project"
 			result.Diagnostics.OwnerScope = "service_project"
 		}
 	}
 	if issue := ProviderConfigurationIssue(providerID); issue != "" {
 		result.Err = catalogError("catalog_configuration_incomplete", issue, 0)
-	} else if CatalogRequiresPrincipal(providerID) && (principal == nil || strings.TrimSpace(principal.PrincipalID) == "") {
+	} else if CatalogRequiresPrincipal(providerID) && strings.TrimSpace(principalID) == "" {
 		result.Err = catalogError("catalog_principal_required", "An active human principal is required for this private provider catalog.", 0)
-	} else if authorized, err := ProviderCredentialAuthorized(providerID, principal); err != nil || !authorized {
+	} else if authorized, err := ProviderCredentialAuthorized(providerID, caller); err != nil || !authorized {
 		result.Err = catalogError("catalog_authentication_failed", "Provider credential is unavailable for catalog access.", 0)
 	}
-	cacheKey := catalogCacheKey(providerID, principal)
+	cacheKey := catalogCacheKey(providerID, caller)
 	if result.Err == nil {
 		e, ok := cachedEntry(cacheKey)
 		if ok && time.Since(e.RefreshedAt) <= catalogTTL {
 			result.Models, result.RefreshedAt = e.Models, e.RefreshedAt
 			result.Diagnostics.FromCache = true
 		} else {
-			_, _, result.Err = refresh(providerID, principal)
+			_, _, result.Err = refresh(providerID, caller)
 			// Use one authoritative snapshot for both rows and timestamp: another
 			// refresh or invalidation may have superseded the discovery result.
 			if current, exists := cachedEntry(cacheKey); exists {
@@ -386,20 +390,20 @@ func readCatalogForPrincipal(
 	return result
 }
 
-func catalogCacheKey(providerID string, principal *config.Principal) string {
+func catalogCacheKey(providerID string, caller core.Caller) string {
 	if managed, err := AutomationManagedAnonymousProvider(providerID); err == nil && managed {
 		return providerID
 	}
-	return providerCacheKey(providerID, principal)
+	return providerCacheKey(providerID, caller)
 }
 
 // RefreshCatalog forces a re-fetch for one provider and returns the new list.
 func RefreshCatalog(providerID string) []ModelInfo {
-	return RefreshCatalogForPrincipal(providerID, nil)
+	return RefreshCatalogForPrincipal(providerID, gatewayCaller())
 }
 
-func RefreshCatalogForPrincipal(providerID string, principal *config.Principal) []ModelInfo {
-	models, _, _ := RefreshCatalogForPrincipalWithError(providerID, principal)
+func RefreshCatalogForPrincipal(providerID string, caller core.Caller) []ModelInfo {
+	models, _, _ := RefreshCatalogForPrincipalWithError(providerID, caller)
 	return models
 }
 
@@ -407,31 +411,32 @@ func RefreshCatalogForPrincipal(providerID string, principal *config.Principal) 
 // structured failure for lifecycle diagnostics. Legitimate empty catalogs are
 // stored as successful refreshes and returned without an error.
 func RefreshCatalogForPrincipalWithError(
-	providerID string, principal *config.Principal,
+	providerID string, caller core.Caller,
 ) ([]ModelInfo, *iam.ProviderAccountObservation, error) {
 	if issue := ProviderConfigurationIssue(providerID); issue != "" {
 		return nil, nil, catalogError(
 			"catalog_configuration_incomplete", issue, 0,
 		)
 	}
-	if CatalogRequiresPrincipal(providerID) && (principal == nil || strings.TrimSpace(principal.PrincipalID) == "") {
+	principalID := callerPrincipalID(caller)
+	if CatalogRequiresPrincipal(providerID) && strings.TrimSpace(principalID) == "" {
 		return nil, nil, catalogError(
 			"catalog_principal_required",
 			"An active human principal is required for this private provider catalog.",
 			0,
 		)
 	}
-	cacheKey := catalogCacheKey(providerID, principal)
+	cacheKey := catalogCacheKey(providerID, caller)
 	revision := catalogRevisionFor(cacheKey)
 	var initialObservation *iam.ProviderAccountObservation
-	if principal != nil && principal.PrincipalKind == "human" {
+	if caller.Kind == core.CallerHuman {
 		if observed, found, err := iam.ActiveProviderAccountObservation(
-			principal.PrincipalID, providerID,
+			principalID, providerID,
 		); err == nil && found {
 			initialObservation = &observed
 		}
 	}
-	models, observation, err := ListProviderModelsForPrincipalWithError(providerID, principal)
+	models, observation, err := ListProviderModelsForPrincipalWithError(providerID, caller)
 	if err != nil {
 		return nil, observation, err
 	}
@@ -446,7 +451,7 @@ func RefreshCatalogForPrincipalWithError(
 			currentRevision.generation == revision.generation+1
 		if refreshRebased {
 			current, found, currentErr := iam.ActiveProviderAccountObservation(
-				principal.PrincipalID, providerID,
+				principalID, providerID,
 			)
 			refreshRebased = currentErr == nil && found && current == *observation &&
 				storeEntryIfRevision(cacheKey, models, currentRevision)
@@ -464,13 +469,13 @@ func RefreshCatalogForPrincipalWithError(
 
 // CatalogLookup returns a single model's info from the (lazily-refreshed) catalog.
 func CatalogLookup(providerID, model string) (ModelInfo, bool) {
-	return CatalogLookupForPrincipal(providerID, model, nil)
+	return CatalogLookupForPrincipal(providerID, model, gatewayCaller())
 }
 
 func CatalogLookupForPrincipal(
-	providerID, model string, principal *config.Principal,
+	providerID, model string, caller core.Caller,
 ) (ModelInfo, bool) {
-	for _, m := range CatalogModelsForPrincipal(providerID, principal) {
+	for _, m := range CatalogModelsForPrincipal(providerID, caller) {
 		if m.ID == model {
 			return m, true
 		}
@@ -481,8 +486,8 @@ func CatalogLookupForPrincipal(
 // CatalogCachedLookupForPrincipal returns only already-known capability data and
 // never performs provider discovery. Dispatch uses it to avoid adding a catalog
 // network call to the request path.
-func CatalogCachedLookupForPrincipal(providerID, model string, principal *config.Principal) (ModelInfo, bool) {
-	models, _ := CatalogCachedForPrincipal(providerID, principal)
+func CatalogCachedLookupForPrincipal(providerID, model string, caller core.Caller) (ModelInfo, bool) {
+	models, _ := CatalogCachedForPrincipal(providerID, caller)
 	for _, current := range models {
 		if current.ID == model {
 			return current, true
@@ -494,34 +499,34 @@ func CatalogCachedLookupForPrincipal(providerID, model string, principal *config
 // CatalogRefreshedAt reports when a provider's catalog was last refreshed (zero
 // time if never).
 func CatalogRefreshedAt(providerID string) time.Time {
-	return CatalogRefreshedAtForPrincipal(providerID, nil)
+	return CatalogRefreshedAtForPrincipal(providerID, gatewayCaller())
 }
 
-func CatalogRefreshedAtForPrincipal(providerID string, principal *config.Principal) time.Time {
+func CatalogRefreshedAtForPrincipal(providerID string, caller core.Caller) time.Time {
 	if ProviderConfigurationIssue(providerID) != "" {
 		return time.Time{}
 	}
-	if CatalogRequiresPrincipal(providerID) && (principal == nil || strings.TrimSpace(principal.PrincipalID) == "") {
+	if CatalogRequiresPrincipal(providerID) && strings.TrimSpace(callerPrincipalID(caller)) == "" {
 		return time.Time{}
 	}
-	e, _ := cachedEntry(catalogCacheKey(providerID, principal))
+	e, _ := cachedEntry(catalogCacheKey(providerID, caller))
 	return e.RefreshedAt
 }
 
 // CatalogCached returns the currently-cached models + refresh time WITHOUT
 // triggering a refresh — for fast status reads (e.g. the admin state endpoint).
 func CatalogCached(providerID string) ([]ModelInfo, time.Time) {
-	return CatalogCachedForPrincipal(providerID, nil)
+	return CatalogCachedForPrincipal(providerID, gatewayCaller())
 }
 
-func CatalogCachedForPrincipal(providerID string, principal *config.Principal) ([]ModelInfo, time.Time) {
+func CatalogCachedForPrincipal(providerID string, caller core.Caller) ([]ModelInfo, time.Time) {
 	if ProviderConfigurationIssue(providerID) != "" {
 		return nil, time.Time{}
 	}
-	if CatalogRequiresPrincipal(providerID) && (principal == nil || strings.TrimSpace(principal.PrincipalID) == "") {
+	if CatalogRequiresPrincipal(providerID) && strings.TrimSpace(callerPrincipalID(caller)) == "" {
 		return nil, time.Time{}
 	}
-	e, _ := cachedEntry(catalogCacheKey(providerID, principal))
+	e, _ := cachedEntry(catalogCacheKey(providerID, caller))
 	return e.Models, e.RefreshedAt
 }
 

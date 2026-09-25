@@ -17,6 +17,10 @@ import (
 	core "github.com/xibodev/llmgw-core"
 )
 
+// anonymous is the caller of gateway-internal work, which resolves only
+// shared credentials.
+var anonymous = core.Caller{Kind: core.CallerAnonymous}
+
 func setupEcho(t *testing.T) {
 	t.Setenv("LLMGW_STATE_DIR", t.TempDir())
 	config.Update(func(s *config.Settings) {
@@ -285,7 +289,7 @@ func TestCompatibilityFilterExcludesOnlyKnownUnsupported(t *testing.T) {
 	if unsupported.Tools != core.SupportUnsupported || modelCompatible(unsupported, request) {
 		t.Fatal("explicitly unsupported tools were accepted")
 	}
-	filtered, err := FilterCompatibleTargets([]Target{{Provider: "echo", Model: "echo-default"}}, nil, request)
+	filtered, err := FilterCompatibleTargets([]Target{{Provider: "echo", Model: "echo-default"}}, anonymous, request)
 	if err != nil || len(filtered) != 1 || filtered[0].Provider != "echo" {
 		t.Fatalf("unknown target should remain eligible: targets=%+v err=%v", filtered, err)
 	}
@@ -516,7 +520,7 @@ func TestResponsesFallbackRejectsUnsupportedToolConstraints(t *testing.T) {
 		},
 	} {
 		t.Run(name, func(t *testing.T) {
-			if err := responsesFallbackCompatibility(target, nil, messages, kw); err == nil {
+			if err := responsesFallbackCompatibility(target, anonymous, messages, kw); err == nil {
 				t.Fatal("unsupported tool constraint was accepted")
 			}
 		})
@@ -534,22 +538,22 @@ func TestTargetCompatibilityPreservesClientControls(t *testing.T) {
 	chat := Target{Provider: "chat", Model: "model"}
 	unsupported := Target{Provider: "echo", Model: "echo-default"}
 
-	if err := anthropicControlsCompatibility(chat, nil, providers.Kwargs{
+	if err := anthropicControlsCompatibility(chat, anonymous, providers.Kwargs{
 		"metadata": map[string]any{"user_id": "fixture"}, "reasoning_effort": "high",
 	}); err != nil {
 		t.Fatal(err)
 	}
-	if err := anthropicControlsCompatibility(Target{Provider: "anthropic", Model: "model"}, nil, providers.Kwargs{
+	if err := anthropicControlsCompatibility(Target{Provider: "anthropic", Model: "model"}, anonymous, providers.Kwargs{
 		"thinking": map[string]any{"type": "disabled"},
 	}); err != nil {
 		t.Fatalf("native Anthropic should preserve disabled thinking: %v", err)
 	}
-	if err := anthropicControlsCompatibility(Target{Provider: "copilot-chat", Model: "model"}, nil, providers.Kwargs{
+	if err := anthropicControlsCompatibility(Target{Provider: "copilot-chat", Model: "model"}, anonymous, providers.Kwargs{
 		"thinking": map[string]any{"type": "disabled"},
 	}); err != nil {
 		t.Fatalf("Copilot Chat should preserve disabled thinking: %v", err)
 	}
-	if err := anthropicControlsCompatibility(Target{Provider: "copilot-adapt", Model: "model"}, nil, providers.Kwargs{
+	if err := anthropicControlsCompatibility(Target{Provider: "copilot-adapt", Model: "model"}, anonymous, providers.Kwargs{
 		"thinking": map[string]any{"type": "disabled"},
 	}); err == nil {
 		t.Fatal("forced Copilot adaptation accepted thinking without a verified Chat surface")
@@ -560,17 +564,17 @@ func TestTargetCompatibilityPreservesClientControls(t *testing.T) {
 		"thinking": {"thinking": map[string]any{"type": "disabled"}},
 	} {
 		t.Run(name, func(t *testing.T) {
-			if err := anthropicControlsCompatibility(unsupported, nil, kw); err == nil {
+			if err := anthropicControlsCompatibility(unsupported, anonymous, kw); err == nil {
 				t.Fatal("unsupported Anthropic control was accepted")
 			}
 		})
 	}
-	if err := responsesFallbackCompatibility(chat, nil, nil, providers.Kwargs{
+	if err := responsesFallbackCompatibility(chat, anonymous, nil, providers.Kwargs{
 		"parallel_tool_calls": false,
 	}); err != nil {
 		t.Fatal(err)
 	}
-	if err := responsesFallbackCompatibility(Target{Provider: "anthropic", Model: "model"}, nil, nil, providers.Kwargs{
+	if err := responsesFallbackCompatibility(Target{Provider: "anthropic", Model: "model"}, anonymous, nil, providers.Kwargs{
 		"parallel_tool_calls": false,
 	}); err == nil {
 		t.Fatal("Anthropic fallback silently accepted parallel_tool_calls")

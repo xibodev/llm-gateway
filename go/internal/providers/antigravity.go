@@ -22,11 +22,11 @@ type antigravityProvider struct {
 	providerID  string
 }
 
-func newAntigravityProvider(providerID string, principal *config.Principal) (Provider, error) {
-	if principal == nil || strings.TrimSpace(principal.PrincipalID) == "" {
+func newAntigravityProvider(providerID string, caller core.Caller) (Provider, error) {
+	principalID := callerPrincipalID(caller)
+	if strings.TrimSpace(principalID) == "" {
 		return nil, &ConfigError{Msg: "google_antigravity: a human principal private connection is required"}
 	}
-	principalID := principal.PrincipalID
 	tokenSource := func(ctx context.Context) (string, string, error) {
 		envelope, connection, ok, err := iam.OAuthProviderConnectionSecret(principalID, providerID, "")
 		if err != nil {

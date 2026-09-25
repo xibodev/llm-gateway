@@ -123,7 +123,7 @@ func resolveMediaTarget(principal *config.Principal, model string, operation cor
 		return "", "", http.StatusNotFound, "no routable target for '" + model + "'"
 	}
 	for _, target := range targets {
-		row, found := providers.CatalogCachedLookupForPrincipal(target.Provider, target.Model, principal)
+		row, found := providers.CatalogCachedLookupForPrincipal(target.Provider, target.Model, callerOf(principal))
 		if found && !providers.ModelSupportsOperation(row, operation) {
 			continue
 		}
@@ -351,7 +351,7 @@ func googleModalityUsage(usage map[string]any) (int, int) {
 }
 
 func imageGeneratorFor(providerID string, principal *config.Principal) (providers.ImageGenerator, bool) {
-	provider, err := providers.GetProviderForPrincipal(providerID, principal)
+	provider, err := providers.GetProviderForPrincipal(providerID, callerOf(principal))
 	if err != nil {
 		return nil, false
 	}
@@ -359,7 +359,7 @@ func imageGeneratorFor(providerID string, principal *config.Principal) (provider
 }
 
 func videoGeneratorFor(providerID string, principal *config.Principal) (providers.VideoGenerator, bool) {
-	provider, err := providers.GetProviderForPrincipal(providerID, principal)
+	provider, err := providers.GetProviderForPrincipal(providerID, callerOf(principal))
 	if err != nil {
 		return nil, false
 	}

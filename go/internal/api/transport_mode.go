@@ -29,7 +29,7 @@ func requestedTransportMode(r *http.Request) (string, error) {
 	return mode, nil
 }
 
-func exactNativeTransparentTarget(model, surface string, resolution router.Resolution, principal *config.Principal) (router.Target, error) {
+func exactNativeTransparentTarget(model, surface string, resolution router.Resolution, caller core.Caller) (router.Target, error) {
 	exact := isExactProviderModelResolution(model, resolution)
 	if !exact {
 		return router.Target{}, errors.New("transparent mode requires an exact provider/model target; endpoints and aliases are not accepted")
@@ -38,16 +38,16 @@ func exactNativeTransparentTarget(model, surface string, resolution router.Resol
 	if config.Get().Providers[target.Provider] == nil {
 		return router.Target{}, errors.New("transparent mode requires a configured provider")
 	}
-	modelInfo, ok := providers.CatalogCachedLookupForPrincipal(target.Provider, target.Model, principal)
+	modelInfo, ok := providers.CatalogCachedLookupForPrincipal(target.Provider, target.Model, caller)
 	if !ok {
 		return router.Target{}, errors.New("transparent mode requires a catalog-confirmed native surface")
 	}
-	interfaces, err := providerTransportInterfaces(target.Provider, target.Model, principal, modelInfo.SupportedSurfaces)
+	interfaces, err := providerTransportInterfaces(target.Provider, target.Model, caller, modelInfo.SupportedSurfaces)
 	if err != nil {
 		return router.Target{}, errors.New("transparent mode could not resolve the provider interface")
 	}
 	plan := planTargetTransport(
-		modelInfo, providers.CatalogRefreshedAtForPrincipal(target.Provider, principal), interfaces,
+		modelInfo, providers.CatalogRefreshedAtForPrincipal(target.Provider, caller), interfaces,
 		surface, exact, core.TransportRequirementTransparent, false, translate.Report{}, time.Now(),
 	)
 	if plan.Disposition == core.TransportNative {
@@ -57,7 +57,7 @@ func exactNativeTransparentTarget(model, surface string, resolution router.Resol
 	case core.TransportRejectExactTargetRequired:
 		return router.Target{}, errors.New("transparent mode requires an exact provider/model target; endpoints and aliases are not accepted")
 	case core.TransportRejectNativeUnconfirmed:
-		anonymousZen, _ := providers.AnonymousZenForPrincipal(target.Provider, principal)
+		anonymousZen, _ := providers.AnonymousZenForPrincipal(target.Provider, caller)
 		if anonymousZen {
 			return router.Target{}, errors.New("transparent mode is unavailable for OpenCode Zen anonymous adaptation")
 		}
@@ -79,12 +79,12 @@ func hasNativeInterface(interfaces []core.TransportInterface, surface core.Model
 	return false
 }
 
-func targetTransportMode(target router.Target, principal *config.Principal, surface string) string {
-	if model, found := providers.CatalogCachedLookupForPrincipal(target.Provider, target.Model, principal); found {
-		interfaces, err := providerTransportInterfaces(target.Provider, target.Model, principal, model.SupportedSurfaces)
+func targetTransportMode(target router.Target, caller core.Caller, surface string) string {
+	if model, found := providers.CatalogCachedLookupForPrincipal(target.Provider, target.Model, caller); found {
+		interfaces, err := providerTransportInterfaces(target.Provider, target.Model, caller, model.SupportedSurfaces)
 		if err == nil {
 			plan := planTargetTransport(
-				model, providers.CatalogRefreshedAtForPrincipal(target.Provider, principal), interfaces,
+				model, providers.CatalogRefreshedAtForPrincipal(target.Provider, caller), interfaces,
 				surface, true, core.TransportRequirementAny, true, translate.Report{}, time.Now(),
 			)
 			if plan.Disposition == core.TransportNative {
@@ -93,7 +93,7 @@ func targetTransportMode(target router.Target, principal *config.Principal, surf
 			return "translated"
 		}
 	}
-	provider, err := providers.GetProviderForPrincipal(target.Provider, principal)
+	provider, err := providers.GetProviderForPrincipal(target.Provider, caller)
 	if err != nil {
 		return "translated"
 	}
@@ -142,8 +142,8 @@ func planTargetTransport(
 	})
 }
 
-func providerTransportInterfaces(providerID, model string, principal *config.Principal, surfaces []string) ([]core.TransportInterface, error) {
-	provider, err := providers.GetProviderForPrincipal(providerID, principal)
+func providerTransportInterfaces(providerID, model string, caller core.Caller, surfaces []string) ([]core.TransportInterface, error) {
+	provider, err := providers.GetProviderForPrincipal(providerID, caller)
 	if err != nil {
 		return nil, err
 	}
@@ -168,14 +168,14 @@ func providerTransportInterfaces(providerID, model string, principal *config.Pri
 
 func modelTransportSurfaces(
 	providerID string,
-	principal *config.Principal,
+	caller core.Caller,
 	model providers.ModelInfo,
 	refreshedAt time.Time,
 	capabilities map[string]any,
 	surfaces []string,
 	evaluatedAt time.Time,
 ) ([]string, []string, []string) {
-	interfaces, err := providerTransportInterfaces(providerID, model.ID, principal, surfaces)
+	interfaces, err := providerTransportInterfaces(providerID, model.ID, caller, surfaces)
 	if err != nil {
 		interfaces = nil
 	}
