@@ -1,0 +1,253 @@
+{
+  "schema_version": "1.0.0",
+  "mode": "change",
+  "contract": {
+    "digest": "31b393ab3e80162226619c441694573993ac618382d74642101484a0bf2e9c80"
+  },
+  "authoring_provenance": {
+    "status": "established",
+    "path": ".release-harness/drafts/llm-gateway.record.json",
+    "digest": "6732ddf3dc8236b974e2aae5f81b546d89c2a466b6fb0a368d76620955bf981e"
+  },
+  "sources": [
+    {
+      "source_id": "primary",
+      "status": "established",
+      "repository_identity": "https://github.com/xibodev/llm-gateway.git",
+      "base_ref": "origin/main",
+      "base_commit": "fad85c1da6810ff53dcd5c4efcbbe60b674ef7d2",
+      "merge_base": "54c3dbf5cc513d30e634f46725cf8ba3a4ad0ba6",
+      "head_commit": "c23585416ccf26b9dcd5e25c41f0cb4b7b6224b1",
+      "head_tree": "eae94416ded89adef7d69cf08e2d3f20d3e25969",
+      "reviewed_source_digest": "06cf6c6ea62174720a2fe1dc8e6561e8bbaa65680f2af584b0ac208da9eae170",
+      "changed_paths": [
+        {
+          "status": "added",
+          "path": "go/internal/api/characterization_google_test.go",
+          "old_blob": "0000000000000000000000000000000000000000",
+          "new_blob": "938e652f89b5158c3cd6e45e7cd09660de1fd7b5"
+        },
+        {
+          "status": "added",
+          "path": "go/internal/api/testdata/characterization/google-chat.golden",
+          "old_blob": "0000000000000000000000000000000000000000",
+          "new_blob": "cb1ffb3af2a367dbac99bdb881f6ce1e0b5134b5"
+        },
+        {
+          "status": "added",
+          "path": "go/internal/api/testdata/characterization/google-embeddings.golden",
+          "old_blob": "0000000000000000000000000000000000000000",
+          "new_blob": "7d89ff8ec31e15c632eda0de6748d21d62569440"
+        },
+        {
+          "status": "added",
+          "path": "go/internal/api/testdata/characterization/google-images.golden",
+          "old_blob": "0000000000000000000000000000000000000000",
+          "new_blob": "6171adbac0554aaa0f6dd7ed10167df00ab18b65"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/iam/credential_record.go",
+          "old_blob": "bfd89362ae5275faf4c2bd1337ee5109a74a4bb6",
+          "new_blob": "85ab35cd20e4a9d32ca8e88fe376b2cad89bbf72"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/iam/credential_store_records_test.go",
+          "old_blob": "9381240c906005453188fa3d0f0bc064f3a3ebde",
+          "new_blob": "f2fc0af4e7d31322d1bd3cb3fc019de4eccfba8d"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/providers/catalog_payload_test.go",
+          "old_blob": "77dfddb508e19b8d026749a40800cb5e332bd1a2",
+          "new_blob": "a31af38f8b4f2ce31f2a18898ef4fd1961e26a2b"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/providers/core_runtime_test.go",
+          "old_blob": "74a39ea1164ad9d8b4e058c3c9fac61cc8aea6df",
+          "new_blob": "ca3befc87e70f2a8053b6aa8588d226c4543418e"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/providers/core_runtime.go",
+          "old_blob": "2c6f2a4a6ef2ef5264eff2355d938e04add94b86",
+          "new_blob": "d810ed0a19dda5fca47c522b74ac1160f0b2d92c"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/providers/error_redaction_test.go",
+          "old_blob": "5ff6bb747590d9fa1441eefb4d853746cd2349d5",
+          "new_blob": "c9e770b220edd71bf93fc8808b6296fc7b9cca89"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/providers/factory.go",
+          "old_blob": "eb75a8c196bdcbcd4b2d78679fb2ae118bf1bb0c",
+          "new_blob": "36995357ea8c3b2221becfbda8bbf6fc25a4ef1e"
+        },
+        {
+          "status": "added",
+          "path": "go/internal/providers/google_provider_test.go",
+          "old_blob": "0000000000000000000000000000000000000000",
+          "new_blob": "5918f5d36e02fc0a1a553ee8bbf68908cb4b7a60"
+        },
+        {
+          "status": "added",
+          "path": "go/internal/providers/google_provider.go",
+          "old_blob": "0000000000000000000000000000000000000000",
+          "new_blob": "1d2a6b724c64ce57f15fe068837b2500436606e8"
+        },
+        {
+          "status": "added",
+          "path": "go/internal/providers/google_runtime_test.go",
+          "old_blob": "0000000000000000000000000000000000000000",
+          "new_blob": "a1a35671913381d06b9d87cab2cc64b39d872f39"
+        },
+        {
+          "status": "added",
+          "path": "go/internal/providers/google_vertical.go",
+          "old_blob": "0000000000000000000000000000000000000000",
+          "new_blob": "5f8a3d00165f48d9c5d2a646fa6b70a32779dc6f"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/providers/googleai_connection_test.go",
+          "old_blob": "ff44b48a901f00c51fde97fedf7dd04ce352dd49",
+          "new_blob": "fa4e58fc080eeea6e5ef0c018d7ea9a58a95db3f"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/providers/googleai_live_test.go",
+          "old_blob": "f38e7584f3a48e31b365ab9b96eeeccc213b3163",
+          "new_blob": "0a629eaf25d8a56338e34d641c66ebea1a79ecf7"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/providers/googleai_pagination_limits_test.go",
+          "old_blob": "e6ea99083ba65b7692ccae148b1d212575645e48",
+          "new_blob": "342cad3c3d78288a96c3ed8461cee914b31f8f9e"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/providers/googleai_serviceaccount_test.go",
+          "old_blob": "2df61dbf362ebcf1539de254ddfc95038f073113",
+          "new_blob": "09a16cb322e1ae53cc65d0d8a041eb05213de59f"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/providers/googleai_test.go",
+          "old_blob": "72e7ca14bd4d97e32475cda845e2db9cff2d92ba",
+          "new_blob": "76557a5b149470287fe9048bd8864478abc5d0bd"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/providers/googleai.go",
+          "old_blob": "cbec07999d683d4b42ee75d31b8487595b8c18e7",
+          "new_blob": "869028fd5684d878dc70f4c7faa9ac7c61a9d03a"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/providers/runtime.go",
+          "old_blob": "bd6910b08977e836275155f42027c205ef378728",
+          "new_blob": "1fba9a809da0c99ca0c479e556b1c6752b94a23a"
+        }
+      ]
+    }
+  ],
+  "facts": [
+    {
+      "id": "through-runtime",
+      "claim": "Google AI Studio and Vertex AI chat and embeddings go through the llmgw-core Runtime with core's Google vertical, registered in the per-type table; image generation calls the vertical's GenerateImages with the credential resolved through the same store; streaming refuses with the existing error; video and the catalog stay on the gateway transport. Upstream request bodies are byte-identical; the gateway's chat, embeddings and image transport code is removed.",
+      "status": "observed",
+      "evidence": {
+        "source": "go/internal/providers/google_vertical.go, googleai.go"
+      }
+    },
+    {
+      "id": "new-goldens",
+      "claim": "Three new characterization goldens (Google chat, embeddings and images) were recorded with the previous code and pass unchanged with the new code; no existing golden changed.",
+      "status": "observed",
+      "evidence": {
+        "source": "go/internal/api/testdata; commit test(api): characterize Google chat, embeddings and images"
+      }
+    },
+    {
+      "id": "credentials",
+      "claim": "Credentials resolve in the factory's order (caller connection, system connection, configured key); service-account connections of any casing load as core.TokenTypeGCPServiceAccount and core exchanges them in its own per-instance token cache; other credential kinds are refused as before.",
+      "status": "observed",
+      "evidence": {
+        "source": "go/internal/iam/credential_record.go; go/internal/providers Google tests"
+      }
+    },
+    {
+      "id": "deviations",
+      "claim": "Edge-case differences: model IDs that are not one URL segment are refused as a configuration error before sending instead of returning an upstream 404; a bad base URL, project or location fails when the provider is built; service-account tokens may be minted separately for chat and embeddings, images, and video or catalog.",
+      "status": "observed",
+      "evidence": {
+        "source": "go/internal/providers Google tests"
+      }
+    },
+    {
+      "id": "suite",
+      "claim": "The full Go suite passes with HTTP_PROXY and HTTPS_PROXY unreachable with unchanged existing characterization goldens and coupling budgets; gofmt, vet, govulncheck (0 reachable), check-docs and git diff --check pass.",
+      "status": "observed",
+      "evidence": {
+        "source": "local gate run on the reviewed head"
+      }
+    }
+  ],
+  "impact": {
+    "assertions": [
+      {
+        "id": "A1",
+        "impact": "unchanged",
+        "supported_by": [
+          "through-runtime",
+          "new-goldens",
+          "suite"
+        ]
+      },
+      {
+        "id": "A2",
+        "impact": "unchanged",
+        "supported_by": [
+          "through-runtime",
+          "new-goldens",
+          "suite"
+        ]
+      },
+      {
+        "id": "A3",
+        "impact": "unchanged",
+        "supported_by": [
+          "through-runtime",
+          "new-goldens",
+          "suite"
+        ]
+      },
+      {
+        "id": "A4",
+        "impact": "unchanged",
+        "supported_by": [
+          "through-runtime",
+          "new-goldens",
+          "suite"
+        ]
+      }
+    ],
+    "requires": [],
+    "possible_binding_changes": []
+  },
+  "questions": [],
+  "conclusion": {
+    "action": "reuse_contract",
+    "summary": "Google AI Studio and Vertex AI move onto the llmgw-core Runtime and vertical with byte-identical upstream requests; CLI, health and models behavior is unchanged."
+  },
+  "proposed": {
+    "by": "google-core",
+    "at": "2026-09-25T12:21:06.743Z"
+  },
+  "digest": "c48cb5c25940e3d0c0e4fa9c65a16c39d8cf3ebd4e6412f657b4836d0aee63c2"
+}
