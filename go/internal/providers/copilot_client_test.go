@@ -3,14 +3,11 @@ package providers
 import (
 	"errors"
 	"net/http"
-	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"testing"
 
 	"llmgw/internal/config"
-
-	copilotauth "github.com/xibodev/llm-provider-auth/copilot"
 )
 
 // withCopilotSettings applies Copilot settings for one test and restores the
@@ -69,41 +66,41 @@ func TestCopilotSettingsPreserveLibraryEnvironmentFallbacks(t *testing.T) {
 }
 
 // TestCopilotErrorsKeepGatewayGuidance pins the exact messages the gateway
-// returned when the guidance lived in the auth library.
+// returned when the guidance lived in the auth library. Core reports the
+// library's error as its cause, which the facade completes with the guidance.
 func TestCopilotErrorsKeepGatewayGuidance(t *testing.T) {
 	t.Setenv("LLMGW_EXPERIMENTAL_COPILOT_PROVIDER", "")
 	t.Setenv("GITHUB_COPILOT_OAUTH_TOKEN", "")
 	t.Setenv("LLMGW_GITHUB_COPILOT_OAUTH_TOKEN", "")
-	cacheDir := t.TempDir()
-	withCopilotSettings(t, func(s *config.Settings) {
-		s.GithubCopilotCacheDir, s.GithubCopilotOAuthToken = cacheDir, ""
-		s.GithubCopilotUseGhCLI, s.AllowCopilotProxy = false, false
-	})
-	auth := copilotAuth{providerID: "github_copilot"}
+	upstream := newCopilotUpstream(t)
+	runtime := installCopilot(t, upstream, &config.ProviderConfig{Type: "github_copilot"})
+	config.Update(func(s *config.Settings) { s.GithubCopilotOAuthToken, s.AllowCopilotProxy = "", false })
+	provider := copilotFacade(t, runtime, gatewayCaller())
+	complete := func() error {
+		_, err := provider.Complete("chat-model", []Message{{"role": "user", "content": "hi"}}, nil)
+		return err
+	}
 
-	_, _, _, err := auth.PrepareObserved()
-	assertCopilotMessage(t, err, "github_copilot: github_copilot provider is disabled by default "+
+	assertCopilotMessage(t, complete(), "github_copilot: github_copilot provider is disabled by default "+
 		"(personal-use grey area). Enable it for your own loopback gateway with allow_copilot_proxy: "+
 		"true or LLMGW_EXPERIMENTAL_COPILOT_PROVIDER=1.")
 
 	config.Update(func(s *config.Settings) { s.AllowCopilotProxy = true })
-	_, _, _, err = auth.PrepareObserved()
-	assertCopilotMessage(t, err, "github_copilot: no GitHub Copilot OAuth token available. Sign in via "+
+	assertCopilotMessage(t, complete(), "github_copilot: no GitHub Copilot OAuth token available. Sign in via "+
 		"the /admin panel, set LLMGW_GITHUB_COPILOT_OAUTH_TOKEN, or `gh auth refresh -s copilot` then "+
 		"`gh auth token`.")
 
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		w.WriteHeader(http.StatusUnauthorized)
-	}))
-	t.Cleanup(server.Close)
-	t.Cleanup(SetCopilotEndpointsForTests(copilotauth.Endpoints{SessionTokenURL: server.URL}))
+	upstream.setRefuse(func(string) int { return http.StatusUnauthorized })
 	config.Update(func(s *config.Settings) { s.GithubCopilotOAuthToken = "synthetic-oauth" })
-	_, _, _, err = auth.PrepareObserved()
+	err := complete()
 	assertCopilotMessage(t, err, "github_copilot: Copilot session-token exchange returned 401: the OAuth "+
 		"token is invalid or lacks Copilot access. Sign in via the /admin panel.")
 	var invocationErr *InvocationError
 	if errors.As(err, &invocationErr) && (invocationErr.Status != http.StatusUnauthorized || !invocationErr.FailoverEligible) {
 		t.Fatalf("401 must stay failover-eligible with its status: %+v", invocationErr)
+	}
+	if _, calls := upstream.take(); len(calls) != 0 {
+		t.Fatalf("a session Copilot never issued reached the API: %+v", calls)
 	}
 }
 

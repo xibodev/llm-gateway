@@ -39,13 +39,9 @@ func TestCopilotProviderCacheIsPrincipalScoped(t *testing.T) {
 	}
 	assertCopilotPrincipal := func(provider Provider, want string) {
 		t.Helper()
-		openai, ok := provider.(OpenAIProvider)
-		if !ok {
-			t.Fatalf("provider type=%T", provider)
-		}
-		auth, ok := openai.auth.(copilotAuth)
-		if !ok || auth.caller.ID != want {
-			t.Fatalf("copilot auth=%#v, want principal %q", openai.auth, want)
+		copilot, ok := provider.(*copilotProvider)
+		if !ok || copilot.caller.ID != want {
+			t.Fatalf("provider=%T %+v, want principal %q", provider, provider, want)
 		}
 	}
 	assertCopilotPrincipal(first, "prn_one")
@@ -68,9 +64,9 @@ func TestCopilotUsesProviderTimeoutOverride(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	openAI, ok := provider.(OpenAIProvider)
-	if !ok || openAI.Timeout != timeout {
-		t.Fatalf("provider=%T timeout=%v, want %v", provider, openAI.Timeout, timeout)
+	copilot, ok := provider.(*copilotProvider)
+	if !ok || copilot.timeout != timeout {
+		t.Fatalf("provider=%T %+v, want timeout %v", provider, provider, timeout)
 	}
 }
 

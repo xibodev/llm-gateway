@@ -36,6 +36,7 @@ func (rt *Runtime) coreVerticals() map[string]coreVertical {
 		"openai_codex":       rt.codexCoreVertical(),
 		"google_antigravity": rt.antigravityCoreVertical(),
 		zenCoreType:          rt.zenCoreVertical(),
+		copilotCoreType:      rt.copilotCoreVertical(),
 	}
 }
 

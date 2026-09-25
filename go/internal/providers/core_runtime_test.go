@@ -27,7 +27,9 @@ var coreVerticalCases = map[string]struct {
 	"zen by URL":       {&config.ProviderConfig{Type: "litellm", BaseURL: "https://opencode.ai/zen/v1"}, zenCoreType},
 	"bedrock at zen":   {&config.ProviderConfig{Type: "bedrock", BaseURL: "https://opencode.ai/zen/v1"}, ""},
 	"plain":            {&config.ProviderConfig{Type: "openai_compatible", BaseURL: "https://api.example.test/v1"}, ""},
-	"copilot":          {&config.ProviderConfig{Type: "github_copilot"}, ""},
+	"copilot":          {&config.ProviderConfig{Type: "github_copilot"}, copilotCoreType},
+	"copilot by type":  {&config.ProviderConfig{Type: " GitHub_Copilot "}, copilotCoreType},
+	"copilot registry": {&config.ProviderConfig{Type: "openai_compatible", RegistryID: "github_copilot"}, ""},
 	"anthropic":        {&config.ProviderConfig{Type: "anthropic"}, ""},
 }
 

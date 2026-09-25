@@ -28,6 +28,9 @@ func (rt *Runtime) ProviderHTTPTarget(
 		base, hdr := zen.httpTarget()
 		return base, hdr, true
 	}
+	if copilot, isCopilot := inst.(*copilotProvider); isCopilot {
+		return copilot.httpTarget()
+	}
 	op, isOpenAI := inst.(OpenAIProvider)
 	if !isOpenAI {
 		return "", nil, false

@@ -3,7 +3,6 @@ package providers
 import (
 	"errors"
 	"fmt"
-	"os"
 	"strings"
 	"sync"
 
@@ -136,11 +135,7 @@ func (rt *Runtime) instantiate(
 		bp.caller = caller
 		return bp, nil
 	case "github_copilot":
-		forceAdapt := true
-		if cfg != nil && !cfg.ForceApiSupport && os.Getenv("LLMGW_DISABLE_COPILOT_API_ADAPTATION") == "1" {
-			forceAdapt = false
-		}
-		return OpenAIProvider{auth: copilotAuth{providerID: providerID, caller: caller}, Timeout: cfg.TimeoutOr(s.GithubCopilotTimeoutSeconds), forceAdapt: forceAdapt, providerID: providerID, caller: caller}, nil
+		return rt.newCopilotProvider(providerID, cfg, caller, cfg.TimeoutOr(s.GithubCopilotTimeoutSeconds)), nil
 	case "ollama":
 		base := cfg.BaseURL
 		if base == "" {
