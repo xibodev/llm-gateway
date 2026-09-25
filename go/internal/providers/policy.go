@@ -11,43 +11,96 @@ import (
 	"time"
 
 	"llmgw/internal/config"
+
+	"github.com/xibodev/llmgw-core/execution"
 )
 
 // ---- circuit breaker state ---------------------------------------------- //
 
-type circuitState struct {
-	mu                  sync.Mutex
-	consecutiveFailures int
-	openUntil           time.Time
+// circuits keeps every provider's circuit breaker in one llmgw-core
+// HealthTracker, keyed by provider name, so the instances of a provider share
+// its circuit and the circuit outlives the provider cache. The zero value is
+// ready for use.
+//
+// Each wrapper counts against the policy it was built with, as it did when it
+// kept the counters itself, so a circuit follows the wrapper acting on it:
+// every tracker call runs under mu with that wrapper's policy in effect, and
+// the tracker reads the policy back while the call holds mu.
+type circuits struct {
+	mu      sync.Mutex
+	tracker *execution.HealthTracker
+	policy  execution.HealthPolicy
 }
 
-// circuitBreakers holds one breaker per provider name.
-type circuitBreakers struct {
-	mu       sync.Mutex
-	circuits map[string]*circuitState
-}
-
-func (b *circuitBreakers) get(name string) *circuitState {
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	c := b.circuits[name]
-	if c == nil {
-		c = &circuitState{}
-		b.circuits[name] = c
+// use puts policy in effect and returns the tracker. The caller holds mu.
+func (c *circuits) use(policy config.ProviderPolicy) *execution.HealthTracker {
+	if c.tracker == nil {
+		c.tracker = execution.NewHealthTracker(execution.HealthOptions{
+			Policy:  func(string) execution.HealthPolicy { return c.policy },
+			Observe: observeCircuit,
+		})
 	}
-	return c
+	c.policy = circuitPolicy(policy)
+	return c.tracker
+}
+
+// available reports whether name's circuit admits a request under policy and,
+// when it does not, until when.
+func (c *circuits) available(name string, policy config.ProviderPolicy) (bool, time.Time) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.use(policy).Available(name)
+}
+
+// record moves name's circuit by the outcome of one operation under policy:
+// nil for a success, otherwise the error the operation returned.
+func (c *circuits) record(name string, policy config.ProviderPolicy, err error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.use(policy).Record(name, err)
+}
+
+// reset forgets name's circuit, or every circuit when name is empty.
+func (c *circuits) reset(name string) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	switch {
+	case name == "":
+		c.tracker = nil
+	case c.tracker != nil:
+		c.tracker.Reset(name)
+	}
+}
+
+// circuitPolicy is the breaker a provider policy configures: its threshold
+// and cooldown, with a streak that never expires. Retry-After starts no
+// cooldown; it only lengthens the wait before the wrapper tries again.
+func circuitPolicy(policy config.ProviderPolicy) execution.HealthPolicy {
+	return execution.HealthPolicy{
+		FailureThreshold: policy.CircuitFailureThreshold,
+		OpenDuration:     time.Duration(policy.CircuitCooldownSeconds * float64(time.Second)),
+		IgnoreRetryAfter: true,
+	}
+}
+
+// observeCircuit reads an operation's outcome as the wrapper always has: a
+// circuit failure extends the streak, any other invocation error ends it as a
+// definitive rejection does, and an error that never reached the upstream,
+// such as a configuration error, says nothing about the provider.
+func observeCircuit(err error) execution.Observation {
+	switch {
+	case err == nil:
+		return execution.Observation{Effect: execution.EffectSuccess}
+	case InvocationCircuitFailure(err):
+		return execution.Observation{Effect: execution.EffectFailure}
+	case IsInvocation(err):
+		return execution.Observation{Effect: execution.EffectSuccess}
+	}
+	return execution.Observation{}
 }
 
 // ResetCircuit clears breaker state (test helper).
-func (rt *Runtime) ResetCircuit(name string) {
-	rt.circuits.mu.Lock()
-	defer rt.circuits.mu.Unlock()
-	if name == "" {
-		rt.circuits.circuits = map[string]*circuitState{}
-	} else {
-		delete(rt.circuits.circuits, name)
-	}
-}
+func (rt *Runtime) ResetCircuit(name string) { rt.circuits.reset(name) }
 
 // ResilientProvider wraps a Provider with retry + circuit-breaker behaviour.
 type ResilientProvider struct {
@@ -67,42 +120,20 @@ func (r *ResilientProvider) checkCircuit() error {
 	if !r.policy.CircuitEnabled() {
 		return nil
 	}
-	c := Current().circuits.get(r.name)
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	if !c.openUntil.IsZero() && time.Now().Before(c.openUntil) {
-		remaining := time.Until(c.openUntil).Seconds()
+	if available, until := Current().circuits.available(r.name, r.policy); !available {
+		remaining := time.Until(until).Seconds()
 		return invocationStatus(r.name+": circuit breaker open for another "+
 			formatSeconds(remaining)+"s", 503)
-	}
-	if !c.openUntil.IsZero() && !time.Now().Before(c.openUntil) {
-		c.openUntil = time.Time{}
 	}
 	return nil
 }
 
-func (r *ResilientProvider) recordSuccess() {
-	if !r.policy.CircuitEnabled() {
-		return
+// record moves the provider's circuit by the outcome of an operation's last
+// try: nil for a success, otherwise the error the operation returns.
+func (r *ResilientProvider) record(err error) {
+	if r.policy.CircuitEnabled() {
+		Current().circuits.record(r.name, r.policy, err)
 	}
-	c := Current().circuits.get(r.name)
-	c.mu.Lock()
-	c.consecutiveFailures = 0
-	c.openUntil = time.Time{}
-	c.mu.Unlock()
-}
-
-func (r *ResilientProvider) recordFailure() {
-	if !r.policy.CircuitEnabled() {
-		return
-	}
-	c := Current().circuits.get(r.name)
-	c.mu.Lock()
-	c.consecutiveFailures++
-	if c.consecutiveFailures >= r.policy.CircuitFailureThreshold {
-		c.openUntil = time.Now().Add(time.Duration(r.policy.CircuitCooldownSeconds * float64(time.Second)))
-	}
-	c.mu.Unlock()
 }
 
 func (r *ResilientProvider) nextBackoff(attempt int) float64 {
@@ -169,43 +200,24 @@ func (r *ResilientProvider) CompleteContextWithObservation(
 	if err := r.checkCircuit(); err != nil {
 		return nil, nil, err
 	}
-	attempts := max1(r.policy.RetryMaxAttempts)
-	var lastErr error
-	var lastObservation *CredentialObservation
-	for attempt := 1; attempt <= attempts; attempt++ {
+	for attempt, attempts := 1, max1(r.policy.RetryMaxAttempts); ; attempt++ {
 		result, observation, err := CompleteProviderContextWithObservation(
 			ctx, r.inner, model, messages, kw,
 		)
-		lastObservation = observation
 		if ctxErr := ctx.Err(); ctxErr != nil {
 			return nil, observation, ctxErr
 		}
 		if err == nil {
-			r.recordSuccess()
+			r.record(nil)
 			return result, observation, nil
 		}
-		if !IsInvocation(err) {
+		if !IsInvocation(err) || !r.retries(err, attempt, attempts) {
 			return nil, observation, err
 		}
-		lastErr = err
-		if !InvocationRetryable(err) {
-			if InvocationCircuitFailure(err) {
-				r.recordFailure()
-			} else {
-				r.recordSuccess()
-			}
-			return nil, observation, err
+		if waitErr := waitForRetry(ctx, r.retryDelay(err, attempt)); waitErr != nil {
+			return nil, observation, waitErr
 		}
-		if attempt < attempts {
-			if waitErr := waitForRetry(ctx, r.retryDelay(err, attempt)); waitErr != nil {
-				return nil, observation, waitErr
-			}
-			continue
-		}
-		r.recordFailure()
-		return nil, observation, err
 	}
-	return nil, lastObservation, lastErr
 }
 
 func (r *ResilientProvider) CompleteResponses(
@@ -228,40 +240,22 @@ func (r *ResilientProvider) CompleteResponsesContext(
 	if ResponsesPayloadIsStateful(payload) {
 		attempts = 1
 	}
-	var lastErr error
-	var lastObservation *CredentialObservation
-	for attempt := 1; attempt <= attempts; attempt++ {
+	for attempt := 1; ; attempt++ {
 		result, observation, err := CompleteResponsesContext(ctx, r.inner, model, payload)
-		lastObservation = observation
 		if ctxErr := ctx.Err(); ctxErr != nil {
 			return nil, observation, ctxErr
 		}
 		if err == nil {
-			r.recordSuccess()
+			r.record(nil)
 			return result, observation, nil
 		}
-		if errors.Is(err, ErrResponsesUnsupported) || !IsInvocation(err) {
+		if errors.Is(err, ErrResponsesUnsupported) || !IsInvocation(err) || !r.retries(err, attempt, attempts) {
 			return nil, observation, err
 		}
-		lastErr = err
-		if !InvocationRetryable(err) {
-			if InvocationCircuitFailure(err) {
-				r.recordFailure()
-			} else {
-				r.recordSuccess()
-			}
-			return nil, observation, err
+		if waitErr := waitForRetry(ctx, r.retryDelay(err, attempt)); waitErr != nil {
+			return nil, observation, waitErr
 		}
-		if attempt < attempts {
-			if waitErr := waitForRetry(ctx, r.retryDelay(err, attempt)); waitErr != nil {
-				return nil, observation, waitErr
-			}
-			continue
-		}
-		r.recordFailure()
-		return nil, observation, err
 	}
-	return nil, lastObservation, lastErr
 }
 
 func (r *ResilientProvider) StreamResponses(
@@ -287,11 +281,8 @@ func (r *ResilientProvider) StreamResponsesContext(
 	if ResponsesPayloadIsStateful(payload) {
 		attempts = 1
 	}
-	var lastErr error
-	var lastObservation *CredentialObservation
-	for attempt := 1; attempt <= attempts; attempt++ {
+	for attempt := 1; ; attempt++ {
 		stream, observation, err := StreamResponsesContext(ctx, r.inner, model, payload)
-		lastObservation = observation
 		if ctxErr := ctx.Err(); ctxErr != nil {
 			if stream != nil {
 				_ = stream.Close()
@@ -299,31 +290,16 @@ func (r *ResilientProvider) StreamResponsesContext(
 			return nil, observation, ctxErr
 		}
 		if err == nil {
-			r.recordSuccess()
+			r.record(nil)
 			return stream, observation, nil
 		}
-		if errors.Is(err, ErrResponsesUnsupported) || !IsInvocation(err) {
+		if errors.Is(err, ErrResponsesUnsupported) || !IsInvocation(err) || !r.retries(err, attempt, attempts) {
 			return nil, observation, err
 		}
-		lastErr = err
-		if !InvocationRetryable(err) {
-			if InvocationCircuitFailure(err) {
-				r.recordFailure()
-			} else {
-				r.recordSuccess()
-			}
-			return nil, observation, err
+		if waitErr := waitForRetry(ctx, r.retryDelay(err, attempt)); waitErr != nil {
+			return nil, observation, waitErr
 		}
-		if attempt < attempts {
-			if waitErr := waitForRetry(ctx, r.retryDelay(err, attempt)); waitErr != nil {
-				return nil, observation, waitErr
-			}
-			continue
-		}
-		r.recordFailure()
-		return nil, observation, err
 	}
-	return nil, lastObservation, lastErr
 }
 
 func (r *ResilientProvider) Stream(model string, messages []Message, kw Kwargs) (StreamIter, error) {
@@ -341,9 +317,7 @@ func (r *ResilientProvider) StreamContext(ctx context.Context, model string, mes
 	if err := r.checkCircuit(); err != nil {
 		return nil, err
 	}
-	attempts := max1(r.policy.RetryMaxAttempts)
-	var lastErr error
-	for attempt := 1; attempt <= attempts; attempt++ {
+	for attempt, attempts := 1, max1(r.policy.RetryMaxAttempts); ; attempt++ {
 		it, err := StreamProviderContext(ctx, r.inner, model, messages, kw)
 		if ctxErr := ctx.Err(); ctxErr != nil {
 			if it != nil {
@@ -352,31 +326,16 @@ func (r *ResilientProvider) StreamContext(ctx context.Context, model string, mes
 			return nil, ctxErr
 		}
 		if err == nil {
-			r.recordSuccess()
+			r.record(nil)
 			return it, nil
 		}
-		if !IsInvocation(err) {
+		if !IsInvocation(err) || !r.retries(err, attempt, attempts) {
 			return nil, err
 		}
-		lastErr = err
-		if !InvocationRetryable(err) {
-			if InvocationCircuitFailure(err) {
-				r.recordFailure()
-			} else {
-				r.recordSuccess()
-			}
-			return nil, err
+		if waitErr := waitForRetry(ctx, r.retryDelay(err, attempt)); waitErr != nil {
+			return nil, waitErr
 		}
-		if attempt < attempts {
-			if waitErr := waitForRetry(ctx, r.retryDelay(err, attempt)); waitErr != nil {
-				return nil, waitErr
-			}
-			continue
-		}
-		r.recordFailure()
-		return nil, err
 	}
-	return nil, lastErr
 }
 
 func (r *ResilientProvider) DefaultVoice() string {
@@ -411,10 +370,10 @@ func (r *ResilientProvider) SynthesizeContext(ctx context.Context, voice, text, 
 			return nil, "", ctx.Err()
 		}
 		if err == nil {
-			r.recordSuccess()
+			r.record(nil)
 			return audio, format, nil
 		}
-		if !r.retryNativeInvocation(err, attempt, attempts) {
+		if !r.retries(err, attempt, attempts) {
 			return nil, "", err
 		}
 		if waitErr := waitForRetry(ctx, r.retryDelay(err, attempt)); waitErr != nil {
@@ -436,11 +395,7 @@ func (r *ResilientProvider) Embed(ctx context.Context, model string, input any) 
 		return nil, err
 	}
 	result, err := embedder.Embed(ctx, model, input)
-	if err == nil {
-		r.recordSuccess()
-	} else {
-		r.recordInvocationOutcome(err)
-	}
+	r.record(err)
 	return result, err
 }
 
@@ -460,11 +415,7 @@ func (r *ResilientProvider) GenerateImagesContext(ctx context.Context, model, pr
 	} else {
 		images, usage, err = generator.GenerateImages(model, prompt, count)
 	}
-	if err == nil {
-		r.recordSuccess()
-	} else {
-		r.recordInvocationOutcome(err)
-	}
+	r.record(err)
 	return images, usage, err
 }
 
@@ -490,11 +441,7 @@ func (r *ResilientProvider) StartVideoContext(ctx context.Context, model, prompt
 	if ctx.Err() != nil {
 		return VideoJob{}, ctx.Err()
 	}
-	if err == nil {
-		r.recordSuccess()
-	} else {
-		r.recordInvocationOutcome(err)
-	}
+	r.record(err)
 	return job, err
 }
 
@@ -522,10 +469,10 @@ func (r *ResilientProvider) PollVideoContext(ctx context.Context, operation stri
 			return VideoJob{}, ctx.Err()
 		}
 		if err == nil {
-			r.recordSuccess()
+			r.record(nil)
 			return job, nil
 		}
-		if !r.retryNativeInvocation(err, attempt, attempts) {
+		if !r.retries(err, attempt, attempts) {
 			return VideoJob{}, err
 		}
 		if waitErr := waitForRetry(ctx, r.retryDelay(err, attempt)); waitErr != nil {
@@ -534,20 +481,15 @@ func (r *ResilientProvider) PollVideoContext(ctx context.Context, operation stri
 	}
 }
 
-func (r *ResilientProvider) retryNativeInvocation(err error, attempt, attempts int) bool {
+// retries reports whether a failed try is repeated: a transient failure with
+// attempts left. Otherwise the failure is the operation's outcome, and it
+// moves the circuit.
+func (r *ResilientProvider) retries(err error, attempt, attempts int) bool {
 	if !InvocationRetryable(err) || attempt >= attempts {
-		r.recordInvocationOutcome(err)
+		r.record(err)
 		return false
 	}
 	return true
-}
-
-func (r *ResilientProvider) recordInvocationOutcome(err error) {
-	if InvocationCircuitFailure(err) {
-		r.recordFailure()
-	} else if IsInvocation(err) {
-		r.recordSuccess()
-	}
 }
 
 func max1(n int) int {

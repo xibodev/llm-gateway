@@ -1,6 +1,10 @@
 package providers
 
-import "testing"
+import (
+	"testing"
+
+	"llmgw/internal/config"
+)
 
 // putProvider caches provider under key in the installed Runtime.
 func putProvider(key string, provider Provider) {
@@ -19,6 +23,16 @@ func putCatalogEntry(key string, entry catalogEntry) {
 	catalogs.entries[key] = entry
 }
 
+// streak returns how many consecutive circuit failures rt holds for name.
+func streak(rt *Runtime, name string) int {
+	rt.circuits.mu.Lock()
+	defer rt.circuits.mu.Unlock()
+	if rt.circuits.tracker == nil {
+		return 0
+	}
+	return rt.circuits.tracker.State(name).Streak
+}
+
 func TestInstallForTestsIsolatesAndRestoresTheRuntime(t *testing.T) {
 	outer := Current()
 	outer.ResetCircuit("")
@@ -28,15 +42,17 @@ func TestInstallForTestsIsolatesAndRestoresTheRuntime(t *testing.T) {
 		if Current() != inner || inner == outer {
 			t.Fatal("InstallForTests did not install a new Runtime")
 		}
-		Current().circuits.get("fixture").consecutiveFailures = 3
+		for range 3 {
+			Current().circuits.record("fixture", config.ProviderPolicy{CircuitFailureThreshold: 5}, unavailable())
+		}
 	})
 	if Current() != outer {
 		t.Fatal("the previous Runtime was not restored")
 	}
-	if inner.circuits.get("fixture").consecutiveFailures != 3 {
+	if streak(inner, "fixture") != 3 {
 		t.Fatal("the test's state did not stay in its own Runtime")
 	}
-	if outer.circuits.get("fixture").consecutiveFailures != 0 {
+	if streak(outer, "fixture") != 0 {
 		t.Fatal("the test's state leaked into the previous Runtime")
 	}
 	outer.ResetCircuit("")

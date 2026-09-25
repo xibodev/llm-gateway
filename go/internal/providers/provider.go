@@ -290,25 +290,17 @@ func (r *ResilientProvider) CountAnthropicTokens(model string, payload map[strin
 	for attempt, attempts := 1, max1(r.policy.RetryMaxAttempts); ; attempt++ {
 		result, err := CountAnthropicTokens(r.inner, model, payload, version, beta)
 		if err == nil {
-			r.recordSuccess()
+			r.record(nil)
 			return result, nil
 		}
 		if errors.Is(err, ErrInvalidAnthropicTokenCount) {
 			if InvocationCircuitFailure(err) {
-				r.recordFailure()
+				r.record(err)
 			}
 			return "", err
 		}
 		if !AnthropicMessagesRetryable(err) || attempt >= attempts {
-			if AnthropicMessagesRetryable(err) {
-				r.recordFailure()
-			} else if IsInvocation(err) {
-				if InvocationCircuitFailure(err) {
-					r.recordFailure()
-				} else {
-					r.recordSuccess()
-				}
-			}
+			r.record(err)
 			return "", err
 		}
 		time.Sleep(time.Duration(r.nextBackoff(attempt) * float64(time.Second)))
@@ -325,21 +317,11 @@ func (r *ResilientProvider) CompleteAnthropicMessages(model string, payload map[
 	for attempt, attempts := 1, max1(r.policy.RetryMaxAttempts); ; attempt++ {
 		result, err := CompleteAnthropicMessages(r.inner, model, payload)
 		if err == nil {
-			r.recordSuccess()
+			r.record(nil)
 			return result, nil
 		}
-		if errors.Is(err, ErrAnthropicMessagesUnsupported) || !AnthropicMessagesRetryable(err) {
-			if IsInvocation(err) {
-				if InvocationCircuitFailure(err) {
-					r.recordFailure()
-				} else {
-					r.recordSuccess()
-				}
-			}
-			return nil, err
-		}
-		if attempt >= attempts {
-			r.recordFailure()
+		if errors.Is(err, ErrAnthropicMessagesUnsupported) || !AnthropicMessagesRetryable(err) || attempt >= attempts {
+			r.record(err)
 			return nil, err
 		}
 		time.Sleep(time.Duration(r.nextBackoff(attempt) * float64(time.Second)))

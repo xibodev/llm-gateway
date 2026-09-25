@@ -36,8 +36,11 @@ type Runtime struct {
 	// catalogs, Antigravity image generation and the console refreshes,
 	// which refresh outside core.
 	credentials oauthStore
+	// circuits holds every provider's circuit breaker in an llmgw-core
+	// HealthTracker, as core's Runtime holds the circuits of the instances it
+	// guards.
+	circuits circuits
 
-	circuits circuitBreakers
 	// gcpTokens caches service-account access tokens for every Vertex
 	// provider. Providers are rebuilt on each settings change and per
 	// principal, so the cache lives here, where tokens outlive those rebuilds.
@@ -71,7 +74,6 @@ func NewRuntime() *Runtime { return newRuntime(iamCredentialStore) }
 func newRuntime(open func(oauth bool) (core.CredentialStore, error)) *Runtime {
 	runtime := &Runtime{}
 	runtime.instances.instances = map[string]Provider{}
-	runtime.circuits.circuits = map[string]*circuitState{}
 	runtime.authAdapters.factories = builtInAuthAdapters()
 	runtime.quotaAdapters.values = map[string]QuotaAdapter{}
 	runtime.copilot = copilotauth.NewDynamic(runtime.copilotSettings)
