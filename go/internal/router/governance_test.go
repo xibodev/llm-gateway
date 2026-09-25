@@ -115,7 +115,7 @@ func TestGovernanceAttributesTelemetry(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	db, err := telConn()
+	db, err := Current().telemetry.conn()
 	if err != nil {
 		t.Fatal(err)
 	}

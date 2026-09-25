@@ -77,10 +77,10 @@ type CompatibilityRequest struct {
 
 // FilterCompatibleTargets removes targets with explicit typed incompatibility.
 // It returns a 400-style configuration error when every target is excluded.
-func FilterCompatibleTargets(targets []Target, caller core.Caller, request CompatibilityRequest) ([]Target, error) {
+func (rt *Runtime) FilterCompatibleTargets(targets []Target, caller core.Caller, request CompatibilityRequest) ([]Target, error) {
 	compatible := make([]Target, 0, len(targets))
 	for _, target := range targets {
-		model, ok := providers.CatalogCachedLookupForPrincipal(target.Provider, target.Model, caller)
+		model, ok := rt.providers().CatalogCachedLookupForPrincipal(target.Provider, target.Model, caller)
 		if !ok || model.TypedCapabilities == nil {
 			compatible = append(compatible, target)
 			continue
@@ -222,14 +222,14 @@ func findCategory(name string) (string, *config.EndpointConfig, error) {
 }
 
 // ResolveTargets maps a requested model to an ordered failover chain.
-func ResolveTargets(model string) ([]Target, error) {
-	return ResolveTargetsForPrincipal(context.Background(), model, core.Caller{Kind: core.CallerAnonymous})
+func (rt *Runtime) ResolveTargets(model string) ([]Target, error) {
+	return rt.ResolveTargetsForPrincipal(context.Background(), model, core.Caller{Kind: core.CallerAnonymous})
 }
 
-func ResolveTargetsForPrincipal(
+func (rt *Runtime) ResolveTargetsForPrincipal(
 	ctx context.Context, model string, caller core.Caller,
 ) ([]Target, error) {
-	resolution, err := ResolveForPrincipal(ctx, model, caller)
+	resolution, err := rt.ResolveForPrincipal(ctx, model, caller)
 	return resolution.Targets, err
 }
 
@@ -239,7 +239,7 @@ func ResolveTargetsForPrincipal(
 // check availability after policy enforcement and before executing the chain.
 // A route outside the key's allowlist, or anything but a route for a
 // routes-only key, reads as model-not-found.
-func ResolveForPrincipal(
+func (rt *Runtime) ResolveForPrincipal(
 	ctx context.Context, model string, caller core.Caller,
 ) (Resolution, error) {
 	governance := governanceFrom(ctx)
@@ -274,7 +274,7 @@ func ResolveForPrincipal(
 			if cfg := config.Get().Providers[m.Provider]; cfg != nil && cfg.Disabled {
 				continue
 			}
-			published, err := routeMemberPublished(m, caller)
+			published, err := rt.routeMemberPublished(m, caller)
 			if err != nil {
 				return Resolution{}, err
 			}
@@ -288,7 +288,7 @@ func ResolveForPrincipal(
 			// In a mixed route, disabled members must not mask an enabled
 			// member's provider-policy or credential denial.
 			for _, m := range cat.Failover {
-				published, err := routeMemberPublished(m, caller)
+				published, err := rt.routeMemberPublished(m, caller)
 				if err != nil {
 					return Resolution{}, err
 				}
@@ -316,7 +316,7 @@ func ResolveForPrincipal(
 				if !authorized {
 					return Resolution{}, &ModelNotFoundError{Requested: name, Unavailable: true}
 				}
-				if _, found := providers.CatalogCachedLookupForPrincipal(head, tail, caller); !found {
+				if _, found := rt.providers().CatalogCachedLookupForPrincipal(head, tail, caller); !found {
 					return Resolution{}, &ModelNotFoundError{Requested: name, Unavailable: true}
 				}
 			}
@@ -326,7 +326,7 @@ func ResolveForPrincipal(
 			return Resolution{Targets: []Target{{Provider: head, Model: tail}}}, nil
 		}
 	}
-	if t, ok, err := resolveNativeAlias(ctx, name, caller); err != nil {
+	if t, ok, err := rt.resolveNativeAlias(ctx, name, caller); err != nil {
 		return Resolution{}, err
 	} else if ok {
 		return Resolution{Targets: []Target{t}}, nil
@@ -334,7 +334,7 @@ func ResolveForPrincipal(
 	return Resolution{}, &ModelNotFoundError{Requested: name}
 }
 
-func routeMemberPublished(member config.EndpointMember, caller core.Caller) (bool, error) {
+func (rt *Runtime) routeMemberPublished(member config.EndpointMember, caller core.Caller) (bool, error) {
 	if providers.CatalogRequiresPrincipal(member.Provider) {
 		authorized, err := providers.ProviderCredentialAuthorized(member.Provider, caller)
 		if err != nil {
@@ -343,7 +343,7 @@ func routeMemberPublished(member config.EndpointMember, caller core.Caller) (boo
 		if !authorized {
 			return false, nil
 		}
-		if _, found := providers.CatalogCachedLookupForPrincipal(member.Provider, member.Model, caller); !found {
+		if _, found := rt.providers().CatalogCachedLookupForPrincipal(member.Provider, member.Model, caller); !found {
 			return false, nil
 		}
 	}
@@ -368,7 +368,7 @@ func nativeKey(s string) string {
 // rows send Anthropic-native names with a context tag (e.g. "claude-opus-4-8[1m]")
 // that would otherwise 404. Ambiguous canonical names are rejected rather than
 // routed to whichever provider happens to sort first.
-func resolveNativeAlias(
+func (rt *Runtime) resolveNativeAlias(
 	ctx context.Context, requested string, caller core.Caller,
 ) (Target, bool, error) {
 	base := requested
@@ -390,7 +390,7 @@ func resolveNativeAlias(
 			return Target{}, false, nil
 		}
 	}
-	candidates, err := NativeAliasCandidates(ctx, caller)
+	candidates, err := rt.NativeAliasCandidates(ctx, caller)
 	if err != nil {
 		return Target{}, false, err
 	}
@@ -405,7 +405,7 @@ func resolveNativeAlias(
 // NativeAliasCandidates returns policy- and credential-authorized catalog
 // targets grouped by the canonical key used for bare-name resolution. A
 // governed request also applies its project's policy.
-func NativeAliasCandidates(ctx context.Context, caller core.Caller) (map[string][]Target, error) {
+func (rt *Runtime) NativeAliasCandidates(ctx context.Context, caller core.Caller) (map[string][]Target, error) {
 	governance := governanceFrom(ctx)
 	if governance != nil && governance.RoutesOnly {
 		return map[string][]Target{}, nil
@@ -439,7 +439,7 @@ func NativeAliasCandidates(ctx context.Context, caller core.Caller) (map[string]
 		if !authorized {
 			continue
 		}
-		models := append([]providers.ModelInfo(nil), providers.CatalogModelsForPrincipal(pid, caller)...)
+		models := append([]providers.ModelInfo(nil), rt.providers().CatalogModelsForPrincipal(pid, caller)...)
 		sort.Slice(models, func(i, j int) bool { return models[i].ID < models[j].ID })
 		for _, m := range models {
 			if _, published, evidenceErr := providers.AnonymousModelPublication(pid, m.ID); evidenceErr != nil || !published {
@@ -527,7 +527,7 @@ type attempt struct {
 	Throttled bool   `json:"throttled,omitempty"`
 }
 
-func recordChain(ctx context.Context, requested string, attempts []attempt, served *Target) {
+func (rt *Runtime) recordChain(ctx context.Context, requested string, attempts []attempt, served *Target) {
 	// Only log interesting chains: a failure occurred, or >1 attempt.
 	if len(attempts) == 0 || (len(attempts) == 1 && attempts[0].OK) {
 		return
@@ -539,7 +539,7 @@ func recordChain(ctx context.Context, requested string, attempts []attempt, serv
 	if governance := governanceFrom(ctx); governance != nil {
 		project, key = governance.Project, governance.Key
 	}
-	recordTelemetryEvent(requested, toEventAttempts(attempts), sp, sm, project, key)
+	rt.recordTelemetryEvent(requested, toEventAttempts(attempts), sp, sm, project, key)
 }
 
 // AttemptTrace is a secret-free record of one complete-request routing attempt.
@@ -553,38 +553,38 @@ type AttemptTrace struct {
 
 // ExecuteComplete runs the chain for a non-streaming request. Returns the
 // response, the served target, and an error if all targets failed.
-func ExecuteComplete(targets []Target, messages []providers.Message, requested string, caller core.Caller, kw providers.Kwargs) (map[string]any, *Target, error) {
-	return ExecuteCompleteContext(context.Background(), targets, messages, requested, caller, kw)
+func (rt *Runtime) ExecuteComplete(targets []Target, messages []providers.Message, requested string, caller core.Caller, kw providers.Kwargs) (map[string]any, *Target, error) {
+	return rt.ExecuteCompleteContext(context.Background(), targets, messages, requested, caller, kw)
 }
 
-func ExecuteCompleteContext(ctx context.Context, targets []Target, messages []providers.Message, requested string, caller core.Caller, kw providers.Kwargs) (map[string]any, *Target, error) {
-	response, served, _, err := executeCompleteWithTrace(ctx, targets, messages, requested, caller, kw)
+func (rt *Runtime) ExecuteCompleteContext(ctx context.Context, targets []Target, messages []providers.Message, requested string, caller core.Caller, kw providers.Kwargs) (map[string]any, *Target, error) {
+	response, served, _, err := rt.executeCompleteWithTrace(ctx, targets, messages, requested, caller, kw)
 	return response, served, err
 }
 
 // ExecuteCompleteWithTrace uses the same route/provider execution path as
 // ExecuteComplete while returning a safe fallback trace for operator tooling.
-func ExecuteCompleteWithTrace(targets []Target, messages []providers.Message, requested string, caller core.Caller, kw providers.Kwargs) (map[string]any, *Target, []AttemptTrace, error) {
-	return executeCompleteWithTrace(context.Background(), targets, messages, requested, caller, kw)
+func (rt *Runtime) ExecuteCompleteWithTrace(targets []Target, messages []providers.Message, requested string, caller core.Caller, kw providers.Kwargs) (map[string]any, *Target, []AttemptTrace, error) {
+	return rt.executeCompleteWithTrace(context.Background(), targets, messages, requested, caller, kw)
 }
 
-func ExecuteCompleteWithTraceContext(ctx context.Context, targets []Target, messages []providers.Message, requested string, caller core.Caller, kw providers.Kwargs) (map[string]any, *Target, []AttemptTrace, error) {
-	return executeCompleteWithTrace(ctx, targets, messages, requested, caller, kw)
+func (rt *Runtime) ExecuteCompleteWithTraceContext(ctx context.Context, targets []Target, messages []providers.Message, requested string, caller core.Caller, kw providers.Kwargs) (map[string]any, *Target, []AttemptTrace, error) {
+	return rt.executeCompleteWithTrace(ctx, targets, messages, requested, caller, kw)
 }
 
 // ExecuteResponses preserves the caller's Responses API intent when a target
 // supports it natively, falling back through an explicit loss-checked Chat
 // adapter only for Chat-only providers.
-func ExecuteResponses(
+func (rt *Runtime) ExecuteResponses(
 	targets []Target,
 	payload map[string]any,
 	requested string,
 	caller core.Caller,
 ) (map[string]any, *Target, error) {
-	return ExecuteResponsesContext(context.Background(), targets, payload, requested, caller)
+	return rt.ExecuteResponsesContext(context.Background(), targets, payload, requested, caller)
 }
 
-func ExecuteResponsesContext(
+func (rt *Runtime) ExecuteResponsesContext(
 	ctx context.Context,
 	targets []Target,
 	payload map[string]any,
@@ -609,7 +609,7 @@ func ExecuteResponsesContext(
 			break
 		}
 		target := targets[index]
-		provider, err := providers.GetProviderForPrincipal(target.Provider, caller)
+		provider, err := rt.providers().GetProviderForPrincipal(target.Provider, caller)
 		if err != nil {
 			attempts = append(attempts, attempt{
 				Provider: target.Provider, Model: target.Model,
@@ -641,7 +641,7 @@ func ExecuteResponsesContext(
 				})
 				break
 			}
-			if compatibilityErr := responsesFallbackCompatibility(
+			if compatibilityErr := rt.responsesFallbackCompatibility(
 				target, caller, chatMessages, chatKw,
 			); compatibilityErr != nil {
 				lastErr = compatibilityErr
@@ -680,10 +680,10 @@ func ExecuteResponsesContext(
 			Provider: target.Provider, Model: target.Model, OK: true,
 		})
 		served := target
-		recordChain(ctx, requested, attempts, &served)
+		rt.recordChain(ctx, requested, attempts, &served)
 		return result, &served, nil
 	}
-	recordChain(ctx, requested, attempts, nil)
+	rt.recordChain(ctx, requested, attempts, nil)
 	if errors.Is(lastErr, context.Canceled) {
 		return nil, nil, context.Canceled
 	}
@@ -698,16 +698,16 @@ func ExecuteResponsesContext(
 
 // ExecuteAnthropicMessages preserves native Messages payloads and loss-checks
 // the narrower OpenAI Chat adapter used by other configured providers.
-func ExecuteAnthropicMessages(
+func (rt *Runtime) ExecuteAnthropicMessages(
 	targets []Target,
 	payload map[string]any,
 	requested string,
 	caller core.Caller,
 ) (map[string]any, *Target, error) {
-	return ExecuteAnthropicMessagesContext(context.Background(), targets, payload, requested, caller)
+	return rt.ExecuteAnthropicMessagesContext(context.Background(), targets, payload, requested, caller)
 }
 
-func ExecuteAnthropicMessagesContext(
+func (rt *Runtime) ExecuteAnthropicMessagesContext(
 	ctx context.Context,
 	targets []Target,
 	payload map[string]any,
@@ -721,7 +721,7 @@ func ExecuteAnthropicMessagesContext(
 	if requiresNative {
 		hasNative := false
 		for _, target := range targets {
-			provider, err := providers.GetProviderForPrincipal(target.Provider, caller)
+			provider, err := rt.providers().GetProviderForPrincipal(target.Provider, caller)
 			if err == nil && providers.SupportsAnthropicMessages(provider) {
 				hasNative = true
 				break
@@ -739,7 +739,7 @@ func ExecuteAnthropicMessagesContext(
 			lastErr = ctx.Err()
 			break
 		}
-		provider, err := providers.GetProviderForPrincipal(target.Provider, caller)
+		provider, err := rt.providers().GetProviderForPrincipal(target.Provider, caller)
 		if err != nil {
 			lastErr = err
 			attempts = append(attempts, attempt{Provider: target.Provider, Model: target.Model, Error: truncate(err.Error())})
@@ -750,7 +750,7 @@ func ExecuteAnthropicMessagesContext(
 			result, err = providers.CompleteAnthropicMessages(provider, target.Model, payload)
 		} else if requiresNative {
 			continue
-		} else if err = anthropicFallbackCompatibility(target, caller, messages, kw); err == nil {
+		} else if err = rt.anthropicFallbackCompatibility(target, caller, messages, kw); err == nil {
 			var chat map[string]any
 			chat, err = providers.CompleteProviderContext(ctx, provider, target.Model, messages, kw)
 			if err == nil {
@@ -771,17 +771,17 @@ func ExecuteAnthropicMessagesContext(
 			}
 			attempts = append(attempts, attempt{Provider: target.Provider, Model: target.Model, Error: truncate(err.Error()), Throttled: providers.IsThrottle(err)})
 			if providers.IsInvocation(err) && !providers.InvocationFailoverEligible(err) {
-				recordChain(ctx, requested, attempts, nil)
+				rt.recordChain(ctx, requested, attempts, nil)
 				return nil, nil, &AllTargetsFailed{Msg: err.Error(), Status: providers.UpstreamStatus(err)}
 			}
 			continue
 		}
 		attempts = append(attempts, attempt{Provider: target.Provider, Model: target.Model, OK: true})
 		served := target
-		recordChain(ctx, requested, attempts, &served)
+		rt.recordChain(ctx, requested, attempts, &served)
 		return result, &served, nil
 	}
-	recordChain(ctx, requested, attempts, nil)
+	rt.recordChain(ctx, requested, attempts, nil)
 	message := "no compatible Anthropic Messages target"
 	if lastErr != nil {
 		message = lastErr.Error()
@@ -789,8 +789,8 @@ func ExecuteAnthropicMessagesContext(
 	return nil, nil, &AllTargetsFailed{Msg: message, Status: lastStatus}
 }
 
-func anthropicFallbackCompatibility(target Target, caller core.Caller, messages []map[string]any, kw providers.Kwargs) error {
-	if err := anthropicControlsCompatibility(target, caller, kw); err != nil {
+func (rt *Runtime) anthropicFallbackCompatibility(target Target, caller core.Caller, messages []map[string]any, kw providers.Kwargs) error {
+	if err := rt.anthropicControlsCompatibility(target, caller, kw); err != nil {
 		return err
 	}
 	hasImages := false
@@ -806,7 +806,7 @@ func anthropicFallbackCompatibility(target Target, caller core.Caller, messages 
 	if !hasImages {
 		return nil
 	}
-	model, ok := providers.CatalogLookupForPrincipal(target.Provider, target.Model, caller)
+	model, ok := rt.providers().CatalogLookupForPrincipal(target.Provider, target.Model, caller)
 	if !ok {
 		return &providers.ConfigError{Msg: "Anthropic image adaptation requires verified model vision capability"}
 	}
@@ -816,7 +816,7 @@ func anthropicFallbackCompatibility(target Target, caller core.Caller, messages 
 	return nil
 }
 
-func anthropicControlsCompatibility(target Target, caller core.Caller, kw providers.Kwargs) error {
+func (rt *Runtime) anthropicControlsCompatibility(target Target, caller core.Caller, kw providers.Kwargs) error {
 	providerConfig := config.Get().Providers[target.Provider]
 	if providerConfig == nil {
 		return &providers.ConfigError{Msg: "provider is not configured"}
@@ -830,7 +830,7 @@ func anthropicControlsCompatibility(target Target, caller core.Caller, kw provid
 			return &providers.ConfigError{Msg: "selected provider cannot preserve Anthropic thinking"}
 		}
 		if providerConfig.ForceApiSupport {
-			model, ok := providers.CatalogLookupForPrincipal(target.Provider, target.Model, caller)
+			model, ok := rt.providers().CatalogLookupForPrincipal(target.Provider, target.Model, caller)
 			if !ok || translate.PreferredEndpoint(model.SupportedSurfaces) != "chat" {
 				return &providers.ConfigError{Msg: "selected provider cannot preserve Anthropic thinking on a Responses-only model"}
 			}
@@ -872,16 +872,16 @@ func (stream *boundedStream) Close() error {
 	return stream.StreamIter.Close()
 }
 
-func ExecuteResponsesStream(
+func (rt *Runtime) ExecuteResponsesStream(
 	targets []Target,
 	payload map[string]any,
 	requested string,
 	caller core.Caller,
 ) (*ResponsesExecutionStream, *Target, error) {
-	return ExecuteResponsesStreamContext(context.Background(), targets, payload, requested, caller)
+	return rt.ExecuteResponsesStreamContext(context.Background(), targets, payload, requested, caller)
 }
 
-func ExecuteResponsesStreamContext(
+func (rt *Runtime) ExecuteResponsesStreamContext(
 	ctx context.Context,
 	targets []Target,
 	payload map[string]any,
@@ -905,7 +905,7 @@ func ExecuteResponsesStreamContext(
 			break
 		}
 		target := targets[index]
-		provider, err := providers.GetProviderForPrincipal(target.Provider, caller)
+		provider, err := rt.providers().GetProviderForPrincipal(target.Provider, caller)
 		if ctxErr := ctx.Err(); ctxErr != nil {
 			lastErr = ctxErr
 			lastStatus = deadlineStatus(ctxErr)
@@ -952,7 +952,7 @@ func ExecuteResponsesStreamContext(
 				})
 				break
 			}
-			if compatibilityErr := responsesFallbackCompatibility(
+			if compatibilityErr := rt.responsesFallbackCompatibility(
 				target, caller, chatMessages, chatKw,
 			); compatibilityErr != nil {
 				lastErr = compatibilityErr
@@ -994,11 +994,11 @@ func ExecuteResponsesStreamContext(
 			Provider: target.Provider, Model: target.Model, OK: true,
 		})
 		served := target
-		recordChain(ctx, requested, attempts, &served)
+		rt.recordChain(ctx, requested, attempts, &served)
 		return &ResponsesExecutionStream{Iter: &boundedStream{StreamIter: stream, cancel: cancel}, Native: native}, &served, nil
 	}
 	cancel()
-	recordChain(ctx, requested, attempts, nil)
+	rt.recordChain(ctx, requested, attempts, nil)
 	if errors.Is(lastErr, context.Canceled) {
 		return nil, nil, context.Canceled
 	}
@@ -1011,7 +1011,7 @@ func ExecuteResponsesStreamContext(
 	}
 }
 
-func responsesFallbackCompatibility(
+func (rt *Runtime) responsesFallbackCompatibility(
 	target Target,
 	caller core.Caller,
 	messages []providers.Message,
@@ -1034,7 +1034,7 @@ func responsesFallbackCompatibility(
 	if hasImages {
 		switch providerType {
 		case "openai_compatible", "openai", "github_copilot", "bedrock", "litellm":
-			model, ok := providers.CatalogLookupForPrincipal(
+			model, ok := rt.providers().CatalogLookupForPrincipal(
 				target.Provider, target.Model, caller,
 			)
 			if !ok {
@@ -1108,7 +1108,7 @@ func responsesFallbackCompatibility(
 	return nil
 }
 
-func executeCompleteWithTrace(ctx context.Context, targets []Target, messages []providers.Message, requested string, caller core.Caller, kw providers.Kwargs) (map[string]any, *Target, []AttemptTrace, error) {
+func (rt *Runtime) executeCompleteWithTrace(ctx context.Context, targets []Target, messages []providers.Message, requested string, caller core.Caller, kw providers.Kwargs) (map[string]any, *Target, []AttemptTrace, error) {
 	ctx, cancel, targets := prepareFallback(ctx, targets, kw)
 	defer cancel()
 	var attempts []attempt
@@ -1121,7 +1121,7 @@ func executeCompleteWithTrace(ctx context.Context, targets []Target, messages []
 		}
 		t := targets[i]
 		attemptStarted := time.Now()
-		prov, err := providers.GetProviderForPrincipal(t.Provider, caller)
+		prov, err := rt.providers().GetProviderForPrincipal(t.Provider, caller)
 		if err != nil {
 			throttled := providers.IsThrottle(err)
 			attempts = append(attempts, attempt{Provider: t.Provider, Model: t.Model, OK: false, Error: truncate(err.Error()), Throttled: throttled})
@@ -1146,10 +1146,10 @@ func executeCompleteWithTrace(ctx context.Context, targets []Target, messages []
 		attempts = append(attempts, attempt{Provider: t.Provider, Model: t.Model, OK: true})
 		trace = append(trace, AttemptTrace{Provider: t.Provider, Model: t.Model, Status: "served", DurationMS: time.Since(attemptStarted).Milliseconds()})
 		served := t
-		recordChain(ctx, requested, attempts, &served)
+		rt.recordChain(ctx, requested, attempts, &served)
 		return result, &served, trace, nil
 	}
-	recordChain(ctx, requested, attempts, nil)
+	rt.recordChain(ctx, requested, attempts, nil)
 	if errors.Is(lastErr, context.Canceled) {
 		return nil, nil, trace, context.Canceled
 	}
@@ -1161,21 +1161,21 @@ func executeCompleteWithTrace(ctx context.Context, targets []Target, messages []
 }
 
 // ExecuteStream runs the chain for a streaming request, failing over pre-first-byte.
-func ExecuteStream(targets []Target, messages []providers.Message, requested string, caller core.Caller, kw providers.Kwargs) (providers.StreamIter, *Target, error) {
-	return ExecuteStreamContext(context.Background(), targets, messages, requested, caller, kw)
+func (rt *Runtime) ExecuteStream(targets []Target, messages []providers.Message, requested string, caller core.Caller, kw providers.Kwargs) (providers.StreamIter, *Target, error) {
+	return rt.ExecuteStreamContext(context.Background(), targets, messages, requested, caller, kw)
 }
 
-func ExecuteStreamContext(ctx context.Context, targets []Target, messages []providers.Message, requested string, caller core.Caller, kw providers.Kwargs) (providers.StreamIter, *Target, error) {
-	return executeStreamContext(ctx, targets, messages, requested, caller, kw, nil)
+func (rt *Runtime) ExecuteStreamContext(ctx context.Context, targets []Target, messages []providers.Message, requested string, caller core.Caller, kw providers.Kwargs) (providers.StreamIter, *Target, error) {
+	return rt.executeStreamContext(ctx, targets, messages, requested, caller, kw, nil)
 }
 
-func ExecuteAnthropicStreamContext(ctx context.Context, targets []Target, messages []providers.Message, requested string, caller core.Caller, kw providers.Kwargs) (providers.StreamIter, *Target, error) {
-	return executeStreamContext(ctx, targets, messages, requested, caller, kw, func(target Target) error {
-		return anthropicControlsCompatibility(target, caller, kw)
+func (rt *Runtime) ExecuteAnthropicStreamContext(ctx context.Context, targets []Target, messages []providers.Message, requested string, caller core.Caller, kw providers.Kwargs) (providers.StreamIter, *Target, error) {
+	return rt.executeStreamContext(ctx, targets, messages, requested, caller, kw, func(target Target) error {
+		return rt.anthropicControlsCompatibility(target, caller, kw)
 	})
 }
 
-func executeStreamContext(ctx context.Context, targets []Target, messages []providers.Message, requested string, caller core.Caller, kw providers.Kwargs, validate func(Target) error) (providers.StreamIter, *Target, error) {
+func (rt *Runtime) executeStreamContext(ctx context.Context, targets []Target, messages []providers.Message, requested string, caller core.Caller, kw providers.Kwargs, validate func(Target) error) (providers.StreamIter, *Target, error) {
 	ctx, cancel, targets := prepareFallback(ctx, targets, kw)
 	var attempts []attempt
 	var lastErr error
@@ -1195,7 +1195,7 @@ func executeStreamContext(ctx context.Context, targets []Target, messages []prov
 				continue
 			}
 		}
-		prov, err := providers.GetProviderForPrincipal(t.Provider, caller)
+		prov, err := rt.providers().GetProviderForPrincipal(t.Provider, caller)
 		if ctxErr := ctx.Err(); ctxErr != nil {
 			lastErr = ctxErr
 			lastStatus = deadlineStatus(ctxErr)
@@ -1230,11 +1230,11 @@ func executeStreamContext(ctx context.Context, targets []Target, messages []prov
 		}
 		attempts = append(attempts, attempt{Provider: t.Provider, Model: t.Model, OK: true})
 		served := t
-		recordChain(ctx, requested, attempts, &served)
+		rt.recordChain(ctx, requested, attempts, &served)
 		return &boundedStream{StreamIter: it, cancel: cancel}, &served, nil
 	}
 	cancel()
-	recordChain(ctx, requested, attempts, nil)
+	rt.recordChain(ctx, requested, attempts, nil)
 	if errors.Is(lastErr, context.Canceled) {
 		return nil, nil, context.Canceled
 	}

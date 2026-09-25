@@ -18,11 +18,13 @@ import (
 // The savings ledger records asked-vs-served model + tokens + cost, attributed
 // to the calling project + named key. Best-effort; never breaks a request.
 
-var (
-	savingsMu   sync.Mutex
-	savingsDBs  = map[string]*sql.DB{}
-	savingsInit = map[string]bool{}
-)
+// savingsStore holds one usage.db handle per configured path, and remembers
+// which of them already have the schema.
+type savingsStore struct {
+	mu          sync.Mutex
+	dbs         map[string]*sql.DB
+	initialized map[string]bool
+}
 
 const savingsSchema = `
 CREATE TABLE IF NOT EXISTS usage_ledger (
@@ -51,11 +53,11 @@ func savingsDBPath() string {
 	return raw
 }
 
-func savingsConn() (*sql.DB, error) {
+func (s *savingsStore) conn() (*sql.DB, error) {
 	path := savingsDBPath()
-	savingsMu.Lock()
-	defer savingsMu.Unlock()
-	if db, ok := savingsDBs[path]; ok {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if db, ok := s.dbs[path]; ok {
 		return db, nil
 	}
 	_ = os.MkdirAll(filepath.Dir(path), 0o755)
@@ -64,13 +66,13 @@ func savingsConn() (*sql.DB, error) {
 		return nil, err
 	}
 	db.SetMaxOpenConns(1)
-	if !savingsInit[path] {
+	if !s.initialized[path] {
 		if _, err := db.Exec(savingsSchema); err != nil {
 			return nil, err
 		}
-		savingsInit[path] = true
+		s.initialized[path] = true
 	}
-	savingsDBs[path] = db
+	s.dbs[path] = db
 	return db, nil
 }
 
@@ -95,7 +97,7 @@ type UsageRecord struct {
 }
 
 // RecordUsage appends one usage row. Best-effort.
-func RecordUsage(r UsageRecord) {
+func (rt *Runtime) RecordUsage(r UsageRecord) {
 	s := config.Get()
 	overrides := s.Savings.PriceCatalog
 	cost := computeCost(r.RoutedModel, r.InputTokens, r.OutputTokens, overrides)
@@ -128,7 +130,7 @@ func RecordUsage(r UsageRecord) {
 	if r.IsStub {
 		stub = 1
 	}
-	db, err := savingsConn()
+	db, err := rt.savings.conn()
 	if err != nil {
 		return
 	}
@@ -153,11 +155,11 @@ func round6(f float64) float64 {
 }
 
 // Totals is the headline usage rollup.
-func Totals(includeStubs bool) map[string]any {
+func (rt *Runtime) Totals(includeStubs bool) map[string]any {
 	if !config.Get().Savings.Enabled {
 		return zeroTotals()
 	}
-	db, err := savingsConn()
+	db, err := rt.savings.conn()
 	if err != nil {
 		return zeroTotals()
 	}
@@ -186,11 +188,11 @@ func zeroTotals() map[string]any {
 }
 
 // ByProject returns per project+key rollups.
-func ByProject(includeStubs bool) []map[string]any {
+func (rt *Runtime) ByProject(includeStubs bool) []map[string]any {
 	if !config.Get().Savings.Enabled {
 		return []map[string]any{}
 	}
-	db, err := savingsConn()
+	db, err := rt.savings.conn()
 	if err != nil {
 		return []map[string]any{}
 	}
@@ -222,11 +224,11 @@ func ByProject(includeStubs bool) []map[string]any {
 }
 
 // RecentUsage returns the most recent usage rows.
-func RecentUsage(limit int) []map[string]any {
+func (rt *Runtime) RecentUsage(limit int) []map[string]any {
 	if !config.Get().Savings.Enabled {
 		return []map[string]any{}
 	}
-	db, err := savingsConn()
+	db, err := rt.savings.conn()
 	if err != nil {
 		return []map[string]any{}
 	}
@@ -261,7 +263,7 @@ func nullOrString(ns sql.NullString) any {
 	return ns.String
 }
 
-func PruneSavingsBefore(cutoff int64) (int64, error) {
+func (rt *Runtime) PruneSavingsBefore(cutoff int64) (int64, error) {
 	if !config.Get().Savings.Enabled {
 		return 0, nil
 	}
@@ -271,7 +273,7 @@ func PruneSavingsBefore(cutoff int64) (int64, error) {
 	} else if err != nil {
 		return 0, err
 	}
-	db, err := savingsConn()
+	db, err := rt.savings.conn()
 	if err != nil {
 		return 0, err
 	}
@@ -296,12 +298,12 @@ func PruneSavingsBefore(cutoff int64) (int64, error) {
 }
 
 // ResetSavingsState drops cached DB handles (test helper).
-func ResetSavingsState() {
-	savingsMu.Lock()
-	defer savingsMu.Unlock()
-	for _, db := range savingsDBs {
+func (rt *Runtime) ResetSavingsState() {
+	rt.savings.mu.Lock()
+	defer rt.savings.mu.Unlock()
+	for _, db := range rt.savings.dbs {
 		_ = db.Close()
 	}
-	savingsDBs = map[string]*sql.DB{}
-	savingsInit = map[string]bool{}
+	rt.savings.dbs = map[string]*sql.DB{}
+	rt.savings.initialized = map[string]bool{}
 }

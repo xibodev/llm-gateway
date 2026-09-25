@@ -21,7 +21,7 @@ func TestPruneAuxiliaryHistory(t *testing.T) {
 		config.Update(func(settings *config.Settings) { settings.Savings = oldSavings })
 	})
 
-	telemetry, err := telConn()
+	telemetry, err := Current().telemetry.conn()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -37,7 +37,7 @@ func TestPruneAuxiliaryHistory(t *testing.T) {
 		t.Fatalf("telemetry deleted=%d err=%v", deleted, err)
 	}
 
-	savings, err := savingsConn()
+	savings, err := Current().savings.conn()
 	if err != nil {
 		t.Fatal(err)
 	}

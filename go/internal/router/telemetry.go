@@ -18,11 +18,12 @@ import (
 // that goes through a failover chain we record which targets failed (throttle
 // vs other) and which one served — the "learn as we go" surface.
 
-var (
-	telMu   sync.Mutex
-	telDB   *sql.DB
-	telPath string
-)
+// telemetryStore holds the telemetry.db handle of the current state directory.
+type telemetryStore struct {
+	mu   sync.Mutex
+	db   *sql.DB
+	path string
+}
 
 const telSchema = `
 CREATE TABLE IF NOT EXISTS failover_events (
@@ -39,16 +40,16 @@ CREATE TABLE IF NOT EXISTS failover_events (
 CREATE INDEX IF NOT EXISTS idx_fe_ts ON failover_events(ts);
 `
 
-func telConn() (*sql.DB, error) {
+func (s *telemetryStore) conn() (*sql.DB, error) {
 	path := filepath.Join(config.StateDir(), "telemetry.db")
-	telMu.Lock()
-	defer telMu.Unlock()
-	if telDB != nil && telPath == path {
-		return telDB, nil
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.db != nil && s.path == path {
+		return s.db, nil
 	}
-	if telDB != nil {
-		_ = telDB.Close()
-		telDB = nil
+	if s.db != nil {
+		_ = s.db.Close()
+		s.db = nil
 	}
 	_ = os.MkdirAll(filepath.Dir(path), 0o755)
 	db, err := sql.Open("sqlite", path)
@@ -59,8 +60,8 @@ func telConn() (*sql.DB, error) {
 	if _, err := db.Exec(telSchema); err != nil {
 		return nil, err
 	}
-	telDB = db
-	telPath = path
+	s.db = db
+	s.path = path
 	return db, nil
 }
 
@@ -81,7 +82,7 @@ func toEventAttempts(attempts []attempt) []eventAttempt {
 	return out
 }
 
-func recordTelemetryEvent(requested string, attempts []eventAttempt, servedProvider, servedModel, project, key string) {
+func (rt *Runtime) recordTelemetryEvent(requested string, attempts []eventAttempt, servedProvider, servedModel, project, key string) {
 	throttled := 0
 	for i := range attempts {
 		attempts[i].Error = providers.SanitizeDiagnosticTextLimit(attempts[i].Error, 200)
@@ -89,7 +90,7 @@ func recordTelemetryEvent(requested string, attempts []eventAttempt, servedProvi
 			throttled = 1
 		}
 	}
-	db, err := telConn()
+	db, err := rt.telemetry.conn()
 	if err != nil {
 		return
 	}
@@ -103,8 +104,8 @@ func recordTelemetryEvent(requested string, attempts []eventAttempt, servedProvi
 }
 
 // RecentTelemetry returns recent failover events.
-func RecentTelemetry(limit int) []map[string]any {
-	db, err := telConn()
+func (rt *Runtime) RecentTelemetry(limit int) []map[string]any {
+	db, err := rt.telemetry.conn()
 	if err != nil {
 		return []map[string]any{}
 	}
@@ -143,8 +144,8 @@ func RecentTelemetry(limit int) []map[string]any {
 }
 
 // TelemetryStats returns aggregate counts.
-func TelemetryStats() map[string]any {
-	db, err := telConn()
+func (rt *Runtime) TelemetryStats() map[string]any {
+	db, err := rt.telemetry.conn()
 	if err != nil {
 		return map[string]any{"events": 0, "throttled": 0, "by_requested": []any{}}
 	}
@@ -166,14 +167,14 @@ func TelemetryStats() map[string]any {
 	return map[string]any{"events": events, "throttled": throttled, "by_requested": byReq}
 }
 
-func PruneTelemetryBefore(cutoff int64) (int64, error) {
+func (rt *Runtime) PruneTelemetryBefore(cutoff int64) (int64, error) {
 	path := filepath.Join(config.StateDir(), "telemetry.db")
 	if _, err := os.Stat(path); os.IsNotExist(err) {
 		return 0, nil
 	} else if err != nil {
 		return 0, err
 	}
-	db, err := telConn()
+	db, err := rt.telemetry.conn()
 	if err != nil {
 		return 0, err
 	}
@@ -198,12 +199,12 @@ func PruneTelemetryBefore(cutoff int64) (int64, error) {
 }
 
 // ResetTelemetryState drops the cached DB handle (test helper).
-func ResetTelemetryState() {
-	telMu.Lock()
-	defer telMu.Unlock()
-	if telDB != nil {
-		_ = telDB.Close()
-		telDB = nil
+func (rt *Runtime) ResetTelemetryState() {
+	rt.telemetry.mu.Lock()
+	defer rt.telemetry.mu.Unlock()
+	if rt.telemetry.db != nil {
+		_ = rt.telemetry.db.Close()
+		rt.telemetry.db = nil
 	}
-	telPath = ""
+	rt.telemetry.path = ""
 }
