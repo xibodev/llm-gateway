@@ -153,7 +153,7 @@ func TestChatHistoryWithThoughtSignaturesIsServedByTranslatedTargets(t *testing.
 			w := apiSmokeRequest(handler, "/v1/chat/completions", map[string]any{
 				"model": tc.model, "stream": tc.stream, "messages": history, "tools": tools,
 			})
-			if w.Code != http.StatusOK || !strings.Contains(w.Body.String(), "ok") {
+			if w.Code != http.StatusOK || !strings.Contains(w.Body.String(), `"content":"ok"`) {
 				t.Fatalf("status=%d body=%s", w.Code, w.Body.String())
 			}
 			sent, _ := json.Marshal(upstream.take(tc.path))
