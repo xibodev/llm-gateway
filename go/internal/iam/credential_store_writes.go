@@ -9,9 +9,11 @@ import (
 )
 
 // saveConnection stores record in the existing connection key names, as a
-// new login into that connection does: it reactivates a revoked or disabled
-// connection, restores it as default under PutProviderConnection's rule, and
-// rotates its revision. It cannot create a connection, because a key does
+// new login does. It mirrors the re-authorization write
+// PutOAuthProviderConnection(..., MakeDefault: connection.IsDefault) and,
+// through it, PutProviderConnection: the same principal rules, reactivation,
+// default rule, account-state seed with one revision rotation, quota clear
+// and check invalidation. It cannot create a connection, because a key does
 // not say which principal and provider own it.
 func (s *CredentialStore) saveConnection(ctx context.Context, key string, record tokenstore.Record) (tokenstore.Record, error) {
 	placement, found, err := s.connectionPlacement(ctx, key)
@@ -44,19 +46,19 @@ func (s *CredentialStore) saveConnection(ctx context.Context, key string, record
 	} else if affected != 1 {
 		return tokenstore.Record{}, errConnectionKindChanged
 	}
-	var principalStatus string
+	var principalKind, principalStatus string
 	var existingDefault, activeDefaults int
 	if err := tx.QueryRowContext(ctx, `
-SELECT p.status,c.is_default,
+SELECT p.kind,p.status,c.is_default,
        (SELECT COUNT(*) FROM provider_connections d
         WHERE d.principal_id=c.principal_id AND d.provider_id=c.provider_id
           AND d.status='active' AND d.is_default=1)
 FROM provider_connections c JOIN principals p ON p.id=c.principal_id
-WHERE c.id=?`, key).Scan(&principalStatus, &existingDefault, &activeDefaults); err != nil {
+WHERE c.id=?`, key).Scan(&principalKind, &principalStatus, &existingDefault, &activeDefaults); err != nil {
 		return tokenstore.Record{}, err
 	}
-	if principalStatus != "active" {
-		return tokenstore.Record{}, fmt.Errorf("principal is disabled")
+	if err := connectionOwnerAllowed(principalKind, principalStatus, placement.kind); err != nil {
+		return tokenstore.Record{}, err
 	}
 	makeDefault := activeDefaults == 0 || existingDefault != 0
 	if makeDefault {
@@ -75,14 +77,63 @@ WHERE id=?`, ciphertext, nonce, boolInt(makeDefault), now, key); err != nil {
 	}
 	seed := accountStateSeed(placement, stored)
 	seed.CredentialRotated = true
-	return s.finishConnectionWrite(ctx, tx, key, placement, seed, stored, now)
+	// PutProviderConnection invalidates checks by owner kind, for OAuth too.
+	return s.finishConnectionWrite(ctx, tx, key, placement, seed, stored, now, invalidateOwnerChecks)
+}
+
+// connectionOwnerAllowed applies PutProviderConnection's owner rules. The
+// OAuth writers always ask for a private connection, which a system principal
+// cannot hold, so for them only a human may own an OAuth connection.
+func connectionOwnerAllowed(principalKind, principalStatus, credentialKind string) error {
+	if principalStatus != "active" {
+		return fmt.Errorf("principal is disabled")
+	}
+	switch principalKind {
+	case "human":
+		return nil
+	case "system":
+		if isOAuthCredentialKind(credentialKind) {
+			return fmt.Errorf("OAuth subscriptions require a human principal")
+		}
+		return nil
+	case "service":
+		return fmt.Errorf("service principals cannot own provider connections")
+	default:
+		return fmt.Errorf("unsupported principal kind %q", principalKind)
+	}
+}
+
+// checkInvalidation invalidates the provider checks a credential write
+// affects. Scopes differ by path, so each write names the one it mirrors.
+type checkInvalidation func(tx *sql.Tx, placement connectionPlacement) error
+
+// invalidateOwnerChecks is PutProviderConnection's and
+// RevokeProviderConnection's scope: every scope for a system owner.
+func invalidateOwnerChecks(tx *sql.Tx, placement connectionPlacement) error {
+	return deleteProviderChecksForCredentialOwnerTx(tx, placement.principalID, placement.providerID)
+}
+
+// invalidatePrincipalChecks is the scope of the OAuth refresh and revoke
+// paths: only the owner's own scope, whatever kind of principal owns it.
+func invalidatePrincipalChecks(tx *sql.Tx, placement connectionPlacement) error {
+	return invalidateProviderChecksTx(tx, placement.providerID, placement.principalID, false)
+}
+
+// conditionalWriteChecks is the scope a conditional write uses: the OAuth
+// refresh paths' scope for OAuth connections, and PutProviderConnection's
+// and RevokeProviderConnection's for every other kind.
+func conditionalWriteChecks(kind string) checkInvalidation {
+	if isOAuthCredentialKind(kind) {
+		return invalidatePrincipalChecks
+	}
+	return invalidateOwnerChecks
 }
 
 // finishConnectionWrite applies the side effects every gateway credential
 // write has, then commits and returns the stored record with its revision.
 func (s *CredentialStore) finishConnectionWrite(
 	ctx context.Context, tx *sql.Tx, key string, placement connectionPlacement,
-	seed ProviderAccountStateSeed, stored tokenstore.Record, now int64,
+	seed ProviderAccountStateSeed, stored tokenstore.Record, now int64, checks checkInvalidation,
 ) (tokenstore.Record, error) {
 	if err := seedProviderAccountStateTx(tx, key, seed, now); err != nil {
 		return tokenstore.Record{}, err
@@ -90,9 +141,7 @@ func (s *CredentialStore) finishConnectionWrite(
 	if err := clearProviderQuotaSnapshotsTx(tx, key, now); err != nil {
 		return tokenstore.Record{}, err
 	}
-	if err := deleteProviderChecksForCredentialOwnerTx(
-		tx, placement.principalID, placement.providerID,
-	); err != nil {
+	if err := checks(tx, placement); err != nil {
 		return tokenstore.Record{}, err
 	}
 	revision, err := connectionRevisionTx(ctx, tx, key)
@@ -106,18 +155,21 @@ func (s *CredentialStore) finishConnectionWrite(
 	return stored, nil
 }
 
-// casRevisionTx is the compare-and-swap every conditional write starts with.
-// The revision is compared and rotated by one UPDATE, which also takes the
-// write lock, so no other writer can slip in between check and write. Only
-// an active connection of an active owner is current, matching Load.
-func casRevisionTx(ctx context.Context, tx *sql.Tx, key string, expected, now int64) (bool, error) {
+// casRevisionTx is the compare every conditional write starts with. It is an
+// UPDATE that changes nothing but matches only the current revision of an
+// active connection of an active owner, the state Load serves. Being a write,
+// it takes the write lock in the same statement as the compare, so no other
+// writer can slip in between; it leaves the revision alone because neither
+// OAuth refresh write rotates it here: the replace seed rotates it once, and
+// a revoke never does.
+func casRevisionTx(ctx context.Context, tx *sql.Tx, key string, expected int64) (bool, error) {
 	result, err := tx.ExecContext(ctx, `
-UPDATE provider_account_state SET credential_revision=credential_revision+1,updated_at=?
+UPDATE provider_account_state SET credential_revision=credential_revision
 WHERE connection_id=? AND credential_revision=? AND EXISTS (
     SELECT 1 FROM provider_connections c JOIN principals p ON p.id=c.principal_id
     WHERE c.id=provider_account_state.connection_id
       AND c.status='active' AND p.status='active')`,
-		now, key, expected)
+		key, expected)
 	if err != nil {
 		return false, err
 	}
@@ -125,6 +177,11 @@ WHERE connection_id=? AND credential_revision=? AND EXISTS (
 	return affected == 1, err
 }
 
+// replaceConnection mirrors ReplaceOAuthProviderConnectionIfCurrent as the
+// OAuth refresh callers invoke it, with the connection's own kind and
+// source, so neither changes. A revision fence replaces its ciphertext
+// compare. Other kinds get the same write with PutProviderConnection's check
+// invalidation.
 func (s *CredentialStore) replaceConnection(
 	ctx context.Context, key, revision string, record tokenstore.Record,
 ) (tokenstore.Record, error) {
@@ -149,7 +206,7 @@ func (s *CredentialStore) replaceConnection(
 		return tokenstore.Record{}, err
 	}
 	defer func() { _ = tx.Rollback() }()
-	current, err := casRevisionTx(ctx, tx, key, expected, now)
+	current, err := casRevisionTx(ctx, tx, key, expected)
 	if err != nil {
 		return tokenstore.Record{}, err
 	}
@@ -171,17 +228,21 @@ WHERE id=? AND status='active' AND credential_kind=?`,
 	} else if affected != 1 {
 		return tokenstore.Record{}, tokenstore.ErrConflict
 	}
-	return s.finishConnectionWrite(ctx, tx, key, placement, accountStateSeed(placement, stored), stored, now)
+	seed := accountStateSeed(placement, stored)
+	seed.CredentialRotated = true
+	return s.finishConnectionWrite(ctx, tx, key, placement, seed, stored, now, conditionalWriteChecks(placement.kind))
 }
 
-// revokeConnection revokes the connection the way RevokeProviderConnection
-// does, promoting another active connection to default, but only while the
-// caller's revision is current.
+// revokeConnection mirrors RevokeOAuthProviderConnectionIfCurrent, and
+// RevokeProviderConnection for other kinds: it revokes the connection,
+// clears its quota, promotes the most recently updated active connection to
+// default and invalidates checks, but only while revision is current. Like
+// both, it leaves the revision alone.
 func (s *CredentialStore) revokeConnection(ctx context.Context, key, revision string) error {
 	expected, ok := parseCredentialRevision(revision)
 	if !ok {
-		// No row carries a negative revision, so the swap below fails and the
-		// existence check tells a conflict from a missing credential.
+		// No row carries a negative revision, so the compare below fails and
+		// the existence check tells a conflict from a missing credential.
 		expected = -1
 	}
 	now := s.now().Unix()
@@ -190,7 +251,7 @@ func (s *CredentialStore) revokeConnection(ctx context.Context, key, revision st
 		return err
 	}
 	defer func() { _ = tx.Rollback() }()
-	current, err := casRevisionTx(ctx, tx, key, expected, now)
+	current, err := casRevisionTx(ctx, tx, key, expected)
 	if err != nil {
 		return err
 	}
@@ -209,8 +270,8 @@ WHERE c.id=? AND c.status='active' AND p.status='active'`, key).Scan(&active); e
 	var placement connectionPlacement
 	var wasDefault int
 	if err := tx.QueryRowContext(ctx, `
-SELECT principal_id,provider_id,is_default FROM provider_connections WHERE id=?`, key,
-	).Scan(&placement.principalID, &placement.providerID, &wasDefault); err != nil {
+SELECT principal_id,provider_id,credential_kind,is_default FROM provider_connections WHERE id=?`, key,
+	).Scan(&placement.principalID, &placement.providerID, &placement.kind, &wasDefault); err != nil {
 		return err
 	}
 	if _, err := tx.ExecContext(ctx, `
@@ -232,9 +293,7 @@ WHERE id=(
 			return err
 		}
 	}
-	if err := deleteProviderChecksForCredentialOwnerTx(
-		tx, placement.principalID, placement.providerID,
-	); err != nil {
+	if err := conditionalWriteChecks(placement.kind)(tx, placement); err != nil {
 		return err
 	}
 	return tx.Commit()

@@ -124,13 +124,17 @@ func connectionSecret(kind string, record tokenstore.Record) (string, error) {
 	if strings.EqualFold(kind, gcpauth.CredentialKind) {
 		// Parse before storing, as PutProviderConnection does, so a malformed
 		// key fails here instead of on the request path.
-		if _, err := gcpauth.Parse([]byte(record.AccessToken)); err != nil {
+		if _, err := gcpauth.Parse([]byte(strings.TrimSpace(record.AccessToken))); err != nil {
 			return "", err
 		}
 	}
-	return record.AccessToken, nil
+	// PutProviderConnection stores every secret trimmed.
+	return strings.TrimSpace(record.AccessToken), nil
 }
 
+// recordEnvelope builds the envelope PutOAuthProviderConnection and
+// ReplaceOAuthProviderConnectionIfCurrent would store: both trim every field
+// except the client secret, which is kept byte for byte.
 func recordEnvelope(record tokenstore.Record) (OAuthTokenEnvelope, error) {
 	envelope := OAuthTokenEnvelope{
 		AccessToken: record.AccessToken, RefreshToken: record.RefreshToken,
@@ -151,6 +155,13 @@ func recordEnvelope(record tokenstore.Record) (OAuthTokenEnvelope, error) {
 			envelope.Metadata = map[string]string{}
 		}
 		envelope.Metadata[key] = value
+	}
+	for _, field := range []*string{
+		&envelope.AccessToken, &envelope.RefreshToken, &envelope.IDToken, &envelope.TokenType,
+		&envelope.AccountID, &envelope.AccountLabel, &envelope.ProjectID, &envelope.OAuthProfile,
+		&envelope.OAuthClientID, &envelope.OAuthClientMode, &envelope.OAuthRedirectURI, &envelope.Status,
+	} {
+		*field = strings.TrimSpace(*field)
 	}
 	return envelope, nil
 }
