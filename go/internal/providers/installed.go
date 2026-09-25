@@ -118,10 +118,6 @@ func ForgetCatalogForProject(providerID, projectID string) {
 	Current().ForgetCatalogForProject(providerID, projectID)
 }
 
-func NewGatewayProviderOrchestrator(profiles []AnonymousProviderProfile) (*core.ProviderOrchestrator, error) {
-	return Current().NewGatewayProviderOrchestrator(profiles)
-}
-
 // CopilotAuth returns the installed Runtime's Copilot authentication client.
 func CopilotAuth() *copilotauth.Client { return Current().CopilotAuth() }
 

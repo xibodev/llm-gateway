@@ -5,95 +5,22 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"strings"
 	"time"
 
 	core "github.com/xibodev/llmgw-core"
 	"github.com/xibodev/llmgw-core/anonymous"
 	coreproviders "github.com/xibodev/llmgw-core/providers"
-
-	"llmgw/internal/iam"
 )
 
-type providerEvidenceGenerationKey struct{}
+// The anonymous-provider automation runs on llmgw-core's anonymous
+// orchestrator (see internal/api/anonymous_provider_automation.go), which
+// reads catalogs and sends probes through the Catalog and Invoker here.
 
-func WithProviderEvidenceGeneration(ctx context.Context, generation int64) context.Context {
-	return context.WithValue(ctx, providerEvidenceGenerationKey{}, generation)
-}
-
-// NewGatewayProviderOrchestrator builds the shared connector surface for the
-// reviewed anonymous profiles supplied by the application registry. Its
-// adapters discover and complete through this Runtime.
-func (rt *Runtime) NewGatewayProviderOrchestrator(profiles []AnonymousProviderProfile) (*core.ProviderOrchestrator, error) {
-	orchestrator := core.NewProviderOrchestrator()
-	for _, profile := range profiles {
-		entry, ok := RegistryProviderByID(profile.RegistryID)
-		if !ok || !entry.AnonymousAutomation || entry.ID == "openai_codex" ||
-			!strings.EqualFold(profile.RuntimeType, "openai_compatible") {
-			return nil, fmt.Errorf("provider profile %q is not eligible for anonymous orchestration", profile.RegistryID)
-		}
-
-		adapter := coreproviders.NewAnonymousOpenAICompatibleAdapter(profile.BaseURL, nil)
-		adapter.DiscoverModels = rt.applicationModelDiscoverer(profile.ProviderID)
-		adapter.SelectProbeTargets = anonymousProbeSelector(profile)
-		if usesApplicationAnonymousAdapter(profile.RegistryID) {
-			adapter.Complete = rt.applicationCompletionRuntime(profile.ProviderID)
-		}
-		if err := orchestrator.Register(profile.ProviderID, adapter); err != nil {
-			return nil, err
-		}
-	}
-	return orchestrator, nil
-}
-
+// usesApplicationAnonymousAdapter reports the profiles probed through their
+// instance's own provider: core's keyless client posts to /chat/completions,
+// which OpenCode Zen and Pollinations do not serve as the gateway does.
 func usesApplicationAnonymousAdapter(registryID string) bool {
 	return registryID == "opencode_zen" || registryID == "pollinations"
-}
-
-func (rt *Runtime) applicationModelDiscoverer(providerID string) core.ProviderModelDiscoverer {
-	catalog := rt.AnonymousCatalog()
-	return func(ctx context.Context, _ core.ProviderConnection) ([]core.ModelInfo, error) {
-		models, err := catalog.Discover(ctx, gatewayCaller(), providerID)
-		if err != nil {
-			return nil, err
-		}
-		modelIDs := make([]string, 0, len(models))
-		for _, model := range models {
-			modelIDs = append(modelIDs, model.ID)
-		}
-		generation, ok := ctx.Value(providerEvidenceGenerationKey{}).(int64)
-		if !ok {
-			return nil, fmt.Errorf("provider evidence generation is required")
-		}
-		if err := iam.ReconcileProviderModelCatalog(
-			providerID, "", iam.ModelEvidenceCompletion, modelIDs, generation,
-		); err != nil {
-			return nil, fmt.Errorf("prepare model evidence: %w", err)
-		}
-		return models, nil
-	}
-}
-
-func anonymousProbeSelector(profile AnonymousProviderProfile) core.ProviderProbeSelector {
-	return func(_ core.ProviderConnection, models []core.ModelInfo) []core.Target {
-		seen := make(map[string]bool, len(models))
-		targets := make([]core.Target, 0, len(models))
-		for _, model := range models {
-			id := strings.TrimSpace(model.ID)
-			if id == "" || seen[id] {
-				continue
-			}
-			seen[id] = true
-			targets = append(targets, core.Target{Provider: profile.ProviderID, Model: id})
-		}
-		return targets
-	}
-}
-
-func (rt *Runtime) applicationCompletionRuntime(providerID string) core.ProviderCompletionRuntime {
-	return func(ctx context.Context, _ core.ProviderConnection, target core.Target, payload map[string]any) (map[string]any, error) {
-		return rt.applicationProbe(ctx, gatewayCaller(), providerID, target.Model, payload)
-	}
 }
 
 // AnonymousCatalog is the Catalog of llmgw-core's anonymous orchestrator on

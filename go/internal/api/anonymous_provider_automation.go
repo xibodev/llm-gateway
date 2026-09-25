@@ -2,6 +2,8 @@ package api
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"log"
 	"net/http"
 	"os"
@@ -11,6 +13,7 @@ import (
 	"time"
 
 	core "github.com/xibodev/llmgw-core"
+	"github.com/xibodev/llmgw-core/anonymous"
 
 	"llmgw/internal/config"
 	"llmgw/internal/iam"
@@ -119,37 +122,27 @@ func (s *server) handleAutoConnectFreeProviders(w http.ResponseWriter, r *http.R
 	w.Header().Set("Cache-Control", "no-store")
 	_ = iam.SetAnonymousProviderAutomationOverride("on")
 
-	runtime := s.providers()
 	profiles := providers.AnonymousProviderProfiles()
-	results := make([]map[string]any, 0, len(profiles))
-	verifiedCount := 0
-
-	orchestrator, err := runtime.NewGatewayProviderOrchestrator(profiles)
+	orchestrator, err := newAnonymousOrchestrator(s.providers(), profiles)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "Provider automation is unavailable.")
 		return
 	}
-	for _, profile := range profiles {
-		providerID, status := ensureAnonymousProvider(runtime, profile)
-		item := map[string]any{
-			"provider_id": providerID,
-			"registry_id": profile.RegistryID,
-			"status":      status,
-		}
-		if status == "managed" {
-			result := connectAnonymousProvider(r.Context(), orchestrator, profile)
-			for key, value := range result {
-				if key != "status" {
-					item[key] = value
-				}
-			}
-			if result["success"] == true {
+	results := make([]map[string]any, 0, len(profiles))
+	verifiedCount := 0
+	for _, result := range orchestrator.ConnectAll(r.Context()) {
+		item := anonymousResultItem(result)
+		item["registry_id"] = result.RegistryID
+		if result.Operation != "" {
+			// A checked provider is managed until its check says more.
+			item["status"] = anonymous.StatusManaged
+			if result.Success {
 				item["status"] = "verified"
 				verifiedCount++
-			} else if result["catalog_evidence"] == string(core.CatalogDiscovered) {
+			} else if result.CatalogEvidence == core.CatalogDiscovered {
 				item["status"] = "connected"
-			} else if details, _ := result["details"].(string); details != "" {
-				item["catalog_error"] = details
+			} else if result.Details != "" {
+				item["catalog_error"] = result.Details
 			}
 		}
 		results = append(results, item)
@@ -174,147 +167,172 @@ func requestAnonymousProviderAutomation() {
 	}
 }
 
-// StartAnonymousProviderAutomation runs the automation hourly, and when a
-// setting change requests it, against runtime until the returned stop runs.
+// StartAnonymousProviderAutomation runs the automation at once, then hourly
+// and when a setting change requests it, against runtime until the returned
+// stop runs.
 func StartAnonymousProviderAutomation(parent context.Context, runtime *providers.Runtime) func() {
-	ctx, cancel := context.WithCancel(parent)
-	done := make(chan struct{})
-	go func() {
-		defer close(done)
-		ticker := time.NewTicker(time.Hour)
-		defer ticker.Stop()
-		for {
-			runAnonymousProviderAutomation(ctx, runtime)
-			select {
-			case <-ctx.Done():
-				return
-			case <-ticker.C:
-			case <-anonymousAutomationWake:
-			}
-		}
-	}()
-	var once sync.Once
-	return func() { once.Do(func() { cancel(); <-done }) }
-}
-
-func runAnonymousProviderAutomation(ctx context.Context, runtime *providers.Runtime) []map[string]any {
-	return runAnonymousProviderAutomationProfiles(ctx, runtime, providers.AnonymousProviderProfiles())
-}
-
-func runAnonymousProviderAutomationProfiles(
-	ctx context.Context, runtime *providers.Runtime, profiles []providers.AnonymousProviderProfile,
-) []map[string]any {
-	state, err := anonymousProviderAutomationState()
-	if err != nil || !state.Effective || ctx.Err() != nil {
-		return nil
-	}
-	orchestrator, err := runtime.NewGatewayProviderOrchestrator(profiles)
+	orchestrator, err := newAnonymousOrchestrator(runtime, providers.AnonymousProviderProfiles())
 	if err != nil {
-		return []map[string]any{{"status": "failed", "failure_code": "orchestrator_unavailable"}}
+		// The registry vets its anonymous profiles as it loads, so this does
+		// not happen; if it did, no run could connect a provider, as before.
+		return func() {}
 	}
-	results := []map[string]any{}
-	for _, profile := range profiles {
-		if ctx.Err() != nil {
-			break
-		}
-		current, stateErr := anonymousProviderAutomationState()
-		if stateErr != nil || !current.Effective {
-			break
-		}
-		providerID, status := ensureAnonymousProvider(runtime, profile)
-		if status != "managed" {
-			results = append(results, map[string]any{"provider_id": providerID, "status": status})
-			continue
-		}
-		claimed, claimErr := iam.ClaimAnonymousProviderCheck(providerID, time.Now(), anonymousProviderAutomationInterval)
-		if claimErr != nil || !claimed {
-			continue
-		}
-		if current, exists := config.Provider(providerID); !exists {
-			continue
-		} else if _, status = classifyAnonymousProvider(profile, current); status != "managed" {
-			results = append(results, map[string]any{"provider_id": providerID, "status": status})
-			continue
-		}
-		currentState, stateErr := anonymousProviderAutomationState()
-		if stateErr != nil || !currentState.Effective {
-			break
-		}
-		if current, exists := config.Provider(providerID); !exists {
-			continue
-		} else if _, status = classifyAnonymousProvider(profile, current); status != "managed" {
-			results = append(results, map[string]any{"provider_id": providerID, "status": status})
-			continue
-		}
-		results = append(results, connectAnonymousProvider(ctx, orchestrator, profile))
-	}
-	return results
+	return orchestrator.Start(parent, time.Hour, anonymousAutomationWake)
 }
 
-func connectAnonymousProvider(
-	ctx context.Context, orchestrator *core.ProviderOrchestrator, profile providers.AnonymousProviderProfile,
-) map[string]any {
-	generation, generationErr := iam.ProviderCheckGeneration(profile.ProviderID, "")
-	if generationErr != nil {
-		return map[string]any{
-			"provider_id": profile.ProviderID, "operation": "verify", "success": false,
-			"status": "failed", "failure_code": "evidence_unavailable",
-			"catalog_evidence": "not_probed", "completion_evidence": "not_probed",
-		}
-	}
-	ctx = providers.WithProviderEvidenceGeneration(ctx, generation)
-	connection := core.ProviderConnection{
-		ProviderID: profile.ProviderID, Kind: core.ProviderConnectionAnonymous, AuthKind: core.ProviderAuthAnonymous,
-	}
-	result, connectErr := orchestrator.Connect(ctx, core.ProviderConnectRequest{
-		Connection: connection, PublicationPolicy: core.PublishVerifiedTargets,
+// newAnonymousOrchestrator returns llmgw-core's anonymous orchestrator for
+// profiles, which runs the automation against runtime: it vets the profiles
+// against the effective registry, probes every model a catalog lists, and
+// publishes the ones that answer. The gateway supplies the Hooks, and the
+// catalog and probe paths through runtime.
+func newAnonymousOrchestrator(
+	runtime *providers.Runtime, profiles []providers.AnonymousProviderProfile,
+) (*anonymous.Orchestrator, error) {
+	automation := newAnonymousAutomation(runtime, profiles)
+	return anonymous.New(anonymous.Options{
+		Profiles: profiles, Registry: providers.EffectiveRegistry(),
+		Catalog: automation, Invoker: runtime.AnonymousInvoker(profiles), Hooks: automation,
+		CheckInterval: anonymousProviderAutomationInterval,
 	})
-	item := map[string]any{
-		"provider_id": profile.ProviderID, "operation": "verify", "success": false,
-		"status": "failed", "authentication_state": authenticationState(result.Health),
-		"catalog_evidence": string(result.Catalog.Status), "completion_evidence": "not_probed",
+}
+
+// anonymousAutomation is the gateway's side of the orchestrator. Its Hooks
+// are the setting, the enrollment policy, the daily claim and the evidence;
+// as its Catalog it prepares a check's model evidence once the catalog is
+// read. The orchestrator checks one provider at a time and asks each check's
+// generation before its catalog, so Generation keeps it for Discover.
+type anonymousAutomation struct {
+	runtime  *providers.Runtime
+	profiles map[string]providers.AnonymousProviderProfile
+	catalog  anonymous.Catalog
+
+	mu          sync.Mutex
+	generations map[string]int64
+}
+
+func newAnonymousAutomation(
+	runtime *providers.Runtime, profiles []providers.AnonymousProviderProfile,
+) *anonymousAutomation {
+	automation := &anonymousAutomation{
+		runtime:     runtime,
+		profiles:    make(map[string]providers.AnonymousProviderProfile, len(profiles)),
+		catalog:     runtime.AnonymousCatalog(),
+		generations: map[string]int64{},
 	}
-	if connectErr != nil {
-		item["failure_code"] = providerHealthFailureCode(result.Health, true)
-		item["details"] = connectErr.Error()
-		recordOrchestratorChecks(profile.ProviderID, generation, result)
+	for _, profile := range profiles {
+		automation.profiles[profile.ProviderID] = profile
+	}
+	return automation
+}
+
+// Enabled reports the effective setting. A setting that cannot be read is
+// off.
+func (a *anonymousAutomation) Enabled(context.Context) bool {
+	state, err := anonymousProviderAutomationState()
+	return err == nil && state.Effective
+}
+
+// Enroll applies the gateway's enrollment policy; see ensureAnonymousProvider.
+func (a *anonymousAutomation) Enroll(_ context.Context, profile providers.AnonymousProviderProfile) (string, string) {
+	return ensureAnonymousProvider(a.runtime, profile)
+}
+
+// Claim claims the provider's daily check and then reads the provider again
+// under the claim, declining one that changed since Enroll: the orchestrator
+// has no second enrollment check of its own. A declined claim still consumes
+// the day, as the gateway's skipped check always did.
+func (a *anonymousAutomation) Claim(_ context.Context, providerID string, at time.Time, every time.Duration) (bool, error) {
+	claimed, err := iam.ClaimAnonymousProviderCheck(providerID, at, every)
+	if err != nil || !claimed {
+		return false, err
+	}
+	current, exists := config.Provider(providerID)
+	if !exists {
+		return false, nil
+	}
+	_, status := classifyAnonymousProvider(a.profiles[providerID], current)
+	return status == anonymous.StatusManaged, nil
+}
+
+// Generation reads the provider's evidence generation, the fence that a later
+// invalidation advances while the check is in flight.
+func (a *anonymousAutomation) Generation(_ context.Context, providerID string) (int64, error) {
+	generation, err := iam.ProviderCheckGeneration(providerID, "")
+	if err != nil {
+		return 0, err
+	}
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.generations[providerID] = generation
+	return generation, nil
+}
+
+// Discover reads the catalog and, before any probe, reconciles the provider's
+// model evidence with it under the check's generation: a model the catalog
+// no longer lists goes stale, and every listed one is unverified until its
+// probe is recorded.
+func (a *anonymousAutomation) Discover(ctx context.Context, caller core.Caller, providerID string) ([]core.ModelInfo, error) {
+	models, err := a.catalog.Discover(ctx, caller, providerID)
+	if err != nil {
+		return nil, err
+	}
+	a.mu.Lock()
+	generation, ok := a.generations[providerID]
+	a.mu.Unlock()
+	if !ok {
+		return nil, errors.New("provider evidence generation is required")
+	}
+	modelIDs := make([]string, 0, len(models))
+	for _, model := range models {
+		modelIDs = append(modelIDs, model.ID)
+	}
+	if err := iam.ReconcileProviderModelCatalog(
+		providerID, "", iam.ModelEvidenceCompletion, modelIDs, generation,
+	); err != nil {
+		return nil, fmt.Errorf("prepare model evidence: %w", err)
+	}
+	return models, nil
+}
+
+// Record keeps a check's evidence. It never fails the check: the automation
+// has always recorded on a best-effort basis.
+func (a *anonymousAutomation) Record(_ context.Context, providerID string, generation int64, result anonymous.Result) error {
+	recordOrchestratorChecks(providerID, generation, result.Connect)
+	return nil
+}
+
+// anonymousResultItem is result as the automation has always reported it: a
+// provider it leaves alone by its enrollment status; a check without an
+// evidence generation by its failure; a check no probe ran for with why; and
+// any other with its probes, published targets and retry advice.
+func anonymousResultItem(result anonymous.Result) map[string]any {
+	if result.Operation == "" {
+		return map[string]any{"provider_id": result.ProviderID, "status": result.Status}
+	}
+	item := map[string]any{
+		"provider_id": result.ProviderID, "operation": result.Operation, "success": result.Success,
+		"status": result.Status, "failure_code": result.FailureCode,
+		"catalog_evidence":    string(result.CatalogEvidence),
+		"completion_evidence": string(result.CompletionEvidence),
+	}
+	if result.FailureCode == anonymous.FailureEvidenceUnavailable {
 		return item
 	}
-	if len(result.Probes) == 0 {
-		item["failure_code"] = "model_unavailable"
-		item["details"] = "No reviewed anonymous model was available for verification."
-		recordOrchestratorChecks(profile.ProviderID, generation, result)
+	item["authentication_state"] = result.AuthenticationState
+	if result.Probed == 0 {
+		item["details"] = result.Details
 		return item
 	}
 	item["targets"] = coreTargetsForWire(result.Targets)
-	item["published"] = len(result.Targets)
-	item["probed"] = len(result.Probes)
-	verified := 0
-	failed := 0
-	for _, probe := range result.Probes {
-		if probe.Status == core.CompletionVerified {
-			verified++
-		} else {
-			failed++
-		}
+	item["published"], item["probed"] = result.Published, result.Probed
+	item["verified"], item["failed"] = result.Verified, result.Failed
+	if result.VerificationError != "" {
+		item["verification_error"] = result.VerificationError
 	}
-	item["verified"] = verified
-	item["failed"] = failed
-	item["completion_evidence"] = map[bool]string{true: "verified", false: "failed"}[failed == 0]
-	if verified > 0 {
-		item["success"] = true
-		item["status"] = "passed"
-		item["authentication_state"] = "accepted"
-		item["failure_code"] = ""
-	} else {
-		item["failure_code"] = providerHealthFailureCode(result.Health, false)
-		item["verification_error"] = "Provider inference verification failed."
+	item["retryable"] = result.Retryable
+	if result.RetryAfter > 0 {
+		item["retry_after"] = strconv.FormatInt(int64(result.RetryAfter/time.Second), 10)
 	}
-	item["retryable"] = result.Health.Retryable
-	if result.Health.RetryAfter > 0 {
-		item["retry_after"] = strconv.FormatInt(int64(result.Health.RetryAfter/time.Second), 10)
-	}
-	recordOrchestratorChecks(profile.ProviderID, generation, result)
 	return item
 }
 
@@ -324,26 +342,6 @@ func coreTargetsForWire(targets []core.Target) []map[string]string {
 		out = append(out, map[string]string{"provider": target.Provider, "model": target.Model})
 	}
 	return out
-}
-
-func authenticationState(health core.ProviderHealthEvidence) string {
-	if health.ErrorClass == core.ProviderErrorAuth || health.ErrorClass == core.ProviderErrorForbidden {
-		return "rejected"
-	}
-	if health.Status == core.ProviderHealthHealthy || health.Status == core.ProviderHealthDegraded {
-		return "accepted"
-	}
-	return "unknown"
-}
-
-func providerHealthFailureCode(health core.ProviderHealthEvidence, catalog bool) string {
-	if health.ErrorClass == core.ProviderErrorAuth || health.ErrorClass == core.ProviderErrorForbidden {
-		return "authentication_rejected"
-	}
-	if catalog {
-		return "catalog_failed"
-	}
-	return "verification_failed"
 }
 
 func recordOrchestratorChecks(providerID string, generation int64, result core.ProviderConnectResult) {
@@ -357,13 +355,7 @@ func recordOrchestratorChecks(providerID string, generation int64, result core.P
 	})
 	for _, probe := range result.Probes {
 		success := probe.Status == core.CompletionVerified
-		failureCode := ""
-		if !success {
-			failureCode = strings.TrimSpace(probe.FailureCode)
-			if failureCode == "" || failureCode == string(core.ProviderErrorNone) {
-				failureCode = "verification_failed"
-			}
-		}
+		failureCode := anonymous.ProbeFailureCode(probe)
 		_ = iam.RecordProviderCheck(iam.ProviderCheck{
 			ProviderID: providerID, Operation: iam.CheckVerify, Generation: generation, Success: success,
 			Detail: providerCheckDetail(success, failureCode),
