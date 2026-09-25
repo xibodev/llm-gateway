@@ -281,20 +281,10 @@ func TestAzureCompletionsPostToTheOpenAIV1Route(t *testing.T) {
 	}))
 	defer server.Close()
 
-	config.Update(func(s *config.Settings) {
-		s.Providers = map[string]*config.ProviderConfig{
-			// The portal value: an origin with no path at all.
-			"azure-fixture": {Type: "azure_openai", RegistryID: "azure_openai",
-				BaseURL: server.URL, APIKey: "test-api-key"},
-		}
+	// The portal value: an origin with no path at all.
+	provider := azureFixture(t, &config.ProviderConfig{
+		Type: "azure_openai", RegistryID: "azure_openai", BaseURL: server.URL, APIKey: "test-api-key",
 	})
-	ResetProviders()
-	t.Cleanup(ResetProviders)
-
-	provider, err := GetProvider("azure-fixture")
-	if err != nil {
-		t.Fatalf("instantiate: %v", err)
-	}
 	if _, err := provider.Complete("gpt-fixture", []Message{{"role": "user", "content": "hi"}}, nil); err != nil {
 		t.Fatalf("complete: %v", err)
 	}
@@ -341,7 +331,7 @@ func TestAzureDoesNotRoundTripTheResponseModelID(t *testing.T) {
 	}))
 	defer server.Close()
 
-	provider := newAzureTestProvider(t, server.URL+"/openai/v1")
+	provider := azureFixture(t, &config.ProviderConfig{Type: "azure_openai", BaseURL: server.URL + "/openai/v1", APIKey: "test-api-key"})
 	out, err := azureChatForTest(t, provider, "gpt-5.6-sol")
 	if err != nil {
 		t.Fatalf("chat: %v", err)

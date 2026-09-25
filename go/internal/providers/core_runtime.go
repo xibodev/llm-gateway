@@ -38,6 +38,7 @@ func (rt *Runtime) coreVerticals() map[string]coreVertical {
 		zenCoreType:          rt.zenCoreVertical(),
 		copilotCoreType:      rt.copilotCoreVertical(),
 		anthropicCoreType:    rt.anthropicCoreVertical(),
+		azureCoreType:        rt.azureCoreVertical(),
 	}
 }
 

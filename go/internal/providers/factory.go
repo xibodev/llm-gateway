@@ -98,11 +98,16 @@ func (rt *Runtime) instantiate(
 		if err != nil {
 			return nil, err
 		}
+		// The core Runtime resolves each request's key itself; the facade
+		// keeps the one resolved here, and its observation, for the catalog.
 		return AzureOpenAIProvider{
 			BaseURL:     baseURL,
 			APIKey:      apiKey,
 			Timeout:     timeout,
 			observation: observation,
+			runtime:     rt,
+			instance:    providerID,
+			caller:      caller,
 		}, nil
 	case "anthropic":
 		credential, kind, _, err := resolveCredentialObserved(providerID, cfg, caller)

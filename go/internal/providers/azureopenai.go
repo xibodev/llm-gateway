@@ -29,14 +29,20 @@ package providers
 //     They are different identifiers: the response value is reported exactly
 //     as upstream sent it and is never written back into a request or used
 //     as a catalog key.
+//
+// Inference goes through the llmgw-core Runtime and core's AzureOpenAI, which
+// holds those divergences for Chat Completions; the catalog stays here.
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
 	"net/url"
 	"strings"
+
+	core "github.com/xibodev/llmgw-core"
 )
 
 // azureDeploymentsAPIVersion is pinned to the last api-version observed to
@@ -46,29 +52,69 @@ import (
 // Do not bump this "to the latest" — there is no newer value that works.
 const azureDeploymentsAPIVersion = "2023-03-15-preview"
 
-// AzureOpenAIProvider talks to one Azure OpenAI resource.
+// AzureOpenAIProvider is the gateway's facade for one Azure OpenAI resource.
+// Chat and its stream go through the core Runtime, which resolves the
+// caller's API key through Azure's store on each request, and core's
+// AzureOpenAI, which builds each Chat body as the gateway's OpenAI-compatible
+// payload did and returns the answer as Azure sent it. The body is rebuilt
+// rather than the client's, so neither the facade nor core declares the wire
+// preserved, and Azure Chat stays labelled translated.
+//
+// The catalog stays on the gateway's path, with the exported fields and the
+// factory's key: the gateway never asks the core Runtime for a catalog, and
+// its deployments listing, pagination and failure codes are the gateway's. A
+// facade the factory did not build serves only the catalog.
 type AzureOpenAIProvider struct {
 	// BaseURL is the full inference endpoint, already carrying /openai/v1
-	// (Azure's own "Endpoint" value plus that suffix). Chat completions POST
-	// here as-is — no api-version query parameter. The deployments catalog
-	// route is derived from this value (scheme+host only), never configured
-	// separately.
+	// (Azure's own "Endpoint" value plus that suffix). The deployments
+	// catalog route is derived from this value (scheme+host only), never
+	// configured separately.
 	BaseURL string
 	APIKey  string
 	Timeout float64
 
 	observation *CredentialObservation
+	runtime     *Runtime
+	instance    string
+	caller      core.Caller
 }
 
 func (AzureOpenAIProvider) IsStub() bool { return false }
 
+// headers are a catalog request's: api-key, not Authorization: Bearer, the
+// main way Azure diverges from every other OpenAI-compatible provider.
 func (p AzureOpenAIProvider) headers() http.Header {
 	h := http.Header{}
 	h.Set("Content-Type", "application/json")
-	// api-key, not Authorization: Bearer — the main way Azure diverges from
-	// every other OpenAI-compatible provider.
 	h.Set("api-key", p.APIKey)
 	return h
+}
+
+// operation returns the context of an operation, naming Azure and the
+// facade's caller for the store the core Runtime calls. It derives from no
+// caller's context, because the transport took none: a request runs until
+// its HTTP client times out, whatever the router's deadline.
+func (p AzureOpenAIProvider) operation() context.Context {
+	return withCoreOperation(context.Background(), azureCoreType, p.caller)
+}
+
+// azureChatRequest is the core request of a Chat call: the options with the
+// model and the messages. Core's AzureOpenAI keeps the fields the
+// OpenAI-compatible payload forwarded, turns _max_output_tokens into
+// max_completion_tokens as withOpenAIOutputLimit did and drops the rest, so
+// the upstream body is unchanged. The model is the deployment name, only
+// ever sent as the request's id.
+func azureChatRequest(model string, messages []Message, kw Kwargs) (core.Request, error) {
+	payload := make(map[string]any, len(kw)+2)
+	for key, value := range kw {
+		payload[key] = value
+	}
+	payload["model"], payload["messages"] = model, messages
+	body, err := json.Marshal(payload)
+	if err != nil {
+		return core.Request{}, &ConfigError{Msg: "azure_openai: invalid Chat request"}
+	}
+	return core.Request{Surface: core.ModelSurfaceChatCompletions, Model: model, Body: body, ContentType: core.ContentTypeJSON}, nil
 }
 
 func (p AzureOpenAIProvider) Complete(model string, messages []Message, kw Kwargs) (map[string]any, error) {
@@ -76,78 +122,40 @@ func (p AzureOpenAIProvider) Complete(model string, messages []Message, kw Kwarg
 	return response, err
 }
 
+// CompleteWithObservation reports the factory's observation, as the
+// transport reported the credential it held.
 func (p AzureOpenAIProvider) CompleteWithObservation(
 	model string, messages []Message, kw Kwargs,
 ) (map[string]any, *CredentialObservation, error) {
-	kw = withOpenAIOutputLimit(kw)
-	// model here is the deployment name the caller asked for. It is only
-	// ever used as the outbound request id — never replaced by, or
-	// reconciled with, whatever the response reports back in "model".
-	body, _ := json.Marshal(buildOpenAIPayload(model, messages, false, kw))
-	// A base_url that cannot be built into a request is a configuration fault,
-	// not a transport one: discarding the error here dereferenced a nil request
-	// on the very next line.
-	req, err := http.NewRequest("POST", p.BaseURL+"/chat/completions", bytes.NewReader(body))
+	request, err := azureChatRequest(model, messages, kw)
 	if err != nil {
-		return nil, p.observation, &ConfigError{Msg: "azure_openai: base_url is not a usable request URL"}
+		return nil, p.observation, err
 	}
-	req.Header = p.headers()
-	resp, err := httpClient(p.Timeout).Do(req)
+	response, err := p.runtime.core.Invoke(p.operation(), p.caller, p.instance, request)
 	if err != nil {
-		return nil, p.observation, retryableInvocation("azure_openai: upstream transport error: " + err.Error())
-	}
-	defer resp.Body.Close()
-	raw, readErr := readInvocationResponseBody(resp, "azure_openai")
-	if readErr != nil {
-		return nil, p.observation, readErr
-	}
-	if resp.StatusCode >= 400 {
-		return nil, p.observation, invocationStatus(
-			fmt.Sprintf("azure_openai: upstream returned %d: %s", resp.StatusCode, redact(extractError(raw))),
-			resp.StatusCode,
-		)
+		return nil, p.observation, azureFailure(err, "azure_openai: upstream transport error: ", p.instance)
 	}
 	// Decoded into a plain map, not a fixed struct, so Azure-only fields
 	// (prompt_filter_results, service_tier, usage.latency_checkpoint) pass
-	// through untouched instead of tripping a strict decoder. Whatever
-	// upstream reports in "model" is returned exactly as sent — it is the
-	// version-stamped id, not the deployment name that was requested, and
-	// nothing here rewrites it.
+	// through untouched, and the version-stamped model is returned exactly as
+	// sent. Core checked the answer as the transport did, so it decodes.
 	var out map[string]any
-	if json.Unmarshal(raw, &out) != nil || len(out) == 0 {
+	if json.Unmarshal(response.Body, &out) != nil {
 		return nil, p.observation, circuitFailureInvocation("azure_openai: invalid JSON in upstream response")
-	}
-	choices, ok := out["choices"].([]any)
-	if !ok || len(choices) == 0 {
-		return nil, p.observation, circuitFailureInvocation("azure_openai: invalid chat response payload")
-	}
-	if _, ok := choices[0].(map[string]any); !ok {
-		return nil, p.observation, circuitFailureInvocation("azure_openai: invalid chat response payload")
 	}
 	return out, p.observation, nil
 }
 
 func (p AzureOpenAIProvider) Stream(model string, messages []Message, kw Kwargs) (StreamIter, error) {
-	kw = withOpenAIOutputLimit(kw)
-	body, _ := json.Marshal(buildOpenAIPayload(model, messages, true, kw))
-	req, err := http.NewRequest("POST", p.BaseURL+"/chat/completions", bytes.NewReader(body))
+	request, err := azureChatRequest(model, messages, kw)
 	if err != nil {
-		return nil, &ConfigError{Msg: "azure_openai: base_url is not a usable request URL"}
+		return nil, err
 	}
-	req.Header = p.headers()
-	resp, err := httpClient(p.Timeout).Do(req)
+	stream, err := p.runtime.core.Stream(p.operation(), p.caller, p.instance, request)
 	if err != nil {
-		return nil, retryableInvocation("azure_openai: streaming transport error: " + err.Error())
+		return nil, azureFailure(err, "azure_openai: streaming transport error: ", p.instance)
 	}
-	if resp.StatusCode >= 400 {
-		raw, _ := readInvocationResponseBody(resp, "azure_openai")
-		resp.Body.Close()
-		return nil, invocationStatus(
-			fmt.Sprintf("azure_openai: upstream returned %d: %s", resp.StatusCode, redact(extractError(raw))),
-			resp.StatusCode,
-		)
-	}
-	return newHTTPStreamIter(resp, "azure_openai"), nil
+	return &azureChatStream{inner: stream}, nil
 }
 
 // ---- catalog ------------------------------------------------------------- //

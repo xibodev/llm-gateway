@@ -159,8 +159,8 @@ func TestProviderNon2xxErrorsAreSanitizedAndKeepStatus(t *testing.T) {
 			_, err := (OpenAIProvider{auth: bearerAuth{base: server.URL}, Timeout: 2}).Complete("model", messages, nil)
 			return err
 		},
-		"Azure completion": func(*testing.T) error {
-			_, err := (AzureOpenAIProvider{BaseURL: server.URL, Timeout: 2}).Complete("model", messages, nil)
+		"Azure completion": func(t *testing.T) error {
+			_, err := azureFixture(t, &config.ProviderConfig{Type: "azure_openai", BaseURL: server.URL, APIKey: "fixture-key", Timeout: &two}).Complete("model", messages, nil)
 			return err
 		},
 		"Anthropic completion": func(t *testing.T) error {
