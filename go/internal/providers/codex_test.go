@@ -921,6 +921,9 @@ func TestCodexChatFacadeServesThoughtSignatureHistory(t *testing.T) {
 	if len(input) != 3 || input[1].(map[string]any)["call_id"] != "call_fixture" {
 		t.Fatalf("input=%+v", input)
 	}
+	if encoded, _ := json.Marshal(input); strings.Contains(string(encoded), "thought_signature") {
+		t.Fatalf("a signature reached Codex: %s", encoded)
+	}
 	if message := response["choices"].([]any)[0].(map[string]any)["message"].(map[string]any); message["content"] != "ok" {
 		t.Fatalf("response=%+v", response)
 	}
