@@ -1,0 +1,239 @@
+{
+  "schema_version": "1.0.0",
+  "mode": "change",
+  "contract": {
+    "digest": "31b393ab3e80162226619c441694573993ac618382d74642101484a0bf2e9c80"
+  },
+  "authoring_provenance": {
+    "status": "established",
+    "path": ".release-harness/drafts/llm-gateway.record.json",
+    "digest": "6732ddf3dc8236b974e2aae5f81b546d89c2a466b6fb0a368d76620955bf981e"
+  },
+  "sources": [
+    {
+      "source_id": "primary",
+      "status": "established",
+      "repository_identity": "https://github.com/xibodev/llm-gateway.git",
+      "base_ref": "origin/main",
+      "base_commit": "8c60a9d297c67b17738b5128574a31b9c3130b5f",
+      "merge_base": "1c7d588041a03af2616e20f6c265d7e2f0938742",
+      "head_commit": "1fb4f8b1868160aca9a24679b3c05f2be80253da",
+      "head_tree": "8fcb95a57930904258d576bb5fe2d88a7820bbb8",
+      "reviewed_source_digest": "5dab7b200443af039e464bf5f9feef667e9b9fccac51bcc3dafc3e8053408324",
+      "changed_paths": [
+        {
+          "status": "modified",
+          "path": "go/internal/api/provider_lifecycle_test.go",
+          "old_blob": "b11b83fde2f22b3e930301e4d3387ea154404c55",
+          "new_blob": "b365d6ffa053ceed8d384489851d7b9512173255"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/api/provider_status.go",
+          "old_blob": "caa4436cf4a23e508a5f206f5a9d121a55802bfb",
+          "new_blob": "fbf431c0532aeeb11c97a0cc8c0dfde6a1e5c6c1"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/architecture/boundary_test.go",
+          "old_blob": "76155952b7e4e071545b7370b94c00058a19ef5b",
+          "new_blob": "2ad93f13903d588da1ca4a11be7d5de4acad63cc"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/providers/anthropic.go",
+          "old_blob": "eb36c7a61d3c930a945971f4f7e843e127f6ed1c",
+          "new_blob": "f14cb525f3e1fae9014e9f1d32dc3087be03c4ed"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/providers/antigravity.go",
+          "old_blob": "6e7e57ffc81c130c7c720915137abf531bf2f12f",
+          "new_blob": "611e799ca8c22b28dc34ce186cceb5e45467aff3"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/providers/azureopenai.go",
+          "old_blob": "e563b445aec4fe755dfeb626cecb6606ef5debc1",
+          "new_blob": "7cbed9f66af6117f72c77f84a8c3f11277fb5544"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/providers/bedrock.go",
+          "old_blob": "bb6b82d0624da1c199a08a859eec1b844e30dfc5",
+          "new_blob": "627934c2c8308419828e202729ca4423d8b93f78"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/providers/catalog_read_test.go",
+          "old_blob": "4a335644aaebaf70ccc7c6be5dfdd65eac719aa4",
+          "new_blob": "3c87350591da713641f5d8b088f31818bbbcfef2"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/providers/catalog.go",
+          "old_blob": "9fb0278b0862db2af355fa59e641ea6a77958910",
+          "new_blob": "ad44f44a23d76aa641860dabd39dfda15f98c67d"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/providers/codex_test.go",
+          "old_blob": "d25162f2cc26e82d78d3ac336e1dffa704956e33",
+          "new_blob": "e8ad79185d468aee13e976a444418ad3f2e6cb9f"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/providers/codex.go",
+          "old_blob": "ac34257c32e5b5a40c3d81b0296b53f8cf4942ba",
+          "new_blob": "7d33ef3034b49365df93576ec17dacbd4a98b791"
+        },
+        {
+          "status": "added",
+          "path": "go/internal/providers/credential_observation_test.go",
+          "old_blob": "0000000000000000000000000000000000000000",
+          "new_blob": "b5efba2963935a82fee29d2ec5507d0f6325ad6b"
+        },
+        {
+          "status": "added",
+          "path": "go/internal/providers/credential_observation.go",
+          "old_blob": "0000000000000000000000000000000000000000",
+          "new_blob": "4ac24250402fdeb457ce66f16ab6f2e7aecbeaa0"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/providers/factory.go",
+          "old_blob": "91c0033cb7461a99b83a1905fab617c6d2bb826c",
+          "new_blob": "c263f8d1028deda98134a2abcbab1e897bd255e2"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/providers/googleai.go",
+          "old_blob": "440e806eb1fa7b0bef85144fdc601433a0eccde0",
+          "new_blob": "cbec07999d683d4b42ee75d31b8487595b8c18e7"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/providers/ollama.go",
+          "old_blob": "bddb21d36a76bc5a429317485a1604ab93253cc5",
+          "new_blob": "c3c3e8f7d8d6df7d5db55df328f3c6423e669006"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/providers/openai_auth.go",
+          "old_blob": "a89c717941876ae9d0168ef51afd2126f8c03ba1",
+          "new_blob": "82821a638ec844bceee6153a6c521212c208b3a1"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/providers/openai.go",
+          "old_blob": "dbb9a44f27d78d42d79310398afbcd8e5b87e3ee",
+          "new_blob": "fac3d9a751309a1da681cc698cf318dd77d740d3"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/providers/policy_v043_test.go",
+          "old_blob": "48eed444eab114db02f63eea9f45a9c1d5a0d571",
+          "new_blob": "59f9f0adb8e920f123c23af8cea7b8bdc33be7ae"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/providers/policy.go",
+          "old_blob": "4b32714daca790c1fb180e25d4c59665237e432b",
+          "new_blob": "0bd8ed4ec29506e4d3027a0d7e858b5c9b9a266e"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/providers/provider.go",
+          "old_blob": "6112f36af934eba264d3791b9ef87cb6664dcac5",
+          "new_blob": "90db4cc451c512e5e380b4f0b4bf4d28e867f48c"
+        }
+      ]
+    }
+  ],
+  "facts": [
+    {
+      "id": "type-neutralized",
+      "claim": "internal/providers carries providers.CredentialObservation{ConnectionID, CredentialRevision} instead of iam.ProviderAccountObservation in every return value and struct field; one helper converts at each iam producer, and internal/api converts back only where it calls the iam account and check writers. Nil still means no observation, and Codex's zero observation, frozen bearer, Azure and Bedrock observations, the re-read after a 401 refresh and both catalog reads are kept.",
+      "status": "observed",
+      "evidence": {
+        "source": "go/internal/providers/credential_observation.go; go/internal/api/provider_status.go"
+      }
+    },
+    {
+      "id": "guards-unchanged",
+      "claim": "The IfCurrent guards of RecordProviderAccountSuccessIfCurrent, RecordProviderAccountFailureIfCurrent, RecordProviderCheck and the check-generation rebasing receive the same connection and revision values as before; no inference path starts recording evidence.",
+      "status": "observed",
+      "evidence": {
+        "source": "git diff between the merge base and HEAD"
+      }
+    },
+    {
+      "id": "budgets",
+      "claim": "The providers iam.* coupling budget moves from 154 to 82; router, api/transport_mode.go, config.Get and config.Principal counts are unchanged.",
+      "status": "observed",
+      "evidence": {
+        "source": "go/internal/architecture/boundary_test.go"
+      }
+    },
+    {
+      "id": "suite",
+      "claim": "The full Go suite passes with HTTP_PROXY and HTTPS_PROXY unreachable with unchanged characterization goldens; gofmt, vet, govulncheck (0 reachable), check-docs and git diff --check pass.",
+      "status": "observed",
+      "evidence": {
+        "source": "local gate run on the reviewed head"
+      }
+    }
+  ],
+  "impact": {
+    "assertions": [
+      {
+        "id": "A1",
+        "impact": "unchanged",
+        "supported_by": [
+          "type-neutralized",
+          "guards-unchanged",
+          "suite"
+        ]
+      },
+      {
+        "id": "A2",
+        "impact": "unchanged",
+        "supported_by": [
+          "type-neutralized",
+          "guards-unchanged",
+          "suite"
+        ]
+      },
+      {
+        "id": "A3",
+        "impact": "unchanged",
+        "supported_by": [
+          "type-neutralized",
+          "guards-unchanged",
+          "suite"
+        ]
+      },
+      {
+        "id": "A4",
+        "impact": "unchanged",
+        "supported_by": [
+          "type-neutralized",
+          "guards-unchanged",
+          "suite"
+        ]
+      }
+    ],
+    "requires": [],
+    "possible_binding_changes": []
+  },
+  "questions": [],
+  "conclusion": {
+    "action": "reuse_contract",
+    "summary": "Providers carry a neutral credential observation instead of the iam type; account and check writes are unchanged, and CLI, health and models behavior is unchanged."
+  },
+  "proposed": {
+    "by": "neutral-observation",
+    "at": "2026-09-25T03:43:36.438Z"
+  },
+  "digest": "3cd4b7aeae225adf0664a2f028c0d1368d6e30dea28ff89609a764fba60a7e71"
+}
