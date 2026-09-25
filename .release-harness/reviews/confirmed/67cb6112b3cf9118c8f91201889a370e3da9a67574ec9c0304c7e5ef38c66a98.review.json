@@ -1,0 +1,247 @@
+{
+  "schema_version": "1.0.0",
+  "mode": "change",
+  "contract": {
+    "digest": "31b393ab3e80162226619c441694573993ac618382d74642101484a0bf2e9c80"
+  },
+  "authoring_provenance": {
+    "status": "established",
+    "path": ".release-harness/drafts/llm-gateway.record.json",
+    "digest": "6732ddf3dc8236b974e2aae5f81b546d89c2a466b6fb0a368d76620955bf981e"
+  },
+  "sources": [
+    {
+      "source_id": "primary",
+      "status": "established",
+      "repository_identity": "https://github.com/xibodev/llm-gateway.git",
+      "base_ref": "origin/main",
+      "base_commit": "cc789b7e5c44ac39633214a745dcd9022534c477",
+      "merge_base": "d5c7b13e8b7b005b45c7f40025eb6b80226e7c53",
+      "head_commit": "70b22c6a1e12ce140b0a5fd165449b96c90c8052",
+      "head_tree": "6385ae58040231ab0bea63ccddd5123b293b8db3",
+      "reviewed_source_digest": "528bf9670b3a564fa5a814873c6811787cdfc4f10d7dd42420169cd54c91850f",
+      "changed_paths": [
+        {
+          "status": "modified",
+          "path": "go/go.mod",
+          "old_blob": "20197d83416d3409c1ce7dc53e249be11b372dae",
+          "new_blob": "815359c7ebe6f503caa020788efb7e32bfb6e8f2"
+        },
+        {
+          "status": "modified",
+          "path": "go/go.sum",
+          "old_blob": "c0b72631c6e625b3328ac4c14d98159c1795dcfd",
+          "new_blob": "e8121ac04131c2a00670f4260e0cc79759772407"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/architecture/boundary_test.go",
+          "old_blob": "2ad93f13903d588da1ca4a11be7d5de4acad63cc",
+          "new_blob": "76c28893fcee1a05b1aba0ee2f0357b617242cea"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/iam/credential_store_connections.go",
+          "old_blob": "1c219a8f197deaa1b18697ea0d5bec1d823b7788",
+          "new_blob": "83e54c5f59127d5068035ef1d9a5eb14461b5f2c"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/iam/credential_store_keys.go",
+          "old_blob": "1ac4391a40b8d471a968640bae2e14e4aa94f369",
+          "new_blob": "e4113cc02b1c573dc9a67a7c4d9ef45983bbdd0e"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/iam/credential_store_records_test.go",
+          "old_blob": "b641f28f2cf75fad7c1ffc42f1ab3c957d08461c",
+          "new_blob": "30392916650b32bf414b9715b77dd4b3662780a1"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/iam/credential_store.go",
+          "old_blob": "c6262cdc1a5d881ab3f286b36d5ff52bd89ec777",
+          "new_blob": "beefd60c8e7f45be0d4b613db70865d1171811ac"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/providers/auth_adapter.go",
+          "old_blob": "3cf9f26cfd388ce5997ed4b23e736a9bb65e68e5",
+          "new_blob": "498d8b5198585cb1dc2a38146af64b08e4e6ac2b"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/providers/catalog_http_test.go",
+          "old_blob": "cda6cc69a8b05d68cabe7664dbf7a63c9c0b84a2",
+          "new_blob": "82087a203695b5d82ed27b4dae49176b45ceafc1"
+        },
+        {
+          "status": "added",
+          "path": "go/internal/providers/codex_call.go",
+          "old_blob": "0000000000000000000000000000000000000000",
+          "new_blob": "8ee9a06578abd01306de17e6d192cef6505c5750"
+        },
+        {
+          "status": "added",
+          "path": "go/internal/providers/codex_credentials.go",
+          "old_blob": "0000000000000000000000000000000000000000",
+          "new_blob": "bc3efb99f0f7d4de49cdf5ba5c6ef44bc37d8754"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/providers/codex_endpoints.go",
+          "old_blob": "f8e3ae7b754e30f9b15f7fdd12d29c471452384b",
+          "new_blob": "08dba58deaa5caabecf78c171b1219f13877818d"
+        },
+        {
+          "status": "added",
+          "path": "go/internal/providers/codex_runtime_test.go",
+          "old_blob": "0000000000000000000000000000000000000000",
+          "new_blob": "d54261d87bff1d729cc9e3c6244de24053afa5a2"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/providers/codex_test.go",
+          "old_blob": "a92a0708691bc0c0c6985bb9e2d61b40e18cd5e1",
+          "new_blob": "6f2eafb7e5f6a8ac66a3d88c1c65202ab139b492"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/providers/codex.go",
+          "old_blob": "bbbc1e61485442be73b057683be2998589bd15bd",
+          "new_blob": "4c85c55024feaabb1abe1b3e13b2271af4720028"
+        },
+        {
+          "status": "added",
+          "path": "go/internal/providers/core_runtime.go",
+          "old_blob": "0000000000000000000000000000000000000000",
+          "new_blob": "d83b63f5a307596854ce828e87a2bf3615b79400"
+        },
+        {
+          "status": "added",
+          "path": "go/internal/providers/credential_evidence_test.go",
+          "old_blob": "0000000000000000000000000000000000000000",
+          "new_blob": "3dca757fd1b771dba98eae8d3e47081edd4abec2"
+        },
+        {
+          "status": "added",
+          "path": "go/internal/providers/credential_evidence.go",
+          "old_blob": "0000000000000000000000000000000000000000",
+          "new_blob": "a1a20913da02ca064c354c68a383fc29d84942ed"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/providers/credential_observation.go",
+          "old_blob": "4ac24250402fdeb457ce66f16ab6f2e7aecbeaa0",
+          "new_blob": "4a88419564a530e2bd1e01eb6279666b55815046"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/providers/factory.go",
+          "old_blob": "d4cab9391bee867c4100e94676fc3b87c160464d",
+          "new_blob": "23b8a46146ebc74ef693a727c0948a8537f2f046"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/providers/runtime.go",
+          "old_blob": "6feeeabd10084ee360a740cb471a5f1ff3c523bd",
+          "new_blob": "ad3afec65ac116dfd98419c53142e95f226981d7"
+        }
+      ]
+    }
+  ],
+  "facts": [
+    {
+      "id": "codex-through-runtime",
+      "claim": "Codex Chat, Responses and both streams are served through an llmgw-core runtime.Runtime held by providers.Runtime: core's Codex vertical sends upstream, the iam credential store resolves and loads connections, a tokenstore.Coordinator refreshes under the SQLite lease, and core's NewCodexRefresh refreshes with each connection's stored client. The gateway's Codex session source, 401 refresh transport and Codex refresh-lock table are removed. Upstream request bytes are unchanged; the characterization goldens pass unchanged.",
+      "status": "observed",
+      "evidence": {
+        "source": "go/internal/providers/core_runtime.go, codex.go, codex_credentials.go, codex_call.go; go/internal/api/testdata unchanged"
+      }
+    },
+    {
+      "id": "parity-rules",
+      "claim": "A connection without a stored client is refused refresh with the existing reauthorization error; each credential fetch is pinned to the account of its first load, so a concurrent re-login fails the request instead of switching accounts; console refresh loads the record and calls Coordinator.Rejected; terminal refresh errors revoke through RevokeIfCurrent and the owner's caches are forgotten after a revoke or stored refresh; a failed refresh after a 401 is reported as before.",
+      "status": "observed",
+      "evidence": {
+        "source": "go/internal/providers/codex_credentials.go; codex_test.go and codex_runtime_test.go"
+      }
+    },
+    {
+      "id": "probe-observation",
+      "claim": "Probe and verify checks get the connection and revision a Codex call used from a request-scoped collector fed by the credential store and the Runtime's evidence sink, including the revision after a mid-request refresh; outside a collector the sink records nothing, so inference records no evidence, as before.",
+      "status": "observed",
+      "evidence": {
+        "source": "go/internal/providers/credential_evidence.go and its test"
+      }
+    },
+    {
+      "id": "error-path-deviations",
+      "claim": "Three error paths differ: an expired Codex token without a refresh token fails before sending instead of being sent; a catalog 401 on such a token reports catalog_authentication_failed and other failed catalog refreshes catalog_refresh_failed; and a Codex call that fails before loading any credential returns no observation instead of a zero-revision one. None affects a successful request, the CLI, health or the public models list.",
+      "status": "observed",
+      "evidence": {
+        "source": "go/internal/providers/codex.go and codex_test.go"
+      }
+    },
+    {
+      "id": "suite",
+      "claim": "The full Go suite passes with HTTP_PROXY and HTTPS_PROXY unreachable with unchanged characterization goldens; the providers iam.* budget moves from 82 to 75; gofmt, vet, govulncheck (0 reachable), check-docs and git diff --check pass.",
+      "status": "observed",
+      "evidence": {
+        "source": "local gate run on the reviewed head"
+      }
+    }
+  ],
+  "impact": {
+    "assertions": [
+      {
+        "id": "A1",
+        "impact": "unchanged",
+        "supported_by": [
+          "codex-through-runtime",
+          "error-path-deviations",
+          "suite"
+        ]
+      },
+      {
+        "id": "A2",
+        "impact": "unchanged",
+        "supported_by": [
+          "codex-through-runtime",
+          "error-path-deviations",
+          "suite"
+        ]
+      },
+      {
+        "id": "A3",
+        "impact": "unchanged",
+        "supported_by": [
+          "codex-through-runtime",
+          "error-path-deviations",
+          "suite"
+        ]
+      },
+      {
+        "id": "A4",
+        "impact": "unchanged",
+        "supported_by": [
+          "codex-through-runtime",
+          "error-path-deviations",
+          "suite"
+        ]
+      }
+    ],
+    "requires": [],
+    "possible_binding_changes": []
+  },
+  "questions": [],
+  "conclusion": {
+    "action": "reuse_contract",
+    "summary": "Codex inference moves onto the llmgw-core Runtime and Codex vertical with unchanged upstream bytes; three Codex error paths differ; CLI, health and models behavior is unchanged."
+  },
+  "proposed": {
+    "by": "codex-core-runtime",
+    "at": "2026-09-25T06:59:24.989Z"
+  },
+  "digest": "67cb6112b3cf9118c8f91201889a370e3da9a67574ec9c0304c7e5ef38c66a98"
+}
