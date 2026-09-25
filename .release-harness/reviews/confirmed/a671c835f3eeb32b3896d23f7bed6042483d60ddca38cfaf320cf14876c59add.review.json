@@ -1,0 +1,119 @@
+{
+  "schema_version": "1.0.0",
+  "mode": "change",
+  "contract": {
+    "digest": "31b393ab3e80162226619c441694573993ac618382d74642101484a0bf2e9c80"
+  },
+  "authoring_provenance": {
+    "status": "established",
+    "path": ".release-harness/drafts/llm-gateway.record.json",
+    "digest": "6732ddf3dc8236b974e2aae5f81b546d89c2a466b6fb0a368d76620955bf981e"
+  },
+  "sources": [
+    {
+      "source_id": "primary",
+      "status": "established",
+      "repository_identity": "https://github.com/xibodev/llm-gateway.git",
+      "base_ref": "origin/main",
+      "base_commit": "cfb3c29690f5ff858fe730f90aac30139d3fea37",
+      "merge_base": "17651b4285032cc2b10fc63853272049a49ef8ef",
+      "head_commit": "794b35d8382e1cc5a9fc707f19927d99fa455036",
+      "head_tree": "61e4a1560109439fdb3e188f78ac9e7b8df97382",
+      "reviewed_source_digest": "064a7fdc6c65147c6b208d735f502190ae01d1de0e52fe3b8adc6902a4050a4e",
+      "changed_paths": [
+        {
+          "status": "added",
+          "path": "go/internal/providers/error_classification_test.go",
+          "old_blob": "0000000000000000000000000000000000000000",
+          "new_blob": "a797cd43bdedf4812fcb003eb80b58362913f183"
+        },
+        {
+          "status": "added",
+          "path": "go/internal/providers/error_classification.go",
+          "old_blob": "0000000000000000000000000000000000000000",
+          "new_blob": "e00b381cf6ab6cfde8c245ce7af50f2bdf7d7396"
+        },
+        {
+          "status": "added",
+          "path": "go/internal/router/classification_parity_test.go",
+          "old_blob": "0000000000000000000000000000000000000000",
+          "new_blob": "c98cb618894c8dadaf3eaa724d71b6bce4310435"
+        }
+      ]
+    }
+  ],
+  "facts": [
+    {
+      "id": "classification-only",
+      "claim": "InvocationError, ConfigError and StreamRecordTooLargeError gain ProviderErrorClassification and an errors.As view as *core.ProviderError, so llmgw-core can classify gateway failures. The invocation classification reads the predicates the resilience wrapper and the router already act on; the gateway itself never consults core, so no routing, retry or response behavior changes.",
+      "status": "observed",
+      "evidence": {
+        "source": "go/internal/providers/error_classification.go; no production caller of core.ClassifyError in the gateway"
+      }
+    },
+    {
+      "id": "parity",
+      "claim": "A 115-case parity test pins core's disposition of representative gateway errors (every InvocationError constructor, statuses 400-504, transport, configuration and wrapped errors) to the router's own retry and failover predicates, and documents the two paths where the router decides by surface rather than by error.",
+      "status": "observed",
+      "evidence": {
+        "source": "go/internal/router/classification_parity_test.go"
+      }
+    },
+    {
+      "id": "suite",
+      "claim": "The full Go suite passes with HTTP_PROXY and HTTPS_PROXY unreachable; characterization goldens and coupling budgets are unchanged. gofmt, vet, govulncheck (0 reachable), check-docs and git diff --check pass.",
+      "status": "observed",
+      "evidence": {
+        "source": "local gate run on the reviewed head"
+      }
+    }
+  ],
+  "impact": {
+    "assertions": [
+      {
+        "id": "A1",
+        "impact": "unchanged",
+        "supported_by": [
+          "classification-only",
+          "suite"
+        ]
+      },
+      {
+        "id": "A2",
+        "impact": "unchanged",
+        "supported_by": [
+          "classification-only",
+          "suite"
+        ]
+      },
+      {
+        "id": "A3",
+        "impact": "unchanged",
+        "supported_by": [
+          "classification-only",
+          "suite"
+        ]
+      },
+      {
+        "id": "A4",
+        "impact": "unchanged",
+        "supported_by": [
+          "classification-only",
+          "suite"
+        ]
+      }
+    ],
+    "requires": [],
+    "possible_binding_changes": []
+  },
+  "questions": [],
+  "conclusion": {
+    "action": "reuse_contract",
+    "summary": "Gateway provider errors classify themselves for llmgw-core; nothing in the gateway reads the classification yet, so CLI, health and models behavior is unchanged."
+  },
+  "proposed": {
+    "by": "error-classification",
+    "at": "2026-09-25T02:31:16.336Z"
+  },
+  "digest": "a671c835f3eeb32b3896d23f7bed6042483d60ddca38cfaf320cf14876c59add"
+}
