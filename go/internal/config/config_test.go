@@ -494,13 +494,15 @@ categories:
 }
 
 func TestUpdateAndSaveFailurePreservesMemory(t *testing.T) {
+	keepSettings(t)
 	dir := t.TempDir()
 	t.Setenv("LLMGW_STATE_DIR", dir)
 	t.Setenv("LLMGW_CONFIG", filepath.Join(dir, "missing", "config.yaml"))
-	old := current
-	current = Defaults()
-	current.Endpoints["existing"] = &EndpointConfig{Failover: []EndpointMember{{Provider: "echo", Model: "old"}}}
-	t.Cleanup(func() { current = old })
+	Update(func(s *Settings) {
+		*s = *Defaults()
+		s.Endpoints["existing"] = &EndpointConfig{Failover: []EndpointMember{{Provider: "echo", Model: "old"}}}
+	})
+	before, generation := Snapshot()
 
 	restore, err := UpdateAndSave(func(next *Settings) error {
 		next.Endpoints["new"] = &EndpointConfig{Failover: []EndpointMember{{Provider: "echo", Model: "new"}}}
@@ -508,6 +510,10 @@ func TestUpdateAndSaveFailurePreservesMemory(t *testing.T) {
 	})
 	if err == nil || restore != nil {
 		t.Fatalf("restore=%v err=%v", restore != nil, err)
+	}
+	current, currentGeneration := Snapshot()
+	if current != before || currentGeneration != generation {
+		t.Fatalf("failed save published generation %d over %d", currentGeneration, generation)
 	}
 	if current.Endpoints["new"] != nil || current.Endpoints["existing"].Failover[0].Model != "old" {
 		t.Fatalf("failed save changed memory: %+v", current.Endpoints)

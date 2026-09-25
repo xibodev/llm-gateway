@@ -8,6 +8,7 @@ package config
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -15,6 +16,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 
 	"gopkg.in/yaml.v3"
 )
@@ -216,80 +218,142 @@ func Defaults() *Settings {
 	}
 }
 
-// ---- singleton + mutex -------------------------------------------------- //
+// ---- published settings ------------------------------------------------- //
 
-var (
-	mu      sync.RWMutex
-	current = Defaults()
-)
-
-// Get returns a read lock's snapshot pointer. Callers must not mutate without
-// Update. For hot-path reads we return the live pointer under the caller's
-// responsibility to treat it as read-only.
-func Get() *Settings {
-	mu.RLock()
-	defer mu.RUnlock()
-	return current
+// published pairs one settings value with the generation it was published
+// under. It is replaced as a whole, so a single atomic load always yields a
+// settings value and the generation that belongs to it.
+type published struct {
+	settings   *Settings
+	generation uint64
 }
 
-// Provider returns an isolated provider snapshot for background workers that
-// must not retain the live configuration map after the lock is released.
+var (
+	// writerMu serializes writers. Each writer deep-copies the published
+	// settings, edits its private copy and publishes that under the next
+	// generation, so a published value is never written again. Readers
+	// never take the mutex: request paths range over Providers and other
+	// maps without a lock, and an in-place write would race them into
+	// Go's unrecoverable concurrent map access fault.
+	writerMu sync.Mutex
+	state    atomic.Pointer[published]
+)
+
+// ErrRestoreSuperseded is returned by the restore function of UpdateAndSave
+// when another change was published after the one it would undo.
+var ErrRestoreSuperseded = errors.New("configuration changed after this update; restore skipped")
+
+func init() {
+	// Generation 1 matches llmgw-core's reference settings source; any
+	// increase after it tells a consumer the settings changed.
+	state.Store(&published{settings: Defaults(), generation: 1})
+}
+
+// publishLocked installs next under the generation after the current one.
+// The caller holds writerMu and must not write to next afterwards.
+func publishLocked(next *Settings) uint64 {
+	generation := state.Load().generation + 1
+	state.Store(&published{settings: next, generation: generation})
+	return generation
+}
+
+// Get returns the current settings without locking. The value is immutable
+// once published: writers publish a new value instead of editing this one,
+// so a caller may keep and range over it while settings change, and a kept
+// value does not see later changes. Callers must treat it as read-only and
+// change settings through Update or UpdateAndSave.
+func Get() *Settings {
+	return state.Load().settings
+}
+
+// Snapshot returns the current settings and the generation they were
+// published under. Both come from one atomic load, so they always belong
+// together. The generation increases with every published change.
+func Snapshot() (*Settings, uint64) {
+	current := state.Load()
+	return current.settings, current.generation
+}
+
+// Generation returns the generation of the current settings.
+func Generation() uint64 {
+	return state.Load().generation
+}
+
+// Source exposes the process-wide settings as a snapshot source, such as
+// llmgw-core's runtime.SettingsSource, without this package depending on
+// the consumer.
+type Source struct{}
+
+// Snapshot returns the current settings and their generation.
+func (Source) Snapshot() (*Settings, uint64) { return Snapshot() }
+
+// Provider returns an isolated copy of one provider's configuration for
+// background workers that must not retain the published settings.
 func Provider(id string) (*ProviderConfig, bool) {
-	mu.RLock()
-	defer mu.RUnlock()
-	provider := current.Providers[id]
+	provider := Get().Providers[id]
 	if provider == nil {
 		return nil, false
 	}
-	copy := *provider
-	return &copy, true
+	return cloneProvider(provider), true
 }
 
-// Update applies fn under the write lock.
+// Update applies fn to a private deep copy of the current settings and
+// publishes the copy under a new generation. fn edits the copy, never a
+// value a reader may hold, and must not keep it: once Update returns, the
+// copy is published and must not change.
 func Update(fn func(*Settings)) {
-	mu.Lock()
-	defer mu.Unlock()
-	fn(current)
+	writerMu.Lock()
+	defer writerMu.Unlock()
+	next := cloneSettings(state.Load().settings)
+	fn(next)
+	publishLocked(next)
 }
 
-// UpdateAndSave stages a complete isolated configuration, persists it, and only
-// then installs it in memory. A failed save leaves the live configuration intact.
+// UpdateAndSave applies fn to a private deep copy of the current settings,
+// persists the copy, and only then publishes it under a new generation. A
+// failed fn or save publishes nothing, so the live configuration is intact.
+//
+// The returned restore function republishes the previous settings under
+// another new generation and persists them. It is a compare-and-swap: if
+// any change was published after this one, restore leaves memory and disk
+// untouched and returns ErrRestoreSuperseded, because rolling back would
+// silently discard that newer change. Callers already report a failed
+// restore as a rollback that did not complete.
 func UpdateAndSave(fn func(*Settings) error) (func() error, error) {
-	mu.Lock()
-	defer mu.Unlock()
-	previous := cloneSettings(current)
-	next := cloneSettings(current)
+	writerMu.Lock()
+	defer writerMu.Unlock()
+	previous := state.Load().settings
+	next := cloneSettings(previous)
 	if err := fn(next); err != nil {
 		return nil, err
 	}
 	if err := writeConfigPayload(configPayload(next)); err != nil {
 		return nil, err
 	}
-	current = next
+	generation := publishLocked(next)
 	return func() error {
-		mu.Lock()
-		defer mu.Unlock()
+		writerMu.Lock()
+		defer writerMu.Unlock()
+		if state.Load().generation != generation {
+			return ErrRestoreSuperseded
+		}
+		// Memory is restored even when the write fails, so the running
+		// gateway holds the settings the caller meant to keep; the error
+		// tells the caller the file may still hold the change.
 		err := writeConfigPayload(configPayload(previous))
-		current = previous
+		publishLocked(cloneSettings(previous))
 		return err
 	}, nil
 }
 
+// cloneSettings deep-copies every reference a writer could reach, so edits
+// to the copy never show through a published value.
 func cloneSettings(source *Settings) *Settings {
 	next := *source
 	next.APIKeys = append([]string(nil), source.APIKeys...)
 	next.Providers = make(map[string]*ProviderConfig, len(source.Providers))
 	for id, provider := range source.Providers {
-		if provider == nil {
-			next.Providers[id] = nil
-			continue
-		}
-		copy := *provider
-		if provider.Timeout != nil {
-			timeout := *provider.Timeout
-			copy.Timeout = &timeout
-		}
-		next.Providers[id] = &copy
+		next.Providers[id] = cloneProvider(provider)
 	}
 	next.Endpoints = make(map[string]*EndpointConfig, len(source.Endpoints))
 	for name, endpoint := range source.Endpoints {
@@ -320,14 +384,28 @@ func cloneSettings(source *Settings) *Settings {
 	return &next
 }
 
+// cloneProvider copies one provider, including the timeout it points to.
+func cloneProvider(provider *ProviderConfig) *ProviderConfig {
+	if provider == nil {
+		return nil
+	}
+	copy := *provider
+	if provider.Timeout != nil {
+		timeout := *provider.Timeout
+		copy.Timeout = &timeout
+	}
+	return &copy
+}
+
 // AddProviderIfMissing persists one provider without overwriting an instance
 // another administrator or automation run created concurrently.
 func AddProviderIfMissing(id string, provider *ProviderConfig) (bool, error) {
-	mu.Lock()
-	defer mu.Unlock()
+	writerMu.Lock()
+	defer writerMu.Unlock()
 	if provider == nil {
 		return false, fmt.Errorf("provider is required")
 	}
+	current := state.Load().settings
 	if current.Providers[id] != nil {
 		return false, nil
 	}
@@ -359,14 +437,9 @@ func AddProviderIfMissing(id string, provider *ProviderConfig) (bool, error) {
 	if err := writeConfigPayload(payload); err != nil {
 		return false, err
 	}
-	next := *current
-	next.Providers = make(map[string]*ProviderConfig, len(current.Providers)+1)
-	for key, value := range current.Providers {
-		next.Providers[key] = value
-	}
-	copy := *provider
-	next.Providers[id] = &copy
-	current = &next
+	next := cloneSettings(current)
+	next.Providers[id] = cloneProvider(provider)
+	publishLocked(next)
 	return true, nil
 }
 
@@ -476,17 +549,20 @@ func readYAML(path string) map[string]any {
 }
 
 // Load reads config.yaml over the defaults, applies ${ENV:} resolution to
-// provider base_url/api_key, layers LLMGW_* env overrides on top, and installs
-// it as the singleton.
+// provider base_url/api_key, layers LLMGW_* env overrides on top, and
+// publishes the result under a new generation. It holds the writer mutex
+// while it reads, so a concurrent UpdateAndSave cannot land between the read
+// and the publish and be lost. The returned value is the published one and
+// is as read-only as Get's.
 func Load() *Settings {
+	writerMu.Lock()
+	defer writerMu.Unlock()
 	s := Defaults()
 	seedConfigIfMissing()
 	payload := readYAML(ConfigFilePath())
 	applyConfig(s, payload)
 	applyEnv(s)
-	mu.Lock()
-	current = s
-	mu.Unlock()
+	publishLocked(s)
 	return s
 }
 
@@ -687,12 +763,47 @@ func applyConfig(s *Settings, payload map[string]any) {
 	applyScalars(s, payload)
 }
 
+// cloneStringAnyMap deep-copies decoded YAML. The policy fields the gateway
+// reads are scalars, but a nested mapping or sequence would otherwise be
+// shared between a published value and a writer's copy.
 func cloneStringAnyMap(source map[string]any) map[string]any {
 	cloned := make(map[string]any, len(source))
 	for key, value := range source {
-		cloned[key] = value
+		cloned[key] = cloneAny(value)
 	}
 	return cloned
+}
+
+// cloneAny copies the containers a YAML decode produces and returns every
+// other value as is: decoded scalars carry no shared mutable state.
+func cloneAny(value any) any {
+	switch typed := value.(type) {
+	case map[string]any:
+		if typed == nil {
+			return typed
+		}
+		return cloneStringAnyMap(typed)
+	case map[any]any:
+		if typed == nil {
+			return typed
+		}
+		cloned := make(map[any]any, len(typed))
+		for key, item := range typed {
+			cloned[key] = cloneAny(item)
+		}
+		return cloned
+	case []any:
+		if typed == nil {
+			return typed
+		}
+		cloned := make([]any, len(typed))
+		for index, item := range typed {
+			cloned[index] = cloneAny(item)
+		}
+		return cloned
+	default:
+		return value
+	}
 }
 
 func mergeProviderPolicy(base ProviderPolicy, fields map[string]any) ProviderPolicy {
@@ -864,11 +975,13 @@ func configPayload(s *Settings) map[string]any {
 	return payload
 }
 
-// Save persists providers + endpoints + policies + savings (never keys).
+// Save persists providers + endpoints + policies + savings (never keys) from
+// the current settings. It holds the writer mutex so the file cannot be
+// written between another writer's save and publish.
 func Save() error {
-	mu.Lock()
-	defer mu.Unlock()
-	payload := configPayload(current)
+	writerMu.Lock()
+	defer writerMu.Unlock()
+	payload := configPayload(state.Load().settings)
 	return writeConfigPayload(payload)
 }
 
