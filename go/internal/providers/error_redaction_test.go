@@ -155,6 +155,7 @@ func TestProviderNon2xxErrorsAreSanitizedAndKeepStatus(t *testing.T) {
 	messages := []Message{{"role": "user", "content": "hi"}}
 	two := 2.0
 	google := studioFixture(t, server.URL, "fixture")
+	ollama := ollamaFixture(t, server.URL)
 	cases := map[string]func(*testing.T) error{
 		"OpenAI-compatible completion": func(*testing.T) error {
 			_, err := (OpenAIProvider{auth: bearerAuth{base: server.URL}, Timeout: 2}).Complete("model", messages, nil)
@@ -173,11 +174,11 @@ func TestProviderNon2xxErrorsAreSanitizedAndKeepStatus(t *testing.T) {
 			return err
 		},
 		"Ollama completion": func(*testing.T) error {
-			_, err := (OllamaProvider{BaseURL: server.URL, Timeout: 2}).Complete("model", messages, nil)
+			_, err := ollama.Complete("model", messages, nil)
 			return err
 		},
 		"Ollama stream setup": func(*testing.T) error {
-			_, err := (OllamaProvider{BaseURL: server.URL, Timeout: 2}).Stream("model", messages, nil)
+			_, err := ollama.Stream("model", messages, nil)
 			return err
 		},
 		"Google completion": func(*testing.T) error {

@@ -68,7 +68,7 @@ func TestCatalogResponseSizeBoundaryAndCache(t *testing.T) {
 			return OpenAIProvider{auth: catalogFixtureAuth{base: base}, Timeout: 5}
 		}},
 		{"ollama", `{"models":[{"name":"fixture-model"}],"private":"fixture-secret"}`, catalogMaxResponseBytes, func(base string) Provider {
-			return OllamaProvider{BaseURL: base, Timeout: 5}
+			return ollamaCatalogFixture(t, base, 5)
 		}},
 		{"azure", `{"data":[{"id":"fixture-deployment","model":"gpt-4o","status":"succeeded"}],"private":"fixture-secret"}`, catalogMaxResponseBytes, func(base string) Provider {
 			return AzureOpenAIProvider{BaseURL: base, APIKey: "fixture-key", Timeout: 5}

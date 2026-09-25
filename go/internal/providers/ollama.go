@@ -1,37 +1,41 @@
 package providers
 
 import (
-	"bufio"
-	"bytes"
+	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
-	"net/http"
 	"net/url"
 	"strings"
+
+	core "github.com/xibodev/llmgw-core"
+	coreproviders "github.com/xibodev/llmgw-core/providers"
 )
 
-// OllamaProvider talks to a local Ollama daemon over its native /api/chat,
-// preserving roles and tool-calling. Keyless.
-type OllamaProvider struct {
-	BaseURL string
-	Timeout float64
+// ollamaProvider is the gateway's Ollama facade. Chat and its stream go
+// through the core Runtime, whose core Ollama converts each request to the
+// daemon's native /api/chat and each answer back, as the gateway's
+// transport did, roles and tool calls included. The catalog stays on the
+// gateway's path, read by a core Ollama of the facade's own, because the
+// Runtime keeps no catalog of these instances.
+type ollamaProvider struct {
+	runtime  *Runtime
+	instance string
+	caller   core.Caller
+	catalog  *coreproviders.Ollama
 }
 
-func ollamaBaseURLIssue(base string) string {
-	base = strings.TrimSpace(base)
-	parsed, err := url.Parse(base)
-	if err != nil || (parsed.Scheme != "http" && parsed.Scheme != "https") || parsed.Host == "" {
-		return "Ollama base URL must be an http(s) native daemon root such as http://127.0.0.1:11434."
+var _ Provider = (*ollamaProvider)(nil)
+
+// newOllamaProvider returns the facade of the Ollama instance at base for
+// caller. A base that is not a daemon root builds none.
+func (rt *Runtime) newOllamaProvider(instance string, caller core.Caller, base string, timeout float64) (*ollamaProvider, error) {
+	catalog, err := newCoreOllama(instance, base, timeout)
+	if err != nil {
+		return nil, err
 	}
-	path := strings.TrimRight(parsed.EscapedPath(), "/")
-	if path != "" {
-		if strings.EqualFold(path, "/v1") {
-			return "Ollama uses its native daemon root, not the OpenAI-compatible /v1 URL; remove /v1."
-		}
-		return "Ollama base URL must be the native daemon root with no path."
-	}
-	return ""
+	return &ollamaProvider{runtime: rt, instance: instance, caller: caller, catalog: catalog}, nil
 }
 
 func ollamaProcessBoundaryGuidance(base string) string {
@@ -46,109 +50,180 @@ func ollamaProcessBoundaryGuidance(base string) string {
 	return ""
 }
 
-func (OllamaProvider) IsStub() bool { return false }
+func (p *ollamaProvider) IsStub() bool { return false }
 
-func ollamaNormalizeMessages(messages []Message) []map[string]any {
-	out := []map[string]any{}
-	for _, m := range messages {
-		role, _ := m["role"].(string)
-		if role == "" {
-			role = "user"
-		}
-		if role == "developer" {
-			role = "system"
-		}
-		content := ""
-		if c, ok := m["content"].(string); ok {
-			content = c
-		} else if m["content"] != nil {
-			content = fmt.Sprintf("%v", m["content"])
-		}
-		toolCalls := m["tool_calls"]
-		toolCallID, _ := m["tool_call_id"].(string)
-		if strings.TrimSpace(content) == "" && toolCalls == nil && toolCallID == "" {
-			continue
-		}
-		msg := map[string]any{"role": role, "content": content}
-		if toolCalls != nil {
-			msg["tool_calls"] = toolCalls
-		}
-		if toolCallID != "" {
-			msg["tool_call_id"] = toolCallID
-		}
-		if name, ok := m["name"].(string); ok && name != "" {
-			msg["name"] = name
-		}
-		out = append(out, msg)
-	}
-	return out
+func (p *ollamaProvider) Complete(model string, messages []Message, kw Kwargs) (map[string]any, error) {
+	return p.CompleteContext(context.Background(), model, messages, kw)
 }
 
-func ollamaBuildPayload(model string, messages []Message, stream bool, kw Kwargs) map[string]any {
-	payload := map[string]any{
-		"model": model, "messages": ollamaNormalizeMessages(messages), "stream": stream,
+func (p *ollamaProvider) CompleteContext(ctx context.Context, model string, messages []Message, kw Kwargs) (map[string]any, error) {
+	request, err := ollamaRequest(model, messages, kw)
+	if err != nil {
+		return nil, err
 	}
-	options := map[string]any{}
-	if v, ok := kw["temperature"]; ok && v != nil {
-		options["temperature"] = v
+	ctx = withCoreOperation(ctx, ollamaCoreType, p.caller)
+	response, err := p.runtime.core.Invoke(ctx, p.caller, p.instance, request)
+	if err != nil {
+		return nil, ollamaFailure(ctx, err)
 	}
-	if v, ok := kw["max_tokens"]; ok && v != nil {
-		options["num_predict"] = v
-	} else if v, ok := kw["_max_output_tokens"]; ok && v != nil {
-		options["num_predict"] = v
+	var completion map[string]any
+	if err := json.Unmarshal(response.Body, &completion); err != nil {
+		return nil, circuitFailureInvocation("ollama: invalid response payload")
 	}
-	if v, ok := kw["top_p"]; ok && v != nil {
-		options["top_p"] = v
-	}
-	if len(options) > 0 {
-		payload["options"] = options
-	}
-	if tools, ok := kw["tools"]; ok && tools != nil {
-		payload["tools"] = tools
-	}
-	return payload
+	return completion, nil
 }
 
-func ollamaMapToolCalls(raw any) []any {
-	list, ok := raw.([]any)
-	if !ok || len(list) == 0 {
-		return nil
-	}
-	var mapped []any
-	for i, tc := range list {
-		tcm, _ := tc.(map[string]any)
-		fn, _ := tcm["function"].(map[string]any)
-		if fn == nil {
-			fn = map[string]any{}
-		}
-		args := fn["arguments"]
-		var argStr string
-		if s, ok := args.(string); ok {
-			argStr = s
-		} else {
-			b, _ := json.Marshal(args)
-			argStr = string(b)
-		}
-		id, _ := tcm["id"].(string)
-		if id == "" {
-			id = fmt.Sprintf("call_%d", i)
-		}
-		name, _ := fn["name"].(string)
-		mapped = append(mapped, map[string]any{
-			"index": i, "id": id, "type": "function",
-			"function": map[string]any{"name": name, "arguments": argStr},
-		})
-	}
-	return mapped
+func (p *ollamaProvider) Stream(model string, messages []Message, kw Kwargs) (StreamIter, error) {
+	return p.StreamContext(context.Background(), model, messages, kw)
 }
 
-func ollamaUsage(data map[string]any) map[string]any {
-	prompt := intOf(data["prompt_eval_count"])
-	completion := intOf(data["eval_count"])
-	return map[string]any{
-		"prompt_tokens": prompt, "completion_tokens": completion,
-		"total_tokens": prompt + completion,
+// StreamContext relays Ollama's stream as Chat chunks. It still finishes
+// with stop after tool calls, as the transport's did; the API layer's chat
+// stream rewrites that finish to tool_calls.
+func (p *ollamaProvider) StreamContext(ctx context.Context, model string, messages []Message, kw Kwargs) (StreamIter, error) {
+	request, err := ollamaRequest(model, messages, kw)
+	if err != nil {
+		return nil, err
 	}
+	ctx = withCoreOperation(ctx, ollamaCoreType, p.caller)
+	stream, err := p.runtime.core.Stream(ctx, p.caller, p.instance, request)
+	if err != nil {
+		return nil, ollamaFailure(ctx, err)
+	}
+	return &ollamaCoreStream{ctx: ctx, inner: stream}, nil
+}
+
+// ollamaRequest is the Chat body core's Ollama reads: the model, the
+// messages and the options. Keys that begin with an underscore are the
+// gateway's own hints, not Chat fields, and stay out, except the output
+// limit of a Responses request, which the transport sent as num_predict
+// when max_tokens was unset, and so is sent as max_tokens.
+func ollamaRequest(model string, messages []Message, kw Kwargs) (core.Request, error) {
+	payload := make(map[string]any, len(kw)+2)
+	for key, value := range kw {
+		if !strings.HasPrefix(key, "_") {
+			payload[key] = value
+		}
+	}
+	if payload["max_tokens"] == nil && kw["_max_output_tokens"] != nil {
+		payload["max_tokens"] = kw["_max_output_tokens"]
+	}
+	payload["model"], payload["messages"] = model, messages
+	body, err := json.Marshal(payload)
+	if err != nil {
+		return core.Request{}, invocation("ollama: request encoding failed")
+	}
+	return core.Request{Surface: core.ModelSurfaceChatCompletions, Model: model, Body: body, ContentType: core.ContentTypeJSON}, nil
+}
+
+// ollamaFailure returns the gateway error for what the core Runtime returned
+// for an Ollama operation, so the router and the resilience wrapper decide
+// on it as they did on the transport's errors. A refusal keeps the daemon's
+// status and, in the transport's message, its words, which a client reads
+// when the refusal ends the chain; the transport read no Retry-After, so
+// none is kept. A request that got no complete answer may repeat, and an
+// answer that cannot be used counts against the circuit.
+func ollamaFailure(ctx context.Context, err error) error {
+	if ctxErr := ctx.Err(); ctxErr != nil {
+		return ctxErr
+	}
+	var configErr *ConfigError
+	if errors.As(err, &configErr) {
+		return configErr
+	}
+	var refusal *coreproviders.InvocationError
+	if errors.As(err, &refusal) && refusal.Status != 0 {
+		// Core quotes the daemon as "Ollama: upstream returned <status>:
+		// <words>", already redacted and bounded.
+		words := strings.TrimPrefix(refusal.Msg, fmt.Sprintf("Ollama: upstream returned %d: ", refusal.Status))
+		return invocationStatus(fmt.Sprintf("ollama: request failed (%d): %s", refusal.Status, words), refusal.Status)
+	}
+	var failure *core.ProviderError
+	if !errors.As(err, &failure) {
+		return invocation("ollama: shared transport failed")
+	}
+	message := "ollama: " + failure.Message
+	switch {
+	case failure.Class != core.ProviderErrorTransport && failure.Class != core.ProviderErrorUpstream:
+		// A request core would not send, or a provider it could not build.
+		return &ConfigError{Msg: message}
+	case failure.Classification.Retryable:
+		return retryableInvocation(message)
+	case failure.Classification.CircuitFailure:
+		return circuitFailureInvocation(message)
+	}
+	return invocation(message)
+}
+
+// ollamaCoreStream relays core's Ollama stream as the chunks the API layer
+// reads, as the transport's stream returned them. Each frame is one data
+// record of one Chat chunk, and [DONE] ends the stream.
+type ollamaCoreStream struct {
+	ctx   context.Context
+	inner core.StreamIter
+	err   error
+}
+
+func (s *ollamaCoreStream) Next() (string, bool) {
+	for {
+		frame, err := s.inner.Next()
+		if err != nil {
+			if !errors.Is(err, io.EOF) {
+				s.err = s.failure(err)
+			}
+			return "", false
+		}
+		data := strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(string(frame)), "data:"))
+		if data != "" && data != "[DONE]" {
+			return data, true
+		}
+	}
+}
+
+func (s *ollamaCoreStream) Err() error   { return s.err }
+func (s *ollamaCoreStream) Close() error { return s.inner.Close() }
+
+// failure reports what ended the stream. Of the failures core's stream
+// reports once open, only a line over the wire limit is an upstream one
+// with a cause, and the transport reported that as the record it would not
+// read.
+func (s *ollamaCoreStream) failure(err error) error {
+	var failure *core.ProviderError
+	if s.ctx.Err() == nil && errors.As(err, &failure) && failure.Class == core.ProviderErrorUpstream && failure.Cause != nil {
+		return &StreamRecordTooLargeError{Format: "NDJSON", Limit: maxStreamRecordWireSize}
+	}
+	return ollamaFailure(s.ctx, err)
+}
+
+func (p *ollamaProvider) ListModels() []ModelInfo {
+	models, _, _ := p.ListModelsWithError()
+	return models
+}
+
+// ListModelsWithError lists the models the daemon holds, as core's Ollama
+// reads /api/tags: each named by its name, or else its model, and made by
+// its family, or else ollama.
+func (p *ollamaProvider) ListModelsWithError() ([]ModelInfo, *CredentialObservation, error) {
+	models, err := p.catalog.ListModels(context.Background(), nil)
+	if err != nil {
+		return nil, nil, ollamaCatalogError(err)
+	}
+	rows := make([]ModelInfo, 0, len(models))
+	for _, model := range models {
+		rows = append(rows, ModelInfo{ID: model.ID, Vendor: model.Vendor})
+	}
+	return rows, nil, nil
+}
+
+// ollamaCatalogError is the gateway's catalog failure for core's. Core's
+// codes are the gateway's without their catalog_ prefix, and its details
+// are the gateway's words, so the failure reads as the transport's did.
+func ollamaCatalogError(err error) error {
+	var failure *coreproviders.CatalogError
+	if !errors.As(err, &failure) {
+		return catalogError("catalog_failed", "Provider catalog failed.", 0)
+	}
+	return catalogError("catalog_"+failure.Code, failure.Detail, failure.Status)
 }
 
 // intOf reads an integer option. Request handlers decode bodies with
@@ -171,188 +246,4 @@ func intOf(v any) int {
 		}
 	}
 	return 0
-}
-
-func (p OllamaProvider) chatURL() string { return strings.TrimRight(p.BaseURL, "/") + "/api/chat" }
-
-func (p OllamaProvider) Complete(model string, messages []Message, kw Kwargs) (map[string]any, error) {
-	payload := ollamaBuildPayload(model, messages, false, kw)
-	body, _ := json.Marshal(payload)
-	resp, err := httpClient(p.Timeout).Post(p.chatURL(), "application/json", bytes.NewReader(body))
-	if err != nil {
-		return nil, retryableInvocation("ollama: request failed: " + err.Error())
-	}
-	defer resp.Body.Close()
-	raw, readErr := readInvocationResponseBody(resp, "ollama")
-	if readErr != nil {
-		return nil, readErr
-	}
-	if resp.StatusCode >= 400 {
-		return nil, invocationStatus(
-			fmt.Sprintf("ollama: request failed (%d): %s", resp.StatusCode, extractError(raw)),
-			resp.StatusCode,
-		)
-	}
-	var data map[string]any
-	if json.Unmarshal(raw, &data) != nil {
-		return nil, circuitFailureInvocation("ollama: invalid response payload")
-	}
-	message, ok := data["message"].(map[string]any)
-	if !ok {
-		return nil, circuitFailureInvocation("ollama: invalid response payload")
-	}
-	content, _ := message["content"].(string)
-	toolCalls := ollamaMapToolCalls(message["tool_calls"])
-	if content == "" && toolCalls == nil {
-		return nil, circuitFailureInvocation("ollama: returned an empty response")
-	}
-	outMsg := map[string]any{"role": "assistant", "content": content}
-	finish := "stop"
-	if toolCalls != nil {
-		outMsg["tool_calls"] = toolCalls
-		finish = "tool_calls"
-	}
-	return map[string]any{
-		"id": "chatcmpl-ollama", "object": "chat.completion", "model": model,
-		"choices": []any{map[string]any{"index": 0, "message": outMsg, "finish_reason": finish}},
-		"usage":   ollamaUsage(data),
-	}, nil
-}
-
-// ollamaStreamIter converts Ollama's native NDJSON stream into OpenAI chunk JSON.
-type ollamaStreamIter struct {
-	resp    *http.Response
-	reader  *bufio.Reader
-	model   string
-	done    bool
-	emitted bool
-	err     error
-}
-
-func (it *ollamaStreamIter) Next() (string, bool) {
-	if it.done {
-		return "", false
-	}
-	for {
-		line, err := readBoundedLine(it.reader, maxStreamRecordWireSize, "NDJSON")
-		if _, ok := err.(*StreamRecordTooLargeError); ok {
-			it.done = true
-			it.err = err
-			return "", false
-		}
-		if strings.TrimSpace(string(line)) != "" {
-			var event map[string]any
-			if json.Unmarshal([]byte(strings.TrimSpace(string(line))), &event) == nil {
-				message, _ := event["message"].(map[string]any)
-				if message == nil {
-					message = map[string]any{}
-				}
-				deltaContent, _ := message["content"].(string)
-				toolCalls := ollamaMapToolCalls(message["tool_calls"])
-				isDone, _ := event["done"].(bool)
-				if deltaContent != "" || toolCalls != nil {
-					delta := map[string]any{}
-					if deltaContent != "" {
-						delta["content"] = deltaContent
-					}
-					if toolCalls != nil {
-						delta["tool_calls"] = toolCalls
-					}
-					it.emitted = true
-					if isDone {
-						it.done = true
-					}
-					return it.chunk(delta, nil), true
-				}
-				if isDone {
-					it.done = true
-					finish := "stop"
-					if toolCalls != nil {
-						finish = "tool_calls"
-					}
-					return it.chunk(map[string]any{}, finish), true
-				}
-			}
-		}
-		if err != nil {
-			it.done = true
-			if err != io.EOF {
-				it.err = retryableInvocation("ollama: streaming transport error: " + err.Error())
-			} else if !it.emitted {
-				it.err = invocation("ollama: returned an empty response")
-			}
-			return "", false
-		}
-	}
-}
-
-func (it *ollamaStreamIter) chunk(delta map[string]any, finish any) string {
-	b, _ := json.Marshal(map[string]any{
-		"id": "chatcmpl-ollama", "object": "chat.completion.chunk", "model": it.model,
-		"choices": []any{map[string]any{"index": 0, "delta": delta, "finish_reason": finish}},
-	})
-	return string(b)
-}
-
-func (it *ollamaStreamIter) Err() error { return it.err }
-func (it *ollamaStreamIter) Close() error {
-	if it.resp != nil {
-		return it.resp.Body.Close()
-	}
-	return nil
-}
-
-func (p OllamaProvider) Stream(model string, messages []Message, kw Kwargs) (StreamIter, error) {
-	payload := ollamaBuildPayload(model, messages, true, kw)
-	body, _ := json.Marshal(payload)
-	resp, err := httpClient(p.Timeout).Post(p.chatURL(), "application/json", bytes.NewReader(body))
-	if err != nil {
-		return nil, retryableInvocation("ollama: streaming request failed: " + err.Error())
-	}
-	if resp.StatusCode >= 400 {
-		raw, _ := readInvocationResponseBody(resp, "ollama")
-		resp.Body.Close()
-		return nil, invocationStatus(
-			fmt.Sprintf("ollama: request failed (%d): %s", resp.StatusCode, extractError(raw)),
-			resp.StatusCode,
-		)
-	}
-	return &ollamaStreamIter{resp: resp, reader: bufio.NewReader(resp.Body), model: model}, nil
-}
-
-func (p OllamaProvider) ListModels() []ModelInfo {
-	models, _, _ := p.ListModelsWithError()
-	return models
-}
-
-func (p OllamaProvider) ListModelsWithError() ([]ModelInfo, *CredentialObservation, error) {
-	timeout := p.Timeout
-	if timeout > 10 {
-		timeout = 10
-	}
-	resp, err := httpClient(timeout).Get(strings.TrimRight(p.BaseURL, "/") + "/api/tags")
-	if err != nil {
-		return nil, nil, catalogError("catalog_transport_error", "Provider catalog request could not reach the upstream service.", 0)
-	}
-	body, err := decodeCatalogResponse(resp, "models", "name", "model")
-	if err != nil {
-		return nil, nil, err
-	}
-	items := body["models"].([]any)
-	out := make([]ModelInfo, 0, len(items))
-	for _, entry := range items {
-		m := entry.(map[string]any)
-		name, _ := m["name"].(string)
-		if strings.TrimSpace(name) == "" {
-			name, _ = m["model"].(string)
-		}
-		vendor := "ollama"
-		if details, ok := m["details"].(map[string]any); ok {
-			if fam, ok := details["family"].(string); ok && fam != "" {
-				vendor = fam
-			}
-		}
-		out = append(out, ModelInfo{ID: name, Vendor: vendor})
-	}
-	return out, nil, nil
 }

@@ -150,11 +150,7 @@ func (rt *Runtime) instantiate(
 	case "github_copilot":
 		return rt.newCopilotProvider(providerID, cfg, caller, cfg.TimeoutOr(s.GithubCopilotTimeoutSeconds)), nil
 	case "ollama":
-		base := cfg.BaseURL
-		if base == "" {
-			base = s.OllamaBaseURL
-		}
-		return OllamaProvider{BaseURL: base, Timeout: cfg.TimeoutOr(s.OllamaTimeoutSeconds)}, nil
+		return rt.newOllamaProvider(providerID, caller, ollamaBase(s, cfg), cfg.TimeoutOr(s.OllamaTimeoutSeconds))
 	case "echo":
 		return EchoProvider{}, nil
 	}

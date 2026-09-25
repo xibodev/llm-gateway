@@ -1,14 +1,27 @@
 package providers
 
-import "testing"
+import (
+	"encoding/json"
+	"net/http"
+	"testing"
+)
 
 func TestV043OllamaMapsDeveloperRoleToSystem(t *testing.T) {
-	messages := ollamaNormalizeMessages([]Message{
+	var body struct {
+		Messages []map[string]any `json:"messages"`
+	}
+	daemon := ollamaDaemon(t, func(w http.ResponseWriter, r *http.Request) {
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Error(err)
+		}
+		_, _ = w.Write([]byte(`{"message":{"content":"ok"}}`))
+	})
+	_, err := ollamaFixture(t, daemon.URL).Complete("model", []Message{
 		{"role": "developer", "content": "developer policy"},
 		{"role": "user", "content": "hello"},
-	})
-	if len(messages) != 2 || messages[0]["role"] != "system" ||
-		messages[0]["content"] != "developer policy" {
-		t.Fatalf("messages=%+v", messages)
+	}, nil)
+	if err != nil || len(body.Messages) != 2 || body.Messages[0]["role"] != "system" ||
+		body.Messages[0]["content"] != "developer policy" {
+		t.Fatalf("messages=%+v err=%v", body.Messages, err)
 	}
 }

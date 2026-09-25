@@ -12,6 +12,7 @@ import (
 	"llmgw/internal/iam"
 
 	core "github.com/xibodev/llmgw-core"
+	coreproviders "github.com/xibodev/llmgw-core/providers"
 )
 
 // A persisted, per-provider model catalog. It is the single source of truth for
@@ -97,12 +98,8 @@ func ProviderConfigurationIssue(providerID string) string {
 	if entry.RequiresBaseURL && strings.TrimSpace(cfg.BaseURL) == "" {
 		return entry.Label + " requires a base URL."
 	}
-	if strings.EqualFold(strings.TrimSpace(cfg.Type), "ollama") {
-		base := cfg.BaseURL
-		if strings.TrimSpace(base) == "" {
-			base = config.Get().OllamaBaseURL
-		}
-		if issue := ollamaBaseURLIssue(base); issue != "" {
+	if ollamaInstance(cfg) {
+		if issue := coreproviders.OllamaBaseURLIssue(ollamaBase(config.Get(), cfg)); issue != "" {
 			return issue
 		}
 	}
