@@ -1,0 +1,159 @@
+{
+  "schema_version": "1.0.0",
+  "mode": "change",
+  "contract": {
+    "digest": "31b393ab3e80162226619c441694573993ac618382d74642101484a0bf2e9c80"
+  },
+  "authoring_provenance": {
+    "status": "established",
+    "path": ".release-harness/drafts/llm-gateway.record.json",
+    "digest": "6732ddf3dc8236b974e2aae5f81b546d89c2a466b6fb0a368d76620955bf981e"
+  },
+  "sources": [
+    {
+      "source_id": "primary",
+      "status": "established",
+      "repository_identity": "https://github.com/xibodev/llm-gateway.git",
+      "base_ref": "origin/main",
+      "base_commit": "1206d03ebe575c1e88c02dcc94a9575b8ab83715",
+      "merge_base": "73ef7f3988d9eb0382a78781594555747e8a2375",
+      "head_commit": "f754f4137ba2ad0d74fc117231e6a8ac90278401",
+      "head_tree": "ab9befc213936b7a869d7c42de6e76588acda95e",
+      "reviewed_source_digest": "1c0f3deceda09e18b842d8bbb0aafa8c032aecf5a26583aca5b1b44b11a988ea",
+      "changed_paths": [
+        {
+          "status": "added",
+          "path": "go/internal/providers/policy_circuit_test.go",
+          "old_blob": "0000000000000000000000000000000000000000",
+          "new_blob": "d94c0db9c05f765cacb4e48fa7c60db37629df1b"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/providers/policy.go",
+          "old_blob": "85f239a51311884eb178362d0fb907968e5e6c83",
+          "new_blob": "20f9f3a3587afa298cd713cd6e5d4ec7409bbea8"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/providers/provider.go",
+          "old_blob": "90db4cc451c512e5e380b4f0b4bf4d28e867f48c",
+          "new_blob": "aa6b103190c99280e4fdeccdf7414932aa4beffa"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/providers/runtime_test.go",
+          "old_blob": "8000a6afb867f1825cdf633aecc2e572aa06cf8c",
+          "new_blob": "a97c2bec29886dd081d8c6f3c6b959a650bf9fea"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/providers/runtime.go",
+          "old_blob": "e442c06874b36aee6d85b33bc4890717a21e756f",
+          "new_blob": "a80ce3d70da942c7524fb9e26edfd1166b7fd58f"
+        },
+        {
+          "status": "added",
+          "path": "go/internal/router/failover_boundary_test.go",
+          "old_blob": "0000000000000000000000000000000000000000",
+          "new_blob": "083ad86fd36f77a5a3cc94486ef6495d1dbecc21"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/router/failover.go",
+          "old_blob": "2e945ef99d2a57ab5332e1f1b6a34a37777261fa",
+          "new_blob": "54b08150fb22e572fed54a12e7bb4b6d7141ae2e"
+        }
+      ]
+    }
+  ],
+  "facts": [
+    {
+      "id": "circuits",
+      "claim": "providers.Runtime keeps its per-provider circuit breakers in one llmgw-core execution.HealthTracker configured from each provider's threshold and cooldown, with no failure window and Retry-After ignored, read by a gateway Observe that fails circuit failures, succeeds other invocation errors and ignores errors that never reached the upstream. The resilience wrapper's retry loops, the circuit-open 503 and their timing are unchanged.",
+      "status": "observed",
+      "evidence": {
+        "source": "go/internal/providers/policy.go and runtime.go; circuit tests pinned before the change"
+      }
+    },
+    {
+      "id": "router-execute",
+      "claim": "All five router failover chains walk their candidates with execution.Execute; each chain's advance rule reaches Execute as the failure's classification, so the Messages chains still move past build, configuration and adapter failures. Endpoints, policy gates, translation-loss routing, affinity, compatibility filtering and telemetry stay product code. Streams commit when they open, as before, and cancellation keeps each chain's own context rules.",
+      "status": "observed",
+      "evidence": {
+        "source": "go/internal/router/failover.go; failover_boundary_test.go"
+      }
+    },
+    {
+      "id": "fixtures",
+      "claim": "The M0 characterization fixtures, including failover-before-output and failover-after-output streams, pass unchanged, as do the router tests and the 115-case classification parity test; tests pinning the circuit breaker and the failover boundary pass on both the old and the new code.",
+      "status": "observed",
+      "evidence": {
+        "source": "go/internal/api/testdata unchanged; go/internal/router tests"
+      }
+    },
+    {
+      "id": "suite",
+      "claim": "The full Go suite passes with HTTP_PROXY and HTTPS_PROXY unreachable, and router and providers pass under -count=10; coupling budgets are unchanged; gofmt, vet, govulncheck (0 reachable), check-docs and git diff --check pass.",
+      "status": "observed",
+      "evidence": {
+        "source": "local gate run on the reviewed head"
+      }
+    }
+  ],
+  "impact": {
+    "assertions": [
+      {
+        "id": "A1",
+        "impact": "unchanged",
+        "supported_by": [
+          "circuits",
+          "router-execute",
+          "fixtures",
+          "suite"
+        ]
+      },
+      {
+        "id": "A2",
+        "impact": "unchanged",
+        "supported_by": [
+          "circuits",
+          "router-execute",
+          "fixtures",
+          "suite"
+        ]
+      },
+      {
+        "id": "A3",
+        "impact": "unchanged",
+        "supported_by": [
+          "circuits",
+          "router-execute",
+          "fixtures",
+          "suite"
+        ]
+      },
+      {
+        "id": "A4",
+        "impact": "unchanged",
+        "supported_by": [
+          "circuits",
+          "router-execute",
+          "fixtures",
+          "suite"
+        ]
+      }
+    ],
+    "requires": [],
+    "possible_binding_changes": []
+  },
+  "questions": [],
+  "conclusion": {
+    "action": "reuse_contract",
+    "summary": "Circuit breakers and router failover are rebuilt on llmgw-core execution primitives with unchanged failover behavior; CLI, health and models behavior is unchanged."
+  },
+  "proposed": {
+    "by": "execution-primitives",
+    "at": "2026-09-25T11:03:45.086Z"
+  },
+  "digest": "222f82482ade48f956fd0c59d8ddb4987e737a1aea29cbc47bf564ba5b1510a4"
+}
