@@ -1,0 +1,215 @@
+{
+  "schema_version": "1.0.0",
+  "mode": "change",
+  "contract": {
+    "digest": "31b393ab3e80162226619c441694573993ac618382d74642101484a0bf2e9c80"
+  },
+  "authoring_provenance": {
+    "status": "established",
+    "path": ".release-harness/drafts/llm-gateway.record.json",
+    "digest": "6732ddf3dc8236b974e2aae5f81b546d89c2a466b6fb0a368d76620955bf981e"
+  },
+  "sources": [
+    {
+      "source_id": "primary",
+      "status": "established",
+      "repository_identity": "https://github.com/xibodev/llm-gateway.git",
+      "base_ref": "origin/main",
+      "base_commit": "14466f1c4bf582119e4dd942651159fb18ab72c8",
+      "merge_base": "ab80462fe2119ced7056d3cc1eeb811b904d7740",
+      "head_commit": "daf2172aa11192ddb42ccdb9f15623b78b628576",
+      "head_tree": "b58499cb8e43e93ebae382a9ddbe02f1faeb7d1b",
+      "reviewed_source_digest": "bac004ce9accc7a18e16da95652f9637f12dad6e3f5a3ae640d380532c6ddbb1",
+      "changed_paths": [
+        {
+          "status": "modified",
+          "path": "go/internal/api/oauth_api_test.go",
+          "old_blob": "5d888109d61ecfe38101434329fbfddaeab83fae",
+          "new_blob": "f18fa13aa866f215f06e34e6caeb7bd890d295b9"
+        },
+        {
+          "status": "added",
+          "path": "go/internal/api/oauth_completion.go",
+          "old_blob": "0000000000000000000000000000000000000000",
+          "new_blob": "0b321b9fa96da874656ab6f35a8a794098eb4fdd"
+        },
+        {
+          "status": "added",
+          "path": "go/internal/api/oauth_differential_code_test.go",
+          "old_blob": "0000000000000000000000000000000000000000",
+          "new_blob": "393abf07f9307ce48008645b479c13195d7cb848"
+        },
+        {
+          "status": "added",
+          "path": "go/internal/api/oauth_differential_device_test.go",
+          "old_blob": "0000000000000000000000000000000000000000",
+          "new_blob": "6140015640fd60ad08a25ac9009dc9fcb9d0f1b6"
+        },
+        {
+          "status": "added",
+          "path": "go/internal/api/oauth_differential_dump_test.go",
+          "old_blob": "0000000000000000000000000000000000000000",
+          "new_blob": "5fd7c72c1d6930a4708312f90ca8ffc6591a66dd"
+        },
+        {
+          "status": "added",
+          "path": "go/internal/api/oauth_differential_test.go",
+          "old_blob": "0000000000000000000000000000000000000000",
+          "new_blob": "a6601c140706f8b6b5e992bc9893881fdbda8637"
+        },
+        {
+          "status": "added",
+          "path": "go/internal/api/oauth_flows_access_test.go",
+          "old_blob": "0000000000000000000000000000000000000000",
+          "new_blob": "4b9cdcf172e467beea0f29470949e8f98193da9d"
+        },
+        {
+          "status": "added",
+          "path": "go/internal/api/oauth_flows_test.go",
+          "old_blob": "0000000000000000000000000000000000000000",
+          "new_blob": "fcb0b0a438a202e5740fca2885e73d7948dcc83f"
+        },
+        {
+          "status": "added",
+          "path": "go/internal/api/oauth_flows.go",
+          "old_blob": "0000000000000000000000000000000000000000",
+          "new_blob": "f4d38f779998ab33323e401c31f48f68f20e470a"
+        },
+        {
+          "status": "added",
+          "path": "go/internal/api/oauth_legacy_completion_test.go",
+          "old_blob": "0000000000000000000000000000000000000000",
+          "new_blob": "18659e595c8b466d6c3e9823117831f63cc879f5"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/api/oauth.go",
+          "old_blob": "c9523fda24cffecb4e4c2a34168df7c207cd8383",
+          "new_blob": "a36dc569f0b06b9e9697537f3bc747e86abece67"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/api/server.go",
+          "old_blob": "8a0604847135e18fd4583d8239ce74550e718f99",
+          "new_blob": "f08d4b2c0f2890ccdae9b782b93c837e23c44ccc"
+        },
+        {
+          "status": "added",
+          "path": "go/internal/providers/oauth_code_drivers_test.go",
+          "old_blob": "0000000000000000000000000000000000000000",
+          "new_blob": "05db7acc8045414cb6e53d316076e1f60a82564b"
+        },
+        {
+          "status": "added",
+          "path": "go/internal/providers/oauth_code_drivers.go",
+          "old_blob": "0000000000000000000000000000000000000000",
+          "new_blob": "9d0b7c362b4348e767ad1bfaefe1d81b0023c134"
+        },
+        {
+          "status": "added",
+          "path": "go/internal/providers/oauth_device_drivers_test.go",
+          "old_blob": "0000000000000000000000000000000000000000",
+          "new_blob": "e1ba72649e884103a096e1050bf4d79f2f952d73"
+        },
+        {
+          "status": "added",
+          "path": "go/internal/providers/oauth_device_drivers.go",
+          "old_blob": "0000000000000000000000000000000000000000",
+          "new_blob": "d640241021b7b85d575031fdded41ccdca8a15a6"
+        },
+        {
+          "status": "added",
+          "path": "go/internal/providers/oauth_drivers.go",
+          "old_blob": "0000000000000000000000000000000000000000",
+          "new_blob": "a48b823858f1ad84c747fb8af08cbd93c71c1ec2"
+        }
+      ]
+    }
+  ],
+  "facts": [
+    {
+      "id": "service",
+      "claim": "The console OAuth routes (start, poll, complete, callback) run on llmgw-core's oauthflow.Service held by the api server, over a MemoryFlowStore capped at five flows per caller; the api package's flow maps, cleanup goroutine and generation counters are removed. Five drivers (Copilot device, Codex device, Codex browser and manual, Antigravity browser, Antigravity consumer manual) call the same llm-provider-auth helpers the adapters use.",
+      "status": "observed",
+      "evidence": {
+        "source": "go/internal/api/oauth.go, oauth_flows.go, oauth_completion.go, server.go; go/internal/providers/oauth_*drivers.go"
+      }
+    },
+    {
+      "id": "completion-identical",
+      "claim": "Completion writes through iam.PutOAuthProviderConnection with the same inputs and side effects; a differential test runs the old completion and the new route on copies of one seeded database and compares every table, the decrypted envelopes, the client profile, the provider settings and the response.",
+      "status": "observed",
+      "evidence": {
+        "source": "go/internal/api differential completion test"
+      }
+    },
+    {
+      "id": "route-changes",
+      "claim": "Route shapes and status codes are unchanged, with these differences: device_code carries the flow ID so the provider device code stays on the server; a transient device-poll error keeps the flow pending instead of deleting it; a pasted code whose exchange fails ends the flow (a mismatched state still leaves it pending); the five-flow cap covers all methods together; a callback must arrive at the flow's exact redirect URL. No characterization golden or API document pins the changed values.",
+      "status": "observed",
+      "evidence": {
+        "source": "go/internal/api/oauth.go; go/internal/api tests; docs checked by check-docs"
+      }
+    },
+    {
+      "id": "suite",
+      "claim": "The full Go suite passes with HTTP_PROXY and HTTPS_PROXY unreachable with unchanged characterization goldens and coupling budgets; new tests cover replay, cross-caller poll and complete, expiry of every method and a single handover of the callback result; gofmt, vet, govulncheck (0 reachable), check-docs and git diff --check pass.",
+      "status": "observed",
+      "evidence": {
+        "source": "local gate run on the reviewed head"
+      }
+    }
+  ],
+  "impact": {
+    "assertions": [
+      {
+        "id": "A1",
+        "impact": "unchanged",
+        "supported_by": [
+          "service",
+          "route-changes",
+          "suite"
+        ]
+      },
+      {
+        "id": "A2",
+        "impact": "unchanged",
+        "supported_by": [
+          "service",
+          "route-changes",
+          "suite"
+        ]
+      },
+      {
+        "id": "A3",
+        "impact": "unchanged",
+        "supported_by": [
+          "service",
+          "route-changes",
+          "suite"
+        ]
+      },
+      {
+        "id": "A4",
+        "impact": "unchanged",
+        "supported_by": [
+          "service",
+          "route-changes",
+          "suite"
+        ]
+      }
+    ],
+    "requires": [],
+    "possible_binding_changes": []
+  },
+  "questions": [],
+  "conclusion": {
+    "action": "reuse_contract",
+    "summary": "Console OAuth flows run on the llmgw-core oauthflow Service with identical completion writes and small documented route differences; CLI, health and models behavior is unchanged."
+  },
+  "proposed": {
+    "by": "oauthflow-service",
+    "at": "2026-09-25T08:37:22.96Z"
+  },
+  "digest": "69122a370f78890e1d515c8ccda30cd2b25e52f67bb7fdbdebfcafc999868808"
+}
