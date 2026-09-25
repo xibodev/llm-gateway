@@ -39,6 +39,7 @@ func (rt *Runtime) coreVerticals() map[string]coreVertical {
 		copilotCoreType:      rt.copilotCoreVertical(),
 		anthropicCoreType:    rt.anthropicCoreVertical(),
 		azureCoreType:        rt.azureCoreVertical(),
+		googleCoreType:       rt.googleCoreVertical(),
 	}
 }
 

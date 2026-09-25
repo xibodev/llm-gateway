@@ -23,6 +23,8 @@ var coreVerticalCases = map[string]struct {
 	"codex litellm":    {&config.ProviderConfig{Type: "litellm", RegistryID: "openai_codex"}, "openai_codex"},
 	"codex at zen URL": {&config.ProviderConfig{Type: "openai_compatible", RegistryID: "openai_codex", BaseURL: "https://opencode.ai/zen/v1"}, "openai_codex"},
 	"antigravity":      {&config.ProviderConfig{Type: "google_antigravity"}, "google_antigravity"},
+	"ai studio":        {&config.ProviderConfig{Type: "ai_studio"}, googleCoreType},
+	"vertex":           {&config.ProviderConfig{Type: "Vertex_AI"}, googleCoreType},
 	"zen":              {&config.ProviderConfig{Type: "openai_compatible", RegistryID: "opencode_zen"}, zenCoreType},
 	"zen by URL":       {&config.ProviderConfig{Type: "litellm", BaseURL: "https://opencode.ai/zen/v1"}, zenCoreType},
 	"bedrock at zen":   {&config.ProviderConfig{Type: "bedrock", BaseURL: "https://opencode.ai/zen/v1"}, ""},
