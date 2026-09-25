@@ -2,7 +2,9 @@ package providers
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -651,5 +653,19 @@ func TestCopilotRequestsTimeOutAsConfigured(t *testing.T) {
 	_, err := provider.Complete("chat-model", []Message{{"role": "user", "content": "hi"}}, Kwargs{"_force_api_support": false})
 	if !InvocationRetryable(err) || time.Since(started) > 3*time.Second {
 		t.Fatalf("err=%v after %s", err, time.Since(started))
+	}
+}
+
+// A caller without a principal resolves no credential, and the store does not
+// open the IAM store to learn so, as the resolver never looked one up.
+func TestCopilotStoreLeavesCallersWithoutAPrincipalToTheGatewayToken(t *testing.T) {
+	store := copilotStore{open: func() (core.CredentialStore, error) {
+		t.Fatal("the IAM store was opened for a caller without a principal")
+		return nil, nil
+	}}
+	for _, caller := range []core.Caller{gatewayCaller(), {ID: iam.AdminCallerID, Kind: core.CallerService}} {
+		if key, err := store.Resolve(context.Background(), caller, "copilot"); !errors.Is(err, core.ErrNoCredential) {
+			t.Fatalf("%+v: key=%q err=%v", caller, key, err)
+		}
 	}
 }

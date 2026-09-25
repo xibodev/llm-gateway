@@ -3,10 +3,13 @@ package providers
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 
 	"llmgw/internal/config"
 
+	copilotauth "github.com/xibodev/llm-provider-auth/copilot"
+	"github.com/xibodev/llm-provider-auth/tokenstore"
 	core "github.com/xibodev/llmgw-core"
 )
 
@@ -163,17 +166,96 @@ func (p *copilotProvider) ListModels() []ModelInfo {
 }
 
 // ListModelsWithError lists the catalog on the gateway's path, as the OpenAI
-// transport listed it, with the rows /v1/models presents.
+// transport listed it: Copilot's /models with a session for the caller, read
+// into the rows /v1/models presents, and once more with a new session when
+// Copilot rejects the first. A session that could not be exchanged fails
+// without a status, as it did.
 func (p *copilotProvider) ListModelsWithError() ([]ModelInfo, *CredentialObservation, error) {
-	catalog := OpenAIProvider{auth: copilotAuth{providerID: p.instance, caller: p.caller}, Timeout: p.timeout}
-	return catalog.ListModelsWithError()
+	ctx, collector := collectCredentials(context.Background())
+	target, err := p.target(ctx, false)
+	if err != nil {
+		return nil, copilotObservation(collector), catalogError(
+			"catalog_authentication_failed", "Provider authentication failed before catalog access.", 0,
+		)
+	}
+	models, observation, err := OpenAIProvider{auth: target, Timeout: p.timeout}.ListModelsWithError()
+	if code, _, status := CatalogFailure(err); code != "catalog_http_error" || status != http.StatusUnauthorized {
+		return models, observation, err
+	}
+	if target, err = p.target(ctx, true); err != nil {
+		return nil, observation, catalogError(
+			"catalog_refresh_failed", "Provider credential refresh failed.", http.StatusUnauthorized,
+		)
+	}
+	models, observation, err = OpenAIProvider{auth: target, Timeout: p.timeout}.ListModelsWithError()
+	if code, _, _ := CatalogFailure(err); code == "catalog_transport_error" {
+		err = catalogError(
+			"catalog_transport_error", "Provider catalog retry could not reach the upstream service.", 0,
+		)
+	}
+	return models, observation, err
 }
 
 // httpTarget is where the gateway proxies a Copilot instance's other
 // endpoints, and how it authenticates them, as the transport did.
 func (p *copilotProvider) httpTarget() (string, http.Header, bool) {
-	base, headers, err := copilotAuth{providerID: p.instance, caller: p.caller}.Prepare()
-	return base, headers, err == nil
+	target, err := p.target(context.Background(), false)
+	return target.base, target.headers, err == nil
+}
+
+// copilotTarget is where a Copilot session sends the gateway's own requests:
+// the session's API base, with the editor identity the OpenAI transport
+// sent, and the credential the session was bought with.
+type copilotTarget struct {
+	base        string
+	headers     http.Header
+	observation *CredentialObservation
+}
+
+// Prepare and PrepareObserved implement OpenAIAuth for the catalog.
+func (t copilotTarget) Prepare() (string, http.Header, error) { return t.base, t.headers.Clone(), nil }
+
+func (t copilotTarget) PrepareObserved() (string, http.Header, *CredentialObservation, error) {
+	return t.base, t.headers.Clone(), t.observation, nil
+}
+
+// target exchanges the caller's GitHub token, from Copilot's store as the
+// Runtime resolves it, on the shared client, or the gateway-wide token for a
+// caller without one; force buys a new session. The store refuses a
+// principal without a credential, and marks the one it reads used.
+func (p *copilotProvider) target(ctx context.Context, force bool) (copilotTarget, error) {
+	auth := p.runtime.copilot
+	if err := auth.AssertProxyAllowed(); err != nil {
+		return copilotTarget{}, err
+	}
+	store := p.runtime.verticals[copilotCoreType].credentials
+	key, err := store.Resolve(ctx, p.caller, p.instance)
+	var session *copilotauth.Session
+	switch {
+	case errors.Is(err, core.ErrNoCredential):
+		session, err = auth.GetSession(force)
+	case err == nil:
+		var record tokenstore.Record
+		if record, err = store.Load(ctx, key); err == nil {
+			session, err = auth.GetSessionForOAuth(record.AccessToken, force)
+		}
+	}
+	if err != nil {
+		return copilotTarget{}, err
+	}
+	settings := config.Get()
+	headers := http.Header{}
+	headers.Set("Authorization", "Bearer "+session.Token)
+	headers.Set("Content-Type", "application/json")
+	headers.Set("Accept", "application/json")
+	headers.Set("Copilot-Integration-Id", settings.GithubCopilotIntegrationID)
+	headers.Set("Editor-Version", settings.GithubCopilotEditorVersion)
+	headers.Set("Editor-Plugin-Version", copilotPluginVersion)
+	headers.Set("OpenAI-Intent", "conversation-panel")
+	headers.Set("User-Agent", copilotUserAgent)
+	return copilotTarget{
+		base: session.ChatBaseURL, headers: headers, observation: copilotObservation(credentialCollectorFrom(ctx)),
+	}, nil
 }
 
 func copilotRequest(surface core.ModelSurface, model string, payload map[string]any) (core.Request, error) {

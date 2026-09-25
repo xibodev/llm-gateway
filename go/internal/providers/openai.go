@@ -17,8 +17,8 @@ import (
 // OpenAIProvider speaks the OpenAI wire standard (/chat/completions, /models)
 // against any backend. Authentication + base URL are supplied by an OpenAIAuth
 // strategy, so this one transport backs every OpenAI-compatible provider type:
-// openai_compatible, bedrock, litellm, and github_copilot (which differ only in
-// their auth strategy).
+// openai_compatible, bedrock and litellm (which differ only in their auth
+// strategy).
 //
 // When forceAdapt (provider config) or a per-request force_api_support flag is
 // set, it may translate a /chat/completions request to the model's actually
@@ -99,34 +99,11 @@ func (p OpenAIProvider) CompleteContextWithObservation(
 	enc.SetEscapeHTML(false)
 	_ = enc.Encode(buildOpenAIPayload(model, messages, false, kw))
 	body := bytes.TrimRight(buf.Bytes(), "\n")
-	do := func(b string, h http.Header) (*http.Response, error) {
-		req, _ := http.NewRequestWithContext(ctx, "POST", p.chatURL(b), bytes.NewReader(body))
-		req.Header = h
-		return httpClient(p.Timeout).Do(req)
-	}
-
-	resp, err := do(base, headers)
+	req, _ := http.NewRequestWithContext(ctx, "POST", p.chatURL(base), bytes.NewReader(body))
+	req.Header = headers
+	resp, err := httpClient(p.Timeout).Do(req)
 	if err != nil {
 		return nil, observation, retryableInvocation("openai: upstream transport error: " + err.Error())
-	}
-	if resp.StatusCode == 401 && p.auth.CanRefresh() {
-		resp.Body.Close()
-		if ctx.Err() != nil {
-			return nil, observation, invocation("openai: request canceled: " + ctx.Err().Error())
-		}
-		if refreshErr := p.auth.Refresh(); refreshErr != nil {
-			return nil, observation, refreshErr
-		}
-		if ctx.Err() != nil {
-			return nil, observation, invocation("openai: request canceled: " + ctx.Err().Error())
-		}
-		if base, headers, observation, err = prepareOpenAIAuth(p.auth); err != nil {
-			return nil, observation, err
-		}
-		applyVisionHeader(headers, messages)
-		if resp, err = do(base, headers); err != nil {
-			return nil, observation, retryableInvocation("openai: upstream transport error on retry: " + err.Error())
-		}
 	}
 	defer resp.Body.Close()
 	raw, readErr := readInvocationResponseBody(resp, "openai")
@@ -135,9 +112,6 @@ func (p OpenAIProvider) CompleteContextWithObservation(
 	}
 	if resp.StatusCode >= 400 {
 		errMsg := extractError(raw)
-		if p.auth.CanRefresh() && (resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden) {
-			return nil, observation, failoverInvocationStatus(fmt.Sprintf("openai: upstream returned %d: %s", resp.StatusCode, redact(errMsg)), resp.StatusCode)
-		}
 		return nil, observation, invocationStatusRetryAfter(fmt.Sprintf("openai: upstream returned %d: %s", resp.StatusCode, redact(errMsg)), resp.StatusCode, resp.Header.Get("Retry-After"))
 	}
 	var out map[string]any
@@ -198,31 +172,11 @@ func (p OpenAIProvider) StreamContext(ctx context.Context, model string, message
 	enc.SetEscapeHTML(false)
 	_ = enc.Encode(buildOpenAIPayload(model, messages, true, kw))
 	body := bytes.TrimRight(buf.Bytes(), "\n")
-	do := func(b string, h http.Header) (*http.Response, error) {
-		req, _ := http.NewRequestWithContext(ctx, "POST", p.chatURL(b), bytes.NewReader(body))
-		req.Header = h
-		return httpClient(p.Timeout).Do(req)
-	}
-
-	resp, err := do(base, headers)
+	req, _ := http.NewRequestWithContext(ctx, "POST", p.chatURL(base), bytes.NewReader(body))
+	req.Header = headers
+	resp, err := httpClient(p.Timeout).Do(req)
 	if err != nil {
 		return nil, retryableInvocation("openai: streaming transport error: " + err.Error())
-	}
-	if resp.StatusCode == 401 && p.auth.CanRefresh() {
-		resp.Body.Close()
-		if refreshErr := p.auth.Refresh(); refreshErr != nil {
-			return nil, refreshErr
-		}
-		if ctx.Err() != nil {
-			return nil, ctx.Err()
-		}
-		if base, headers, err = p.auth.Prepare(); err != nil {
-			return nil, err
-		}
-		applyVisionHeader(headers, messages)
-		if resp, err = do(base, headers); err != nil {
-			return nil, retryableInvocation("openai: streaming transport error on retry: " + err.Error())
-		}
 	}
 	if resp.StatusCode >= 400 {
 		raw, readErr := readInvocationResponseBody(resp, "openai")
@@ -231,9 +185,6 @@ func (p OpenAIProvider) StreamContext(ctx context.Context, model string, message
 			return nil, readErr
 		}
 		errMsg := extractError(raw)
-		if p.auth.CanRefresh() && (resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden) {
-			return nil, failoverInvocationStatus(fmt.Sprintf("openai: upstream returned %d: %s", resp.StatusCode, redact(errMsg)), resp.StatusCode)
-		}
 		return nil, invocationStatusRetryAfter(fmt.Sprintf("openai: upstream returned %d: %s", resp.StatusCode, redact(errMsg)), resp.StatusCode, resp.Header.Get("Retry-After"))
 	}
 	return newHTTPStreamIter(resp, "openai"), nil
@@ -276,43 +227,15 @@ func (p OpenAIProvider) ListModelsWithError() (
 	if timeout > 10 {
 		timeout = 10
 	}
-	get := func(b string, h http.Header) (*http.Response, error) {
-		req, _ := http.NewRequest("GET", p.modelsURL(b), nil)
-		req.Header = h
-		return httpClient(timeout).Do(req)
-	}
-
-	resp, err := get(base, headers)
+	req, _ := http.NewRequest("GET", p.modelsURL(base), nil)
+	req.Header = headers
+	resp, err := httpClient(timeout).Do(req)
 	if err != nil {
 		return nil, observation, catalogError(
 			"catalog_transport_error",
 			"Provider catalog request could not reach the upstream service.",
 			0,
 		)
-	}
-	if resp.StatusCode == 401 && p.auth.CanRefresh() {
-		resp.Body.Close()
-		if refreshErr := p.auth.Refresh(); refreshErr != nil {
-			return nil, observation, catalogError(
-				"catalog_refresh_failed",
-				"Provider credential refresh failed.",
-				http.StatusUnauthorized,
-			)
-		}
-		if base, headers, observation, err = prepareOpenAIAuth(p.auth); err != nil {
-			return nil, observation, catalogError(
-				"catalog_authentication_failed",
-				"Provider authentication failed after credential refresh.",
-				http.StatusUnauthorized,
-			)
-		}
-		if resp, err = get(base, headers); err != nil {
-			return nil, observation, catalogError(
-				"catalog_transport_error",
-				"Provider catalog retry could not reach the upstream service.",
-				0,
-			)
-		}
 	}
 	if resp.StatusCode >= 400 {
 		resp.Body.Close()
@@ -488,8 +411,9 @@ func messagesHaveImages(messages []Message) bool {
 	return false
 }
 
-// applyVisionHeader unlocks image processing on GitHub Copilot (which rejects
-// images without it). Harmless to other OpenAI-compatible providers.
+// applyVisionHeader marks a request that carries images with the header
+// GitHub Copilot requires for them. The transport has sent it since it served
+// Copilot, and other OpenAI-compatible upstreams ignore it.
 func applyVisionHeader(h http.Header, messages []Message) {
 	if messagesHaveImages(messages) {
 		h.Set("Copilot-Vision-Request", "true")
@@ -717,26 +641,6 @@ func (p OpenAIProvider) callResponsesPayloadContext(
 	if err != nil {
 		return nil, observation, retryableInvocation("openai: responses transport error: " + err.Error())
 	}
-	if resp.StatusCode == 401 && p.auth.CanRefresh() {
-		resp.Body.Close()
-		if ctx.Err() != nil {
-			return nil, observation, invocation("openai: responses request canceled: " + ctx.Err().Error())
-		}
-		if refreshErr := p.auth.Refresh(); refreshErr != nil {
-			return nil, observation, refreshErr
-		}
-		if ctx.Err() != nil {
-			return nil, observation, invocation("openai: responses request canceled: " + ctx.Err().Error())
-		}
-		if base, headers, observation, err = prepareOpenAIAuth(p.auth); err != nil {
-			return nil, observation, err
-		}
-		headers.Set("Accept", "application/json")
-		applyResponsesVisionHeader(headers, payload)
-		if resp, err = post(base, headers); err != nil {
-			return nil, observation, retryableInvocation("openai: responses transport error on retry: " + err.Error())
-		}
-	}
 	raw, readErr := readInvocationResponseBody(resp, "openai: responses")
 	resp.Body.Close()
 	if readErr != nil {
@@ -756,9 +660,6 @@ func (p OpenAIProvider) callResponsesPayloadContext(
 	}
 	if resp.StatusCode >= 400 {
 		message := fmt.Sprintf("openai: responses endpoint returned %d: %s", resp.StatusCode, redact(extractError(raw)))
-		if p.auth.CanRefresh() && (resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden) {
-			return nil, observation, failoverInvocationStatus(message, resp.StatusCode)
-		}
 		return nil, observation, invocationStatusRetryAfter(message, resp.StatusCode, resp.Header.Get("Retry-After"))
 	}
 	var out map[string]any
@@ -786,53 +687,24 @@ func (p OpenAIProvider) streamResponsesPayloadContext(
 	}
 	headers.Set("Accept", "text/event-stream")
 	applyResponsesVisionHeader(headers, payload)
-	post := func(b string, h http.Header) (*http.Response, error) {
-		buf := bytes.Buffer{}
-		enc := json.NewEncoder(&buf)
-		enc.SetEscapeHTML(false)
-		_ = enc.Encode(payload)
-		body := bytes.TrimRight(buf.Bytes(), "\n")
-		request, _ := http.NewRequestWithContext(ctx, "POST", b+"/responses", bytes.NewReader(body))
-		request.Header = h
-		return httpClient(p.Timeout).Do(request)
-	}
-	response, err := post(base, headers)
+	buf := bytes.Buffer{}
+	enc := json.NewEncoder(&buf)
+	enc.SetEscapeHTML(false)
+	_ = enc.Encode(payload)
+	body := bytes.TrimRight(buf.Bytes(), "\n")
+	request, _ := http.NewRequestWithContext(ctx, "POST", base+"/responses", bytes.NewReader(body))
+	request.Header = headers
+	response, err := httpClient(p.Timeout).Do(request)
 	if err != nil {
 		return nil, observation, retryableInvocation(
 			"openai: responses streaming transport error: " + err.Error(),
 		)
-	}
-	if response.StatusCode == http.StatusUnauthorized && p.auth.CanRefresh() {
-		response.Body.Close()
-		if refreshErr := p.auth.Refresh(); refreshErr != nil {
-			return nil, observation, refreshErr
-		}
-		if ctx.Err() != nil {
-			return nil, observation, ctx.Err()
-		}
-		if base, headers, observation, err = prepareOpenAIAuth(p.auth); err != nil {
-			return nil, observation, err
-		}
-		headers.Set("Accept", "text/event-stream")
-		applyResponsesVisionHeader(headers, payload)
-		response, err = post(base, headers)
-		if err != nil {
-			return nil, observation, retryableInvocation(
-				"openai: responses streaming retry failed: " + err.Error(),
-			)
-		}
 	}
 	if response.StatusCode >= 400 {
 		raw, readErr := readInvocationResponseBody(response, "openai: responses")
 		response.Body.Close()
 		if readErr != nil {
 			return nil, observation, readErr
-		}
-		if p.auth.CanRefresh() && (response.StatusCode == http.StatusUnauthorized || response.StatusCode == http.StatusForbidden) {
-			return nil, observation, failoverInvocationStatus(
-				fmt.Sprintf("openai: responses endpoint returned %d: %s", response.StatusCode, redact(extractError(raw))),
-				response.StatusCode,
-			)
 		}
 		return nil, observation, invocationStatusRetryAfter(
 			fmt.Sprintf(

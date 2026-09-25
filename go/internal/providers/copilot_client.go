@@ -86,3 +86,23 @@ func copilotGuidance(err error) string {
 	}
 	return ""
 }
+
+// copilotInvocationError reports a session the shared client could not
+// obtain with the gateway's guidance: a transport failure may be repeated, a
+// status is kept, and the library's error is the message.
+func copilotInvocationError(err error) error {
+	if err == nil || IsInvocation(err) || IsConfig(err) {
+		return err
+	}
+	message := "github_copilot: " + err.Error() + copilotGuidance(err)
+	var authErr *copilotauth.AuthError
+	if errors.As(err, &authErr) {
+		if authErr.Transport {
+			return retryableInvocation(message)
+		}
+		if authErr.StatusCode != 0 {
+			return failoverInvocationStatus(message, authErr.StatusCode)
+		}
+	}
+	return invocation(message)
+}

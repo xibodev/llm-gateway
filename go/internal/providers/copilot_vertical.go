@@ -286,20 +286,24 @@ func copilotCredentialFailure(err error) error {
 	return invocation("github_copilot: load BYOC credential: " + err.Error())
 }
 
-// Resolve implements core.CredentialStore.
+// Resolve implements core.CredentialStore. A caller without a principal
+// resolves nothing, as the resolver never looked one up for it.
 func (s copilotStore) Resolve(ctx context.Context, caller core.Caller, instance string) (string, error) {
+	if callerPrincipalID(caller) == "" {
+		return "", core.ErrNoCredential
+	}
 	store, err := s.open()
 	if err != nil {
 		return "", copilotCredentialFailure(err)
 	}
 	key, err := store.Resolve(ctx, caller, instance)
 	switch {
-	case errors.Is(err, core.ErrNoCredential) && callerPrincipalID(caller) != "":
+	case errors.Is(err, core.ErrNoCredential):
 		return "", errNoCopilotCredential()
-	case err != nil && !errors.Is(err, core.ErrNoCredential):
+	case err != nil:
 		return "", copilotCredentialFailure(err)
 	}
-	return key, err
+	return key, nil
 }
 
 // Load implements tokenstore.Store. The record carries no expiry, so the

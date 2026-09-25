@@ -1,29 +1,20 @@
 package providers
 
 import (
-	"errors"
 	"net/http"
 	"strings"
-
-	"llmgw/internal/config"
-	"llmgw/internal/iam"
-
-	copilotauth "github.com/xibodev/llm-provider-auth/copilot"
-	core "github.com/xibodev/llmgw-core"
 )
 
 // OpenAIAuth decouples authentication from the OpenAI wire transport. It
-// resolves the base URL + request headers for a call and can refresh
-// credentials after a 401. This is why one transport (OpenAIProvider) serves
-// every OpenAI-compatible backend — openai_compatible, bedrock, litellm, and
-// github_copilot differ ONLY in how a request is authenticated + where it points.
+// resolves the base URL + request headers for a call. This is why one
+// transport (OpenAIProvider) serves every OpenAI-compatible backend —
+// openai_compatible, bedrock, litellm — which differ ONLY in how a request is
+// authenticated + where it points. GitHub Copilot, whose session a 401 could
+// replace, is served by llmgw-core's Copilot vertical, and its catalog reaches
+// the transport with a session already exchanged (see copilotTarget).
 type OpenAIAuth interface {
 	// Prepare resolves the base URL and headers for a request.
 	Prepare() (baseURL string, headers http.Header, err error)
-	// CanRefresh reports whether a 401 is worth retrying after Refresh.
-	CanRefresh() bool
-	// Refresh forces re-authentication (e.g. a new session token).
-	Refresh() error
 }
 
 type observedOpenAIAuth interface {
@@ -43,23 +34,6 @@ func prepareOpenAIAuth(
 	}
 	baseURL, headers, err := auth.Prepare()
 	return baseURL, headers, nil, err
-}
-
-func copilotInvocationError(err error) error {
-	if err == nil || IsInvocation(err) || IsConfig(err) {
-		return err
-	}
-	message := "github_copilot: " + err.Error() + copilotGuidance(err)
-	var authErr *copilotauth.AuthError
-	if errors.As(err, &authErr) {
-		if authErr.Transport {
-			return retryableInvocation(message)
-		}
-		if authErr.StatusCode != 0 {
-			return failoverInvocationStatus(message, authErr.StatusCode)
-		}
-	}
-	return invocation(message)
 }
 
 // bearerAuth is a static base URL + optional Bearer key: openai_compatible,
@@ -100,74 +74,4 @@ func (a bearerAuth) PrepareObserved() (
 ) {
 	baseURL, headers, err := a.Prepare()
 	return baseURL, headers, a.observation, err
-}
-
-func (bearerAuth) CanRefresh() bool { return false }
-func (bearerAuth) Refresh() error   { return nil }
-
-// copilotAuth resolves a GitHub Copilot session (OAuth-derived) plus the editor
-// identity headers that unlock the endpoint. The base URL comes from the
-// session; a 401 is retried after forcing a new session token.
-type copilotAuth struct {
-	providerID string
-	caller     core.Caller
-}
-
-func (a copilotAuth) Prepare() (string, http.Header, error) {
-	baseURL, headers, _, err := a.PrepareObserved()
-	return baseURL, headers, err
-}
-
-func (a copilotAuth) PrepareObserved() (
-	string, http.Header, *CredentialObservation, error,
-) {
-	if err := Current().copilot.AssertProxyAllowed(); err != nil {
-		return "", nil, nil, invocation("github_copilot: " + err.Error() + copilotGuidance(err))
-	}
-	s, observation, err := a.session(false)
-	if err != nil {
-		return "", nil, observation, copilotInvocationError(err)
-	}
-	cfg := config.Get()
-	h := http.Header{}
-	h.Set("Authorization", "Bearer "+s.Token)
-	h.Set("Content-Type", "application/json")
-	h.Set("Accept", "application/json")
-	h.Set("Copilot-Integration-Id", cfg.GithubCopilotIntegrationID)
-	h.Set("Editor-Version", cfg.GithubCopilotEditorVersion)
-	h.Set("Editor-Plugin-Version", "llm-gateway/0.1")
-	h.Set("OpenAI-Intent", "conversation-panel")
-	h.Set("User-Agent", "GithubCopilotChat/llm-gateway")
-	return s.ChatBaseURL, h, observation, nil
-}
-
-func (copilotAuth) CanRefresh() bool { return true }
-
-func (a copilotAuth) Refresh() error {
-	_, _, err := a.session(true)
-	return copilotInvocationError(err)
-}
-
-func (a copilotAuth) session(
-	force bool,
-) (*copilotauth.Session, *CredentialObservation, error) {
-	if callerPrincipalID(a.caller) == "" {
-		session, err := Current().copilot.GetSession(force)
-		return session, nil, err
-	}
-	oauth, observed, ok, err := iam.ResolveCallerOAuthCredentialSecretWithObservation(
-		a.caller, a.providerID,
-	)
-	observation := credentialObservation(observed)
-	if err != nil {
-		return nil, observation, invocation("github_copilot: load BYOC credential: " + err.Error())
-	}
-	if !ok {
-		return nil, observation, &ConfigError{Msg: "github_copilot: this principal has no active Copilot credential"}
-	}
-	session, err := Current().copilot.GetSessionForOAuth(oauth, force)
-	if err != nil {
-		return nil, observation, copilotInvocationError(err)
-	}
-	return session, observation, nil
 }

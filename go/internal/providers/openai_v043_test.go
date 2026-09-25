@@ -11,17 +11,6 @@ import (
 	"llmgw/internal/config"
 )
 
-type v043RefreshAuth struct{ base string }
-
-func (auth v043RefreshAuth) Prepare() (string, http.Header, error) {
-	return auth.base, http.Header{
-		"Authorization": {"Bearer fixture"},
-		"Content-Type":  {"application/json"},
-	}, nil
-}
-func (v043RefreshAuth) CanRefresh() bool { return true }
-func (v043RefreshAuth) Refresh() error   { return nil }
-
 func TestChatToResponsesTranslationLossPolicy(t *testing.T) {
 	var calls atomic.Int32
 	var request map[string]any
@@ -33,7 +22,7 @@ func TestChatToResponsesTranslationLossPolicy(t *testing.T) {
 		_, _ = w.Write([]byte(`{"id":"resp_1","status":"completed","output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"ok"}]}]}`))
 	}))
 	defer server.Close()
-	provider := OpenAIProvider{auth: v043RefreshAuth{base: server.URL}}
+	provider := OpenAIProvider{auth: bearerAuth{base: server.URL, apiKey: "fixture"}}
 	messages := []Message{{"role": "user", "content": "hi"}}
 
 	if _, err := provider.completeViaResponses("model", messages, Kwargs{"stop": []any{"END"}}); err == nil || !strings.Contains(err.Error(), "stop") {
@@ -51,7 +40,10 @@ func TestChatToResponsesTranslationLossPolicy(t *testing.T) {
 	}
 }
 
-func TestV043OpenAIRetryPreservesVisionHeaders(t *testing.T) {
+// The transport marks every request that carries images with Copilot's vision
+// header, which other upstreams ignore. Copilot's replay of a rejected
+// session keeps it too; see TestCopilotFailuresKeepTheirClassification.
+func TestV043OpenAIRequestsCarryVisionHeaders(t *testing.T) {
 	for name, invoke := range map[string]func(OpenAIProvider) error{
 		"chat": func(provider OpenAIProvider) error {
 			_, err := provider.Complete("vision", []Message{{
@@ -98,10 +90,6 @@ func TestV043OpenAIRetryPreservesVisionHeaders(t *testing.T) {
 				if r.Header.Get("Copilot-Vision-Request") != "true" {
 					t.Fatalf("request %d missing vision header", requests)
 				}
-				if requests == 1 {
-					w.WriteHeader(http.StatusUnauthorized)
-					return
-				}
 				w.Header().Set("Content-Type", "application/json")
 				if r.URL.Path == "/responses" {
 					if r.Header.Get("Accept") == "text/event-stream" {
@@ -115,11 +103,11 @@ func TestV043OpenAIRetryPreservesVisionHeaders(t *testing.T) {
 			}))
 			defer server.Close()
 			if err := invoke(OpenAIProvider{
-				auth: v043RefreshAuth{base: server.URL}, Timeout: 2,
+				auth: bearerAuth{base: server.URL, apiKey: "fixture"}, Timeout: 2,
 			}); err != nil {
 				t.Fatal(err)
 			}
-			if requests != 2 {
+			if requests != 1 {
 				t.Fatalf("requests=%d", requests)
 			}
 		})
@@ -168,7 +156,10 @@ func TestOpenAIRejectsHTTP200SoftError(t *testing.T) {
 	}
 }
 
-func TestV043RefreshedOAuthRejectionIsDefinitive(t *testing.T) {
+// A rejected key is final: nothing on this transport refreshes one, so the
+// request is sent once. Copilot's rejected session is replaced once; see
+// TestCopilotFailuresKeepTheirClassification.
+func TestV043OpenAIRejectionIsDefinitive(t *testing.T) {
 	for name, invoke := range map[string]func(OpenAIProvider) error{
 		"chat": func(provider OpenAIProvider) error {
 			_, err := provider.Complete("model", []Message{{"role": "user", "content": "hi"}}, nil)
@@ -187,12 +178,12 @@ func TestV043RefreshedOAuthRejectionIsDefinitive(t *testing.T) {
 				_, _ = w.Write([]byte(`{"error":{"message":"rejected"}}`))
 			}))
 			defer server.Close()
-			err := invoke(OpenAIProvider{auth: v043RefreshAuth{base: server.URL}, Timeout: 2})
+			err := invoke(OpenAIProvider{auth: bearerAuth{base: server.URL, apiKey: "fixture"}, Timeout: 2})
 			if err == nil || InvocationRetryable(err) || InvocationFailoverEligible(err) || UpstreamStatus(err) != http.StatusUnauthorized {
 				t.Fatalf("error=%v retry=%v failover=%v status=%d", err, InvocationRetryable(err), InvocationFailoverEligible(err), UpstreamStatus(err))
 			}
-			if requests != 2 {
-				t.Fatalf("requests=%d want=2", requests)
+			if requests != 1 {
+				t.Fatalf("requests=%d want=1", requests)
 			}
 		})
 	}

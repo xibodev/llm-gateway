@@ -1,9 +1,10 @@
 // Package providers implements the upstream provider stack, organized on two
 // axes: a wire-standard TRANSPORT (OpenAIProvider for /chat/completions, the
-// native AnthropicProvider, Ollama) and a pluggable AUTH strategy (bearer key,
-// Copilot OAuth session). One OpenAI transport therefore backs every
-// OpenAI-compatible type — openai_compatible, bedrock, litellm, github_copilot —
-// which differ only in auth + base URL. A factory builds them from config and a
+// native AnthropicProvider, Ollama) and a pluggable AUTH strategy (bearer key).
+// One OpenAI transport therefore backs every OpenAI-compatible type —
+// openai_compatible, bedrock, litellm — which differ only in auth + base URL.
+// The provider types llmgw-core serves, such as github_copilot, run on its
+// Runtime instead (see coreVerticals). A factory builds them from config and a
 // resilience wrapper adds retry + circuit breaking. (echo is an internal test stub.)
 package providers
 

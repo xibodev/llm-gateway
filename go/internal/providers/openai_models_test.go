@@ -10,8 +10,6 @@ import (
 type catalogFixtureAuth struct {
 	base       string
 	prepareErr error
-	refreshErr error
-	refresh    bool
 }
 
 func (a catalogFixtureAuth) Prepare() (string, http.Header, error) {
@@ -20,9 +18,6 @@ func (a catalogFixtureAuth) Prepare() (string, http.Header, error) {
 	}
 	return a.base, http.Header{"Authorization": {"Bearer fixture"}}, nil
 }
-
-func (a catalogFixtureAuth) CanRefresh() bool { return a.refresh }
-func (a catalogFixtureAuth) Refresh() error   { return a.refreshErr }
 
 func TestOpenAIListModelsPrefersDisplayName(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -58,18 +53,21 @@ func TestOpenAIListModelsReportsSafeFailures(t *testing.T) {
 		}
 	})
 
-	t.Run("refresh", func(t *testing.T) {
+	// Nothing on this transport refreshes a key, so a rejection is reported
+	// as the catalog answered it. Copilot's catalog replaces a rejected
+	// session; see TestCopilotCatalogStaysOnTheGatewayPath.
+	t.Run("rejected key", func(t *testing.T) {
+		requests := 0
 		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			requests++
 			http.Error(w, "unauthorized", http.StatusUnauthorized)
 		}))
 		defer server.Close()
-		provider := OpenAIProvider{auth: catalogFixtureAuth{
-			base: server.URL, refresh: true, refreshErr: errors.New("refresh denied"),
-		}, Timeout: 2}
+		provider := OpenAIProvider{auth: catalogFixtureAuth{base: server.URL}, Timeout: 2}
 		_, _, err := provider.ListModelsWithError()
 		code, _, status := CatalogFailure(err)
-		if code != "catalog_refresh_failed" || status != http.StatusUnauthorized {
-			t.Fatalf("failure=(%q,%d)", code, status)
+		if code != "catalog_http_error" || status != http.StatusUnauthorized || requests != 1 {
+			t.Fatalf("failure=(%q,%d) requests=%d", code, status, requests)
 		}
 	})
 
