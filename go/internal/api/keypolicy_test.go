@@ -34,7 +34,7 @@ func TestModelPolicyAllowsEquivalentDirectModelIDsButRequiresRouteName(t *testin
 	if !modelPolicyAllows([]string{"gpt-4o"}, "copilot/gpt-4o", "", targets) {
 		t.Fatal("bare allowlist should permit the equivalent namespaced model")
 	}
-	resolution, err := router.ResolveForPrincipal("smart", nil)
+	resolution, err := resolveAs("smart", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -44,7 +44,7 @@ func TestModelPolicyAllowsEquivalentDirectModelIDsButRequiresRouteName(t *testin
 	if !modelPolicyAllows([]string{"smart"}, "smart", resolution.Category, resolution.Targets) {
 		t.Fatal("explicit route allowlist should pass")
 	}
-	resolution, err = router.ResolveForPrincipal("SMART", nil)
+	resolution, err = resolveAs("SMART", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -54,7 +54,7 @@ func TestModelPolicyAllowsEquivalentDirectModelIDsButRequiresRouteName(t *testin
 	if !modelPolicyAllows([]string{"smart"}, "SMART", resolution.Category, resolution.Targets) {
 		t.Fatal("case-variant route request should match the canonical route allowlist")
 	}
-	resolution, err = router.ResolveForPrincipal(" smart ", nil)
+	resolution, err = resolveAs(" smart ", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -70,7 +70,7 @@ func TestModelPolicyAllowsEquivalentDirectModelIDsButRequiresRouteName(t *testin
 			Failover: []config.EndpointMember{{Provider: "copilot", Model: "gpt-4.1"}},
 		}
 	})
-	resolution, err = router.ResolveForPrincipal("SMART", nil)
+	resolution, err = resolveAs("SMART", nil)
 	if err != nil {
 		t.Fatal(err)
 	}

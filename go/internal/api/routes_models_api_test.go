@@ -11,7 +11,6 @@ import (
 	"llmgw/internal/config"
 	"llmgw/internal/iam"
 	"llmgw/internal/providers"
-	"llmgw/internal/router"
 
 	codexauth "github.com/xibodev/llm-provider-auth/codex"
 )
@@ -253,7 +252,7 @@ func TestAdminRouteRequiresExplicitUnverifiedAnonymousOptIn(t *testing.T) {
 	if status != http.StatusOK {
 		t.Fatalf("delete first route status=%d", status)
 	}
-	resolution, err := router.ResolveForPrincipal("candidate-route-2", nil)
+	resolution, err := resolveAs("candidate-route-2", nil)
 	if err != nil || len(resolution.Targets) != 1 || resolution.Targets[0].Model != "candidate" {
 		t.Fatalf("remaining route lost opt-in: resolution=%+v err=%v", resolution, err)
 	}
@@ -261,7 +260,7 @@ func TestAdminRouteRequiresExplicitUnverifiedAnonymousOptIn(t *testing.T) {
 	if status != http.StatusOK {
 		t.Fatalf("delete final route status=%d", status)
 	}
-	if _, err := router.ResolveForPrincipal("candidate-route-2", nil); err == nil {
+	if _, err := resolveAs("candidate-route-2", nil); err == nil {
 		t.Fatal("deleted opt-in route remained resolvable")
 	}
 }
@@ -316,7 +315,7 @@ func TestRouteEditRemovesUnverifiedPublicationOptIn(t *testing.T) {
 	if status != http.StatusOK {
 		t.Fatalf("edit status=%d", status)
 	}
-	resolution, err := router.ResolveForPrincipal("candidate-route", nil)
+	resolution, err := resolveAs("candidate-route", nil)
 	if err != nil || len(resolution.Targets) != 1 || resolution.Targets[0].Model != "verified" {
 		t.Fatalf("edited route failed: resolution=%+v err=%v", resolution, err)
 	}
@@ -593,12 +592,12 @@ func TestAdminCodexCatalogAndRouteValidationArePrincipalScoped(t *testing.T) {
 	if status != http.StatusOK || !contains(payload, "codex/gpt-5-codex") || modelCalls != 1 {
 		t.Fatalf("owner models status=%d payload=%+v calls=%d", status, payload, modelCalls)
 	}
-	if _, err := router.ResolveForPrincipal("codex/gpt-5-codex", &config.Principal{
+	if _, err := resolveAs("codex/gpt-5-codex", &config.Principal{
 		PrincipalID: owner.ID, PrincipalKind: owner.Kind,
 	}); err != nil {
 		t.Fatalf("owner direct resolution: %v", err)
 	}
-	if _, err := router.ResolveForPrincipal("codex/gpt-5-codex", &config.Principal{
+	if _, err := resolveAs("codex/gpt-5-codex", &config.Principal{
 		PrincipalID: other.ID, PrincipalKind: other.Kind,
 	}); err == nil {
 		t.Fatal("other principal resolved owner-scoped direct model")
@@ -656,10 +655,10 @@ func TestAdminCodexCatalogAndRouteValidationArePrincipalScoped(t *testing.T) {
 		t.Fatal(err)
 	}
 	ownerPrincipal := &config.Principal{PrincipalID: owner.ID, PrincipalKind: owner.Kind}
-	if _, err := router.ResolveForPrincipal("codex/gpt-5-codex", ownerPrincipal); err == nil {
+	if _, err := resolveAs("codex/gpt-5-codex", ownerPrincipal); err == nil {
 		t.Fatal("revoked principal resolved cached direct model")
 	}
-	if _, err := router.ResolveForPrincipal("owner-codex", ownerPrincipal); err == nil {
+	if _, err := resolveAs("owner-codex", ownerPrincipal); err == nil {
 		t.Fatal("revoked principal resolved cached private route")
 	}
 }

@@ -216,7 +216,7 @@ func responsesToChatRequest(rr *responsesRequest) *chatRequest {
 
 func chatDispatch(w http.ResponseWriter, r *http.Request, req *chatRequest, principal *config.Principal, endpoint string) {
 	started := time.Now()
-	resolution, err := router.ResolveForPrincipal(req.Model, principal)
+	resolution, err := resolveModel(r.Context(), req.Model, principal)
 	if err != nil {
 		if _, ok := err.(*router.ModelNotFoundError); ok {
 			recordFailureUsage(endpoint, req.Model, principal, 404, "model_not_found", started)
@@ -291,7 +291,7 @@ func chatDispatch(w http.ResponseWriter, r *http.Request, req *chatRequest, prin
 		return
 	}
 
-	response, served, trace, err := router.ExecuteCompleteWithTraceContext(ctx, targets, msgs, req.Model, principal, kw)
+	response, served, trace, err := router.ExecuteCompleteWithTraceContext(governed(ctx, principal), targets, msgs, req.Model, callerOf(principal), kw)
 	setChatDiagnostics(w, started, msgs, req.Tools, trace)
 	if err != nil {
 		recordFailureUsage(
@@ -408,7 +408,7 @@ func upstreamErrorStatus(err error) int {
 }
 
 func streamChatSSE(w http.ResponseWriter, ctx context.Context, targets []router.Target, msgs []providers.Message, requested string, principal *config.Principal, kw providers.Kwargs, endpoint string, started time.Time) {
-	it, served, err := router.ExecuteStreamContext(ctx, targets, msgs, requested, principal, kw)
+	it, served, err := router.ExecuteStreamContext(governed(ctx, principal), targets, msgs, requested, callerOf(principal), kw)
 	if err != nil {
 		if ctx.Err() != nil {
 			recordClientCancelled(endpoint, requested, principal, started)

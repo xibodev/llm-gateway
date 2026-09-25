@@ -100,7 +100,7 @@ func handleMessages(w http.ResponseWriter, r *http.Request) {
 		raw["_llmgw_preamble"] = pre
 	}
 
-	resolution, err := router.ResolveForPrincipal(req.Model, principal)
+	resolution, err := resolveModel(r.Context(), req.Model, principal)
 	if err != nil {
 		if _, ok := err.(*router.ModelNotFoundError); ok {
 			recordFailureUsage("anthropic.messages", req.Model, principal, 404, "model_not_found", started)
@@ -165,7 +165,7 @@ func handleMessages(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	response, served, err := router.ExecuteAnthropicMessagesContext(r.Context(), targets, raw, req.Model, principal)
+	response, served, err := router.ExecuteAnthropicMessagesContext(governed(r.Context(), principal), targets, raw, req.Model, callerOf(principal))
 	if err != nil {
 		status := upstreamErrorStatus(err)
 		recordFailureUsage("anthropic.messages", req.Model, principal, status, "upstream", started)
@@ -181,7 +181,7 @@ func handleMessages(w http.ResponseWriter, r *http.Request) {
 }
 
 func streamMessagesSSE(w http.ResponseWriter, ctx context.Context, targets []router.Target, msgs []providers.Message, requested string, principal *config.Principal, kw providers.Kwargs, started time.Time) {
-	it, served, err := router.ExecuteAnthropicStreamContext(ctx, targets, msgs, requested, principal, kw)
+	it, served, err := router.ExecuteAnthropicStreamContext(governed(ctx, principal), targets, msgs, requested, callerOf(principal), kw)
 	if err != nil {
 		if ctx.Err() != nil {
 			recordClientCancelled("anthropic.messages", requested, principal, started)
@@ -278,7 +278,7 @@ func handleCountTokens(w http.ResponseWriter, r *http.Request) {
 		writeError(w, 422, "model is required")
 		return
 	}
-	resolution, err := router.ResolveForPrincipal(model, principal)
+	resolution, err := resolveModel(r.Context(), model, principal)
 	if err != nil {
 		if _, ok := err.(*router.ModelNotFoundError); ok {
 			writeError(w, 404, err.Error())

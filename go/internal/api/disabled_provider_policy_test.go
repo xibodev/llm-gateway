@@ -14,7 +14,6 @@ import (
 
 	"llmgw/internal/config"
 	"llmgw/internal/iam"
-	"llmgw/internal/router"
 
 	core "github.com/xibodev/llmgw-core"
 )
@@ -218,7 +217,7 @@ func TestDisabledProviderPlaygroundAvailability(t *testing.T) {
 		t.Fatal(err)
 	}
 	principal := &config.Principal{ProjectID: project.ID}
-	resolution, err := router.ResolveForPrincipal("fixture/model", principal)
+	resolution, err := resolveAs("fixture/model", principal)
 	if err != nil {
 		t.Fatal(err)
 	}

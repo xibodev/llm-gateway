@@ -34,7 +34,7 @@ func resolveAudioTarget(principal *config.Principal, model string, operation cor
 	if model == "" {
 		return "", "", 400, "'model' is required (e.g. localai/whisper-base)"
 	}
-	resolution, err := router.ResolveForPrincipal(model, principal)
+	resolution, err := resolveModel(context.Background(), model, principal)
 	if err != nil {
 		if _, missing := err.(*router.ModelNotFoundError); missing {
 			return "", "", 404, err.Error()

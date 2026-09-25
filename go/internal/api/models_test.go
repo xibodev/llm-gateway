@@ -211,7 +211,7 @@ func TestModelListAliasesAreDeterministicUniqueAndRoundTrip(t *testing.T) {
 	for _, raw := range rows {
 		row := raw.(map[string]any)
 		id, owner := row["id"].(string), row["owned_by"].(string)
-		resolution, err := router.ResolveForPrincipal(id, nil)
+		resolution, err := resolveAs(id, nil)
 		if err != nil {
 			t.Fatalf("advertised row %q does not resolve: %v", id, err)
 		}
@@ -253,7 +253,7 @@ func TestModelListAliasesAreDeterministicUniqueAndRoundTrip(t *testing.T) {
 			found = row["owned_by"] == "alpha"
 		}
 	}
-	resolution, err := router.ResolveForPrincipal(alias, principal)
+	resolution, err := resolveAs(alias, principal)
 	if err != nil || !found || resolution.Targets[0] != (router.Target{Provider: "alpha", Model: "echo-strong"}) {
 		t.Fatalf("policy-unique alias found=%v resolution=%+v err=%v", found, resolution, err)
 	}

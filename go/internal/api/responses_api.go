@@ -71,7 +71,7 @@ func responsesDispatch(
 		writeError(w, 400, "background Responses jobs are not supported by this gateway.")
 		return
 	}
-	resolution, err := router.ResolveForPrincipal(request.Model, principal)
+	resolution, err := resolveModel(r.Context(), request.Model, principal)
 	if err != nil {
 		if _, missing := err.(*router.ModelNotFoundError); missing {
 			recordFailureUsage("openai.responses", request.Model, principal, 404, "model_not_found", started)
@@ -156,7 +156,7 @@ func responsesDispatch(
 		return
 	}
 	response, served, err := router.ExecuteResponsesContext(
-		ctx, targets, payload, request.Model, principal,
+		governed(ctx, principal), targets, payload, request.Model, callerOf(principal),
 	)
 	if err != nil {
 		recordFailureUsage(
@@ -281,7 +281,7 @@ func streamResponsesSSE(
 	started time.Time,
 ) {
 	execution, served, err := router.ExecuteResponsesStreamContext(
-		ctx, targets, payload, requested, principal,
+		governed(ctx, principal), targets, payload, requested, callerOf(principal),
 	)
 	if err != nil {
 		if ctx.Err() != nil {

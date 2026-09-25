@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
@@ -108,7 +109,7 @@ func resolveMediaTarget(principal *config.Principal, model string, operation cor
 	if model == "" {
 		return "", "", http.StatusBadRequest, "'model' is required"
 	}
-	resolution, err := router.ResolveForPrincipal(model, principal)
+	resolution, err := resolveModel(context.Background(), model, principal)
 	if err != nil {
 		if _, missing := err.(*router.ModelNotFoundError); missing {
 			return "", "", http.StatusNotFound, err.Error()

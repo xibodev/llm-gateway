@@ -208,7 +208,7 @@ func executePlayground(w http.ResponseWriter, r *http.Request, body playgroundBo
 		return
 	}
 	started := time.Now()
-	resolution, err := router.ResolveForPrincipal(body.Model, principal)
+	resolution, err := resolveModel(r.Context(), body.Model, principal)
 	if err != nil {
 		if _, missing := err.(*router.ModelNotFoundError); missing {
 			writeError(w, 404, err.Error())
@@ -230,7 +230,7 @@ func executePlayground(w http.ResponseWriter, r *http.Request, body playgroundBo
 		return
 	}
 	request := chatRequest{Model: body.Model, Messages: body.Messages, Temperature: body.Temperature, MaxTokens: body.MaxTokens, ReasoningEffort: body.ReasoningEffort, Tools: body.Tools, ToolChoice: body.ToolChoice}
-	response, served, trace, err := router.ExecuteCompleteWithTraceContext(r.Context(), targets, providerMessages(body.Messages), body.Model, principal, chatKwargs(&request))
+	response, served, trace, err := router.ExecuteCompleteWithTraceContext(governed(r.Context(), principal), targets, providerMessages(body.Messages), body.Model, callerOf(principal), chatKwargs(&request))
 	latency := time.Since(started).Milliseconds()
 	if err != nil {
 		if r.Context().Err() != nil {
@@ -274,7 +274,7 @@ func executePlaygroundSurface(w http.ResponseWriter, r *http.Request, payload ma
 		return
 	}
 	started := time.Now()
-	resolution, err := router.ResolveForPrincipal(body.Model, principal)
+	resolution, err := resolveModel(r.Context(), body.Model, principal)
 	if err != nil {
 		if _, missing := err.(*router.ModelNotFoundError); missing {
 			writeError(w, http.StatusNotFound, err.Error())
@@ -315,9 +315,9 @@ func executePlaygroundSurface(w http.ResponseWriter, r *http.Request, payload ma
 	var trace []router.AttemptTrace
 	switch surface {
 	case core.ModelSurfaceResponses:
-		response, served, err = router.ExecuteResponsesContext(r.Context(), targets, payload, body.Model, principal)
+		response, served, err = router.ExecuteResponsesContext(governed(r.Context(), principal), targets, payload, body.Model, callerOf(principal))
 	case core.ModelSurfaceMessages:
-		response, served, err = router.ExecuteAnthropicMessagesContext(r.Context(), targets, payload, body.Model, principal)
+		response, served, err = router.ExecuteAnthropicMessagesContext(governed(r.Context(), principal), targets, payload, body.Model, callerOf(principal))
 	default:
 		var request chatRequest
 		raw, _ := json.Marshal(payload)
@@ -326,7 +326,7 @@ func executePlaygroundSurface(w http.ResponseWriter, r *http.Request, payload ma
 			writeError(w, http.StatusBadRequest, "at least one message is required")
 			return
 		}
-		response, served, trace, err = router.ExecuteCompleteWithTraceContext(r.Context(), targets, providerMessages(request.Messages), body.Model, principal, chatKwargs(&request))
+		response, served, trace, err = router.ExecuteCompleteWithTraceContext(governed(r.Context(), principal), targets, providerMessages(request.Messages), body.Model, callerOf(principal), chatKwargs(&request))
 		if err == nil {
 			response["model"] = served.Model
 			normalizeChatResponseEnvelope(response)

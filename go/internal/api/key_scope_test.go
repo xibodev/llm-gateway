@@ -72,12 +72,12 @@ func TestKeyScopeRoutingAndCatalog(t *testing.T) {
 		t.Fatalf("resolve: %v", err)
 	}
 	for _, model := range []string{"one/echo-default", "two/echo-default", "claude-echo-default", "echo-default[1m]", "other"} {
-		if _, err := router.ResolveForPrincipal(model, p); err == nil {
+		if _, err := resolveAs(model, p); err == nil {
 			t.Errorf("direct/other selector accepted: %s", model)
 		}
 	}
 	for _, model := range []string{"echo-default", " ECHO-DEFAULT "} {
-		resolution, err := router.ResolveForPrincipal(model, p)
+		resolution, err := resolveAs(model, p)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -101,7 +101,7 @@ func TestKeyScopeRoutingAndCatalog(t *testing.T) {
 	config.Update(func(s *config.Settings) {
 		s.Endpoints["echo-default"] = &config.EndpointConfig{Failover: []config.EndpointMember{{Provider: "two", Model: "echo-new"}}}
 	})
-	resolution, err := router.ResolveForPrincipal("echo-default", p)
+	resolution, err := resolveAs("echo-default", p)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -129,21 +129,21 @@ func TestKeyScopeRoutingAndCatalog(t *testing.T) {
 	}
 	// The endpoint name is also a native model. Removing it must not turn the grant into direct access.
 	config.Update(func(s *config.Settings) { delete(s.Endpoints, "echo-default") })
-	if _, err := router.ResolveForPrincipal("echo-default", p); err == nil {
+	if _, err := resolveAs("echo-default", p); err == nil {
 		t.Fatal("deleted route fell back to native model")
 	}
 	if _, status, _ := authorizeKeyPolicy(p, "echo-default", "", []router.Target{{Provider: "two", Model: "echo-default"}}); status != 403 {
 		t.Fatal("direct collision bypassed policy")
 	}
 	p.AllowedRoutes = nil
-	if _, err := router.ResolveForPrincipal("other", p); err == nil {
+	if _, err := resolveAs("other", p); err == nil {
 		t.Fatal("empty route-only scope was unrestricted")
 	}
 	list, err = buildModelList(p)
 	if err != nil || len(list["data"].([]any)) != 0 {
 		t.Fatalf("empty route-only catalog: %+v %v", list, err)
 	}
-	aliases, err := router.NativeAliasCandidates(p)
+	aliases, err := aliasCandidatesAs(p)
 	if err != nil || len(aliases) != 0 {
 		t.Fatalf("route-only aliases: %+v %v", aliases, err)
 	}
@@ -152,14 +152,14 @@ func TestKeyScopeRoutingAndCatalog(t *testing.T) {
 func TestKeyScopeRoutesAndDirectModelsAreIndependent(t *testing.T) {
 	_, _ = setupKeyScope(t)
 	p := &config.Principal{Token: "scope-test", AllowedRoutes: []string{"echo-default"}}
-	resolution, err := router.ResolveForPrincipal("one/echo-new", p)
+	resolution, err := resolveAs("one/echo-new", p)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if _, status, _ := authorizeKeyPolicy(p, "one/echo-new", resolution.Category, resolution.Targets); status != 0 {
 		t.Fatalf("non-route-only key lost direct access: %d", status)
 	}
-	if _, err := router.ResolveForPrincipal("other", p); err == nil {
+	if _, err := resolveAs("other", p); err == nil {
 		t.Fatal("route allowlist did not restrict routes")
 	}
 	for _, name := range []string{"one/echo-new", "ONE/ECHO-NEW"} {
@@ -168,7 +168,7 @@ func TestKeyScopeRoutesAndDirectModelsAreIndependent(t *testing.T) {
 				s.Endpoints[name] = &config.EndpointConfig{Failover: []config.EndpointMember{{Provider: "one", Model: "echo-new"}}}
 			})
 			t.Cleanup(func() { config.Update(func(s *config.Settings) { delete(s.Endpoints, name) }) })
-			if _, err := router.ResolveForPrincipal("one/echo-new", p); err == nil {
+			if _, err := resolveAs("one/echo-new", p); err == nil {
 				t.Fatal("router accepted forbidden colliding endpoint")
 			}
 			list, err := buildModelList(p)

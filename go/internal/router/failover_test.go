@@ -49,7 +49,7 @@ func TestResolveTargets(t *testing.T) {
 	setupEcho(t)
 
 	// category
-	resolution, err := ResolveForPrincipal("SMART", nil)
+	resolution, err := ResolveForPrincipal(context.Background(), "SMART", anonymous)
 	if err != nil || resolution.Category != "smart" || len(resolution.Targets) != 1 || resolution.Targets[0].Provider != "echo" {
 		t.Fatalf("category resolve wrong: %+v %v", resolution, err)
 	}
@@ -79,15 +79,15 @@ func TestResolveCategoryRejectsAmbiguousCaseVariants(t *testing.T) {
 		}
 	})
 
-	lower, err := ResolveForPrincipal("smart", nil)
+	lower, err := ResolveForPrincipal(context.Background(), "smart", anonymous)
 	if err != nil || lower.Category != "smart" || lower.Targets[0].Provider != "echo" {
 		t.Fatalf("exact lower-case route resolve wrong: %+v %v", lower, err)
 	}
-	upper, err := ResolveForPrincipal("SMART", nil)
+	upper, err := ResolveForPrincipal(context.Background(), "SMART", anonymous)
 	if err != nil || upper.Category != "SMART" || upper.Targets[0].Provider != "echo2" {
 		t.Fatalf("exact upper-case route resolve wrong: %+v %v", upper, err)
 	}
-	if _, err := ResolveForPrincipal("SmArT", nil); err == nil {
+	if _, err := ResolveForPrincipal(context.Background(), "SmArT", anonymous); err == nil {
 		t.Fatal("ambiguous case-insensitive route lookup should fail")
 	} else if _, ok := err.(*AmbiguousCategoryError); !ok {
 		t.Fatalf("want AmbiguousCategoryError, got %T: %v", err, err)
@@ -137,16 +137,16 @@ func TestResolveNativeAlias(t *testing.T) {
 	} else if _, ok := err.(*ModelNotFoundError); !ok {
 		t.Fatalf("want safe ModelNotFoundError, got %T: %v", err, err)
 	}
-	principal := &config.Principal{AllowedProviders: []string{"echo2"}}
-	targets, err := ResolveTargetsForPrincipal("echo-strong[1m]", principal)
+	governed := WithGovernance(context.Background(), Governance{AllowedProviders: []string{"echo2"}})
+	targets, err := ResolveTargetsForPrincipal(governed, "echo-strong[1m]", anonymous)
 	if err != nil || len(targets) != 1 || targets[0] != (Target{Provider: "echo2", Model: "echo-strong"}) {
 		t.Fatalf("policy-filtered tagged alias resolve wrong: %v %v", targets, err)
 	}
-	if targets, err := ResolveTargetsForPrincipal("ECHO-DEEP", principal); err != nil || len(targets) != 1 || targets[0].Model != "echo-deep" {
+	if targets, err := ResolveTargetsForPrincipal(governed, "ECHO-DEEP", anonymous); err != nil || len(targets) != 1 || targets[0].Model != "echo-deep" {
 		t.Fatalf("case-insensitive resolve wrong: %v %v", targets, err)
 	}
 	config.Update(func(s *config.Settings) { s.AnthropicDiscoveryAllModels = true })
-	if targets, err := ResolveTargetsForPrincipal("claude-echo-strong", principal); err != nil || len(targets) != 1 || targets[0].Model != "echo-strong" {
+	if targets, err := ResolveTargetsForPrincipal(governed, "claude-echo-strong", anonymous); err != nil || len(targets) != 1 || targets[0].Model != "echo-strong" {
 		t.Fatalf("prefix-strip resolve wrong: %v %v", targets, err)
 	}
 	// Exact provider/model remains authoritative even when its bare alias is ambiguous.
@@ -170,7 +170,7 @@ func TestNativeAliasCanonicalCollisionAndEndpointPrecedence(t *testing.T) {
 		}
 	})
 	providers.ResetProviders()
-	resolution, err := ResolveForPrincipal("ECHO-STRONG", nil)
+	resolution, err := ResolveForPrincipal(context.Background(), "ECHO-STRONG", anonymous)
 	if err != nil || resolution.Category != "ECHO-STRONG" || resolution.Targets[0].Model != "echo-deep" {
 		t.Fatalf("exact endpoint lost precedence: %+v %v", resolution, err)
 	}
@@ -182,7 +182,7 @@ func TestNativeAliasCanonicalCollisionAndEndpointPrecedence(t *testing.T) {
 func TestExecuteCompleteEcho(t *testing.T) {
 	setupEcho(t)
 	targets, _ := ResolveTargets("smart")
-	resp, served, err := ExecuteComplete(targets, []providers.Message{{"role": "user", "content": "hi"}}, "smart", nil, providers.Kwargs{})
+	resp, served, err := ExecuteComplete(targets, []providers.Message{{"role": "user", "content": "hi"}}, "smart", anonymous, providers.Kwargs{})
 	if err != nil {
 		t.Fatalf("execute failed: %v", err)
 	}
@@ -199,7 +199,8 @@ func TestExecuteCompleteEcho(t *testing.T) {
 func TestExecuteCompleteFailover(t *testing.T) {
 	setupEcho(t)
 	targets, _ := ResolveTargets("failover")
-	resp, served, err := ExecuteComplete(targets, []providers.Message{{"role": "user", "content": "hi"}}, "failover", &config.Principal{Project: "p", Key: "k"}, providers.Kwargs{})
+	attributed := WithGovernance(context.Background(), Governance{Project: "p", Key: "k"})
+	resp, served, err := ExecuteCompleteContext(attributed, targets, []providers.Message{{"role": "user", "content": "hi"}}, "failover", anonymous, providers.Kwargs{})
 	if err != nil {
 		t.Fatalf("failover should succeed via echo: %v", err)
 	}
@@ -247,7 +248,7 @@ func TestGenericFailoverUsesInvocationEligibility(t *testing.T) {
 			})
 			providers.ResetProviders()
 			t.Cleanup(providers.ResetProviders)
-			_, served, err := ExecuteComplete([]Target{{Provider: "upstream", Model: "model"}, {Provider: "echo", Model: "echo-default"}}, []providers.Message{{"role": "user", "content": "hi"}}, "route", nil, nil)
+			_, served, err := ExecuteComplete([]Target{{Provider: "upstream", Model: "model"}, {Provider: "echo", Model: "echo-default"}}, []providers.Message{{"role": "user", "content": "hi"}}, "route", anonymous, nil)
 			eligible := status == http.StatusTooManyRequests || status == http.StatusInternalServerError
 			if eligible && (err != nil || served == nil || served.Provider != "echo") {
 				t.Fatalf("eligible status did not fail over: served=%+v err=%v", served, err)
@@ -276,7 +277,7 @@ func TestFallbackTimeoutBoundsWholeChain(t *testing.T) {
 	providers.ResetProviders()
 	started := time.Now()
 	ctx := WithFallbackOptions(context.Background(), 20*time.Millisecond, "")
-	_, _, err := ExecuteCompleteContext(ctx, []Target{{Provider: "slow", Model: "model"}, {Provider: "echo", Model: "echo-default"}}, nil, "route", nil, nil)
+	_, _, err := ExecuteCompleteContext(ctx, []Target{{Provider: "slow", Model: "model"}, {Provider: "echo", Model: "echo-default"}}, nil, "route", anonymous, nil)
 	if err == nil || time.Since(started) > time.Second {
 		t.Fatalf("timeout err=%v elapsed=%v", err, time.Since(started))
 	}
@@ -332,7 +333,7 @@ func TestAffinitySelectsDeterministicStart(t *testing.T) {
 	var selected Target
 	for range 2 {
 		ctx := WithFallbackOptions(context.Background(), time.Second, "agent-loop")
-		_, served, err := ExecuteCompleteContext(ctx, targets, nil, "route", nil, nil)
+		_, served, err := ExecuteCompleteContext(ctx, targets, nil, "route", anonymous, nil)
 		if err != nil || served == nil {
 			t.Fatal(err)
 		}
@@ -377,7 +378,7 @@ func TestFailoverErrorsAndTelemetryAreSanitized(t *testing.T) {
 	messages := []providers.Message{{"role": "user", "content": "hi"}}
 	_, served, err := ExecuteComplete(
 		[]Target{{Provider: "bad", Model: "bad-model"}, {Provider: "echo", Model: "echo-default"}},
-		messages, "fallback", nil, providers.Kwargs{},
+		messages, "fallback", anonymous, providers.Kwargs{},
 	)
 	if err != nil || served == nil || served.Provider != "echo" {
 		t.Fatalf("fallback result served=%+v err=%v", served, err)
@@ -385,7 +386,7 @@ func TestFailoverErrorsAndTelemetryAreSanitized(t *testing.T) {
 
 	_, _, err = ExecuteComplete(
 		[]Target{{Provider: "bad", Model: "bad-model"}},
-		messages, "all-targets", nil, providers.Kwargs{},
+		messages, "all-targets", anonymous, providers.Kwargs{},
 	)
 	var allTargets *AllTargetsFailed
 	if !errors.As(err, &allTargets) {
@@ -473,7 +474,7 @@ func TestAttemptTruncationSanitizesBeforeLimiting(t *testing.T) {
 func TestExecuteStreamEcho(t *testing.T) {
 	setupEcho(t)
 	targets, _ := ResolveTargets("smart")
-	it, served, err := ExecuteStream(targets, []providers.Message{{"role": "user", "content": "hi"}}, "smart", nil, providers.Kwargs{})
+	it, served, err := ExecuteStream(targets, []providers.Message{{"role": "user", "content": "hi"}}, "smart", anonymous, providers.Kwargs{})
 	if err != nil {
 		t.Fatalf("stream failed: %v", err)
 	}
@@ -590,8 +591,8 @@ func TestPrivateRouteRequiresCallerScopedCatalogMembership(t *testing.T) {
 		settings.Endpoints["private-route"] = &config.EndpointConfig{Failover: []config.EndpointMember{{Provider: "private", Model: "model"}}}
 	})
 	providers.ResetProviders()
-	principal := &config.Principal{PrincipalID: "owner", PrincipalKind: "human"}
-	if _, err := ResolveForPrincipal("private-route", principal); err == nil {
+	owner := core.Caller{ID: "owner", Kind: core.CallerHuman}
+	if _, err := ResolveForPrincipal(context.Background(), "private-route", owner); err == nil {
 		t.Fatal("private route resolved without caller-scoped catalog membership")
 	}
 }

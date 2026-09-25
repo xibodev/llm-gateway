@@ -67,7 +67,7 @@ func audioPlaygroundTarget(principal *config.Principal, model string, operation 
 	if model == "" {
 		return "", "", http.StatusBadRequest, "model is required"
 	}
-	resolution, err := router.ResolveForPrincipal(model, principal)
+	resolution, err := resolveModel(context.Background(), model, principal)
 	if err != nil {
 		if _, missing := err.(*router.ModelNotFoundError); missing {
 			return "", "", http.StatusNotFound, err.Error()
@@ -110,7 +110,7 @@ func mediaPlaygroundTarget(principal *config.Principal, model string, operation 
 	if model == "" {
 		return "", "", http.StatusBadRequest, "model is required"
 	}
-	resolution, err := router.ResolveForPrincipal(model, principal)
+	resolution, err := resolveModel(context.Background(), model, principal)
 	if err != nil {
 		if _, missing := err.(*router.ModelNotFoundError); missing {
 			return "", "", http.StatusNotFound, err.Error()

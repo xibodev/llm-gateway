@@ -122,13 +122,13 @@ func TestConfigErrorEndsGenericChainButNotMessagesChain(t *testing.T) {
 	targets := []Target{{Provider: "misconfigured", Model: "m"}, {Provider: "echo", Model: "echo-default"}}
 
 	messages := []providers.Message{{"role": "user", "content": "hi"}}
-	if _, served, err := ExecuteComplete(targets, messages, "route", nil, nil); err == nil || served != nil {
+	if _, served, err := ExecuteComplete(targets, messages, "route", anonymous, nil); err == nil || served != nil {
 		t.Fatalf("the generic chain moved past a ConfigError: served=%+v err=%v", served, err)
 	}
 	payload := map[string]any{"model": "route", "max_tokens": 16, "messages": []any{
 		map[string]any{"role": "user", "content": "hi"},
 	}}
-	if _, served, err := ExecuteAnthropicMessages(targets, payload, "route", nil); err != nil || served == nil || served.Provider != "echo" {
+	if _, served, err := ExecuteAnthropicMessages(targets, payload, "route", anonymous); err != nil || served == nil || served.Provider != "echo" {
 		t.Fatalf("the Messages chain stopped at a ConfigError: served=%+v err=%v", served, err)
 	}
 }

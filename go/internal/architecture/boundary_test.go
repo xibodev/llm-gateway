@@ -54,7 +54,7 @@ var coreBound = []boundUnit{
 		// in the gateway when the routing primitives move.
 		path:    "internal/router",
 		allowed: []string{"database/sql", "llmgw/internal/config", "llmgw/internal/iam", "modernc.org/sqlite"},
-		budget:  map[string]int{metricIAM: 6, metricConfigGet: 15, metricConfigPrincipal: 22},
+		budget:  map[string]int{metricIAM: 6, metricConfigGet: 15, metricConfigPrincipal: 0},
 	},
 	{
 		path:    "internal/api/transport_mode.go",

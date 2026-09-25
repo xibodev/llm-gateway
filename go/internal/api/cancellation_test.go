@@ -440,8 +440,8 @@ func TestCodexInFlightStreamCancellation(t *testing.T) {
 	resultCh := make(chan result, 1)
 	go func() {
 		execution, served, err := router.ExecuteResponsesStreamContext(
-			ctx, []router.Target{{Provider: "codex", Model: "model"}},
-			map[string]any{"input": "hi", "stream": true}, "codex/model", principal,
+			governed(ctx, principal), []router.Target{{Provider: "codex", Model: "model"}},
+			map[string]any{"input": "hi", "stream": true}, "codex/model", callerOf(principal),
 		)
 		resultCh <- result{execution, served, err}
 	}()
