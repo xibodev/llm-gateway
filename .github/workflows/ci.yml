@@ -45,6 +45,18 @@ jobs:
           NO_PROXY: ""
         run: go test ./...
 
+      - name: Race-test settings publication
+        working-directory: go
+        # Requests read settings without a lock while writers publish new
+        # copies. The race detector needs cgo, which the release builds
+        # leave off, so it covers the package that owns that invariant.
+        env:
+          CGO_ENABLED: "1"
+          HTTP_PROXY: http://127.0.0.1:9
+          HTTPS_PROXY: http://127.0.0.1:9
+          NO_PROXY: ""
+        run: go test -race ./internal/config/...
+
       - name: Vulnerability scan
         working-directory: go
         run: |
