@@ -78,11 +78,11 @@ func (rt *Runtime) refreshCodexConnection(ctx context.Context, principalID, prov
 	if !ok || strings.TrimSpace(envelope.RefreshToken) == "" {
 		return errNoCodexRefreshToken()
 	}
-	ctx, _ = withCodexCall(ctx, principalID, providerID)
+	ctx, _ = withOAuthCall(ctx, principalID, providerID)
 	coordinator, err := rt.codexCoordinator()
 	var record tokenstore.Record
 	if err == nil {
-		record, err = rt.codexCredentials.Load(ctx, connection.ID)
+		record, err = rt.credentials.Load(ctx, connection.ID)
 	}
 	if err == nil {
 		_, err = coordinator.Rejected(ctx, connection.ID, record)
@@ -95,7 +95,7 @@ func (rt *Runtime) refreshCodexConnection(ctx context.Context, principalID, prov
 // refreshes take the credential store's lease, so they serialize with the
 // Runtime's own coordinators in this process and every other.
 func (rt *Runtime) codexCoordinator() (*tokenstore.Coordinator, error) {
-	return tokenstore.NewCoordinator(rt.codexCredentials, rt.codexRefresh(EffectiveCodexClientID()))
+	return tokenstore.NewCoordinator(rt.credentials, rt.codexRefresh(EffectiveCodexClientID()))
 }
 
 func codexOAuthClientIDForEnvelope(envelope iam.OAuthTokenEnvelope) (string, error) {
@@ -162,9 +162,9 @@ func (rt *Runtime) newCodexProvider(
 	return CodexProvider{runtime: rt, instance: instance, caller: caller, catalog: catalog}, nil
 }
 
-// call returns ctx carrying the codexCall of one operation of this facade.
-func (p CodexProvider) call(ctx context.Context) (context.Context, *codexCall) {
-	return withCodexCall(ctx, callerPrincipalID(p.caller), p.instance)
+// call returns ctx carrying the oauthCall of one operation of this facade.
+func (p CodexProvider) call(ctx context.Context) (context.Context, *oauthCall) {
+	return withOAuthCall(ctx, callerPrincipalID(p.caller), p.instance)
 }
 
 func (p CodexProvider) IsStub() bool { return false }
@@ -238,7 +238,7 @@ func (p CodexProvider) listModels(ctx context.Context) ([]core.ModelInfo, error)
 	coordinator, err := p.runtime.codexCoordinator()
 	var key string
 	if err == nil {
-		key, err = p.runtime.codexCredentials.Resolve(ctx, p.caller, p.instance)
+		key, err = p.runtime.credentials.Resolve(ctx, p.caller, p.instance)
 	}
 	var record tokenstore.Record
 	if err == nil {
@@ -325,7 +325,7 @@ func (s *codexCoreStream) Close() error { return s.inner.Close() }
 // Runtime returned for this call. After an upstream 401 the Runtime refreshes
 // once and, when the refresh fails, returns the 401; the Codex path returned
 // the refresh failure, which the call recorded, so that is what it reports.
-func (c *codexCall) failure(err error) error {
+func (c *oauthCall) failure(err error) error {
 	if rejection := c.rejected(); rejection != nil && core.ClassifyError(err).StatusCode == http.StatusUnauthorized {
 		err = rejection
 	}

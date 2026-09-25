@@ -8,11 +8,12 @@ import (
 	"github.com/xibodev/llm-provider-auth/tokenstore"
 )
 
-// codexCall is one Codex operation as the credential store and the refresh
-// see it when a tokenstore.Coordinator, the core Runtime's or the gateway's
-// own, runs them on the operation's behalf. It travels in the operation's
-// context, which the Coordinator passes to both.
-type codexCall struct {
+// oauthCall is one operation on a caller's own OAuth connection, as the
+// credential store and the refresh see it when a tokenstore.Coordinator, the
+// core Runtime's or the gateway's own, runs them on the operation's behalf.
+// It travels in the operation's context, which the Coordinator passes to
+// both.
+type oauthCall struct {
 	principalID, providerID string
 
 	mu sync.Mutex
@@ -25,18 +26,18 @@ type codexCall struct {
 	rejection error
 }
 
-type codexCallKey struct{}
+type oauthCallKey struct{}
 
-// withCodexCall returns ctx carrying a new call of principalID on providerID.
-func withCodexCall(ctx context.Context, principalID, providerID string) (context.Context, *codexCall) {
-	call := &codexCall{principalID: principalID, providerID: providerID}
-	return context.WithValue(ctx, codexCallKey{}, call), call
+// withOAuthCall returns ctx carrying a new call of principalID on providerID.
+func withOAuthCall(ctx context.Context, principalID, providerID string) (context.Context, *oauthCall) {
+	call := &oauthCall{principalID: principalID, providerID: providerID}
+	return context.WithValue(ctx, oauthCallKey{}, call), call
 }
 
-// codexCallFrom returns the call ctx carries, or nil. Every method accepts a
+// oauthCallFrom returns the call ctx carries, or nil. Every method accepts a
 // nil call and then does nothing.
-func codexCallFrom(ctx context.Context) *codexCall {
-	call, _ := ctx.Value(codexCallKey{}).(*codexCall)
+func oauthCallFrom(ctx context.Context) *oauthCall {
+	call, _ := ctx.Value(oauthCallKey{}).(*oauthCall)
 	return call
 }
 
@@ -49,7 +50,7 @@ func codexCallFrom(ctx context.Context) *codexCall {
 // prepare and within one refresh, but not across the replay, so a replay
 // after the connection was signed in again to another account used the new
 // sign-in, and still does.
-func (c *codexCall) attempt() {
+func (c *oauthCall) attempt() {
 	if c == nil {
 		return
 	}
@@ -68,7 +69,7 @@ func (c *codexCall) attempt() {
 // third check that path made cannot fail any more: it reread the connection
 // after storing a refresh, and a sign-in could land in between, but the
 // Coordinator hands out the record it stored instead of rereading.
-func (c *codexCall) pin(record tokenstore.Record) error {
+func (c *oauthCall) pin(record tokenstore.Record) error {
 	if c == nil {
 		return nil
 	}
@@ -87,7 +88,7 @@ func (c *codexCall) pin(record tokenstore.Record) error {
 // reject records a failure of the refresh that followed the last attempt.
 // The next attempt clears it, so a failure that did not stop the replay is
 // never reported.
-func (c *codexCall) reject(err error) {
+func (c *oauthCall) reject(err error) {
 	if c == nil || err == nil {
 		return
 	}
@@ -96,7 +97,7 @@ func (c *codexCall) reject(err error) {
 	c.rejection = err
 }
 
-func (c *codexCall) rejected() error {
+func (c *oauthCall) rejected() error {
 	if c == nil {
 		return nil
 	}
@@ -107,7 +108,7 @@ func (c *codexCall) rejected() error {
 
 // forget drops the caches a write to the caller's credential invalidates, as
 // the Codex path did after each refresh it stored and each revocation.
-func (c *codexCall) forget(runtime *Runtime) {
+func (c *oauthCall) forget(runtime *Runtime) {
 	if c == nil {
 		return
 	}

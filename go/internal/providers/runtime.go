@@ -25,9 +25,10 @@ type Runtime struct {
 	instances providerCache
 	catalogs  catalogCache
 	core      *coreruntime.Runtime[*config.Settings]
-	// codexCredentials is the credential store behind core and behind the
-	// Codex catalog and console refresh, which refresh outside core.
-	codexCredentials codexStore
+	// credentials is the credential store behind core and behind the
+	// gateway's own Coordinators: the Codex catalog and console refresh,
+	// which refresh outside core.
+	credentials oauthStore
 	// antigravityRefresh serializes the OAuth refreshes of one Antigravity
 	// connection. Codex refreshes take the credential store's lease instead.
 	antigravityRefresh refreshLocks
@@ -67,7 +68,7 @@ func newRuntime(credentials func() (core.CredentialStore, error)) *Runtime {
 	runtime.authAdapters.factories = builtInAuthAdapters()
 	runtime.quotaAdapters.values = map[string]QuotaAdapter{}
 	runtime.copilot = copilotauth.NewDynamic(runtime.copilotSettings)
-	runtime.codexCredentials = codexStore{runtime: runtime, open: credentials}
+	runtime.credentials = oauthStore{runtime: runtime, open: credentials}
 	coreRuntime, err := newCoreRuntime(runtime)
 	if err != nil {
 		// New fails only without settings or a provider factory, and

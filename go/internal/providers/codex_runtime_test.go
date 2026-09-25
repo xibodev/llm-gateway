@@ -130,7 +130,7 @@ func TestCodexReplayReportsTheFailedRefresh(t *testing.T) {
 // The connection is signed in again, to another account, between a request
 // and the 401 that makes the Runtime refresh it. The Codex path pinned the
 // account within one credential fetch, not across the replay, so it replayed
-// with the new sign-in. The pin's scope keeps that: see codexCall.attempt.
+// with the new sign-in. The pin's scope keeps that: see oauthCall.attempt.
 func TestCodexReplayAfterSignInUsesTheNewSignIn(t *testing.T) {
 	var owner iam.Principal
 	upstream := &codexUpstream{}

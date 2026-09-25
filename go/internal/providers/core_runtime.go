@@ -24,7 +24,7 @@ func newCoreRuntime(rt *Runtime) (*coreruntime.Runtime[*config.Settings], error)
 	return coreruntime.New(coreruntime.Options[*config.Settings]{
 		Settings:    config.Source{},
 		Providers:   rt.coreProvider,
-		Credentials: rt.codexCredentials,
+		Credentials: rt.credentials,
 		Refresh:     rt.coreRefresh,
 		Evidence:    credentialEvidence{},
 		// Catalogs stays nil. The gateway lists Codex models on its own
@@ -75,16 +75,16 @@ func (rt *Runtime) coreProvider(settings *config.Settings, instance string) (cor
 
 // codexCoreProvider is core's Codex as the core Runtime serves it. Each
 // request the Runtime sends upstream, its replay included, starts a new
-// account pin scope on the operation's codexCall.
+// account pin scope on the operation's oauthCall.
 type codexCoreProvider struct{ *coreproviders.Codex }
 
 func (p codexCoreProvider) Invoke(ctx context.Context, request core.Request) (core.Response, error) {
-	codexCallFrom(ctx).attempt()
+	oauthCallFrom(ctx).attempt()
 	return p.Codex.Invoke(ctx, request)
 }
 
 func (p codexCoreProvider) Stream(ctx context.Context, request core.Request) (core.StreamIter, error) {
-	codexCallFrom(ctx).attempt()
+	oauthCallFrom(ctx).attempt()
 	return p.Codex.Stream(ctx, request)
 }
 

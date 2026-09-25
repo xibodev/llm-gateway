@@ -649,7 +649,7 @@ func TestCodexRefreshSerializesConcurrentRotation(t *testing.T) {
 
 	// Two coordinators stand for two processes; the credential store's
 	// lease is all they share.
-	record, err := Current().codexCredentials.Load(context.Background(), connection.ID)
+	record, err := Current().credentials.Load(context.Background(), connection.ID)
 	if err != nil || record.AccessToken != initial.AccessToken {
 		t.Fatalf("record=%v err=%v", record, err)
 	}
@@ -715,7 +715,7 @@ func TestCodexRefreshRejectsChangedAccount(t *testing.T) {
 // The connection is signed in again to another account while a request
 // refreshes it. The Coordinator's compare-and-swap loses and it would serve
 // the new sign-in; the request was bound to the first account and must fail
-// instead, before anything reaches Codex. See codexCall.pin.
+// instead, before anything reaches Codex. See oauthCall.pin.
 func TestCodexPrepareRejectsConcurrentAccountReplacement(t *testing.T) {
 	setupCodexProviderTest(t)
 	configureCodexInstance(t, "codex")
