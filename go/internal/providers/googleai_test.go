@@ -35,7 +35,7 @@ func googleFixture(t *testing.T, cfg *config.ProviderConfig) *googleProvider {
 	t.Cleanup(func() {
 		config.Update(func(s *config.Settings) { s.CredentialEncryptionKey, s.Providers = oldKey, oldProviders })
 	})
-	provider, err := runtime.instantiate("google", cfg, gatewayCaller())
+	provider, err := runtime.instantiate(config.Get(), "google", cfg, gatewayCaller())
 	if err != nil {
 		t.Fatal(err)
 	}

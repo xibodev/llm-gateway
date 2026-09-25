@@ -16,11 +16,12 @@ import (
 func (rt *Runtime) ProviderHTTPTarget(
 	providerID string, caller core.Caller,
 ) (baseURL string, headers http.Header, ok bool) {
-	cfg, exists := config.Get().Providers[providerID]
+	settings := config.Get()
+	cfg, exists := settings.Providers[providerID]
 	if !exists {
 		return "", nil, false
 	}
-	inst, err := rt.instantiate(providerID, cfg, caller)
+	inst, err := rt.instantiate(settings, providerID, cfg, caller)
 	if err != nil {
 		return "", nil, false
 	}

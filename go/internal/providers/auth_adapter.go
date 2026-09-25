@@ -413,7 +413,7 @@ func (adapter openAICodexAuthAdapter) RefreshConnection(
 func (adapter openAICodexAuthAdapter) Revoke(
 	ctx context.Context, envelope iam.OAuthTokenEnvelope,
 ) error {
-	clientID, err := codexOAuthClientIDForEnvelope(envelope)
+	clientID, err := codexGrantClient(envelope.OAuthProfile, envelope.OAuthClientID)
 	if err != nil {
 		return err
 	}
@@ -433,11 +433,10 @@ const (
 
 // antigravityOAuthConfig returns the runtime OAuth client configured in
 // settings, unless a test replaced it through the seam.
-func (rt *Runtime) antigravityOAuthConfig(redirectURI string) antigravityauth.Config {
+func (rt *Runtime) antigravityOAuthConfig(settings *config.Settings, redirectURI string) antigravityauth.Config {
 	if replaced := rt.antigravityOAuth.get(); replaced != nil {
 		return replaced(redirectURI)
 	}
-	settings := config.Get()
 	return antigravityauth.Config{
 		ClientID: settings.GoogleAntigravityClientID, ClientSecret: settings.GoogleAntigravityClientSecret,
 		ClientAuthMode: antigravityauth.ClientAuthModeClientSecretPost,
@@ -560,13 +559,14 @@ func (adapter googleAntigravityAuthAdapter) config(redirectURI string) antigravi
 		configured.RedirectURI = redirectURI
 		return configured
 	}
-	if provider := config.Get().Providers[adapter.providerID]; provider != nil && strings.TrimSpace(provider.PublicOAuthClientID) != "" {
+	settings := config.Get()
+	if provider := settings.Providers[adapter.providerID]; provider != nil && strings.TrimSpace(provider.PublicOAuthClientID) != "" {
 		return antigravityauth.Config{
 			ClientID: strings.TrimSpace(provider.PublicOAuthClientID), ClientAuthMode: antigravityauth.ClientAuthModePublicPKCE,
 			RedirectURI: redirectURI,
 		}
 	}
-	return Current().antigravityOAuthConfig(redirectURI)
+	return Current().antigravityOAuthConfig(settings, redirectURI)
 }
 
 func antigravityOAuthProfile(mode antigravityauth.ClientAuthMode) string {

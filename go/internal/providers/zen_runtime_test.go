@@ -157,7 +157,7 @@ func TestZenRequestsResolveTheFactoryPrecedence(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := runtime.instantiate("zen", cfg, owner); !IsConfig(err) {
+	if _, err := runtime.instantiate(config.Get(), "zen", cfg, owner); !IsConfig(err) {
 		t.Fatalf("an OAuth connection built a Zen facade: err=%v", err)
 	}
 	store := runtime.verticals[zenCoreType].credentials

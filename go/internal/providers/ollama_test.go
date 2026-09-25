@@ -40,7 +40,7 @@ func ollamaFixture(t *testing.T, base string) *ollamaProvider {
 		s.Providers["ollama-fixture"] = cfg
 	})
 	t.Cleanup(func() { config.Update(func(s *config.Settings) { delete(s.Providers, "ollama-fixture") }) })
-	provider, err := runtime.instantiate("ollama-fixture", cfg, gatewayCaller())
+	provider, err := runtime.instantiate(config.Get(), "ollama-fixture", cfg, gatewayCaller())
 	if err != nil {
 		t.Fatal(err)
 	}

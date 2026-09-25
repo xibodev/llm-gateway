@@ -47,7 +47,7 @@ func openAIFixtureRuntime(t *testing.T, cfg *config.ProviderConfig) *Runtime {
 // openAIFacade is the facade the provider factory builds for caller.
 func openAIFacade(t *testing.T, runtime *Runtime, caller core.Caller) *openAICompatibleProvider {
 	t.Helper()
-	provider, err := runtime.instantiate(openAIFixtureInstance, config.Get().Providers[openAIFixtureInstance], caller)
+	provider, err := runtime.instantiate(config.Get(), openAIFixtureInstance, config.Get().Providers[openAIFixtureInstance], caller)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -183,7 +183,7 @@ func TestOpenAIFacadesRefuseAnEndpointCoreCannotServe(t *testing.T) {
 		{Type: "openai_compatible", BaseURL: "api.example.test/v1", APIKey: "fixture-key"},
 	} {
 		runtime := openAIFixtureRuntime(t, cfg)
-		if _, err := runtime.instantiate(openAIFixtureInstance, cfg, gatewayCaller()); !IsConfig(err) {
+		if _, err := runtime.instantiate(config.Get(), openAIFixtureInstance, cfg, gatewayCaller()); !IsConfig(err) {
 			t.Fatalf("%+v: err=%v, want a configuration error", cfg, err)
 		}
 	}

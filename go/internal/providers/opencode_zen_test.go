@@ -47,7 +47,7 @@ func zenFixtureConfig(t *testing.T, cfg *config.ProviderConfig) *zenProvider {
 
 func zenFacade(t *testing.T, runtime *Runtime, caller core.Caller) *zenProvider {
 	t.Helper()
-	provider, err := runtime.instantiate("zen", config.Get().Providers["zen"], caller)
+	provider, err := runtime.instantiate(config.Get(), "zen", config.Get().Providers["zen"], caller)
 	if err != nil {
 		t.Fatal(err)
 	}

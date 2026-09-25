@@ -79,7 +79,8 @@ func CatalogRequiresPrincipal(providerID string) bool {
 // ProviderConfigurationIssue reports setup that must be completed before a
 // provider can expose a runnable catalog. Cached rows never override this gate.
 func ProviderConfigurationIssue(providerID string) string {
-	cfg, ok := config.Get().Providers[providerID]
+	settings := config.Get()
+	cfg, ok := settings.Providers[providerID]
 	if !ok {
 		return ""
 	}
@@ -89,7 +90,7 @@ func ProviderConfigurationIssue(providerID string) string {
 		return entry.Label + " requires a base URL."
 	}
 	if ollamaInstance(cfg) {
-		if issue := coreproviders.OllamaBaseURLIssue(ollamaBase(config.Get(), cfg)); issue != "" {
+		if issue := coreproviders.OllamaBaseURLIssue(ollamaBase(settings, cfg)); issue != "" {
 			return issue
 		}
 	}
@@ -106,7 +107,7 @@ func ProviderConfigurationIssue(providerID string) string {
 			return "Azure OpenAI base URL is not a resource endpoint: it must be an http(s) URL with no path, or a path ending in /openai/v1."
 		}
 	case "openai_codex":
-		if EffectiveCodexClientID() == "" {
+		if effectiveCodexClientID(settings) == "" {
 			return "OpenAI Codex requires an OAuth client ID."
 		}
 	}

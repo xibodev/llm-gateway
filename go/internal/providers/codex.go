@@ -98,10 +98,6 @@ func (rt *Runtime) codexCoordinator() (*tokenstore.Coordinator, error) {
 	return tokenstore.NewCoordinator(rt.credentials, rt.codexRefresh(EffectiveCodexClientID()))
 }
 
-func codexOAuthClientIDForEnvelope(envelope iam.OAuthTokenEnvelope) (string, error) {
-	return codexGrantClient(envelope.OAuthProfile, envelope.OAuthClientID)
-}
-
 // codexGrantClient returns the OAuth client a connection's grant belongs to,
 // from the profile and client stored with it. A connection without them
 // predates stored client profiles, and using the configured client instead

@@ -31,15 +31,17 @@ var ProviderTypes = []string{
 	"ai_studio", "vertex_ai", "azure_openai", "google_antigravity",
 }
 
+// instantiate builds the facade of providerID, configured as cfg, for
+// caller, with the rest of its settings from settings, the snapshot cfg was
+// read from.
 func (rt *Runtime) instantiate(
-	providerID string, cfg *config.ProviderConfig, caller core.Caller,
+	settings *config.Settings, providerID string, cfg *config.ProviderConfig, caller core.Caller,
 ) (Provider, error) {
 	ptype := strings.ToLower(strings.TrimSpace(cfg.Type))
 	if cfg.Disabled {
 		return nil, &ConfigError{Msg: "provider '" + providerID + "' is disabled — re-enable it from the provider detail page"}
 	}
-	s := config.Get()
-	timeout := s.OpenAICompatibleTimeoutSeconds
+	timeout := settings.OpenAICompatibleTimeoutSeconds
 	if cfg.Timeout != nil {
 		timeout = *cfg.Timeout
 	}
@@ -72,11 +74,11 @@ func (rt *Runtime) instantiate(
 			}
 			return rt.newCodexProvider(providerID, caller, timeout, nil, "")
 		}
-		base := openAICompatibleBase(s, cfg)
-		if zenInstance(s, providerID, cfg) {
+		base := openAICompatibleBase(settings, cfg)
+		if zenInstance(settings, providerID, cfg) {
 			return rt.newZenProvider(providerID, cfg, caller, base, timeout)
 		}
-		return rt.newOpenAICompatibleProvider(providerID, cfg, caller, s)
+		return rt.newOpenAICompatibleProvider(providerID, cfg, caller, settings)
 	case "azure_openai":
 		// Normalised, not merely checked for emptiness: the catalog derives the
 		// deployments route from scheme+host alone while inference appends to
@@ -126,17 +128,17 @@ func (rt *Runtime) instantiate(
 	case "bedrock":
 		return rt.newBedrockProvider(providerID, cfg, caller)
 	case "github_copilot":
-		return rt.newCopilotProvider(providerID, cfg, caller, cfg.TimeoutOr(s.GithubCopilotTimeoutSeconds)), nil
+		return rt.newCopilotProvider(providerID, cfg, caller, cfg.TimeoutOr(settings.GithubCopilotTimeoutSeconds)), nil
 	case "ollama":
-		return rt.newOllamaProvider(providerID, caller, ollamaBase(s, cfg), cfg.TimeoutOr(s.OllamaTimeoutSeconds))
+		return rt.newOllamaProvider(providerID, caller, ollamaBase(settings, cfg), cfg.TimeoutOr(settings.OllamaTimeoutSeconds))
 	case "echo":
 		return EchoProvider{}, nil
 	}
 	return nil, &ConfigError{Msg: fmt.Sprintf("provider '%s': unknown type '%s'", providerID, cfg.Type)}
 }
 
-func policyFor(providerID string) config.ProviderPolicy {
-	p := config.Get().Policies
+func policyFor(settings *config.Settings, providerID string) config.ProviderPolicy {
+	p := settings.Policies
 	if override, ok := p.Overrides[providerID]; ok {
 		return override
 	}
@@ -173,14 +175,18 @@ func (rt *Runtime) GetProviderForPrincipal(
 		}
 		cache.mu.Unlock()
 
-		cfg, ok := config.Get().Providers[providerID]
+		// One snapshot builds the instance and its policy. It is read after
+		// the epoch, so an eviction for a change published meanwhile
+		// discards the build instead of caching it.
+		settings := config.Get()
+		cfg, ok := settings.Providers[providerID]
 		if !ok {
 			return nil, &ConfigError{Msg: fmt.Sprintf("unknown provider '%s'; add it under 'providers:'", providerID)}
 		}
-		instance, err := rt.instantiate(providerID, cfg, caller)
+		instance, err := rt.instantiate(settings, providerID, cfg, caller)
 		var provider Provider
 		if err == nil {
-			policy := policyFor(providerID)
+			policy := policyFor(settings, providerID)
 			provider = instance
 			if policy.RetryEnabled() || policy.CircuitEnabled() {
 				provider = &ResilientProvider{inner: instance, name: providerID, policy: policy}

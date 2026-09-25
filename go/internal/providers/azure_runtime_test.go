@@ -45,7 +45,7 @@ func azureFixture(t *testing.T, cfg *config.ProviderConfig) AzureOpenAIProvider 
 // azureFacade is the facade the provider factory builds for caller.
 func azureFacade(t *testing.T, runtime *Runtime, caller core.Caller) AzureOpenAIProvider {
 	t.Helper()
-	provider, err := runtime.instantiate(azureFixtureInstance, config.Get().Providers[azureFixtureInstance], caller)
+	provider, err := runtime.instantiate(config.Get(), azureFixtureInstance, config.Get().Providers[azureFixtureInstance], caller)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -206,7 +206,7 @@ func TestAzureRequestsResolveTheFactoryPrecedence(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := runtime.instantiate(azureFixtureInstance, cfg, owner); !IsConfig(err) {
+	if _, err := runtime.instantiate(config.Get(), azureFixtureInstance, cfg, owner); !IsConfig(err) {
 		t.Fatalf("an OAuth connection built an Azure facade: err=%v", err)
 	}
 	if _, err := runtime.verticals[azureCoreType].credentials.Load(context.Background(), oauth.ID); !IsConfig(err) {

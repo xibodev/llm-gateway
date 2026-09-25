@@ -42,7 +42,7 @@ func antigravityInstance(cfg *config.ProviderConfig) bool {
 // OAuth client the gateway signs in with, plus the rules of that path core
 // lacks.
 func (rt *Runtime) antigravityRefresh(settings *config.Settings, instance string) tokenstore.RefreshFunc {
-	oauth := rt.antigravityOAuthConfig("")
+	oauth := rt.antigravityOAuthConfig(settings, "")
 	publicClientID := ""
 	if cfg := settings.Providers[instance]; cfg != nil {
 		publicClientID = cfg.PublicOAuthClientID

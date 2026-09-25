@@ -47,7 +47,7 @@ func anthropicFixture(t *testing.T, cfg *config.ProviderConfig) AnthropicNativeP
 // anthropicFacade is the facade the provider factory builds for caller.
 func anthropicFacade(t *testing.T, runtime *Runtime, caller core.Caller) AnthropicNativeProvider {
 	t.Helper()
-	provider, err := runtime.instantiate(anthropicFixtureInstance, config.Get().Providers[anthropicFixtureInstance], caller)
+	provider, err := runtime.instantiate(config.Get(), anthropicFixtureInstance, config.Get().Providers[anthropicFixtureInstance], caller)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -227,7 +227,7 @@ func TestAnthropicRequestsResolveTheFactoryPrecedence(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := runtime.instantiate(anthropicFixtureInstance, cfg, owner); !IsConfig(err) {
+	if _, err := runtime.instantiate(config.Get(), anthropicFixtureInstance, cfg, owner); !IsConfig(err) {
 		t.Fatalf("an OAuth connection built an Anthropic facade: err=%v", err)
 	}
 	if _, err := runtime.verticals[anthropicCoreType].credentials.Load(context.Background(), oauth.ID); !IsConfig(err) {
