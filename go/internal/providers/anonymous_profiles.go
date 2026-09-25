@@ -31,13 +31,6 @@ func AnonymousVerificationModel(registryID string, rows []ModelInfo) string {
 	return coreproviders.SelectVerificationModel(registryID, free)
 }
 
-func (p OpenAIProvider) chatURL(base string) string {
-	if p.registryID == "pollinations" {
-		return strings.TrimRight(base, "/") + "/v1/chat/completions"
-	}
-	return strings.TrimRight(base, "/") + "/chat/completions"
-}
-
 func (c openAICatalog) modelsURL(base string) string {
 	return strings.TrimRight(base, "/") + "/models"
 }

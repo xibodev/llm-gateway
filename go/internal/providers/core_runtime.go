@@ -189,11 +189,11 @@ func coreOperationFrom(ctx context.Context) coreOperation {
 // types resolve owner-private OAuth connections, and each read marks the
 // connection used, as both paths' reads did. Copilot's store opens it with
 // oauth set too: OAuthPrecedence is the Copilot resolver's order, and that
-// resolver marked each credential it read. Zen's store opens it without:
-// a nil Precedence resolves every instance with ConnectionPrecedence, the
-// provider factory's order, and reads mark nothing, because the factory
-// marks the credential it builds a Zen facade with, which is where the Zen
-// path recorded a use.
+// resolver marked each credential it read. Zen's store, as every
+// connectionStore, opens it without: a nil Precedence resolves every
+// instance with ConnectionPrecedence, the provider factory's order, and
+// reads mark nothing, because the factory marks the credential it builds a
+// facade with, which is where those paths recorded a use.
 func iamCredentialStore(oauth bool) (core.CredentialStore, error) {
 	db, err := iam.DB()
 	if err != nil {

@@ -76,19 +76,7 @@ func (rt *Runtime) instantiate(
 		if zenInstance(s, providerID, cfg) {
 			return rt.newZenProvider(providerID, cfg, caller, base, timeout)
 		}
-		registryID := EffectiveRegistryID(providerID, cfg.RegistryID, cfg.Type)
-		apiKey, observation, err := resolveAPIKeyObserved(providerID, cfg, caller)
-		if err != nil {
-			return nil, err
-		}
-		registryEntry, _ := RegistryProviderByID(registryID)
-		anonymous := registryEntry.AnonymousAutomation && AnonymousAPIKey(apiKey)
-		return OpenAIProvider{
-			auth:    bearerAuth{base: strings.TrimRight(base, "/"), apiKey: apiKey, observation: observation},
-			Timeout: timeout, forceAdapt: cfg.ForceApiSupport,
-			providerID: providerID, caller: caller, registryID: registryID,
-			anonymous: anonymous,
-		}, nil
+		return rt.newOpenAICompatibleProvider(providerID, cfg, caller, s)
 	case "azure_openai":
 		// Normalised, not merely checked for emptiness: the catalog derives the
 		// deployments route from scheme+host alone while inference appends to
@@ -136,17 +124,7 @@ func (rt *Runtime) instantiate(
 	case "google_antigravity":
 		return rt.newAntigravityProvider(providerID, caller)
 	case "bedrock":
-		apiKey, observation, err := resolveAPIKeyObserved(providerID, cfg, caller)
-		if err != nil {
-			return nil, err
-		}
-		bp := buildBedrockProvider(
-			cfg.Region, cfg.BaseURL, apiKey, observation, cfg.TimeoutOr(0),
-		)
-		bp.forceAdapt = cfg.ForceApiSupport
-		bp.providerID = providerID
-		bp.caller = caller
-		return bp, nil
+		return rt.newBedrockProvider(providerID, cfg, caller)
 	case "github_copilot":
 		return rt.newCopilotProvider(providerID, cfg, caller, cfg.TimeoutOr(s.GithubCopilotTimeoutSeconds)), nil
 	case "ollama":

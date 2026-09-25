@@ -462,7 +462,8 @@ func azureDeploymentRows(decoded map[string]any) []ModelInfo {
 // Excluded rather than listed with their real capability, because a row this
 // gateway cannot route anywhere is not better than a missing row: embeddings
 // and audio reach an upstream only through providers.ProviderHTTPTarget, which
-// serves OpenAIProvider alone, and an Azure resource is not one. Exclusion also
+// serves the OpenAI-compatible, Bedrock, OpenCode Zen and Copilot facades
+// alone, and an Azure resource is none of them. Exclusion also
 // costs nothing at call time — `<provider>/<deployment>` resolves without
 // consulting the catalog (router.ResolveForPrincipal), so an operator who knows
 // a deployment name can still reach it.

@@ -79,3 +79,14 @@ func bedrockCore(instance string, cfg *config.ProviderConfig) openAICoreSpec {
 		},
 	}
 }
+
+// bedrockBase is where a Bedrock instance's catalog and proxied endpoints
+// are, as the transport addressed them: its base URL, or else its region's
+// endpoint, which core serves its requests at too.
+func bedrockBase(cfg *config.ProviderConfig) string {
+	base := strings.TrimSpace(cfg.BaseURL)
+	if base == "" {
+		base = config.BedrockBaseURL(cfg.Region)
+	}
+	return strings.TrimRight(base, "/")
+}

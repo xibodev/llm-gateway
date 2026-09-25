@@ -31,7 +31,7 @@ func TestCatalogPayloadValidationAndCache(t *testing.T) {
 				return googleCatalog(NewVertexAIWithAccessToken(base+"/v1", "fixture-token", "fixture-project", "global", 2))
 			}},
 		{"openai", "data", "/models", `{"id":"fixture-model","owned_by":"fixture"}`, "id", `{"name":"fixture-model","future":{"nested":[null,17]}}`,
-			func(base string) Provider { return OpenAIProvider{auth: catalogFixtureAuth{base: base}, Timeout: 2} }},
+			func(base string) Provider { return openAICatalogFixture(base, 2) }},
 	} {
 		t.Run(provider.name, func(t *testing.T) {
 			for _, tc := range []struct {
@@ -292,7 +292,7 @@ func TestCatalogIdentityVariantsAndFiltering(t *testing.T) {
 			case "ollama":
 				p = ollamaCatalogFixture(t, server.URL, 2)
 			case "openai":
-				p = OpenAIProvider{auth: catalogFixtureAuth{base: server.URL}, Timeout: 2}
+				p = openAICatalogFixture(server.URL, 2)
 			case "studio":
 				p = googleCatalog(NewAIStudio(server.URL+"/v1beta", "fixture-key", 2))
 			case "vertex":

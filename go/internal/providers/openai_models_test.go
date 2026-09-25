@@ -1,27 +1,14 @@
 package providers
 
 import (
-	"errors"
 	"net/http"
 	"net/http/httptest"
 	"testing"
 )
 
-type catalogFixtureAuth struct {
-	base       string
-	prepareErr error
-}
-
-func (a catalogFixtureAuth) Prepare() (string, http.Header, error) {
-	if a.prepareErr != nil {
-		return "", nil, a.prepareErr
-	}
-	return a.base, http.Header{"Authorization": {"Bearer fixture"}}, nil
-}
-
 func TestOpenAIListModelsPrefersDisplayName(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/models" {
+		if r.URL.Path != "/models" || r.Header.Get("Authorization") != "Bearer fixture" {
 			http.NotFound(w, r)
 			return
 		}
@@ -30,31 +17,18 @@ func TestOpenAIListModelsPrefersDisplayName(t *testing.T) {
 	}))
 	defer server.Close()
 
-	provider := OpenAIProvider{
-		auth:    bearerAuth{base: server.URL, apiKey: "fixture"},
-		Timeout: 2,
-	}
-	rows := provider.ListModels()
+	rows := openAICatalogFixture(server.URL, 2).ListModels()
 	if len(rows) != 1 || rows[0].ID != "atlas-small" || rows[0].Label != "Atlas Small" {
 		t.Fatalf("models=%+v", rows)
 	}
 }
 
+// The catalog's failures carry safe codes and details. A credential that
+// could not be prepared is reported by the facade that prepares one, as
+// Copilot's is; see TestCopilotCatalogStaysOnTheGatewayPath.
 func TestOpenAIListModelsReportsSafeFailures(t *testing.T) {
-	t.Run("authentication", func(t *testing.T) {
-		provider := OpenAIProvider{auth: catalogFixtureAuth{
-			prepareErr: errors.New("Copilot session-token exchange returned 401"),
-		}}
-		_, _, err := provider.ListModelsWithError()
-		code, detail, status := CatalogFailure(err)
-		if code != "catalog_authentication_failed" || status != 0 ||
-			detail != "Provider authentication failed before catalog access." {
-			t.Fatalf("failure=(%q,%q,%d)", code, detail, status)
-		}
-	})
-
-	// Nothing on this transport refreshes a key, so a rejection is reported
-	// as the catalog answered it. Copilot's catalog replaces a rejected
+	// Nothing on this path refreshes a key, so a rejection is reported as
+	// the catalog answered it. Copilot's catalog replaces a rejected
 	// session; see TestCopilotCatalogStaysOnTheGatewayPath.
 	t.Run("rejected key", func(t *testing.T) {
 		requests := 0
@@ -63,8 +37,7 @@ func TestOpenAIListModelsReportsSafeFailures(t *testing.T) {
 			http.Error(w, "unauthorized", http.StatusUnauthorized)
 		}))
 		defer server.Close()
-		provider := OpenAIProvider{auth: catalogFixtureAuth{base: server.URL}, Timeout: 2}
-		_, _, err := provider.ListModelsWithError()
+		_, _, err := listModelsWithError(openAICatalogFixture(server.URL, 2))
 		code, _, status := CatalogFailure(err)
 		if code != "catalog_http_error" || status != http.StatusUnauthorized || requests != 1 {
 			t.Fatalf("failure=(%q,%d) requests=%d", code, status, requests)
@@ -76,10 +49,7 @@ func TestOpenAIListModelsReportsSafeFailures(t *testing.T) {
 			http.Error(w, `{"error":{"message":"catalog unavailable"}}`, http.StatusBadGateway)
 		}))
 		defer server.Close()
-		provider := OpenAIProvider{
-			auth: catalogFixtureAuth{base: server.URL}, Timeout: 2,
-		}
-		_, _, err := provider.ListModelsWithError()
+		_, _, err := listModelsWithError(openAICatalogFixture(server.URL, 2))
 		code, detail, status := CatalogFailure(err)
 		if code != "catalog_http_error" || status != http.StatusBadGateway ||
 			detail == "" {
@@ -92,10 +62,7 @@ func TestOpenAIListModelsReportsSafeFailures(t *testing.T) {
 			_, _ = w.Write([]byte("not-json"))
 		}))
 		defer server.Close()
-		provider := OpenAIProvider{
-			auth: catalogFixtureAuth{base: server.URL}, Timeout: 2,
-		}
-		_, _, err := provider.ListModelsWithError()
+		_, _, err := listModelsWithError(openAICatalogFixture(server.URL, 2))
 		code, _, _ := CatalogFailure(err)
 		if code != "catalog_invalid_json" {
 			t.Fatalf("code=%q", code)
@@ -108,10 +75,7 @@ func TestOpenAIListModelsReportsSafeFailures(t *testing.T) {
 			_, _ = w.Write([]byte(`{"data":[]}`))
 		}))
 		defer server.Close()
-		provider := OpenAIProvider{
-			auth: catalogFixtureAuth{base: server.URL}, Timeout: 2,
-		}
-		models, _, err := provider.ListModelsWithError()
+		models, _, err := listModelsWithError(openAICatalogFixture(server.URL, 2))
 		if err != nil || models == nil || len(models) != 0 {
 			t.Fatalf("models=%+v err=%v", models, err)
 		}

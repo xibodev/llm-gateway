@@ -2,80 +2,57 @@ package providers
 
 import (
 	"encoding/json"
+	"io"
 	"net/http"
-	"net/http/httptest"
 	"strings"
-	"sync/atomic"
 	"testing"
 
 	"llmgw/internal/config"
 )
 
+// A Chat request adaptation serves over Responses is converted as the
+// transport converted it: a material loss refuses it before anything is
+// sent, and an advisory one is sent.
 func TestChatToResponsesTranslationLossPolicy(t *testing.T) {
-	var calls atomic.Int32
-	var request map[string]any
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		calls.Add(1)
-		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
-			t.Error(err)
-		}
-		_, _ = w.Write([]byte(`{"id":"resp_1","status":"completed","output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"ok"}]}]}`))
-	}))
-	defer server.Close()
-	provider := OpenAIProvider{auth: bearerAuth{base: server.URL, apiKey: "fixture"}}
+	upstream, base := newOpenAIUpstream(t)
+	provider := openAICompatibleFixture(t, &config.ProviderConfig{Type: "openai_compatible", BaseURL: base, APIKey: "fixture"})
+	storeOpenAICatalog(provider, ModelInfo{ID: "model", SupportedSurfaces: []string{"/responses"}})
 	messages := []Message{{"role": "user", "content": "hi"}}
 
-	if _, err := provider.completeViaResponses("model", messages, Kwargs{"stop": []any{"END"}}); err == nil || !strings.Contains(err.Error(), "stop") {
+	if _, err := provider.Complete("model", messages, Kwargs{"stop": []any{"END"}, "_force_api_support": true}); !IsConfig(err) || !strings.Contains(err.Error(), "stop") {
 		t.Fatalf("material conversion error=%v", err)
 	}
-	if calls.Load() != 0 {
-		t.Fatalf("material conversion dispatched %d request(s)", calls.Load())
+	if calls := upstream.take(); len(calls) != 0 {
+		t.Fatalf("material conversion dispatched %d request(s)", len(calls))
 	}
 
-	if _, err := provider.completeViaResponses("model", messages, Kwargs{"max_tokens": 8, "_force_api_support": true}); err != nil {
+	if _, err := provider.Complete("model", messages, Kwargs{"max_tokens": 8, "_force_api_support": true}); err != nil {
 		t.Fatalf("advisory conversion rejected: %v", err)
 	}
-	if calls.Load() != 1 || request["max_output_tokens"] != float64(8) {
-		t.Fatalf("calls=%d request=%+v", calls.Load(), request)
+	calls := upstream.take()
+	var request map[string]any
+	if len(calls) != 1 || calls[0].path != "/responses" || json.Unmarshal([]byte(calls[0].body), &request) != nil || request["max_output_tokens"] != float64(8) {
+		t.Fatalf("calls=%+v", calls)
 	}
 }
 
-// The transport marks every request that carries images with Copilot's vision
-// header, which other upstreams ignore. Copilot's replay of a rejected
-// session keeps it too; see TestCopilotFailuresKeepTheirClassification.
+// Every request that carries images is marked with Copilot's vision header,
+// which other upstreams ignore, as the transport marked it.
 func TestV043OpenAIRequestsCarryVisionHeaders(t *testing.T) {
-	for name, invoke := range map[string]func(OpenAIProvider) error{
-		"chat": func(provider OpenAIProvider) error {
+	image := []any{map[string]any{"type": "input_image", "image_url": "data:image/png;base64,AA=="}}
+	for name, invoke := range map[string]func(*openAICompatibleProvider) error{
+		"chat": func(provider *openAICompatibleProvider) error {
 			_, err := provider.Complete("vision", []Message{{
-				"role": "user", "content": []any{map[string]any{
-					"type":      "image_url",
-					"image_url": map[string]any{"url": "data:image/png;base64,AA=="},
-				}},
+				"role": "user", "content": []any{map[string]any{"type": "image_url", "image_url": map[string]any{"url": "data:image/png;base64,AA=="}}},
 			}}, Kwargs{})
 			return err
 		},
-		"responses": func(provider OpenAIProvider) error {
-			_, _, err := provider.callResponsesPayloadWithObservation(map[string]any{
-				"model": "vision",
-				"input": []any{map[string]any{
-					"type": "message", "role": "user",
-					"content": []any{map[string]any{
-						"type": "input_image", "image_url": "data:image/png;base64,AA==",
-					}},
-				}},
-			})
+		"responses": func(provider *openAICompatibleProvider) error {
+			_, _, err := provider.CompleteResponses("vision", map[string]any{"input": []any{map[string]any{"type": "message", "role": "user", "content": image}}})
 			return err
 		},
-		"responses stream": func(provider OpenAIProvider) error {
-			stream, _, err := provider.streamResponsesPayload(map[string]any{
-				"model": "vision", "stream": true,
-				"input": []any{map[string]any{
-					"type": "message", "role": "user",
-					"content": []any{map[string]any{
-						"type": "input_image", "image_url": "data:image/png;base64,AA==",
-					}},
-				}},
-			})
+		"responses stream": func(provider *openAICompatibleProvider) error {
+			stream, _, err := provider.StreamResponses("vision", map[string]any{"input": []any{map[string]any{"type": "message", "role": "user", "content": image}}})
 			if err != nil {
 				return err
 			}
@@ -84,36 +61,20 @@ func TestV043OpenAIRequestsCarryVisionHeaders(t *testing.T) {
 		},
 	} {
 		t.Run(name, func(t *testing.T) {
-			requests := 0
-			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				requests++
-				if r.Header.Get("Copilot-Vision-Request") != "true" {
-					t.Fatalf("request %d missing vision header", requests)
-				}
-				w.Header().Set("Content-Type", "application/json")
-				if r.URL.Path == "/responses" {
-					if r.Header.Get("Accept") == "text/event-stream" {
-						_, _ = w.Write([]byte("data: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_1\",\"object\":\"response\",\"status\":\"completed\",\"output\":[]}}\n\n"))
-						return
-					}
-					_, _ = w.Write([]byte(`{"id":"resp_1","object":"response","status":"completed","output":[]}`))
-					return
-				}
-				_, _ = w.Write([]byte(`{"id":"chat_1","choices":[{"message":{"role":"assistant","content":"ok"},"finish_reason":"stop"}]}`))
-			}))
-			defer server.Close()
-			if err := invoke(OpenAIProvider{
-				auth: bearerAuth{base: server.URL, apiKey: "fixture"}, Timeout: 2,
-			}); err != nil {
+			upstream, base := newOpenAIUpstream(t)
+			provider := openAICompatibleFixture(t, &config.ProviderConfig{Type: "openai_compatible", RegistryID: "openai", BaseURL: base, APIKey: "fixture"})
+			if err := invoke(provider); err != nil {
 				t.Fatal(err)
 			}
-			if requests != 1 {
-				t.Fatalf("requests=%d", requests)
+			if calls := upstream.take(); len(calls) != 1 || calls[0].vision != "true" {
+				t.Fatalf("calls=%+v", calls)
 			}
 		})
 	}
 }
 
+// An answer that cannot be used counts against the circuit and is not
+// repeated, as the transport read it.
 func TestV043OpenAIRejectsStructurallyInvalidSuccessPayloads(t *testing.T) {
 	for name, testCase := range map[string]struct {
 		body      string
@@ -125,14 +86,12 @@ func TestV043OpenAIRejectsStructurallyInvalidSuccessPayloads(t *testing.T) {
 		"responses empty": {body: `{}`, responses: true},
 	} {
 		t.Run(name, func(t *testing.T) {
-			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-				_, _ = w.Write([]byte(testCase.body))
-			}))
-			defer server.Close()
-			provider := OpenAIProvider{auth: bearerAuth{base: server.URL}, Timeout: 2}
+			upstream, base := newOpenAIUpstream(t)
+			upstream.setAnswer(func(w http.ResponseWriter, _ openAICall) { _, _ = io.WriteString(w, testCase.body) })
+			provider := openAICompatibleFixture(t, &config.ProviderConfig{Type: "openai_compatible", RegistryID: "openai", BaseURL: base})
 			var err error
 			if testCase.responses {
-				_, _, err = provider.callResponsesPayloadWithObservation(map[string]any{"input": "hi"})
+				_, _, err = provider.CompleteResponses("model", map[string]any{"input": "hi"})
 			} else {
 				_, err = provider.Complete("model", []Message{{"role": "user", "content": "hi"}}, nil)
 			}
@@ -143,66 +102,62 @@ func TestV043OpenAIRejectsStructurallyInvalidSuccessPayloads(t *testing.T) {
 	}
 }
 
+// An error beside a success status is repeated, as the transport repeated
+// it. Its message no longer quotes the upstream's words: core never quotes
+// an answer's error.
 func TestOpenAIRejectsHTTP200SoftError(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		_, _ = w.Write([]byte(`{"error":{"message":"service temporarily overloaded"}}`))
-	}))
-	defer server.Close()
-	_, err := (OpenAIProvider{auth: bearerAuth{base: server.URL}, Timeout: 2}).Complete(
-		"model", []Message{{"role": "user", "content": "hi"}}, nil,
-	)
-	if err == nil || !InvocationRetryable(err) || !strings.Contains(err.Error(), "soft error") {
+	upstream, base := newOpenAIUpstream(t)
+	upstream.setAnswer(func(w http.ResponseWriter, _ openAICall) {
+		_, _ = io.WriteString(w, `{"error":{"message":"service temporarily overloaded"}}`)
+	})
+	provider := openAICompatibleFixture(t, &config.ProviderConfig{Type: "openai_compatible", BaseURL: base})
+	_, err := provider.Complete("model", []Message{{"role": "user", "content": "hi"}}, nil)
+	if err == nil || !InvocationRetryable(err) || err.Error() != "openai: upstream returned a soft error" {
 		t.Fatalf("error=%v retryable=%v", err, InvocationRetryable(err))
 	}
 }
 
-// A rejected key is final: nothing on this transport refreshes one, so the
-// request is sent once. Copilot's rejected session is replaced once; see
+// A rejected key is final: nothing refreshes an API key, so the request is
+// sent once. Copilot's rejected session is replaced once; see
 // TestCopilotFailuresKeepTheirClassification.
 func TestV043OpenAIRejectionIsDefinitive(t *testing.T) {
-	for name, invoke := range map[string]func(OpenAIProvider) error{
-		"chat": func(provider OpenAIProvider) error {
+	for name, invoke := range map[string]func(*openAICompatibleProvider) error{
+		"chat": func(provider *openAICompatibleProvider) error {
 			_, err := provider.Complete("model", []Message{{"role": "user", "content": "hi"}}, nil)
 			return err
 		},
-		"responses": func(provider OpenAIProvider) error {
-			_, _, err := provider.callResponsesPayloadWithObservation(map[string]any{"input": "hi"})
+		"responses": func(provider *openAICompatibleProvider) error {
+			_, _, err := provider.CompleteResponses("model", map[string]any{"input": "hi"})
 			return err
 		},
 	} {
 		t.Run(name, func(t *testing.T) {
-			requests := 0
-			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-				requests++
+			upstream, base := newOpenAIUpstream(t)
+			upstream.setAnswer(func(w http.ResponseWriter, _ openAICall) {
 				w.WriteHeader(http.StatusUnauthorized)
-				_, _ = w.Write([]byte(`{"error":{"message":"rejected"}}`))
-			}))
-			defer server.Close()
-			err := invoke(OpenAIProvider{auth: bearerAuth{base: server.URL, apiKey: "fixture"}, Timeout: 2})
+				_, _ = io.WriteString(w, `{"error":{"message":"rejected"}}`)
+			})
+			err := invoke(openAICompatibleFixture(t, &config.ProviderConfig{Type: "openai_compatible", RegistryID: "openai", BaseURL: base, APIKey: "fixture"}))
 			if err == nil || InvocationRetryable(err) || InvocationFailoverEligible(err) || UpstreamStatus(err) != http.StatusUnauthorized {
 				t.Fatalf("error=%v retry=%v failover=%v status=%d", err, InvocationRetryable(err), InvocationFailoverEligible(err), UpstreamStatus(err))
 			}
-			if requests != 1 {
-				t.Fatalf("requests=%d want=1", requests)
+			if calls := upstream.take(); len(calls) != 1 {
+				t.Fatalf("requests=%d want=1", len(calls))
 			}
 		})
 	}
 }
 
+// The openai entry serves Responses for every model, with no catalog row to
+// say so.
 func TestV043OfficialOpenAIUsesNativeResponsesWithoutCatalogMetadata(t *testing.T) {
-	oldProviders := config.Get().Providers
-	config.Update(func(settings *config.Settings) {
-		settings.Providers = map[string]*config.ProviderConfig{
-			"openai": {Type: "openai_compatible", RegistryID: "openai"},
-		}
-	})
-	t.Cleanup(func() {
-		config.Update(func(settings *config.Settings) {
-			settings.Providers = oldProviders
-		})
-	})
-	if !(OpenAIProvider{providerID: "openai"}).supportsNativeResponses("future-model") {
-		t.Fatal("official OpenAI should attempt its native Responses endpoint")
+	upstream, base := newOpenAIUpstream(t)
+	provider := openAICompatibleFixture(t, &config.ProviderConfig{Type: "openai_compatible", RegistryID: "openai", BaseURL: base, APIKey: "fixture"})
+	if _, _, err := provider.CompleteResponses("future-model", map[string]any{"input": "hi"}); err != nil {
+		t.Fatal(err)
+	}
+	if calls := upstream.take(); len(calls) != 1 || calls[0].path != "/responses" {
+		t.Fatalf("calls=%+v, want the native Responses endpoint", calls)
 	}
 }
 

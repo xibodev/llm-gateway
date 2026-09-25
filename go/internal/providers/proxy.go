@@ -31,13 +31,10 @@ func (rt *Runtime) ProviderHTTPTarget(
 	if copilot, isCopilot := inst.(*copilotProvider); isCopilot {
 		return copilot.httpTarget()
 	}
-	op, isOpenAI := inst.(OpenAIProvider)
+	openAI, isOpenAI := inst.(*openAICompatibleProvider)
 	if !isOpenAI {
 		return "", nil, false
 	}
-	base, hdr, err := op.auth.Prepare()
-	if err != nil {
-		return "", nil, false
-	}
+	base, hdr := openAI.httpTarget()
 	return base, hdr, true
 }

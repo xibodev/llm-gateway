@@ -53,12 +53,12 @@ func TestAnonymousCatalogProfilesFilterClaimedModels(t *testing.T) {
 	}
 }
 
+// Pollinations lists its catalog at /models as a bare array; core sends its
+// Chat under /v1, see TestOpenAIVerticalRoutesByTheCallersCatalog.
 func TestPollinationsProfileUsesDistinctPathsAndArrayCatalog(t *testing.T) {
-	provider := OpenAIProvider{registryID: "pollinations", anonymous: true}
 	catalog := openAICatalog{registryID: "pollinations", anonymous: true}
-	if catalog.modelsURL("https://text.pollinations.ai") != "https://text.pollinations.ai/models" ||
-		provider.chatURL("https://text.pollinations.ai") != "https://text.pollinations.ai/v1/chat/completions" {
-		t.Fatalf("models=%q chat=%q", catalog.modelsURL("https://text.pollinations.ai"), provider.chatURL("https://text.pollinations.ai"))
+	if catalog.modelsURL("https://text.pollinations.ai") != "https://text.pollinations.ai/models" {
+		t.Fatalf("models=%q", catalog.modelsURL("https://text.pollinations.ai"))
 	}
 	response := &http.Response{
 		StatusCode: http.StatusOK,

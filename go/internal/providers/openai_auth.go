@@ -5,45 +5,11 @@ import (
 	"strings"
 )
 
-// OpenAIAuth decouples authentication from the OpenAI wire transport. It
-// resolves the base URL + request headers for a call. This is why one
-// transport (OpenAIProvider) serves every OpenAI-compatible backend —
-// openai_compatible, bedrock, litellm — which differ ONLY in how a request is
-// authenticated + where it points. GitHub Copilot, whose session a 401 could
-// replace, is served by llmgw-core's Copilot vertical, and lists its catalog
-// with a session already exchanged (see copilotTarget).
-type OpenAIAuth interface {
-	// Prepare resolves the base URL and headers for a request.
-	Prepare() (baseURL string, headers http.Header, err error)
-}
-
-type observedOpenAIAuth interface {
-	PrepareObserved() (
-		baseURL string,
-		headers http.Header,
-		observation *CredentialObservation,
-		err error,
-	)
-}
-
-func prepareOpenAIAuth(
-	auth OpenAIAuth,
-) (string, http.Header, *CredentialObservation, error) {
-	if observed, ok := auth.(observedOpenAIAuth); ok {
-		return observed.PrepareObserved()
-	}
-	baseURL, headers, err := auth.Prepare()
-	return baseURL, headers, nil, err
-}
-
-// bearerAuth is a static base URL + optional Bearer key: openai_compatible,
-// bedrock (token), litellm, localai, and any keyless local server.
-type bearerAuth struct {
-	base        string
-	apiKey      string
-	observation *CredentialObservation
-}
-
+// normalizeBearerKey reads an OpenAI-wire key as the gateway reads one:
+// trimmed, without a "Bearer " prefix, and none for "free" and "none", the
+// sentinels of anonymous access. Core's OpenAI-compatible providers read a
+// key the same way; the gateway still reads one for the requests it sends
+// on its own path.
 func normalizeBearerKey(value string) string {
 	key := strings.TrimSpace(value)
 	if strings.HasPrefix(strings.ToLower(key), "bearer ") {
@@ -55,13 +21,11 @@ func normalizeBearerKey(value string) string {
 	return key
 }
 
+// AnonymousAPIKey reports a key that asks for anonymous access: none, or the
+// "public" bearer an anonymous registry entry is sent.
 func AnonymousAPIKey(value string) bool {
 	key := normalizeBearerKey(value)
 	return key == "" || strings.EqualFold(key, "public")
-}
-
-func (a bearerAuth) Prepare() (string, http.Header, error) {
-	return a.base, openAIHeader(a.apiKey), nil
 }
 
 // openAIHeader is what the gateway sends an OpenAI-compatible upstream it
@@ -74,11 +38,4 @@ func openAIHeader(apiKey string) http.Header {
 		h.Set("Authorization", "Bearer "+key)
 	}
 	return h
-}
-
-func (a bearerAuth) PrepareObserved() (
-	string, http.Header, *CredentialObservation, error,
-) {
-	baseURL, headers, err := a.Prepare()
-	return baseURL, headers, a.observation, err
 }

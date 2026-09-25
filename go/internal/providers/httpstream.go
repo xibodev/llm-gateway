@@ -11,43 +11,6 @@ import (
 
 const inferenceMaxResponseBytes = 64 << 20
 
-// httpStreamIter returns complete SSE data payloads and surfaces parser or
-// mid-stream transport errors via Err.
-type httpStreamIter struct {
-	resp   *http.Response
-	reader *sseRecordReader
-	err    error
-	prefix string // error message prefix for this provider
-}
-
-func newHTTPStreamIter(resp *http.Response, prefix string) *httpStreamIter {
-	return &httpStreamIter{resp: resp, reader: newSSERecordReader(resp.Body), prefix: prefix}
-}
-
-func (it *httpStreamIter) Next() (string, bool) {
-	payload, ok := it.reader.Next()
-	if !ok {
-		it.finish(it.reader.Err())
-	}
-	return payload, ok
-}
-
-func (it *httpStreamIter) finish(err error) {
-	if _, ok := err.(*StreamRecordTooLargeError); ok {
-		it.err = err
-	} else if err != nil && err != io.EOF {
-		it.err = &InvocationError{Msg: it.prefix + ": streaming transport error: " + err.Error()}
-	}
-}
-
-func (it *httpStreamIter) Err() error { return it.err }
-func (it *httpStreamIter) Close() error {
-	if it.resp != nil {
-		return it.resp.Body.Close()
-	}
-	return nil
-}
-
 // ---- shared HTTP client ------------------------------------------------- //
 
 func httpClient(timeout float64) *http.Client {

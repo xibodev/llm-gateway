@@ -91,9 +91,9 @@ func TestZenHTTPTargetMatchesCLIContract(t *testing.T) {
 			}
 		}
 	}
-	_, headers, err := bearerAuth{base: "https://example.com/v1"}.Prepare()
-	if err != nil || headers.Get("Authorization") != "" || headers.Get("x-opencode-session") != "" {
-		t.Fatalf("ordinary provider gained OpenCode headers: %v, err=%v", headers, err)
+	headers := openAIHeader("")
+	if headers.Get("Authorization") != "" || headers.Get("x-opencode-session") != "" {
+		t.Fatalf("ordinary provider gained OpenCode headers: %v", headers)
 	}
 }
 
@@ -420,7 +420,7 @@ func TestAnonymousZenCompletePreservesOrdinaryAndExplicitTitlePrompts(t *testing
 	}
 
 	// A non-Zen anonymous provider must not adapt messages.
-	nonZen := OpenAIProvider{auth: bearerAuth{base: base}, Timeout: 2, providerID: "other", registryID: "kilo_code", anonymous: true}
+	nonZen := openAICompatibleFixture(t, &config.ProviderConfig{Type: "openai_compatible", RegistryID: "kilo_code", BaseURL: base})
 	if _, err := nonZen.Complete("kilo-free", []Message{{"role": "user", "content": "test"}}, nil); err != nil {
 		t.Fatal(err)
 	}

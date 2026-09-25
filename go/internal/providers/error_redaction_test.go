@@ -157,8 +157,12 @@ func TestProviderNon2xxErrorsAreSanitizedAndKeepStatus(t *testing.T) {
 	google := studioFixture(t, server.URL, "fixture")
 	ollama := ollamaFixture(t, server.URL)
 	cases := map[string]func(*testing.T) error{
-		"OpenAI-compatible completion": func(*testing.T) error {
-			_, err := (OpenAIProvider{auth: bearerAuth{base: server.URL}, Timeout: 2}).Complete("model", messages, nil)
+		"OpenAI-compatible completion": func(t *testing.T) error {
+			_, err := openAICompatibleFixture(t, &config.ProviderConfig{Type: "openai_compatible", BaseURL: server.URL, Timeout: &two}).Complete("model", messages, nil)
+			return err
+		},
+		"Bedrock stream setup": func(t *testing.T) error {
+			_, err := openAICompatibleFixture(t, &config.ProviderConfig{Type: "bedrock", BaseURL: server.URL, Timeout: &two}).Stream("model", messages, nil)
 			return err
 		},
 		"Azure completion": func(t *testing.T) error {
@@ -226,9 +230,9 @@ func TestProviderErrorSanitizesCredentialAcrossExtractionBoundary(t *testing.T) 
 	}))
 	defer server.Close()
 
-	_, err := (OpenAIProvider{auth: bearerAuth{base: server.URL}, Timeout: 2}).Complete(
-		"model", []Message{{"role": "user", "content": "hi"}}, nil,
-	)
+	two := 2.0
+	provider := openAICompatibleFixture(t, &config.ProviderConfig{Type: "openai_compatible", BaseURL: server.URL, Timeout: &two})
+	_, err := provider.Complete("model", []Message{{"role": "user", "content": "hi"}}, nil)
 	if err == nil {
 		t.Fatal("non-2xx response returned no error")
 	}

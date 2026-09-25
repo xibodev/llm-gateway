@@ -108,14 +108,13 @@ func TestBedrockCarriesPersonalCredentialObservation(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	openAI, ok := provider.(OpenAIProvider)
+	openAI, ok := provider.(*openAICompatibleProvider)
 	if !ok {
 		t.Fatalf("provider type=%T", provider)
 	}
-	auth, ok := openAI.auth.(bearerAuth)
-	if !ok || auth.observation == nil ||
-		auth.observation.ConnectionID != connection.ID {
-		t.Fatalf("auth observation=%+v", auth.observation)
+	if observation := openAI.catalog.observation; observation == nil ||
+		observation.ConnectionID != connection.ID {
+		t.Fatalf("observation=%+v", observation)
 	}
 }
 

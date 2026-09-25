@@ -100,25 +100,6 @@ func TestSSERecordReaderCountsIgnoredWireLines(t *testing.T) {
 	}
 }
 
-func TestHTTPStreamIterReturnsCompleteRecordsAndParserErrors(t *testing.T) {
-	response := &http.Response{Body: io.NopCloser(strings.NewReader(
-		"data: one\ndata: two\n\ndata: " + strings.Repeat("x", maxStreamRecordWireSize) + "\n\n",
-	))}
-	iter := newHTTPStreamIter(response, "test")
-	defer iter.Close()
-
-	if got, ok := iter.Next(); !ok || got != "one\ntwo" {
-		t.Fatalf("record = %q, %v", got, ok)
-	}
-	if _, ok := iter.Next(); ok {
-		t.Fatal("oversized record was accepted")
-	}
-	var sizeErr *StreamRecordTooLargeError
-	if !errors.As(iter.Err(), &sizeErr) {
-		t.Fatalf("error = %#v", iter.Err())
-	}
-}
-
 func TestInvocationResponseBodyReadFailureClassification(t *testing.T) {
 	for _, testCase := range []struct {
 		name      string

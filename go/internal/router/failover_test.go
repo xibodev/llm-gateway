@@ -21,8 +21,22 @@ import (
 // shared credentials.
 var anonymous = core.Caller{Kind: core.CallerAnonymous}
 
-func setupEcho(t *testing.T) {
+// useStateDir gives the test a state directory and an IAM of its own, as the
+// gateway initializes IAM before it serves: a request to an OpenAI-compatible
+// fixture resolves its key through IAM's credential store. IAM's handle is
+// closed when the test ends, so the directory can be removed.
+func useStateDir(t *testing.T) {
+	t.Helper()
 	t.Setenv("LLMGW_STATE_DIR", t.TempDir())
+	iam.ResetForTests()
+	t.Cleanup(iam.ResetForTests)
+	if _, err := iam.Initialize(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func setupEcho(t *testing.T) {
+	useStateDir(t)
 	config.Update(func(s *config.Settings) {
 		s.Savings.Enabled = false
 		s.Providers = map[string]*config.ProviderConfig{
@@ -229,7 +243,7 @@ func TestExecuteCompleteFailover(t *testing.T) {
 func TestGenericFailoverUsesInvocationEligibility(t *testing.T) {
 	for _, status := range []int{http.StatusUnauthorized, http.StatusForbidden, http.StatusTooManyRequests, http.StatusInternalServerError} {
 		t.Run(http.StatusText(status), func(t *testing.T) {
-			t.Setenv("LLMGW_STATE_DIR", t.TempDir())
+			useStateDir(t)
 			ResetTelemetryState()
 			t.Cleanup(ResetTelemetryState)
 			requests := 0
@@ -345,7 +359,7 @@ func TestAffinitySelectsDeterministicStart(t *testing.T) {
 }
 
 func TestFailoverErrorsAndTelemetryAreSanitized(t *testing.T) {
-	t.Setenv("LLMGW_STATE_DIR", t.TempDir())
+	useStateDir(t)
 	secret := "llmgw_" + strings.Repeat("A", 32)
 	email := "routing-owner@example.test"
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
