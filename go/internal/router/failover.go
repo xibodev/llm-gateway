@@ -19,6 +19,7 @@ import (
 
 	"github.com/xibodev/llm-translate"
 	core "github.com/xibodev/llmgw-core"
+	"github.com/xibodev/llmgw-core/execution"
 )
 
 // Target is one resolved provider/model in a chain.
@@ -139,6 +140,54 @@ func modelCompatible(capabilities *core.ModelCapabilities, request Compatibility
 func shouldAdvance(err error) bool {
 	return providers.IsInvocation(err) && providers.InvocationFailoverEligible(err)
 }
+
+// walk tries targets in order on llmgw-core's execution.Execute until one
+// serves, and returns what it served and the target that served it, nil
+// when none did. try runs one target and judges its failure: whether a chain
+// moves past a failure is the chain's own predicate, product policy that
+// differs by surface, and Execute reads the judgement as the failure's
+// classification.
+//
+// The chains end on the caller's context by their own rules, which try
+// applies. A complete chain checks the context before each target, so a
+// target that fails as the context ends is reported by its own failure
+// unless the chain moves on to another target; a stream chain also checks it
+// after each call and stops unrecorded. Execute's own checks would report the
+// context's error after any failure, so it walks under a context that never
+// ends while try reads the chain's.
+func walk[R any](ctx context.Context, targets []Target, try func(Target) (R, error)) (R, *Target) {
+	result, err := execution.Execute(context.WithoutCancel(ctx), execution.Executor[Target]{}, targets,
+		func(_ context.Context, target Target) (R, error) { return try(target) })
+	if err != nil {
+		return result.Value, nil
+	}
+	served := result.Candidate
+	return result.Value, &served
+}
+
+// judgement is how a chain reads a target's failure. Execute moves past a
+// failure whose classification permits failover and stops at any other, so
+// a judgement permits failover exactly when the chain moves on. It never
+// permits a repeat: the resilience wrapper has already repeated the target
+// as far as its policy allows.
+type judgement struct {
+	err     error
+	advance bool
+}
+
+func (j *judgement) Error() string { return j.err.Error() }
+func (j *judgement) Unwrap() error { return j.err }
+
+func (j *judgement) ProviderErrorClassification() core.ProviderErrorClassification {
+	return core.ProviderErrorClassification{FailoverEligible: j.advance}
+}
+
+// judge hands err to Execute: the chain moves on when advance holds and
+// stops at err otherwise.
+func judge(err error, advance bool) error { return &judgement{err: err, advance: advance} }
+
+// stop ends the chain at err.
+func stop(err error) error { return judge(err, false) }
 
 func deadlineStatus(err error) int {
 	if errors.Is(err, context.DeadlineExceeded) {
@@ -596,19 +645,16 @@ func (rt *Runtime) ExecuteResponsesContext(
 	}
 	ctx, cancel, targets := prepareFallback(ctx, targets, nil)
 	defer cancel()
-	conversion, conversionErr := translate.ResponsesRequestToChatWithReport(payload)
-	chatMessages, chatKw := conversion.Value.Messages, conversion.Value.Keywords
-	materialErr := conversion.RejectMaterialLoss()
+	fallback := translateResponsesFallback(payload)
 	var attempts []attempt
 	var lastErr error
 	lastStatus := 0
-	for index := range targets {
+	result, served := walk(ctx, targets, func(target Target) (map[string]any, error) {
 		if ctx.Err() != nil {
 			lastErr = ctx.Err()
 			lastStatus = deadlineStatus(lastErr)
-			break
+			return nil, stop(lastErr)
 		}
-		target := targets[index]
 		provider, err := rt.providers().GetProviderForPrincipal(target.Provider, caller)
 		if err != nil {
 			attempts = append(attempts, attempt{
@@ -616,43 +662,19 @@ func (rt *Runtime) ExecuteResponsesContext(
 				Error: truncate(err.Error()), Throttled: providers.IsThrottle(err),
 			})
 			lastErr = err
-			if shouldAdvance(err) {
-				continue
-			}
-			break
+			return nil, judge(err, shouldAdvance(err))
 		}
 		result, _, err := providers.CompleteResponsesContext(ctx, provider, target.Model, payload)
 		if errors.Is(err, providers.ErrResponsesUnsupported) {
-			if materialErr != nil {
-				lastErr = &providers.ConfigError{Msg: materialErr.Error()}
-				lastStatus = 400
+			if refusal := rt.responsesFallbackRefusal(target, caller, fallback); refusal != nil {
+				lastErr, lastStatus = refusal, 400
 				attempts = append(attempts, attempt{
 					Provider: target.Provider, Model: target.Model,
 					Error: truncate(lastErr.Error()),
 				})
-				break
+				return nil, stop(refusal)
 			}
-			if conversionErr != nil {
-				lastErr = &providers.ConfigError{Msg: conversionErr.Error()}
-				lastStatus = 400
-				attempts = append(attempts, attempt{
-					Provider: target.Provider, Model: target.Model,
-					Error: truncate(lastErr.Error()),
-				})
-				break
-			}
-			if compatibilityErr := rt.responsesFallbackCompatibility(
-				target, caller, chatMessages, chatKw,
-			); compatibilityErr != nil {
-				lastErr = compatibilityErr
-				lastStatus = 400
-				attempts = append(attempts, attempt{
-					Provider: target.Provider, Model: target.Model,
-					Error: truncate(lastErr.Error()),
-				})
-				break
-			}
-			chat, chatErr := providers.CompleteProviderContext(ctx, provider, target.Model, chatMessages, chatKw)
+			chat, chatErr := providers.CompleteProviderContext(ctx, provider, target.Model, fallback.messages, fallback.kw)
 			if chatErr == nil {
 				converted := translate.ChatResponseToResponsesWithRequestAndReport(target.Model, chat, payload)
 				if lossErr := providers.RejectMaterialLossExceptThoughtSignatures(converted.Report); lossErr != nil {
@@ -670,20 +692,18 @@ func (rt *Runtime) ExecuteResponsesContext(
 			})
 			lastErr = err
 			lastStatus = providers.UpstreamStatus(err)
-			if shouldAdvance(err) {
-				continue
-			}
-			break
+			return nil, judge(err, shouldAdvance(err))
 		}
 		result["model"] = target.Model
 		attempts = append(attempts, attempt{
 			Provider: target.Provider, Model: target.Model, OK: true,
 		})
-		served := target
-		rt.recordChain(ctx, requested, attempts, &served)
-		return result, &served, nil
+		return result, nil
+	})
+	rt.recordChain(ctx, requested, attempts, served)
+	if served != nil {
+		return result, served, nil
 	}
-	rt.recordChain(ctx, requested, attempts, nil)
 	if errors.Is(lastErr, context.Canceled) {
 		return nil, nil, context.Canceled
 	}
@@ -734,22 +754,25 @@ func (rt *Runtime) ExecuteAnthropicMessagesContext(
 	var attempts []attempt
 	var lastErr error
 	lastStatus := 0
-	for _, target := range targets {
+	// This chain moves past every failure but a definitive upstream
+	// rejection: a target that cannot be built or cannot take the request
+	// through the Chat adapter leaves the request to the next target.
+	result, served := walk(ctx, targets, func(target Target) (map[string]any, error) {
 		if ctx.Err() != nil {
 			lastErr = ctx.Err()
-			break
+			return nil, stop(lastErr)
 		}
 		provider, err := rt.providers().GetProviderForPrincipal(target.Provider, caller)
 		if err != nil {
 			lastErr = err
 			attempts = append(attempts, attempt{Provider: target.Provider, Model: target.Model, Error: truncate(err.Error())})
-			continue
+			return nil, judge(err, true)
 		}
 		var result map[string]any
 		if providers.SupportsAnthropicMessages(provider) {
 			result, err = providers.CompleteAnthropicMessages(provider, target.Model, payload)
 		} else if requiresNative {
-			continue
+			return nil, judge(errChatOnly, true)
 		} else if err = rt.anthropicFallbackCompatibility(target, caller, messages, kw); err == nil {
 			var chat map[string]any
 			chat, err = providers.CompleteProviderContext(ctx, provider, target.Model, messages, kw)
@@ -771,23 +794,29 @@ func (rt *Runtime) ExecuteAnthropicMessagesContext(
 			}
 			attempts = append(attempts, attempt{Provider: target.Provider, Model: target.Model, Error: truncate(err.Error()), Throttled: providers.IsThrottle(err)})
 			if providers.IsInvocation(err) && !providers.InvocationFailoverEligible(err) {
-				rt.recordChain(ctx, requested, attempts, nil)
-				return nil, nil, &AllTargetsFailed{Msg: err.Error(), Status: providers.UpstreamStatus(err)}
+				lastStatus = providers.UpstreamStatus(err)
+				return nil, stop(err)
 			}
-			continue
+			return nil, judge(err, true)
 		}
 		attempts = append(attempts, attempt{Provider: target.Provider, Model: target.Model, OK: true})
-		served := target
-		rt.recordChain(ctx, requested, attempts, &served)
-		return result, &served, nil
+		return result, nil
+	})
+	rt.recordChain(ctx, requested, attempts, served)
+	if served != nil {
+		return result, served, nil
 	}
-	rt.recordChain(ctx, requested, attempts, nil)
 	message := "no compatible Anthropic Messages target"
 	if lastErr != nil {
 		message = lastErr.Error()
 	}
 	return nil, nil, &AllTargetsFailed{Msg: message, Status: lastStatus}
 }
+
+// errChatOnly is the failure of a target that a request needing native
+// Messages skips, unrecorded: the target has only the Chat adapter, which
+// would lose part of the request.
+var errChatOnly = errors.New("router: target serves Messages only through the Chat adapter")
 
 func (rt *Runtime) anthropicFallbackCompatibility(target Target, caller core.Caller, messages []map[string]any, kw providers.Kwargs) error {
 	if err := rt.anthropicControlsCompatibility(target, caller, kw); err != nil {
@@ -892,24 +921,26 @@ func (rt *Runtime) ExecuteResponsesStreamContext(
 		targets = targets[:1]
 	}
 	ctx, cancel, targets := prepareFallback(ctx, targets, nil)
-	conversion, conversionErr := translate.ResponsesRequestToChatWithReport(payload)
-	chatMessages, chatKw := conversion.Value.Messages, conversion.Value.Keywords
-	materialErr := conversion.RejectMaterialLoss()
+	fallback := translateResponsesFallback(payload)
 	var attempts []attempt
 	var lastErr error
 	lastStatus := 0
-	for index := range targets {
-		if err := ctx.Err(); err != nil {
-			lastErr = err
-			lastStatus = deadlineStatus(err)
-			break
+	ended := func() error {
+		err := ctx.Err()
+		if err != nil {
+			lastErr, lastStatus = err, deadlineStatus(err)
 		}
-		target := targets[index]
+		return err
+	}
+	// Like the Chat stream chain, this one commits to the first target whose
+	// stream opens; see executeStreamContext.
+	opened, served := walk(ctx, targets, func(target Target) (*ResponsesExecutionStream, error) {
+		if err := ended(); err != nil {
+			return nil, stop(err)
+		}
 		provider, err := rt.providers().GetProviderForPrincipal(target.Provider, caller)
-		if ctxErr := ctx.Err(); ctxErr != nil {
-			lastErr = ctxErr
-			lastStatus = deadlineStatus(ctxErr)
-			break
+		if ctxErr := ended(); ctxErr != nil {
+			return nil, stop(ctxErr)
 		}
 		if err != nil {
 			attempts = append(attempts, attempt{
@@ -917,65 +948,35 @@ func (rt *Runtime) ExecuteResponsesStreamContext(
 				Error: truncate(err.Error()), Throttled: providers.IsThrottle(err),
 			})
 			lastErr = err
-			if shouldAdvance(err) {
-				continue
-			}
-			break
+			return nil, judge(err, shouldAdvance(err))
 		}
 		stream, _, err := providers.StreamResponsesContext(ctx, provider, target.Model, payload)
-		if ctxErr := ctx.Err(); ctxErr != nil {
+		if ctxErr := ended(); ctxErr != nil {
 			if stream != nil {
 				_ = stream.Close()
 			}
-			lastErr = ctxErr
-			lastStatus = deadlineStatus(ctxErr)
-			break
+			return nil, stop(ctxErr)
 		}
 		native := true
 		if errors.Is(err, providers.ErrResponsesUnsupported) {
 			native = false
-			if materialErr != nil {
-				lastErr = &providers.ConfigError{Msg: materialErr.Error()}
-				lastStatus = 400
+			if refusal := rt.responsesFallbackRefusal(target, caller, fallback); refusal != nil {
+				lastErr, lastStatus = refusal, 400
 				attempts = append(attempts, attempt{
 					Provider: target.Provider, Model: target.Model,
 					Error: truncate(lastErr.Error()),
 				})
-				break
+				return nil, stop(refusal)
 			}
-			if conversionErr != nil {
-				lastErr = &providers.ConfigError{Msg: conversionErr.Error()}
-				lastStatus = 400
-				attempts = append(attempts, attempt{
-					Provider: target.Provider, Model: target.Model,
-					Error: truncate(lastErr.Error()),
-				})
-				break
+			if ctxErr := ended(); ctxErr != nil {
+				return nil, stop(ctxErr)
 			}
-			if compatibilityErr := rt.responsesFallbackCompatibility(
-				target, caller, chatMessages, chatKw,
-			); compatibilityErr != nil {
-				lastErr = compatibilityErr
-				lastStatus = 400
-				attempts = append(attempts, attempt{
-					Provider: target.Provider, Model: target.Model,
-					Error: truncate(lastErr.Error()),
-				})
-				break
-			}
-			if ctxErr := ctx.Err(); ctxErr != nil {
-				lastErr = ctxErr
-				lastStatus = deadlineStatus(ctxErr)
-				break
-			}
-			stream, err = providers.StreamProviderContext(ctx, provider, target.Model, chatMessages, chatKw)
-			if ctxErr := ctx.Err(); ctxErr != nil {
+			stream, err = providers.StreamProviderContext(ctx, provider, target.Model, fallback.messages, fallback.kw)
+			if ctxErr := ended(); ctxErr != nil {
 				if stream != nil {
 					_ = stream.Close()
 				}
-				lastErr = ctxErr
-				lastStatus = deadlineStatus(ctxErr)
-				break
+				return nil, stop(ctxErr)
 			}
 		}
 		if err != nil {
@@ -985,20 +986,19 @@ func (rt *Runtime) ExecuteResponsesStreamContext(
 			})
 			lastErr = err
 			lastStatus = providers.UpstreamStatus(err)
-			if shouldAdvance(err) {
-				continue
-			}
-			break
+			return nil, judge(err, shouldAdvance(err))
 		}
 		attempts = append(attempts, attempt{
 			Provider: target.Provider, Model: target.Model, OK: true,
 		})
-		served := target
-		rt.recordChain(ctx, requested, attempts, &served)
-		return &ResponsesExecutionStream{Iter: &boundedStream{StreamIter: stream, cancel: cancel}, Native: native}, &served, nil
+		return &ResponsesExecutionStream{Iter: stream, Native: native}, nil
+	})
+	rt.recordChain(ctx, requested, attempts, served)
+	if served != nil {
+		opened.Iter = &boundedStream{StreamIter: opened.Iter, cancel: cancel}
+		return opened, served, nil
 	}
 	cancel()
-	rt.recordChain(ctx, requested, attempts, nil)
 	if errors.Is(lastErr, context.Canceled) {
 		return nil, nil, context.Canceled
 	}
@@ -1009,6 +1009,38 @@ func (rt *Runtime) ExecuteResponsesStreamContext(
 	return nil, nil, &AllTargetsFailed{
 		Msg: message, Status: lastStatus,
 	}
+}
+
+// responsesFallback is a Responses request translated for the strict Chat
+// fallback, which serves it on a target without native Responses.
+type responsesFallback struct {
+	messages []providers.Message
+	kw       providers.Kwargs
+	// untranslatable and loss say why the request cannot take the fallback:
+	// it does not translate, or its translation loses part of it.
+	untranslatable, loss error
+}
+
+func translateResponsesFallback(payload map[string]any) responsesFallback {
+	conversion, err := translate.ResponsesRequestToChatWithReport(payload)
+	return responsesFallback{
+		messages: conversion.Value.Messages, kw: conversion.Value.Keywords,
+		untranslatable: err, loss: conversion.RejectMaterialLoss(),
+	}
+}
+
+// responsesFallbackRefusal is why target cannot serve a request through the
+// Chat fallback, or nil: a material loss, a request that does not translate,
+// or a control the target's provider cannot preserve. A refusal ends the
+// chain with a 400.
+func (rt *Runtime) responsesFallbackRefusal(target Target, caller core.Caller, fallback responsesFallback) error {
+	if fallback.loss != nil {
+		return &providers.ConfigError{Msg: fallback.loss.Error()}
+	}
+	if fallback.untranslatable != nil {
+		return &providers.ConfigError{Msg: fallback.untranslatable.Error()}
+	}
+	return rt.responsesFallbackCompatibility(target, caller, fallback.messages, fallback.kw)
 }
 
 func (rt *Runtime) responsesFallbackCompatibility(
@@ -1114,42 +1146,35 @@ func (rt *Runtime) executeCompleteWithTrace(ctx context.Context, targets []Targe
 	var attempts []attempt
 	trace := make([]AttemptTrace, 0, len(targets))
 	var lastErr error
-	for i := range targets {
+	failed := func(t Target, attemptStarted time.Time, err error) error {
+		throttled := providers.IsThrottle(err)
+		attempts = append(attempts, attempt{Provider: t.Provider, Model: t.Model, OK: false, Error: truncate(err.Error()), Throttled: throttled})
+		trace = append(trace, AttemptTrace{Provider: t.Provider, Model: t.Model, Status: "failed", Throttled: throttled, DurationMS: time.Since(attemptStarted).Milliseconds()})
+		lastErr = err
+		return judge(err, shouldAdvance(err))
+	}
+	result, served := walk(ctx, targets, func(t Target) (map[string]any, error) {
 		if ctx.Err() != nil {
 			lastErr = ctx.Err()
-			break
+			return nil, stop(lastErr)
 		}
-		t := targets[i]
 		attemptStarted := time.Now()
 		prov, err := rt.providers().GetProviderForPrincipal(t.Provider, caller)
 		if err != nil {
-			throttled := providers.IsThrottle(err)
-			attempts = append(attempts, attempt{Provider: t.Provider, Model: t.Model, OK: false, Error: truncate(err.Error()), Throttled: throttled})
-			trace = append(trace, AttemptTrace{Provider: t.Provider, Model: t.Model, Status: "failed", Throttled: throttled, DurationMS: time.Since(attemptStarted).Milliseconds()})
-			lastErr = err
-			if shouldAdvance(err) {
-				continue
-			}
-			break
+			return nil, failed(t, attemptStarted, err)
 		}
 		result, err := providers.CompleteProviderContext(ctx, prov, t.Model, messages, kw)
 		if err != nil {
-			throttled := providers.IsThrottle(err)
-			attempts = append(attempts, attempt{Provider: t.Provider, Model: t.Model, OK: false, Error: truncate(err.Error()), Throttled: throttled})
-			trace = append(trace, AttemptTrace{Provider: t.Provider, Model: t.Model, Status: "failed", Throttled: throttled, DurationMS: time.Since(attemptStarted).Milliseconds()})
-			lastErr = err
-			if shouldAdvance(err) {
-				continue
-			}
-			break
+			return nil, failed(t, attemptStarted, err)
 		}
 		attempts = append(attempts, attempt{Provider: t.Provider, Model: t.Model, OK: true})
 		trace = append(trace, AttemptTrace{Provider: t.Provider, Model: t.Model, Status: "served", DurationMS: time.Since(attemptStarted).Milliseconds()})
-		served := t
-		rt.recordChain(ctx, requested, attempts, &served)
-		return result, &served, trace, nil
+		return result, nil
+	})
+	rt.recordChain(ctx, requested, attempts, served)
+	if served != nil {
+		return result, served, trace, nil
 	}
-	rt.recordChain(ctx, requested, attempts, nil)
 	if errors.Is(lastErr, context.Canceled) {
 		return nil, nil, trace, context.Canceled
 	}
@@ -1175,66 +1200,68 @@ func (rt *Runtime) ExecuteAnthropicStreamContext(ctx context.Context, targets []
 	})
 }
 
+// executeStreamContext commits to the first target whose stream opens. That
+// is the failover boundary the gateway documents: a request moves to the next
+// target only before the first response byte, and the API layer writes the
+// status line and headers as soon as a stream is returned. So the chain walks
+// on Execute with a try that opens the stream, not on ExecuteStream, which
+// holds frames back until one carries output and would fail over a stream
+// that broke after its upstream answered.
 func (rt *Runtime) executeStreamContext(ctx context.Context, targets []Target, messages []providers.Message, requested string, caller core.Caller, kw providers.Kwargs, validate func(Target) error) (providers.StreamIter, *Target, error) {
 	ctx, cancel, targets := prepareFallback(ctx, targets, kw)
 	var attempts []attempt
 	var lastErr error
 	lastStatus := 0
-	for i := range targets {
-		if err := ctx.Err(); err != nil {
-			lastErr = err
-			lastStatus = deadlineStatus(err)
-			break
+	ended := func() error {
+		err := ctx.Err()
+		if err != nil {
+			lastErr, lastStatus = err, deadlineStatus(err)
 		}
-		t := targets[i]
+		return err
+	}
+	failed := func(t Target, err error) error {
+		attempts = append(attempts, attempt{Provider: t.Provider, Model: t.Model, OK: false, Error: truncate(err.Error()), Throttled: providers.IsThrottle(err)})
+		lastErr = err
+		lastStatus = providers.UpstreamStatus(err)
+		return judge(err, shouldAdvance(err))
+	}
+	it, served := walk(ctx, targets, func(t Target) (providers.StreamIter, error) {
+		if err := ended(); err != nil {
+			return nil, stop(err)
+		}
 		if validate != nil {
 			if err := validate(t); err != nil {
 				attempts = append(attempts, attempt{Provider: t.Provider, Model: t.Model, Error: truncate(err.Error())})
 				lastErr = err
 				lastStatus = 400
-				continue
+				return nil, judge(err, true)
 			}
 		}
 		prov, err := rt.providers().GetProviderForPrincipal(t.Provider, caller)
-		if ctxErr := ctx.Err(); ctxErr != nil {
-			lastErr = ctxErr
-			lastStatus = deadlineStatus(ctxErr)
-			break
+		if ctxErr := ended(); ctxErr != nil {
+			return nil, stop(ctxErr)
 		}
 		if err != nil {
-			attempts = append(attempts, attempt{Provider: t.Provider, Model: t.Model, OK: false, Error: truncate(err.Error()), Throttled: providers.IsThrottle(err)})
-			lastErr = err
-			lastStatus = providers.UpstreamStatus(err)
-			if shouldAdvance(err) {
-				continue
-			}
-			break
+			return nil, failed(t, err)
 		}
 		it, err := providers.StreamProviderContext(ctx, prov, t.Model, messages, kw)
-		if ctxErr := ctx.Err(); ctxErr != nil {
+		if ctxErr := ended(); ctxErr != nil {
 			if it != nil {
 				_ = it.Close()
 			}
-			lastErr = ctxErr
-			lastStatus = deadlineStatus(ctxErr)
-			break
+			return nil, stop(ctxErr)
 		}
 		if err != nil {
-			attempts = append(attempts, attempt{Provider: t.Provider, Model: t.Model, OK: false, Error: truncate(err.Error()), Throttled: providers.IsThrottle(err)})
-			lastErr = err
-			lastStatus = providers.UpstreamStatus(err)
-			if shouldAdvance(err) {
-				continue
-			}
-			break
+			return nil, failed(t, err)
 		}
 		attempts = append(attempts, attempt{Provider: t.Provider, Model: t.Model, OK: true})
-		served := t
-		rt.recordChain(ctx, requested, attempts, &served)
-		return &boundedStream{StreamIter: it, cancel: cancel}, &served, nil
+		return it, nil
+	})
+	rt.recordChain(ctx, requested, attempts, served)
+	if served != nil {
+		return &boundedStream{StreamIter: it, cancel: cancel}, served, nil
 	}
 	cancel()
-	rt.recordChain(ctx, requested, attempts, nil)
 	if errors.Is(lastErr, context.Canceled) {
 		return nil, nil, context.Canceled
 	}
