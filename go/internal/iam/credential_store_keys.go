@@ -113,6 +113,9 @@ WHERE c.id=? AND c.status='active' AND p.status='active'`, id,
 	if err != nil {
 		return tokenstore.Record{}, err
 	}
+	if err := s.markRead(ctx, "provider_credentials", id); err != nil {
+		return tokenstore.Record{}, err
+	}
 	record := legacyCredentialRecord(kind, secret)
 	record.Revision = readOnlyCredentialRevision
 	return record, nil

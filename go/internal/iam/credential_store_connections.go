@@ -83,8 +83,22 @@ WHERE c.id=? AND c.status='active' AND p.status='active'`, key,
 	if err != nil {
 		return tokenstore.Record{}, err
 	}
+	if err := s.markRead(ctx, "provider_connections", key); err != nil {
+		return tokenstore.Record{}, err
+	}
 	record.Revision = strconv.FormatInt(revision, 10)
 	return record, nil
+}
+
+// markRead records a read of the credential id in table as its last use when
+// the store marks use. A failed write fails the read, as it does for the
+// gateway's resolvers.
+func (s *CredentialStore) markRead(ctx context.Context, table, id string) error {
+	if !s.markUsed {
+		return nil
+	}
+	_, err := s.db.ExecContext(ctx, "UPDATE "+table+" SET last_used_at=? WHERE id=?", s.now().Unix(), id)
+	return err
 }
 
 // sealConnection encodes record for placement and encrypts it the way

@@ -34,6 +34,11 @@ type CredentialStoreOptions struct {
 	// the gateway chooses by provider type. Nil resolves every instance with
 	// ConnectionPrecedence.
 	Precedence func(instance string) CredentialPrecedence
+	// MarkUsed makes Load record each read of a stored credential as its
+	// last use, as the gateway's resolvers do when they hand one to a
+	// provider, so the last-used time the console shows keeps moving for
+	// credentials served through this store.
+	MarkUsed bool
 }
 
 // CredentialStore exposes the encrypted provider connections as the
@@ -53,6 +58,7 @@ type CredentialStore struct {
 	leaseTTL   time.Duration
 	now        func() time.Time
 	precedence func(instance string) CredentialPrecedence
+	markUsed   bool
 }
 
 // NewCredentialStore returns a store over db, normally the handle DB returns.
@@ -65,6 +71,7 @@ func NewCredentialStore(db *sql.DB, options CredentialStoreOptions) (*Credential
 	}
 	store := &CredentialStore{
 		db: db, leaseTTL: options.LeaseTTL, now: options.Now, precedence: options.Precedence,
+		markUsed: options.MarkUsed,
 	}
 	if store.leaseTTL == 0 {
 		store.leaseTTL = DefaultCredentialLeaseTTL

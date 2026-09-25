@@ -89,6 +89,35 @@ func TestCredentialStoreRoundTripsTheGatewayEnvelope(t *testing.T) {
 	}
 }
 
+func TestCredentialStoreMarksReadsAsUseOnlyWhenAsked(t *testing.T) {
+	path := credentialStatePath(t)
+	ctx := context.Background()
+	human, _ := CreatePrincipal("human", "fixture:mark-used", "", "Mark used")
+	connection := fullOAuthConnection(t, human.ID)
+	lastUsed := func() int64 {
+		t.Helper()
+		connections, err := ListProviderConnections(human.ID, "fixture-codex")
+		if err != nil || len(connections) != 1 {
+			t.Fatalf("connections=%+v err=%v", connections, err)
+		}
+		return connections[0].LastUsedAt
+	}
+	clock := newFakeClock()
+	if _, err := openCredentialStore(t, path, CredentialStoreOptions{Now: clock.Now}).Load(ctx, connection.ID); err != nil {
+		t.Fatal(err)
+	}
+	if got := lastUsed(); got != 0 {
+		t.Fatalf("a plain store marked the read as use: last_used_at=%d", got)
+	}
+	marking := openCredentialStore(t, path, CredentialStoreOptions{Now: clock.Now, MarkUsed: true})
+	if _, err := marking.Load(ctx, connection.ID); err != nil {
+		t.Fatal(err)
+	}
+	if got := lastUsed(); got != clock.Now().Unix() {
+		t.Fatalf("last_used_at=%d, want %d", got, clock.Now().Unix())
+	}
+}
+
 func TestCredentialStoreMapsNonOAuthKinds(t *testing.T) {
 	path := credentialStatePath(t)
 	ctx := context.Background()
