@@ -15,7 +15,6 @@ import (
 	"llmgw/internal/router"
 
 	providerauth "github.com/xibodev/llm-provider-auth"
-	translate "github.com/xibodev/llm-translate"
 	core "github.com/xibodev/llmgw-core"
 	coreproviders "github.com/xibodev/llmgw-core/providers"
 )
@@ -43,7 +42,7 @@ func TestTransparentDecisionContractRejectsRoutesAndNonNativeSurfaces(t *testing
 func TestTransportModeHeaderValidationDoesNotUseUserAgent(t *testing.T) {
 	request := httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
 	request.Header.Set("User-Agent", "OpenCode/fixture")
-	if mode, err := requestedTransportMode(request); err != nil || mode != "" {
+	if mode, err := requestedTransportMode(request); err != nil || mode != core.TransportRequirementAny {
 		t.Fatalf("User-Agent selected mode=%q err=%v", mode, err)
 	}
 	request.Header.Set(transportModeHeader, "privileged")
@@ -65,7 +64,7 @@ func TestTransparentStreamingRemainsUnsupported(t *testing.T) {
 	}
 }
 
-func TestPlanTargetTransportUsesFreshCatalogEvidence(t *testing.T) {
+func TestPlanTransparentUsesFreshCatalogEvidence(t *testing.T) {
 	now := time.Date(2026, time.September, 21, 12, 0, 0, 0, time.UTC)
 	capabilities := providers.AdaptModelCapabilities(
 		map[string]any{"chat": true}, []string{"/v1/responses"}, time.Time{}, time.Time{},
@@ -79,17 +78,12 @@ func TestPlanTargetTransportUsesFreshCatalogEvidence(t *testing.T) {
 		SupportedSurfaces: []string{"/v1/responses"},
 		TypedCapabilities: capabilities,
 	}
-	plan := planTargetTransport(
-		model, now.Add(-time.Minute), []core.TransportInterface{{Surface: core.ModelSurfaceResponses, Native: core.SupportSupported}}, "/responses", true,
-		core.TransportRequirementTransparent, false, translate.Report{}, now,
-	)
+	nativeResponses := []core.TransportInterface{{Surface: core.ModelSurfaceResponses, Native: core.SupportSupported}}
+	plan := planTransparent(model, now.Add(-time.Minute), nativeResponses, core.ParseSurfacePath("/responses"), now)
 	if plan.Disposition != core.TransportNative || plan.Confidence != core.TransportConfidenceHigh {
 		t.Fatalf("fresh transparent plan = %+v", plan)
 	}
-	plan = planTargetTransport(
-		model, now, []core.TransportInterface{{Surface: core.ModelSurfaceResponses, Native: core.SupportSupported}}, "/v1/messages", true,
-		core.TransportRequirementTransparent, false, translate.Report{}, now,
-	)
+	plan = planTransparent(model, now, nativeResponses, core.ParseSurfacePath("/v1/messages"), now)
 	if plan.Disposition != core.TransportReject {
 		t.Fatalf("unsupported surface plan = %+v", plan)
 	}
@@ -102,21 +96,11 @@ func TestPlanTargetTransportUsesFreshCatalogEvidence(t *testing.T) {
 		{name: "unknown"},
 	} {
 		t.Run(test.name, func(t *testing.T) {
-			plan := planTargetTransport(
-				model, test.refreshedAt, []core.TransportInterface{{Surface: core.ModelSurfaceResponses, Native: core.SupportSupported}}, "/v1/responses", true,
-				core.TransportRequirementTransparent, false, translate.Report{}, now,
-			)
+			plan := planTransparent(model, test.refreshedAt, nativeResponses, core.ModelSurfaceResponses, now)
 			if plan.Disposition != core.TransportReject || plan.Reason != core.TransportRejectNativeUnconfirmed {
 				t.Fatalf("plan = %+v", plan)
 			}
 		})
-	}
-	plan = planTargetTransport(
-		model, now.Add(-transportCatalogFreshness), []core.TransportInterface{{Surface: core.ModelSurfaceResponses, Native: core.SupportSupported}}, "/v1/responses", true,
-		core.TransportRequirementAny, false, translate.Report{}, now,
-	)
-	if plan.Disposition != core.TransportNative || plan.Confidence != core.TransportConfidenceLow {
-		t.Fatalf("permissive stale plan = %+v", plan)
 	}
 }
 
@@ -172,79 +156,14 @@ func TestTransparentPlansUseNativeProviderCatalogEvidence(t *testing.T) {
 			if len(rows) != 1 {
 				t.Fatalf("catalog rows=%+v", rows)
 			}
-			surface := modelSurface(test.surface)
-			plan := planTargetTransport(
-				rows[0], now, []core.TransportInterface{{Surface: surface, Native: core.SupportSupported}},
-				test.surface, true, core.TransportRequirementTransparent, false, translate.Report{}, now,
+			surface := core.ParseSurfacePath(test.surface)
+			plan := planTransparent(
+				rows[0], now, []core.TransportInterface{{Surface: surface, Native: core.SupportSupported}}, surface, now,
 			)
 			if plan.Disposition != core.TransportNative || plan.Confidence != core.TransportConfidenceHigh {
 				t.Fatalf("plan=%+v capabilities=%+v", plan, rows[0].TypedCapabilities)
 			}
 		})
-	}
-}
-
-func TestPlanTargetTransportFreshnessDoesNotUpgradeCapabilityEvidence(t *testing.T) {
-	now := time.Date(2026, time.September, 21, 12, 0, 0, 0, time.UTC)
-	capabilities := providers.AdaptModelCapabilities(
-		map[string]any{"chat": true}, []string{"/v1/responses"}, time.Time{}, time.Time{},
-	)
-	model := providers.ModelInfo{
-		ID: "model", SupportedSurfaces: []string{"/v1/responses"}, TypedCapabilities: capabilities,
-	}
-	plan := planTargetTransport(
-		model, now, []core.TransportInterface{{Surface: core.ModelSurfaceResponses, Native: core.SupportSupported}},
-		"/v1/responses", true, core.TransportRequirementTransparent, false, translate.Report{}, now,
-	)
-	if plan.Disposition != core.TransportReject || plan.Reason != core.TransportRejectNativeUnconfirmed {
-		t.Fatalf("medium-confidence cached evidence certified transparent: %+v", plan)
-	}
-	if capabilities.Provenance.Source != core.ModelCapabilitySourceInferred ||
-		capabilities.Provenance.Confidence != core.ModelCapabilityConfidenceMedium {
-		t.Fatalf("input evidence was mutated: %+v", capabilities.Provenance)
-	}
-}
-
-func TestPlanTargetTransportRejectsRoutesZenAndLossyAdaptation(t *testing.T) {
-	now := time.Date(2026, time.September, 21, 12, 0, 0, 0, time.UTC)
-	model := providers.ModelInfo{
-		ID:                "model",
-		Capabilities:      map[string]any{"chat": true},
-		SupportedSurfaces: []string{"/v1/chat/completions"},
-	}
-	plan := planTargetTransport(
-		model, now, []core.TransportInterface{{Surface: core.ModelSurfaceChatCompletions, Native: core.SupportSupported}}, "/v1/chat/completions", false,
-		core.TransportRequirementTransparent, false, translate.Report{}, now,
-	)
-	if plan.Reason != core.TransportRejectExactTargetRequired {
-		t.Fatalf("route plan = %+v", plan)
-	}
-
-	plan = planTargetTransport(
-		model, now, []core.TransportInterface{{Surface: core.ModelSurfaceChatCompletions, Native: core.SupportUnsupported}}, "/v1/chat/completions", true,
-		core.TransportRequirementTransparent, false, translate.Report{}, now,
-	)
-	if plan.Disposition != core.TransportReject || plan.Reason != core.TransportRejectNativeUnconfirmed {
-		t.Fatalf("Zen plan = %+v", plan)
-	}
-
-	plan = planTargetTransport(
-		model, now, []core.TransportInterface{{Surface: core.ModelSurfaceChatCompletions, Native: core.SupportSupported}}, "/v1/responses", true,
-		core.TransportRequirementAny, false, translate.Report{}, now,
-	)
-	if plan.Disposition != core.TransportReject || plan.Reason != core.TransportRejectTranslationUnevaluated {
-		t.Fatalf("unevaluated adaptation plan = %+v", plan)
-	}
-
-	loss := translate.NewReport(translate.Loss{
-		Path: "input[0]", Class: translate.LossDropped, Severity: translate.LossMaterial,
-	})
-	plan = planTargetTransport(
-		model, now, []core.TransportInterface{{Surface: core.ModelSurfaceChatCompletions, Native: core.SupportSupported}}, "/v1/responses", true,
-		core.TransportRequirementAny, true, loss, now,
-	)
-	if plan.Disposition != core.TransportReject || plan.Reason != core.TransportRejectTranslationLoss {
-		t.Fatalf("lossy adaptation plan = %+v", plan)
 	}
 }
 

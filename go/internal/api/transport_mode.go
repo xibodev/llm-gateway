@@ -3,169 +3,96 @@ package api
 import (
 	"errors"
 	"net/http"
-	"strings"
+	"slices"
 	"time"
 
 	"llmgw/internal/config"
 	"llmgw/internal/providers"
 	"llmgw/internal/router"
 
-	translate "github.com/xibodev/llm-translate"
 	core "github.com/xibodev/llmgw-core"
 )
 
 const transportModeHeader = "X-LLMGW-Transport-Mode"
 
+// transportCatalogFreshness is how long a catalog row stays fresh evidence
+// for transport planning after its catalog was refreshed: the gateway's
+// catalog hour, whatever freshness the row itself carries.
 const transportCatalogFreshness = time.Hour
 
-func requestedTransportMode(r *http.Request) (string, error) {
-	mode := strings.ToLower(strings.TrimSpace(r.Header.Get(transportModeHeader)))
-	if mode == "" {
-		return "", nil
+var errTransportMode = errors.New("X-LLMGW-Transport-Mode must be transparent when present")
+
+func requestedTransportMode(r *http.Request) (core.TransportRequirement, error) {
+	requirement, err := core.ParseTransportRequirement(r.Header.Get(transportModeHeader))
+	if err != nil {
+		return "", errTransportMode
 	}
-	if mode != "transparent" {
-		return "", errors.New("X-LLMGW-Transport-Mode must be transparent when present")
-	}
-	return mode, nil
+	return requirement, nil
 }
 
 func exactNativeTransparentTarget(model, surface string, resolution router.Resolution, caller core.Caller) (router.Target, error) {
-	exact := isExactProviderModelResolution(model, resolution)
-	if !exact {
+	if !isExactProviderModelResolution(model, resolution) {
 		return router.Target{}, errors.New("transparent mode requires an exact provider/model target; endpoints and aliases are not accepted")
 	}
 	target := resolution.Targets[0]
 	if config.Get().Providers[target.Provider] == nil {
 		return router.Target{}, errors.New("transparent mode requires a configured provider")
 	}
-	modelInfo, ok := providers.CatalogCachedLookupForPrincipal(target.Provider, target.Model, caller)
+	row, ok := providers.CatalogCachedLookupForPrincipal(target.Provider, target.Model, caller)
 	if !ok {
 		return router.Target{}, errors.New("transparent mode requires a catalog-confirmed native surface")
 	}
-	interfaces, err := providerTransportInterfaces(target.Provider, target.Model, caller, modelInfo.SupportedSurfaces)
+	provider, credential, err := transportDeclaration(target.Provider, caller)
 	if err != nil {
 		return router.Target{}, errors.New("transparent mode could not resolve the provider interface")
 	}
-	plan := planTargetTransport(
-		modelInfo, providers.CatalogRefreshedAtForPrincipal(target.Provider, caller), interfaces,
-		surface, exact, core.TransportRequirementTransparent, false, translate.Report{}, time.Now(),
+	requested := core.ParseSurfacePath(surface)
+	interfaces := core.TransportInterfaces(provider, credential, target.Model, row.SupportedSurfaces)
+	plan := planTransparent(
+		row, providers.CatalogRefreshedAtForPrincipal(target.Provider, caller), interfaces, requested, time.Now(),
 	)
 	if plan.Disposition == core.TransportNative {
 		return target, nil
 	}
-	switch plan.Reason {
-	case core.TransportRejectExactTargetRequired:
-		return router.Target{}, errors.New("transparent mode requires an exact provider/model target; endpoints and aliases are not accepted")
-	case core.TransportRejectNativeUnconfirmed:
-		anonymousZen, _ := providers.AnonymousZenForPrincipal(target.Provider, caller)
-		if anonymousZen {
-			return router.Target{}, errors.New("transparent mode is unavailable for OpenCode Zen anonymous adaptation")
-		}
-		if !hasNativeInterface(interfaces, modelSurface(surface)) {
-			return router.Target{}, errors.New("the requested client surface is not native for this provider/model target")
-		}
-		return router.Target{}, errors.New("transparent mode requires fresh, catalog-confirmed native capability evidence")
-	default:
+	if plan.Reason != core.TransportRejectNativeUnconfirmed {
 		return router.Target{}, errors.New("the requested client surface is not native for this provider/model target")
 	}
+	if anonymousZen, _ := providers.AnonymousZenForPrincipal(target.Provider, caller); anonymousZen {
+		return router.Target{}, errors.New("transparent mode is unavailable for OpenCode Zen anonymous adaptation")
+	}
+	if !slices.Contains(interfaces, core.TransportInterface{Surface: requested, Native: core.SupportSupported}) {
+		return router.Target{}, errors.New("the requested client surface is not native for this provider/model target")
+	}
+	return router.Target{}, errors.New("transparent mode requires fresh, catalog-confirmed native capability evidence")
 }
 
-func hasNativeInterface(interfaces []core.TransportInterface, surface core.ModelSurface) bool {
-	for _, current := range interfaces {
-		if current.Surface == surface && current.Native == core.SupportSupported {
-			return true
-		}
-	}
-	return false
-}
-
-func targetTransportMode(target router.Target, caller core.Caller, surface string) string {
-	if model, found := providers.CatalogCachedLookupForPrincipal(target.Provider, target.Model, caller); found {
-		interfaces, err := providerTransportInterfaces(target.Provider, target.Model, caller, model.SupportedSurfaces)
-		if err == nil {
-			plan := planTargetTransport(
-				model, providers.CatalogRefreshedAtForPrincipal(target.Provider, caller), interfaces,
-				surface, true, core.TransportRequirementAny, true, translate.Report{}, time.Now(),
-			)
-			if plan.Disposition == core.TransportNative {
-				return "native"
-			}
-			return "translated"
-		}
-	}
-	provider, err := providers.GetProviderForPrincipal(target.Provider, caller)
-	if err != nil {
-		return "translated"
-	}
-	if providers.PreservesWireNativeSurface(provider, target.Model, modelSurface(surface)) {
-		return "native"
-	}
-	return "translated"
-}
-
-func planTargetTransport(
-	model providers.ModelInfo,
-	refreshedAt time.Time,
-	interfaces []core.TransportInterface,
-	surface string,
-	exact bool,
-	requirement core.TransportRequirement,
-	translationEvaluated bool,
-	translation translate.Report,
-	evaluatedAt time.Time,
+// planTransparent plans a transparent request of an exact target from its
+// cached catalog row.
+func planTransparent(
+	row providers.ModelInfo, refreshedAt time.Time, interfaces []core.TransportInterface,
+	surface core.ModelSurface, evaluatedAt time.Time,
 ) core.TransportPlan {
-	capabilities := providers.AdaptModelCapabilities(
-		model.Capabilities, model.SupportedSurfaces, refreshedAt, time.Time{},
-	)
-	if model.TypedCapabilities != nil {
-		copy := *model.TypedCapabilities
-		capabilities = &copy
-	}
-	if !refreshedAt.IsZero() {
-		discoveredAt := refreshedAt.UTC()
-		expiresAt := discoveredAt.Add(transportCatalogFreshness)
-		capabilities.Freshness.DiscoveredAt = &discoveredAt
-		capabilities.Freshness.ExpiresAt = &expiresAt
-	} else {
-		capabilities.Freshness = core.ModelCapabilityFreshness{}
-	}
 	return core.PlanTransport(core.TransportPlanRequest{
-		Operation:            core.ModelOperationChat,
-		Surface:              modelSurface(surface),
-		EvaluatedAt:          evaluatedAt,
-		ExactTarget:          exact,
-		Capabilities:         *capabilities,
-		Interfaces:           interfaces,
-		Requirement:          requirement,
-		TranslationEvaluated: translationEvaluated,
-		Translation:          translation,
+		Operation: core.ModelOperationChat, Surface: surface, EvaluatedAt: evaluatedAt, ExactTarget: true,
+		Capabilities: transportEvidence(row, refreshedAt).Capabilities(),
+		Interfaces:   interfaces, Requirement: core.TransportRequirementTransparent,
 	})
 }
 
-func providerTransportInterfaces(providerID, model string, caller core.Caller, surfaces []string) ([]core.TransportInterface, error) {
-	provider, err := providers.GetProviderForPrincipal(providerID, caller)
-	if err != nil {
-		return nil, err
+func targetTransportMode(target router.Target, caller core.Caller, surface string) string {
+	var evidence *core.TransportEvidence
+	if row, found := providers.CatalogCachedLookupForPrincipal(target.Provider, target.Model, caller); found {
+		cached := transportEvidence(row, providers.CatalogRefreshedAtForPrincipal(target.Provider, caller))
+		evidence = &cached
 	}
-	interfaces := make([]core.TransportInterface, 0, len(surfaces))
-	for _, candidate := range surfaces {
-		surface := modelSurface(candidate)
-		switch surface {
-		case core.ModelSurfaceChatCompletions:
-		case core.ModelSurfaceResponses:
-		case core.ModelSurfaceMessages:
-		default:
-			continue
-		}
-		native := core.SupportUnsupported
-		if providers.PreservesWireNativeSurface(provider, model, surface) {
-			native = core.SupportSupported
-		}
-		interfaces = append(interfaces, core.TransportInterface{Surface: surface, Native: native})
-	}
-	return interfaces, nil
+	provider, credential, _ := transportDeclaration(target.Provider, caller)
+	return core.ResponseTransportMode(
+		provider, credential, target.Model, core.ParseSurfacePath(surface), evidence, time.Now(),
+	)
 }
 
+// modelTransportSurfaces classifies a /v1/models row's chat surfaces, with
+// the capabilities and surfaces the list presents for it.
 func modelTransportSurfaces(
 	providerID string,
 	caller core.Caller,
@@ -175,54 +102,28 @@ func modelTransportSurfaces(
 	surfaces []string,
 	evaluatedAt time.Time,
 ) ([]string, []string, []string) {
-	interfaces, err := providerTransportInterfaces(providerID, model.ID, caller, surfaces)
-	if err != nil {
-		interfaces = nil
-	}
-
-	chat, _ := capabilities["chat"].(bool)
-	for _, surface := range surfaces {
-		if modelSurface(surface) != "" {
-			chat = true
-			break
-		}
-	}
-	if !chat {
-		return nil, nil, nil
-	}
-
-	model.Capabilities = capabilities
-	model.SupportedSurfaces = surfaces
-	native := []string{}
-	emulated := []string{}
-	unknown := []string{}
-	for _, surface := range []string{"/v1/chat/completions", "/v1/responses", "/v1/messages"} {
-		plan := planTargetTransport(
-			model, refreshedAt, interfaces, surface, true,
-			core.TransportRequirementAny, true, translate.Report{}, evaluatedAt,
-		)
-		switch plan.Disposition {
-		case core.TransportNative:
-			native = append(native, surface)
-		case core.TransportAdapted:
-			emulated = append(emulated, surface)
-		default:
-			unknown = append(unknown, surface)
-		}
-	}
-	return native, emulated, unknown
+	provider, credential, _ := transportDeclaration(providerID, caller)
+	model.Capabilities, model.SupportedSurfaces = capabilities, surfaces
+	return core.ListingSurfaces(provider, credential, transportEvidence(model, refreshedAt), evaluatedAt)
 }
 
-func modelSurface(surface string) core.ModelSurface {
-	switch strings.ToLower(strings.TrimPrefix(strings.TrimSpace(surface), "/v1")) {
-	case "/chat/completions":
-		return core.ModelSurfaceChatCompletions
-	case "/responses":
-		return core.ModelSurfaceResponses
-	case "/messages":
-		return core.ModelSurfaceMessages
-	default:
-		return ""
+// transportDeclaration returns the core provider whose declarations say
+// which surfaces providerID forwards in their own wire for caller, and the
+// credential its requests carry; see providers.WireDeclaration.
+func transportDeclaration(providerID string, caller core.Caller) (core.Provider, *core.Credential, error) {
+	provider, err := providers.GetProviderForPrincipal(providerID, caller)
+	if err != nil {
+		return nil, nil, err
+	}
+	declared, credential := providers.WireDeclaration(provider)
+	return declared, credential, nil
+}
+
+// transportEvidence is what a cached catalog row says for transport
+// planning: fresh for the gateway's catalog hour after its refresh.
+func transportEvidence(row providers.ModelInfo, refreshedAt time.Time) core.TransportEvidence {
+	return core.TransportEvidence{
+		Row: providers.CoreModelInfo(row), RefreshedAt: refreshedAt, FreshFor: transportCatalogFreshness,
 	}
 }
 

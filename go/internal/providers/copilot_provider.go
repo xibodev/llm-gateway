@@ -46,7 +46,11 @@ func (rt *Runtime) newCopilotProvider(
 func (p *copilotProvider) IsStub() bool { return false }
 
 // PreservesWireNativeSurface declares Chat and Responses as the OpenAI
-// transport declared them for Copilot.
+// transport declared them for Copilot. Transport planning reads it rather
+// than core's Copilot (see WireDeclaration): core's declares by the routes
+// of the catalog it last listed itself, which the gateway's catalog path
+// never feeds, so a response and /v1/models would be labelled translated or
+// emulated for a model core has not listed, where the gateway says native.
 func (p *copilotProvider) PreservesWireNativeSurface(_ string, surface core.ModelSurface) bool {
 	return surface == core.ModelSurfaceChatCompletions || surface == core.ModelSurfaceResponses
 }
