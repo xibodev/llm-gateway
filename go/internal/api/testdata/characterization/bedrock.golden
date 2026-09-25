@@ -1,0 +1,208 @@
+# Chat Completions, Bedrock
+request: POST /v1/chat/completions
+status: 200
+header Content-Type: application/json
+header X-Llmgw-Attempts: 1
+header X-Llmgw-Duration-Ms: <ms>
+header X-Llmgw-Fallback-Ms: <ms>
+header X-Llmgw-Prompt-Bytes: 39
+header X-Llmgw-Tool-Schema-Bytes: 0
+header X-Llmgw-Transport-Mode: native
+header X-Llmgw-Ttfb-Ms: <ms>
+upstream: POST /br/chat/completions
+upstream body: {"max_tokens":64,"messages":[{"content":"Say hello","role":"user"}],"model":"chat-fixture","stream":false}
+body:
+{
+  "choices": [
+    {
+      "finish_reason": "stop",
+      "index": 0,
+      "message": {
+        "content": "Hello from chat",
+        "role": "assistant"
+      }
+    }
+  ],
+  "created": "<time>",
+  "id": "chatcmpl_fixture",
+  "model": "chat-fixture",
+  "object": "chat.completion",
+  "usage": {
+    "completion_tokens": 4,
+    "prompt_tokens": 3,
+    "total_tokens": 7
+  }
+}
+# Chat Completions stream, Bedrock
+request: POST /v1/chat/completions
+status: 200
+header Cache-Control: no-cache
+header Connection: keep-alive
+header Content-Type: text/event-stream
+header X-Llmgw-Prompt-Bytes: 39
+header X-Llmgw-Tool-Schema-Bytes: 0
+header X-Llmgw-Ttfb-Ms: <ms>
+upstream: POST /br/chat/completions
+upstream body: {"max_tokens":64,"messages":[{"content":"Say hello","role":"user"}],"model":"chat-fixture","stream":true}
+body:
+data: {"choices":[{"delta":{"content":"Hello","role":"assistant"},"finish_reason":null,"index":0}],"created":"<time>","id":"chatcmpl_fixture","model":"chat-fixture","object":"chat.completion.chunk"}
+
+data: {"choices":[{"delta":{"content":" from chat"},"finish_reason":null,"index":0}],"created":"<time>","id":"chatcmpl_fixture","model":"chat-fixture","object":"chat.completion.chunk"}
+
+data: {"choices":[{"delta":{},"finish_reason":"stop","index":0}],"created":"<time>","id":"chatcmpl_fixture","model":"chat-fixture","object":"chat.completion.chunk","usage":{"completion_tokens":4,"prompt_tokens":3,"total_tokens":7}}
+
+data: [DONE]
+# Responses, native Bedrock
+request: POST /v1/responses
+status: 200
+header Content-Type: application/json
+header X-Llmgw-Transport-Mode: native
+upstream: POST /br/responses
+upstream body: {"input":"Say hello","model":"responses-fixture","stream":false}
+body:
+{
+  "created_at": "<time>",
+  "id": "resp_fixture",
+  "instructions": null,
+  "model": "responses-fixture",
+  "object": "response",
+  "output": [
+    {
+      "content": [
+        {
+          "annotations": [],
+          "text": "Hello from responses",
+          "type": "output_text"
+        }
+      ],
+      "id": "msg_fixture",
+      "role": "assistant",
+      "status": "completed",
+      "type": "message"
+    }
+  ],
+  "status": "completed",
+  "usage": {
+    "input_tokens": 3,
+    "output_tokens": 4,
+    "total_tokens": 7
+  }
+}
+# Responses stream, native Bedrock
+request: POST /v1/responses
+status: 200
+header Cache-Control: no-cache
+header Connection: keep-alive
+header Content-Type: text/event-stream
+upstream: POST /br/responses
+upstream body: {"input":"Say hello","model":"responses-fixture","stream":true}
+body:
+event: response.created
+data: {"response":{"created_at":"<time>","id":"resp_fixture","instructions":null,"model":"responses-fixture","object":"response","output":[],"status":"in_progress"},"sequence_number":0,"type":"response.created"}
+
+event: response.output_item.added
+data: {"item":{"content":[],"id":"msg_fixture","role":"assistant","status":"in_progress","type":"message"},"output_index":0,"sequence_number":1,"type":"response.output_item.added"}
+
+event: response.output_text.delta
+data: {"content_index":0,"delta":"Hello","item_id":"msg_fixture","output_index":0,"sequence_number":2,"type":"response.output_text.delta"}
+
+event: response.output_text.delta
+data: {"content_index":0,"delta":" from responses","item_id":"msg_fixture","output_index":0,"sequence_number":3,"type":"response.output_text.delta"}
+
+event: response.output_text.done
+data: {"content_index":0,"item_id":"msg_fixture","output_index":0,"sequence_number":4,"text":"Hello from responses","type":"response.output_text.done"}
+
+event: response.output_item.done
+data: {"item":{"content":[{"annotations":[],"text":"Hello from responses","type":"output_text"}],"id":"msg_fixture","role":"assistant","status":"completed","type":"message"},"output_index":0,"sequence_number":5,"type":"response.output_item.done"}
+
+event: response.completed
+data: {"response":{"created_at":"<time>","id":"resp_fixture","instructions":null,"model":"responses-fixture","object":"response","output":[{"content":[{"annotations":[],"text":"Hello from responses","type":"output_text"}],"id":"msg_fixture","role":"assistant","status":"completed","type":"message"}],"status":"completed","usage":{"input_tokens":3,"output_tokens":4,"total_tokens":7}},"sequence_number":6,"type":"response.completed"}
+# Responses translated to a Chat-only model, Bedrock
+request: POST /v1/responses
+status: 200
+header Content-Type: application/json
+header X-Llmgw-Transport-Mode: translated
+upstream: POST /br/chat/completions
+upstream body: {"messages":[{"content":"Say hello","role":"user"}],"model":"chat-fixture","stream":false}
+body:
+{
+  "background": false,
+  "created_at": "<time>",
+  "error": null,
+  "id": "chatcmpl_fixture",
+  "incomplete_details": null,
+  "instructions": null,
+  "max_output_tokens": null,
+  "max_tool_calls": null,
+  "metadata": {},
+  "model": "chat-fixture",
+  "object": "response",
+  "output": [
+    {
+      "content": [
+        {
+          "annotations": [],
+          "text": "Hello from chat",
+          "type": "output_text"
+        }
+      ],
+      "id": "msg_chatcmpl_fixture",
+      "role": "assistant",
+      "status": "completed",
+      "type": "message"
+    }
+  ],
+  "output_text": "Hello from chat",
+  "parallel_tool_calls": true,
+  "previous_response_id": null,
+  "reasoning": {
+    "effort": null,
+    "summary": null
+  },
+  "service_tier": "default",
+  "status": "completed",
+  "store": false,
+  "temperature": null,
+  "text": {
+    "format": {
+      "type": "text"
+    }
+  },
+  "tool_choice": "auto",
+  "tools": [],
+  "top_logprobs": 0,
+  "top_p": null,
+  "truncation": "disabled",
+  "usage": {
+    "input_tokens": 3,
+    "input_tokens_details": {
+      "cached_tokens": 0
+    },
+    "output_tokens": 4,
+    "output_tokens_details": {
+      "reasoning_tokens": 0
+    },
+    "total_tokens": 7
+  },
+  "user": null
+}
+# Refused upstream, Bedrock
+request: POST /v1/chat/completions
+status: 429
+header Content-Type: application/json
+header X-Llmgw-Attempts: 1
+header X-Llmgw-Duration-Ms: <ms>
+header X-Llmgw-Fallback-Ms: <ms>
+header X-Llmgw-Prompt-Bytes: 39
+header X-Llmgw-Tool-Schema-Bytes: 0
+header X-Llmgw-Ttfb-Ms: <ms>
+upstream: POST /br/chat/completions
+upstream body: {"max_tokens":64,"messages":[{"content":"Say hello","role":"user"}],"model":"throttled-fixture","stream":false}
+body:
+{
+  "error": {
+    "code": "429",
+    "message": "openai: upstream returned 429: fixture rate limit",
+    "type": "invalid_request_error"
+  }
+}
