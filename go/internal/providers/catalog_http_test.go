@@ -20,7 +20,7 @@ func catalogFixtureCodex(t *testing.T, base string) Provider {
 			providerauth.NewStaticTokenSource(&providerauth.Token{AccessToken: "fixture"}), "",
 		),
 		Instructions: codexInstructions, ResponsesURL: base + "/responses",
-		ModelsURL: base + "/models", Client: httpClient(5),
+		ModelsURL: base + "/models", ClientVersion: codexCatalogClientVersion, Client: httpClient(5),
 	})
 	if err != nil {
 		t.Fatal(err)

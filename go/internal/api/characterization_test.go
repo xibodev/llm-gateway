@@ -224,13 +224,15 @@ func setupCharacterization(t *testing.T) *characterizationFixture {
 	router.ResetTelemetryState()
 	upstream := &characterizationUpstream{}
 	server := httptest.NewServer(upstream)
-	oldResponses, oldModels, oldToken := codexauth.ResponsesBaseURL, codexauth.ModelsURL, codexauth.OAuthTokenURL
-	codexauth.ResponsesBaseURL = server.URL + "/backend-api/codex"
-	codexauth.ModelsURL = server.URL + "/backend-api/codex/models"
-	codexauth.OAuthTokenURL = server.URL + "/oauth/token"
+	// Registered before the cleanup below, so it restores after the server
+	// has closed.
+	providers.SetCodexEndpointsForTests(t, providers.CodexEndpoints{
+		OAuth:            codexauth.Endpoints{OAuthTokenURL: server.URL + "/oauth/token"},
+		ResponsesBaseURL: server.URL + "/backend-api/codex",
+		ModelsURL:        server.URL + "/backend-api/codex/models",
+	})
 	t.Cleanup(func() {
 		server.Close()
-		codexauth.ResponsesBaseURL, codexauth.ModelsURL, codexauth.OAuthTokenURL = oldResponses, oldModels, oldToken
 		providers.ResetProviders()
 		iam.ResetForTests()
 		router.ResetSavingsState()

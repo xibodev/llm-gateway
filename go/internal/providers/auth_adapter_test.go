@@ -28,10 +28,9 @@ func TestCodexBrowserOAuthUsesOfficialPKCEProfile(t *testing.T) {
 		_, _ = w.Write([]byte(`{"access_token":"access-token","refresh_token":"refresh-token","expires_in":3600}`))
 	}))
 	defer server.Close()
-	oldAuthorize, oldToken, oldClient := codexBrowserAuthorizeURL, codexauth.OAuthTokenURL, codexBrowserHTTPClient
-	codexBrowserAuthorizeURL, codexauth.OAuthTokenURL, codexBrowserHTTPClient = server.URL+"/authorize", server.URL+"/token", server.Client()
-	t.Cleanup(func() {
-		codexBrowserAuthorizeURL, codexauth.OAuthTokenURL, codexBrowserHTTPClient = oldAuthorize, oldToken, oldClient
+	SetCodexEndpointsForTests(t, CodexEndpoints{
+		OAuth:               codexauth.Endpoints{OAuthTokenURL: server.URL + "/token"},
+		BrowserAuthorizeURL: server.URL + "/authorize", HTTPClient: server.Client(),
 	})
 
 	adapter := openAICodexAuthAdapter{clientID: "fixture-client"}
@@ -67,6 +66,27 @@ func TestCodexManualBrowserUsesRegisteredLoopbackRedirect(t *testing.T) {
 	}
 	if got := authorizationURL.Query().Get("client_id"); got != "captured-client" {
 		t.Fatalf("client_id=%q", got)
+	}
+}
+
+// Revocation sends the client the connection was granted to, which may no
+// longer be the configured one.
+func TestCodexRevokeUsesConnectionBoundClientID(t *testing.T) {
+	body := map[string]string{}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Error(err)
+		}
+	}))
+	defer server.Close()
+	SetCodexEndpointsForTests(t, CodexEndpoints{OAuth: codexauth.Endpoints{RevokeURL: server.URL}})
+	err := (openAICodexAuthAdapter{clientID: "configured-client"}).Revoke(context.Background(), iam.OAuthTokenEnvelope{
+		AccessToken: "fixture-access", RefreshToken: "fixture-refresh",
+		OAuthProfile: codexOAuthProfileDevice, OAuthClientID: "bound-client",
+	})
+	if err != nil || body["client_id"] != "bound-client" || body["token"] != "fixture-refresh" ||
+		body["token_type_hint"] != "refresh_token" || len(body) != 3 {
+		t.Fatalf("revoke body=%v err=%v", body, err)
 	}
 }
 

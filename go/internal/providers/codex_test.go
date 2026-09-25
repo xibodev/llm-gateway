@@ -98,11 +98,9 @@ func TestCodexCatalogRefreshStoresModelsAfterCredentialRotation(t *testing.T) {
 		}
 	}))
 	defer server.Close()
-	oldModels, oldToken := codexauth.ModelsURL, codexauth.OAuthTokenURL
-	codexauth.ModelsURL = server.URL + "/backend-api/codex/models"
-	codexauth.OAuthTokenURL = server.URL + "/oauth/token"
-	t.Cleanup(func() {
-		codexauth.ModelsURL, codexauth.OAuthTokenURL = oldModels, oldToken
+	SetCodexEndpointsForTests(t, CodexEndpoints{
+		OAuth:     codexauth.Endpoints{OAuthTokenURL: server.URL + "/oauth/token"},
+		ModelsURL: server.URL + "/backend-api/codex/models",
 	})
 	principal := core.Caller{ID: human.ID, Kind: core.CallerHuman}
 	models, observation, err := RefreshCatalogForPrincipalWithError("codex", principal)
@@ -160,7 +158,7 @@ func TestCodexCatalogEvidenceSeparatesOAuthFromCatalogContents(t *testing.T) {
 					providerauth.NewStaticTokenSource(&providerauth.Token{AccessToken: "fixture"}), "",
 				),
 				Instructions: codexInstructions, ResponsesURL: server.URL + "/responses",
-				ModelsURL: server.URL, Client: server.Client(),
+				ModelsURL: server.URL, ClientVersion: codexCatalogClientVersion, Client: server.Client(),
 			})
 			if createErr != nil {
 				t.Fatal(createErr)
@@ -256,12 +254,10 @@ func TestCodexProviderUsesResponsesRefreshesOnceAndCatalogsWithClientVersion(t *
 		}
 	}))
 	defer server.Close()
-	oldResponses, oldModels, oldToken := codexauth.ResponsesBaseURL, codexauth.ModelsURL, codexauth.OAuthTokenURL
-	codexauth.ResponsesBaseURL = server.URL + "/backend-api/codex"
-	codexauth.ModelsURL = server.URL + "/backend-api/codex/models"
-	codexauth.OAuthTokenURL = server.URL + "/oauth/token"
-	t.Cleanup(func() {
-		codexauth.ResponsesBaseURL, codexauth.ModelsURL, codexauth.OAuthTokenURL = oldResponses, oldModels, oldToken
+	SetCodexEndpointsForTests(t, CodexEndpoints{
+		OAuth:            codexauth.Endpoints{OAuthTokenURL: server.URL + "/oauth/token"},
+		ResponsesBaseURL: server.URL + "/backend-api/codex",
+		ModelsURL:        server.URL + "/backend-api/codex/models",
 	})
 
 	instance, err := newCodexProvider(codexAuth{
@@ -341,9 +337,9 @@ func TestCodexCatalogRefreshRetryDoesNotGainInferenceBetaHeader(t *testing.T) {
 		}
 	}))
 	defer server.Close()
-	oldModels, oldToken := codexauth.ModelsURL, codexauth.OAuthTokenURL
-	codexauth.ModelsURL, codexauth.OAuthTokenURL = server.URL+"/models", server.URL+"/oauth/token"
-	t.Cleanup(func() { codexauth.ModelsURL, codexauth.OAuthTokenURL = oldModels, oldToken })
+	SetCodexEndpointsForTests(t, CodexEndpoints{
+		OAuth: codexauth.Endpoints{OAuthTokenURL: server.URL + "/oauth/token"}, ModelsURL: server.URL + "/models",
+	})
 	provider, err := newCodexProvider(codexAuth{principalID: human.ID, providerID: "codex", clientID: "fixture-client"}, 30, server.Client(), "fixture")
 	if err != nil {
 		t.Fatal(err)
@@ -394,7 +390,7 @@ func TestCodexCatalogFailsWhenNoUsableModelsRemain(t *testing.T) {
 			providerauth.NewStaticTokenSource(&providerauth.Token{AccessToken: "fixture"}), "",
 		),
 		Instructions: codexInstructions, ResponsesURL: server.URL + "/responses",
-		ModelsURL: server.URL, Client: server.Client(),
+		ModelsURL: server.URL, ClientVersion: codexCatalogClientVersion, Client: server.Client(),
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -430,7 +426,7 @@ func TestCodexSharedTransportPreservesStreamingAndResponsesSurface(t *testing.T)
 			providerauth.NewStaticTokenSource(&providerauth.Token{AccessToken: "fixture"}), "",
 		),
 		Instructions: codexInstructions, ResponsesURL: server.URL, ModelsURL: server.URL,
-		Client: server.Client(),
+		ClientVersion: codexCatalogClientVersion, Client: server.Client(),
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -527,9 +523,7 @@ func TestCodexInvalidRefreshRevokesPrivateConnection(t *testing.T) {
 		_, _ = w.Write([]byte(`{"error":"invalid_grant"}`))
 	}))
 	defer server.Close()
-	oldToken := codexauth.OAuthTokenURL
-	codexauth.OAuthTokenURL = server.URL
-	t.Cleanup(func() { codexauth.OAuthTokenURL = oldToken })
+	SetCodexEndpointsForTests(t, CodexEndpoints{OAuth: codexauth.Endpoints{OAuthTokenURL: server.URL}})
 	auth := codexAuth{principalID: human.ID, providerID: "codex", clientID: "fixture-client"}
 	if err := auth.Refresh(); err == nil {
 		t.Fatal("invalid refresh unexpectedly succeeded")
@@ -564,9 +558,7 @@ func TestCodexRefreshUsesConnectionBoundClientID(t *testing.T) {
 		_, _ = w.Write([]byte(`{"access_token":"new"}`))
 	}))
 	defer server.Close()
-	oldToken := codexauth.OAuthTokenURL
-	codexauth.OAuthTokenURL = server.URL
-	t.Cleanup(func() { codexauth.OAuthTokenURL = oldToken })
+	SetCodexEndpointsForTests(t, CodexEndpoints{OAuth: codexauth.Endpoints{OAuthTokenURL: server.URL}})
 	if err := (codexAuth{principalID: human.ID, providerID: "codex", clientID: "mutable-global-client"}).Refresh(); err != nil {
 		t.Fatal(err)
 	}
@@ -624,9 +616,7 @@ func TestCodexRefreshSerializesConcurrentRotation(t *testing.T) {
 		_, _ = w.Write([]byte(`{"access_token":"new-access","refresh_token":"new-refresh"}`))
 	}))
 	defer server.Close()
-	oldToken := codexauth.OAuthTokenURL
-	codexauth.OAuthTokenURL = server.URL
-	t.Cleanup(func() { codexauth.OAuthTokenURL = oldToken })
+	SetCodexEndpointsForTests(t, CodexEndpoints{OAuth: codexauth.Endpoints{OAuthTokenURL: server.URL}})
 
 	auth := codexAuth{principalID: human.ID, providerID: "codex", clientID: "fixture-client"}
 	start := make(chan struct{})
@@ -675,9 +665,7 @@ func TestCodexRefreshRejectsChangedAccount(t *testing.T) {
 		_, _ = w.Write([]byte(`{"access_token":"new-access","refresh_token":"new-refresh","account_id":"account-b"}`))
 	}))
 	defer server.Close()
-	oldToken := codexauth.OAuthTokenURL
-	codexauth.OAuthTokenURL = server.URL
-	t.Cleanup(func() { codexauth.OAuthTokenURL = oldToken })
+	SetCodexEndpointsForTests(t, CodexEndpoints{OAuth: codexauth.Endpoints{OAuthTokenURL: server.URL}})
 
 	auth := codexAuth{principalID: human.ID, providerID: "codex", clientID: "fixture-client"}
 	err = auth.refreshConnection(initial, connection)
@@ -720,9 +708,7 @@ func TestCodexPrepareRejectsConcurrentAccountReplacement(t *testing.T) {
 		_, _ = w.Write([]byte(`{"access_token":"new-access","refresh_token":"new-refresh","account_id":"account-a"}`))
 	}))
 	defer server.Close()
-	oldToken := codexauth.OAuthTokenURL
-	codexauth.OAuthTokenURL = server.URL
-	t.Cleanup(func() { codexauth.OAuthTokenURL = oldToken })
+	SetCodexEndpointsForTests(t, CodexEndpoints{OAuth: codexauth.Endpoints{OAuthTokenURL: server.URL}})
 
 	auth := codexAuth{principalID: human.ID, providerID: "codex", clientID: "fixture-client"}
 	if _, _, err = auth.Prepare(); err == nil || !strings.Contains(err.Error(), "account changed") {
@@ -765,9 +751,7 @@ func TestCodexReusedRefreshDoesNotRevokeRotatedConnection(t *testing.T) {
 		_, _ = w.Write([]byte(`{"error":"refresh_token_reused"}`))
 	}))
 	defer server.Close()
-	oldToken := codexauth.OAuthTokenURL
-	codexauth.OAuthTokenURL = server.URL
-	t.Cleanup(func() { codexauth.OAuthTokenURL = oldToken })
+	SetCodexEndpointsForTests(t, CodexEndpoints{OAuth: codexauth.Endpoints{OAuthTokenURL: server.URL}})
 
 	auth := codexAuth{principalID: human.ID, providerID: "codex", clientID: "fixture-client"}
 	if err := auth.refreshConnection(initial, connection); err == nil {
@@ -805,9 +789,7 @@ func TestExplicitCodexRefreshDoesNotRecreateRevokedConnection(t *testing.T) {
 		_, _ = w.Write([]byte(`{"access_token":"new-access","refresh_token":"new-refresh","account_id":"account-a"}`))
 	}))
 	defer server.Close()
-	oldToken := codexauth.OAuthTokenURL
-	codexauth.OAuthTokenURL = server.URL
-	t.Cleanup(func() { codexauth.OAuthTokenURL = oldToken })
+	SetCodexEndpointsForTests(t, CodexEndpoints{OAuth: codexauth.Endpoints{OAuthTokenURL: server.URL}})
 
 	errs := make(chan error, 1)
 	go func() {
@@ -916,7 +898,7 @@ func TestCodexChatFacadeServesThoughtSignatureHistory(t *testing.T) {
 			providerauth.NewStaticTokenSource(&providerauth.Token{AccessToken: "fixture"}), "",
 		),
 		Instructions: codexInstructions, ResponsesURL: server.URL, ModelsURL: server.URL,
-		Client: server.Client(),
+		ClientVersion: codexCatalogClientVersion, Client: server.Client(),
 	})
 	if err != nil {
 		t.Fatal(err)

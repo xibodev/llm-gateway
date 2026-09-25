@@ -134,8 +134,8 @@ func TestTransparentPlansUseNativeProviderCatalogEvidence(t *testing.T) {
 					SessionSource: coreproviders.NewCodexTokenSessionSource(
 						providerauth.NewStaticTokenSource(&providerauth.Token{AccessToken: "fixture"}), "",
 					),
-					Instructions: "fixture", ModelsURL: server.URL, Client: server.Client(),
-					Now: func() time.Time { return now },
+					Instructions: "fixture", ModelsURL: server.URL, ClientVersion: "fixture-version",
+					Client: server.Client(), Now: func() time.Time { return now },
 				})
 				if err != nil {
 					t.Fatal(err)

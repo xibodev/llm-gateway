@@ -5,7 +5,6 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
-	"net/http"
 	"net/url"
 	"strings"
 	"sync"
@@ -166,9 +165,6 @@ var providerAuthAdapters = struct {
 	},
 }}
 
-var codexBrowserAuthorizeURL = "https://auth.openai.com/oauth/authorize"
-var codexBrowserHTTPClient *http.Client
-
 func RegisterProviderAuthAdapterFactory(id string, factory ProviderAuthAdapterFactory) error {
 	id = strings.ToLower(strings.TrimSpace(id))
 	if !registryIdentifierPattern.MatchString(id) {
@@ -279,8 +275,8 @@ func (openAICodexAuthAdapter) CredentialKind() string { return "openai_codex_oau
 func (openAICodexAuthAdapter) Capabilities() ProviderAuthCapabilities {
 	return ProviderAuthCapabilities{DeviceCode: true, BrowserCallback: true, Refresh: true, Revoke: true}
 }
-func (adapter openAICodexAuthAdapter) StartDevice(context.Context) (ProviderAuthStart, error) {
-	flow, err := codexauth.StartDeviceFlow(adapter.clientID)
+func (adapter openAICodexAuthAdapter) StartDevice(ctx context.Context) (ProviderAuthStart, error) {
+	flow, err := codexOAuth(adapter.clientID).StartDeviceFlow(ctx)
 	if err != nil {
 		return ProviderAuthStart{}, err
 	}
@@ -322,14 +318,15 @@ func (adapter openAICodexAuthAdapter) CompleteBrowser(ctx context.Context, code,
 }
 
 func codexBrowserConfig(clientID string) browseroauth.Config {
+	endpoints := codexEndpoints.withDefaults()
 	return browseroauth.Config{
-		AuthorizeURL: codexBrowserAuthorizeURL, TokenURL: codexauth.OAuthTokenURL,
+		AuthorizeURL: endpoints.BrowserAuthorizeURL, TokenURL: endpoints.OAuth.OAuthTokenURL,
 		ClientID: strings.TrimSpace(clientID), ClientAuthMode: browseroauth.ClientAuthModePublicPKCE,
 		Scopes: []string{"openid", "profile", "email", "offline_access"},
 		ExtraAuthParams: url.Values{
 			"id_token_add_organizations": {"true"}, "codex_cli_simplified_flow": {"true"}, "originator": {"codex_cli_rs"},
 		},
-		HTTPClient: codexBrowserHTTPClient,
+		HTTPClient: endpoints.HTTPClient,
 	}
 }
 
@@ -384,7 +381,7 @@ func (adapter openAICodexAuthAdapter) CompleteManual(ctx context.Context, code, 
 	return (openAICodexAuthAdapter{clientID: clientID}).CompleteBrowser(ctx, code, privateState)
 }
 func (adapter openAICodexAuthAdapter) PollDevice(
-	_ context.Context, deviceCode, privateState string,
+	ctx context.Context, deviceCode, privateState string,
 ) ProviderAuthPoll {
 	state := codexDevicePrivateState{}
 	if json.Unmarshal([]byte(privateState), &state) != nil || state.UserCode == "" || strings.TrimSpace(state.ClientID) == "" {
@@ -392,7 +389,9 @@ func (adapter openAICodexAuthAdapter) PollDevice(
 			Status: "error", Error: "Codex device authorization state is unavailable. Start again.",
 		}
 	}
-	status, tokens, err := codexauth.PollAndExchange(codexauth.DeviceFlow{
+	// Poll and exchange with the client that started the flow, not the one
+	// configured now: the user's approval belongs to that client.
+	status, tokens, err := codexOAuth(state.ClientID).PollAndExchange(ctx, codexauth.DeviceFlow{
 		DeviceAuthID: deviceCode, UserCode: state.UserCode, ClientID: state.ClientID,
 	})
 	if err != nil {
@@ -411,13 +410,13 @@ func (adapter openAICodexAuthAdapter) RefreshConnection(
 	return RefreshCodexOAuthConnection(principalID, providerID, connectionName)
 }
 func (adapter openAICodexAuthAdapter) Revoke(
-	_ context.Context, envelope iam.OAuthTokenEnvelope,
+	ctx context.Context, envelope iam.OAuthTokenEnvelope,
 ) error {
 	clientID, err := codexOAuthClientIDForEnvelope(envelope)
 	if err != nil {
 		return err
 	}
-	return codexauth.Revoke(clientID, envelope.RefreshToken, envelope.AccessToken)
+	return codexOAuth(clientID).Revoke(ctx, envelope.RefreshToken, envelope.AccessToken)
 }
 
 type googleAntigravityAuthAdapter struct {

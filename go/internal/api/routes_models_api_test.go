@@ -11,8 +11,6 @@ import (
 	"llmgw/internal/config"
 	"llmgw/internal/iam"
 	"llmgw/internal/providers"
-
-	codexauth "github.com/xibodev/llm-provider-auth/codex"
 )
 
 func TestAdminRouteRejectsUnknownMembersAndPreservesOrder(t *testing.T) {
@@ -566,9 +564,7 @@ func TestAdminCodexCatalogAndRouteValidationArePrincipalScoped(t *testing.T) {
 		_, _ = w.Write([]byte(`{"data":[{"id":"gpt-5-codex","owned_by":"openai","supported_in_api":true,"visibility":"list"}]}`))
 	}))
 	defer upstream.Close()
-	oldModels := codexauth.ModelsURL
-	codexauth.ModelsURL = upstream.URL + "/models"
-	t.Cleanup(func() { codexauth.ModelsURL = oldModels })
+	providers.SetCodexEndpointsForTests(t, providers.CodexEndpoints{ModelsURL: upstream.URL + "/models"})
 	server := httptest.NewServer(NewServer())
 	defer server.Close()
 	contains := func(payload map[string]any, want string) bool {

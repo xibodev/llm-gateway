@@ -12,8 +12,6 @@ import (
 	"llmgw/internal/iam"
 	"llmgw/internal/providers"
 	"llmgw/internal/router"
-
-	codexauth "github.com/xibodev/llm-provider-auth/codex"
 )
 
 func TestProviderQuotaAdvisoriesAreHonestUnknownWithoutNumericLimits(t *testing.T) {
@@ -218,9 +216,7 @@ func TestProviderProbeUsesSelectedCodexOwnerCatalog(t *testing.T) {
 		_, _ = w.Write([]byte(`{"data":[{"id":"gpt-5-codex","supported_in_api":true,"visibility":"list"}]}`))
 	}))
 	defer upstream.Close()
-	oldModels := codexauth.ModelsURL
-	codexauth.ModelsURL = upstream.URL
-	t.Cleanup(func() { codexauth.ModelsURL = oldModels })
+	providers.SetCodexEndpointsForTests(t, providers.CodexEndpoints{ModelsURL: upstream.URL})
 	server := httptest.NewServer(NewServer())
 	defer server.Close()
 

@@ -123,7 +123,7 @@ func (a codexAuth) PrepareObserved() (
 	if strings.TrimSpace(envelope.AccountID) != "" {
 		headers.Set("ChatGPT-Account-ID", envelope.AccountID)
 	}
-	return strings.TrimRight(codexauth.ResponsesBaseURL, "/"), headers, credentialObservation(&observation), nil
+	return strings.TrimRight(codexEndpoints.withDefaults().ResponsesBaseURL, "/"), headers, credentialObservation(&observation), nil
 }
 
 func (codexAuth) CanRefresh() bool { return true }
@@ -180,7 +180,7 @@ func (a codexAuth) refreshConnection(initial iam.OAuthTokenEnvelope, initialConn
 			}
 		}
 	} else {
-		tokens, err = codexauth.Refresh(clientID, envelope.RefreshToken)
+		tokens, err = codexOAuth(clientID).Refresh(context.Background(), envelope.RefreshToken)
 	}
 	if err != nil {
 		var refreshError *codexauth.RefreshError
@@ -329,11 +329,12 @@ func newCodexProvider(auth codexAuth, timeout float64, client *http.Client, clie
 		clientVersion = codexCatalogClientVersion
 	}
 	client.Transport = codexRefreshTransport{auth: auth, inner: transport}
+	endpoints := codexEndpoints.withDefaults()
 	inner, err := coreproviders.NewCodexProvider(coreproviders.CodexProviderConfig{
 		SessionSource: codexSessionSource{auth: auth},
 		Instructions:  codexInstructions,
-		ResponsesURL:  strings.TrimRight(codexauth.ResponsesBaseURL, "/") + "/responses",
-		ModelsURL:     codexauth.ModelsURL,
+		ResponsesURL:  strings.TrimRight(endpoints.ResponsesBaseURL, "/") + "/responses",
+		ModelsURL:     endpoints.ModelsURL,
 		ClientVersion: clientVersion,
 		Client:        client,
 	})

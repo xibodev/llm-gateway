@@ -155,9 +155,7 @@ func TestOAuthStartSurfacesProviderPersistenceFailure(t *testing.T) {
 		_, _ = w.Write([]byte(`{"device_auth_id":"fixture-device","user_code":"FIXTURE-CODE","interval":5,"expires_in":600}`))
 	}))
 	defer server.Close()
-	oldUserCodeURL := codexauth.UserCodeURL
-	codexauth.UserCodeURL = server.URL
-	t.Cleanup(func() { codexauth.UserCodeURL = oldUserCodeURL })
+	providers.SetCodexEndpointsForTests(t, providers.CodexEndpoints{OAuth: codexauth.Endpoints{UserCodeURL: server.URL}})
 	oldSettings := *config.Get()
 	t.Cleanup(func() { config.Update(func(settings *config.Settings) { *settings = oldSettings }) })
 	config.Update(func(settings *config.Settings) {
@@ -223,9 +221,7 @@ func TestAdminCodexClientIDRollsBackWhenFlowStartFails(t *testing.T) {
 		http.Error(w, "failed", http.StatusBadGateway)
 	}))
 	defer server.Close()
-	oldUserCodeURL := codexauth.UserCodeURL
-	codexauth.UserCodeURL = server.URL
-	t.Cleanup(func() { codexauth.UserCodeURL = oldUserCodeURL })
+	providers.SetCodexEndpointsForTests(t, providers.CodexEndpoints{OAuth: codexauth.Endpoints{UserCodeURL: server.URL}})
 
 	_, err := startOAuthFlow(
 		iam.Principal{ID: "owner", Kind: "human"}, "codex", "replacement-client", true,
@@ -754,7 +750,7 @@ func TestUserCodexOAuthStoresBoundProfileAndSurvivesReload(t *testing.T) {
 			raw := make([]byte, r.ContentLength)
 			_, _ = r.Body.Read(raw)
 			form, _ := url.ParseQuery(string(raw))
-			if r.Header.Get("Content-Type") != "application/x-www-form-urlencoded" || form.Get("grant_type") != "authorization_code" || form.Get("code") != "codex-auth-code" || form.Get("code_verifier") != "server-verifier" || form.Get("redirect_uri") != codexauth.DeviceAuthRedirectURI || len(form) != 5 {
+			if r.Header.Get("Content-Type") != "application/x-www-form-urlencoded" || form.Get("grant_type") != "authorization_code" || form.Get("client_id") != "fixture-codex-client" || form.Get("code") != "codex-auth-code" || form.Get("code_verifier") != "server-verifier" || form.Get("redirect_uri") != codexauth.DeviceAuthRedirectURI || len(form) != 5 {
 				t.Fatalf("exchange form=%v", form)
 			}
 			_, _ = w.Write([]byte(`{"access_token":"codex-access-token","refresh_token":"codex-refresh-token","id_token":"codex-id-token","expires_in":120,"account_id":"workspace-42","account_label":"Fixture workspace"}`))
@@ -771,12 +767,12 @@ func TestUserCodexOAuthStoresBoundProfileAndSurvivesReload(t *testing.T) {
 		}
 	}))
 	defer server.Close()
-	oldUser, oldDevice, oldToken, oldModels := codexauth.UserCodeURL, codexauth.DeviceTokenURL, codexauth.OAuthTokenURL, codexauth.ModelsURL
-	codexauth.UserCodeURL, codexauth.DeviceTokenURL, codexauth.OAuthTokenURL = server.URL+"/usercode", server.URL+"/device-token", server.URL+"/oauth-token"
-	codexauth.ModelsURL = server.URL + "/models"
-	t.Cleanup(func() {
-		codexauth.UserCodeURL, codexauth.DeviceTokenURL, codexauth.OAuthTokenURL = oldUser, oldDevice, oldToken
-		codexauth.ModelsURL = oldModels
+	providers.SetCodexEndpointsForTests(t, providers.CodexEndpoints{
+		OAuth: codexauth.Endpoints{
+			UserCodeURL: server.URL + "/usercode", DeviceTokenURL: server.URL + "/device-token",
+			OAuthTokenURL: server.URL + "/oauth-token",
+		},
+		ModelsURL: server.URL + "/models",
 	})
 
 	oldSSOEnabled, oldSSOSecret := config.Get().SSOEnabled, config.Get().SSOSharedSecret

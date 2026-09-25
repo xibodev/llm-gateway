@@ -19,8 +19,6 @@ import (
 	"llmgw/internal/iam"
 	"llmgw/internal/providers"
 	"llmgw/internal/router"
-
-	codexauth "github.com/xibodev/llm-provider-auth/codex"
 )
 
 var _ http.Flusher = (*streamTestWriter)(nil)
@@ -403,9 +401,7 @@ func TestCodexInFlightStreamCancellation(t *testing.T) {
 		cancelled <- struct{}{}
 	}))
 	defer upstream.Close()
-	oldResponsesBaseURL := codexauth.ResponsesBaseURL
-	codexauth.ResponsesBaseURL = upstream.URL + "/backend-api/codex"
-	t.Cleanup(func() { codexauth.ResponsesBaseURL = oldResponsesBaseURL })
+	providers.SetCodexEndpointsForTests(t, providers.CodexEndpoints{ResponsesBaseURL: upstream.URL + "/backend-api/codex"})
 
 	setupCancellationTest(t, upstream.URL)
 	human, err := iam.CreatePrincipal("human", "fixture:cancel-codex", "", "Codex fixture")
