@@ -26,8 +26,10 @@ const (
 	codexBrowserRedirectURI        = "http://localhost:1455/auth/callback"
 )
 
-func EffectiveCodexClientID() string {
-	if clientID := strings.TrimSpace(config.Get().OpenAICodexClientID); clientID != "" {
+func EffectiveCodexClientID() string { return effectiveCodexClientID(config.Get()) }
+
+func effectiveCodexClientID(settings *config.Settings) string {
+	if clientID := strings.TrimSpace(settings.OpenAICodexClientID); clientID != "" {
 		return clientID
 	}
 	return DefaultCodexClientID

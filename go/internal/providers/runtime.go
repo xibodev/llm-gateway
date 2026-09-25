@@ -4,9 +4,13 @@ import (
 	"sync"
 	"sync/atomic"
 
+	"llmgw/internal/config"
+
 	antigravityauth "github.com/xibodev/llm-provider-auth/antigravity"
 	copilotauth "github.com/xibodev/llm-provider-auth/copilot"
 	gcpauth "github.com/xibodev/llm-provider-auth/gcp"
+	core "github.com/xibodev/llmgw-core"
+	coreruntime "github.com/xibodev/llmgw-core/runtime"
 )
 
 // Runtime owns the provider stack's mutable state. A process builds one after
@@ -14,11 +18,18 @@ import (
 //
 // The first group is the state llmgw-core's runtime.Runtime also keeps, so
 // that value can take it over from here; the rest has no core counterpart.
+// For Codex it has taken over: core holds the Codex provider and the
+// coordinators that refresh Codex credentials, so no Codex refresh lock is
+// kept here.
 type Runtime struct {
 	instances providerCache
 	catalogs  catalogCache
-	// The refresh locks serialize the OAuth refreshes of one connection.
-	codexRefresh       refreshLocks
+	core      *coreruntime.Runtime[*config.Settings]
+	// codexCredentials is the credential store behind core and behind the
+	// Codex catalog and console refresh, which refresh outside core.
+	codexCredentials codexStore
+	// antigravityRefresh serializes the OAuth refreshes of one Antigravity
+	// connection. Codex refreshes take the credential store's lease instead.
 	antigravityRefresh refreshLocks
 
 	circuits circuitBreakers
@@ -43,16 +54,27 @@ type Runtime struct {
 
 // NewRuntime returns a Runtime with empty caches and the built-in auth
 // adapters. The catalog loads catalog.json from the state directory on first
-// use.
-func NewRuntime() *Runtime {
+// use, and Codex credentials are the IAM provider connections.
+func NewRuntime() *Runtime { return newRuntime(iamCredentialStore) }
+
+// newRuntime returns a Runtime that opens the store of its Codex credentials
+// with credentials, once per operation. Tests pass an in-memory store.
+func newRuntime(credentials func() (core.CredentialStore, error)) *Runtime {
 	runtime := &Runtime{}
 	runtime.instances.instances = map[string]Provider{}
-	runtime.codexRefresh.entries = map[string]*refreshLock{}
 	runtime.antigravityRefresh.entries = map[string]*refreshLock{}
 	runtime.circuits.circuits = map[string]*circuitState{}
 	runtime.authAdapters.factories = builtInAuthAdapters()
 	runtime.quotaAdapters.values = map[string]QuotaAdapter{}
 	runtime.copilot = copilotauth.NewDynamic(runtime.copilotSettings)
+	runtime.codexCredentials = codexStore{runtime: runtime, open: credentials}
+	coreRuntime, err := newCoreRuntime(runtime)
+	if err != nil {
+		// New fails only without settings or a provider factory, and
+		// newCoreRuntime always passes both.
+		panic("providers: build the core runtime: " + err.Error())
+	}
+	runtime.core = coreRuntime
 	return runtime
 }
 

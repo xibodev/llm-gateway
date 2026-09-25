@@ -8,24 +8,11 @@ import (
 	"strings"
 	"testing"
 	"time"
-
-	providerauth "github.com/xibodev/llm-provider-auth"
-	coreproviders "github.com/xibodev/llmgw-core/providers"
 )
 
 func catalogFixtureCodex(t *testing.T, base string) Provider {
 	t.Helper()
-	inner, err := coreproviders.NewCodexProvider(coreproviders.CodexProviderConfig{
-		SessionSource: coreproviders.NewCodexTokenSessionSource(
-			providerauth.NewStaticTokenSource(&providerauth.Token{AccessToken: "fixture"}), "",
-		),
-		Instructions: codexInstructions, ResponsesURL: base + "/responses",
-		ModelsURL: base + "/models", ClientVersion: codexCatalogClientVersion, Client: httpClient(5),
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	return CodexProvider{inner: inner}
+	return codexFixture(t, "catalog-read", CodexEndpoints{ResponsesBaseURL: base, ModelsURL: base + "/models"}, codexCatalogClientVersion)
 }
 
 // Generate padding indefinitely so the decoder, not the fixture, must stop reading.

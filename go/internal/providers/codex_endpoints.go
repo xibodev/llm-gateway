@@ -4,6 +4,8 @@ import (
 	"net/http"
 	"strings"
 
+	"llmgw/internal/config"
+
 	codexauth "github.com/xibodev/llm-provider-auth/codex"
 )
 
@@ -24,18 +26,27 @@ type CodexEndpoints struct {
 	// passes to core.
 	ResponsesBaseURL string
 	ModelsURL        string
-	// HTTPClient performs the OAuth requests. Nil keeps each library's
-	// default client.
+	// HTTPClient performs the OAuth requests and the core Runtime's Codex
+	// requests. Nil keeps each library's default client for OAuth and a
+	// client with the provider's timeout for Codex.
 	HTTPClient *http.Client
 }
 
 // SetCodexEndpointsForTests points the installed Runtime's Codex calls at
 // test servers until the test ends. It takes only the Cleanup method of a
 // testing.TB, so the gateway binary does not link the testing package.
+//
+// The core Runtime builds its Codex provider and refresh from the endpoints
+// once per settings generation, so both swaps publish the settings again,
+// unchanged, to have it rebuild them.
 func SetCodexEndpointsForTests(t interface{ Cleanup(func()) }, endpoints CodexEndpoints) {
 	runtime := Current()
 	previous := runtime.codexEndpoints.swap(endpoints)
-	t.Cleanup(func() { runtime.codexEndpoints.swap(previous) })
+	config.Update(func(*config.Settings) {})
+	t.Cleanup(func() {
+		runtime.codexEndpoints.swap(previous)
+		config.Update(func(*config.Settings) {})
+	})
 }
 
 // currentCodexEndpoints returns the installed Runtime's endpoints with every

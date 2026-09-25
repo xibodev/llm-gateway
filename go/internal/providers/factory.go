@@ -63,17 +63,13 @@ func (rt *Runtime) instantiate(
 		}
 		return NewEdgeTTS(cfg.BaseURL, token, cfg.DefaultVoice, cfg.TimeoutOr(60)), nil
 	case "openai_compatible", "openai", "litellm":
-		registryID := EffectiveRegistryID(providerID, cfg.RegistryID, cfg.Type)
-		if registryID == "openai_codex" {
-			principalID := callerPrincipalID(caller)
-			if strings.TrimSpace(principalID) == "" {
+		if codexInstance(providerID, cfg) {
+			if strings.TrimSpace(callerPrincipalID(caller)) == "" {
 				return nil, &ConfigError{Msg: "openai_codex: a human principal private connection is required"}
 			}
-			clientID := EffectiveCodexClientID()
-			return newCodexProvider(codexAuth{
-				principalID: principalID, providerID: providerID, clientID: clientID,
-			}, timeout, nil, "")
+			return rt.newCodexProvider(providerID, caller, timeout, nil, "")
 		}
+		registryID := EffectiveRegistryID(providerID, cfg.RegistryID, cfg.Type)
 		apiKey, observation, err := resolveAPIKeyObserved(providerID, cfg, caller)
 		if err != nil {
 			return nil, err

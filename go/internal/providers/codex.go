@@ -2,6 +2,7 @@ package providers
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"io"
 	"net/http"
@@ -9,25 +10,17 @@ import (
 	"strings"
 	"time"
 
+	"llmgw/internal/config"
 	"llmgw/internal/iam"
 
-	providerauth "github.com/xibodev/llm-provider-auth"
-	browseroauth "github.com/xibodev/llm-provider-auth/browseroauth"
 	codexauth "github.com/xibodev/llm-provider-auth/codex"
+	"github.com/xibodev/llm-provider-auth/tokenstore"
 	core "github.com/xibodev/llmgw-core"
 	coreproviders "github.com/xibodev/llmgw-core/providers"
 )
 
-// codexAuth supplies owner-private official Codex credentials to the common
-// OpenAI Responses transport. Account identity is sent only when the official
-// upstream requires it.
-type codexAuth struct {
-	principalID    string
-	providerID     string
-	connectionName string
-	clientID       string
-}
-
+// codexRefreshInvocationError reports a failed Codex refresh with the status
+// and retry semantics the gateway's routing acts on.
 func codexRefreshInvocationError(err error) error {
 	if err == nil || IsInvocation(err) || IsConfig(err) {
 		return err
@@ -48,195 +41,24 @@ func codexRefreshInvocationError(err error) error {
 	return invocation("openai_codex: refresh failed")
 }
 
-func (a codexAuth) Prepare() (string, http.Header, error) {
-	baseURL, headers, _, err := a.PrepareObserved()
-	return baseURL, headers, err
-}
-
-func (a codexAuth) PrepareObserved() (
-	string, http.Header, *CredentialObservation, error,
-) {
-	envelope, connection, observation, ok, err := iam.OAuthProviderConnectionSecretWithObservation(
-		a.principalID, a.providerID, a.connectionName,
-	)
-	if err != nil {
-		return "", nil, credentialObservation(&observation), invocation("openai_codex: load private OAuth connection: " + err.Error())
-	}
-	if !ok {
-		return "", nil, nil, &ConfigError{Msg: "openai_codex: this principal has no active private Codex connection"}
-	}
-	if envelope.ExpiresAt > 0 && envelope.ExpiresAt <= time.Now().Add(60*time.Second).Unix() && envelope.RefreshToken != "" {
-		expectedAccountID := strings.TrimSpace(envelope.AccountID)
-		if err := a.refreshConnection(envelope, connection); err != nil {
-			return "", nil, credentialObservation(&observation), err
-		}
-		envelope, _, observation, ok, err = iam.OAuthProviderConnectionSecretWithObservation(
-			a.principalID, a.providerID, a.connectionName,
-		)
-		if err != nil || !ok {
-			return "", nil, credentialObservation(&observation), invocation("openai_codex: refresh did not yield an active connection")
-		}
-		if codexAccountMismatch(expectedAccountID, envelope.AccountID) {
-			return "", nil, credentialObservation(&observation), invocation("openai_codex: account changed during refresh")
-		}
-	}
-	headers := http.Header{}
-	headers.Set("Authorization", "Bearer "+envelope.AccessToken)
-	headers.Set("Content-Type", "application/json")
-	headers.Set("Accept", "application/json")
-	headers.Set("User-Agent", "llm-gateway/codex")
-	headers.Set("originator", "codex_cli_rs")
-	headers.Set("OpenAI-Beta", "responses=experimental")
-	if strings.TrimSpace(envelope.AccountID) != "" {
-		headers.Set("ChatGPT-Account-ID", envelope.AccountID)
-	}
-	return strings.TrimRight(currentCodexEndpoints().ResponsesBaseURL, "/"), headers, credentialObservation(&observation), nil
-}
-
-func (codexAuth) CanRefresh() bool { return true }
-
-func (a codexAuth) Refresh() error {
-	envelope, connection, ok, err := iam.OAuthProviderConnectionSecret(a.principalID, a.providerID, a.connectionName)
-	if err != nil {
-		return invocation("openai_codex: load refresh token: " + err.Error())
-	}
-	if !ok || strings.TrimSpace(envelope.RefreshToken) == "" {
-		return &ConfigError{Msg: "openai_codex: no refresh token is available"}
-	}
-	return a.refreshConnection(envelope, connection)
-}
-
-func (a codexAuth) refreshConnection(initial iam.OAuthTokenEnvelope, initialConnection iam.ProviderConnection) error {
-	expectedAccountID := strings.TrimSpace(initial.AccountID)
-	unlock := Current().codexRefresh.lock(a.principalID + "|" + a.providerID + "|" + initialConnection.ID)
-	defer unlock()
-
-	envelope, connection, ok, err := iam.OAuthProviderConnectionSecret(a.principalID, a.providerID, a.connectionName)
-	if err != nil {
-		return invocation("openai_codex: reload refresh token: " + err.Error())
-	}
-	if !ok || strings.TrimSpace(envelope.RefreshToken) == "" {
-		return &ConfigError{Msg: "openai_codex: no refresh token is available"}
-	}
-	if codexAccountMismatch(expectedAccountID, envelope.AccountID) {
-		return invocation("openai_codex: account changed during refresh")
-	}
-	if connection.ID != initialConnection.ID || !sameCodexRefreshState(initial, envelope) {
-		return nil
-	}
-
-	clientID, err := codexOAuthClientIDForEnvelope(envelope)
-	if err != nil {
-		return &ConfigError{Msg: "openai_codex: " + err.Error()}
-	}
-	var tokens codexauth.TokenSet
-	if strings.TrimSpace(envelope.OAuthProfile) == codexOAuthProfileBrowser {
-		var browserTokens browseroauth.TokenEnvelope
-		browserTokens, err = codexBrowserConfig(clientID).Refresh(context.Background(), envelope.RefreshToken)
-		if err == nil {
-			accountID, accountLabel := codexIDTokenIdentity(browserTokens.IDToken)
-			tokens = codexauth.TokenSet{
-				AccessToken: browserTokens.AccessToken, RefreshToken: browserTokens.RefreshToken,
-				IDToken: browserTokens.IDToken, TokenType: browserTokens.TokenType,
-				ExpiresAt: browserTokens.ExpiresAt.Unix(), AccountID: accountID, AccountLabel: accountLabel,
-			}
-		} else {
-			var endpoint *browseroauth.EndpointError
-			if errors.As(err, &endpoint) {
-				err = &codexauth.RefreshError{StatusCode: endpoint.StatusCode, Code: endpoint.Code, Description: endpoint.Description}
-			}
-		}
-	} else {
-		tokens, err = codexOAuth(clientID).Refresh(context.Background(), envelope.RefreshToken)
-	}
-	if err != nil {
-		var refreshError *codexauth.RefreshError
-		if errors.As(err, &refreshError) && shouldRevokeCodexRefresh(strings.ToLower(refreshError.Code)) {
-			if revoked, revokeErr := iam.RevokeOAuthProviderConnectionIfCurrent(connection, envelope); revokeErr == nil && revoked {
-				ForgetProviderForPrincipal(a.providerID, a.principalID)
-				ForgetCatalogForPrincipal(a.providerID, a.principalID)
-			}
-		}
-		return codexRefreshInvocationError(err)
-	}
-	if codexAccountMismatch(expectedAccountID, tokens.AccountID) {
-		return invocation("openai_codex: account changed during refresh")
-	}
-	refreshToken := tokens.RefreshToken
-	if refreshToken == "" {
-		refreshToken = envelope.RefreshToken
-	}
-	idToken := tokens.IDToken
-	if idToken == "" {
-		idToken = envelope.IDToken
-	}
-	accountID := tokens.AccountID
-	if accountID == "" {
-		accountID = envelope.AccountID
-	}
-	accountLabel := tokens.AccountLabel
-	if accountLabel == "" {
-		accountLabel = envelope.AccountLabel
-	}
-	tokenType := tokens.TokenType
-	if tokenType == "" {
-		tokenType = envelope.TokenType
-	}
-	expiresAt := tokens.ExpiresAt
-	_, err = iam.ReplaceOAuthProviderConnectionIfCurrent(
-		connection, envelope, iam.OAuthConnectionCreate{
-			PrincipalID: a.principalID, ProviderID: a.providerID, Name: connection.Name, Kind: connection.Kind,
-			Source: connection.Source, MakeDefault: connection.IsDefault, AccessToken: tokens.AccessToken,
-			RefreshToken: refreshToken, IDToken: idToken, TokenType: tokenType, ExpiresAt: expiresAt,
-			AccountID: accountID, AccountLabel: accountLabel, Status: "active",
-			ProjectID: envelope.ProjectID, OAuthProfile: envelope.OAuthProfile,
-			OAuthClientID: envelope.OAuthClientID, OAuthClientMode: envelope.OAuthClientMode,
-			OAuthRedirectURI: envelope.OAuthRedirectURI, OAuthClientSecret: envelope.OAuthClientSecret,
-		},
-	)
-	if errors.Is(err, iam.ErrOAuthProviderConnectionChanged) {
-		current, _, ok, loadErr := iam.OAuthProviderConnectionSecret(a.principalID, a.providerID, a.connectionName)
-		if loadErr != nil {
-			return invocation("openai_codex: reload changed connection: " + loadErr.Error())
-		}
-		if !ok {
-			return invocation("openai_codex: connection changed during refresh")
-		}
-		if codexAccountMismatch(expectedAccountID, current.AccountID) {
-			return invocation("openai_codex: account changed during refresh")
-		}
-		return nil
-	}
-	if err != nil {
-		return invocation("openai_codex: store refreshed connection: " + err.Error())
-	}
-	ForgetProviderForPrincipal(a.providerID, a.principalID)
-	ForgetCatalogForPrincipal(a.providerID, a.principalID)
-	return nil
-}
-
 func codexAccountMismatch(expected, actual string) bool {
 	expected = strings.TrimSpace(expected)
 	actual = strings.TrimSpace(actual)
 	return expected != "" && actual != "" && expected != actual
 }
 
-// RefreshCodexOAuthConnection runs the guarded refresh path used by inference.
-// Explicit console refreshes must not bypass its lock, account pin, or
-// compare-before-write checks.
+// RefreshCodexOAuthConnection is the console's "refresh now". It runs the
+// refresh inference runs, through a Coordinator over the credential store, so
+// it takes the same lease, account pin and compare-and-swap, and it refreshes
+// even a token that has not expired: the Coordinator's Rejected refreshes
+// whenever the record it is handed is still current.
 func RefreshCodexOAuthConnection(
 	principalID, providerID, connectionName string,
 ) (iam.OAuthTokenEnvelope, iam.ProviderConnection, error) {
-	auth := codexAuth{
-		principalID: principalID, providerID: providerID,
-		connectionName: connectionName,
-	}
-	if err := auth.Refresh(); err != nil {
+	if err := Current().refreshCodexConnection(context.Background(), principalID, providerID, connectionName); err != nil {
 		return iam.OAuthTokenEnvelope{}, iam.ProviderConnection{}, err
 	}
-	envelope, connection, ok, err := iam.OAuthProviderConnectionSecret(
-		principalID, providerID, connectionName,
-	)
+	envelope, connection, ok, err := iam.OAuthProviderConnectionSecret(principalID, providerID, connectionName)
 	if err != nil {
 		return iam.OAuthTokenEnvelope{}, iam.ProviderConnection{}, err
 	}
@@ -248,25 +70,48 @@ func RefreshCodexOAuthConnection(
 	return envelope, connection, nil
 }
 
+func (rt *Runtime) refreshCodexConnection(ctx context.Context, principalID, providerID, connectionName string) error {
+	envelope, connection, ok, err := iam.OAuthProviderConnectionSecret(principalID, providerID, connectionName)
+	if err != nil {
+		return invocation("openai_codex: load refresh token: " + err.Error())
+	}
+	if !ok || strings.TrimSpace(envelope.RefreshToken) == "" {
+		return errNoCodexRefreshToken()
+	}
+	ctx, _ = withCodexCall(ctx, principalID, providerID)
+	coordinator, err := rt.codexCoordinator()
+	var record tokenstore.Record
+	if err == nil {
+		record, err = rt.codexCredentials.Load(ctx, connection.ID)
+	}
+	if err == nil {
+		_, err = coordinator.Rejected(ctx, connection.ID, record)
+	}
+	return codexFailure(err)
+}
+
+// codexCoordinator refreshes Codex credentials outside the core Runtime, for
+// the catalog, which stays on the gateway's path, and for the console. Its
+// refreshes take the credential store's lease, so they serialize with the
+// Runtime's own coordinators in this process and every other.
+func (rt *Runtime) codexCoordinator() (*tokenstore.Coordinator, error) {
+	return tokenstore.NewCoordinator(rt.codexCredentials, rt.codexRefresh(EffectiveCodexClientID()))
+}
+
 func codexOAuthClientIDForEnvelope(envelope iam.OAuthTokenEnvelope) (string, error) {
-	profile := strings.TrimSpace(envelope.OAuthProfile)
-	if (profile != codexOAuthProfileDevice && profile != codexOAuthProfileBrowser) || strings.TrimSpace(envelope.OAuthClientID) == "" {
+	return codexGrantClient(envelope.OAuthProfile, envelope.OAuthClientID)
+}
+
+// codexGrantClient returns the OAuth client a connection's grant belongs to,
+// from the profile and client stored with it. A connection without them
+// predates stored client profiles, and using the configured client instead
+// could spend its grant against a client it was never issued to.
+func codexGrantClient(profile, clientID string) (string, error) {
+	profile = strings.TrimSpace(profile)
+	if (profile != codexOAuthProfileDevice && profile != codexOAuthProfileBrowser) || strings.TrimSpace(clientID) == "" {
 		return "", errors.New("OAuth client profile is unavailable; reauthorize this connection")
 	}
-	return strings.TrimSpace(envelope.OAuthClientID), nil
-}
-
-func sameCodexRefreshState(left, right iam.OAuthTokenEnvelope) bool {
-	return left.AccessToken == right.AccessToken && left.RefreshToken == right.RefreshToken
-}
-
-func shouldRevokeCodexRefresh(code string) bool {
-	switch code {
-	case "invalid_grant", "invalid_token", "token_reused", "refresh_token_reused", "refresh_token_invalidated", "expired_token", "refresh_token_expired":
-		return true
-	default:
-		return false
-	}
+	return strings.TrimSpace(clientID), nil
 }
 
 const codexInstructions = "Follow the caller's request."
@@ -275,105 +120,51 @@ const codexInstructions = "Follow the caller's request."
 // gateway has verified, not an attempt to impersonate an installed Codex CLI.
 const codexCatalogClientVersion = "0.155.1"
 
-// CodexProvider keeps gateway IAM and legacy interfaces around the shared Codex
-// catalog, request, and streaming transport.
+// CodexProvider is the gateway's Codex facade. Inference goes through the
+// core Runtime, which resolves the caller's own connection, keeps its token
+// fresh and replays once a request whose token the upstream rejected. The
+// catalog stays on the gateway's path: it calls core's Codex transport itself
+// with a credential from the same store, refreshed by the same rules.
 type CodexProvider struct {
-	inner *coreproviders.CodexProvider
-	auth  codexAuth
+	runtime  *Runtime
+	instance string
+	caller   core.Caller
+	// catalog is core's Codex, used only for the catalog. It sends
+	// clientVersion, and its client performs the catalog requests.
+	catalog *coreproviders.Codex
 }
 
-func newCodexProvider(auth codexAuth, timeout float64, client *http.Client, clientVersion string) (CodexProvider, error) {
-	transport := http.DefaultTransport
-	if client != nil && client.Transport != nil {
-		transport = client.Transport
+// codexInstance reports whether a configured provider is served by Codex.
+func codexInstance(providerID string, cfg *config.ProviderConfig) bool {
+	switch strings.ToLower(strings.TrimSpace(cfg.Type)) {
+	case "openai_compatible", "openai", "litellm":
+		return EffectiveRegistryID(providerID, cfg.RegistryID, cfg.Type) == "openai_codex"
 	}
+	return false
+}
+
+// newCodexProvider returns the facade of instance for caller. A nil client
+// times out after timeout seconds, and an empty clientVersion is the one this
+// gateway verified the catalog against.
+func (rt *Runtime) newCodexProvider(
+	instance string, caller core.Caller, timeout float64, client *http.Client, clientVersion string,
+) (CodexProvider, error) {
 	if client == nil {
 		client = httpClient(timeout)
-	} else {
-		client = &http.Client{Transport: client.Transport, Timeout: client.Timeout}
 	}
 	if strings.TrimSpace(clientVersion) == "" {
 		clientVersion = codexCatalogClientVersion
 	}
-	client.Transport = codexRefreshTransport{auth: auth, inner: transport}
-	endpoints := currentCodexEndpoints()
-	inner, err := coreproviders.NewCodexProvider(coreproviders.CodexProviderConfig{
-		SessionSource: codexSessionSource{auth: auth},
-		Instructions:  codexInstructions,
-		ResponsesURL:  strings.TrimRight(endpoints.ResponsesBaseURL, "/") + "/responses",
-		ModelsURL:     endpoints.ModelsURL,
-		ClientVersion: clientVersion,
-		Client:        client,
-	})
+	catalog, err := rt.newCoreCodex(client, clientVersion)
 	if err != nil {
-		return CodexProvider{}, &ConfigError{Msg: "openai_codex: initialize shared transport: " + err.Error()}
+		return CodexProvider{}, err
 	}
-	return CodexProvider{inner: inner, auth: auth}, nil
+	return CodexProvider{runtime: rt, instance: instance, caller: caller, catalog: catalog}, nil
 }
 
-type codexSessionSource struct{ auth codexAuth }
-
-func (s codexSessionSource) Session(context.Context) (coreproviders.CodexSession, error) {
-	_, headers, _, err := s.auth.PrepareObserved()
-	if err != nil {
-		return coreproviders.CodexSession{}, err
-	}
-	authorization := strings.TrimSpace(headers.Get("Authorization"))
-	tokenType, accessToken, ok := strings.Cut(authorization, " ")
-	if !ok || strings.TrimSpace(accessToken) == "" {
-		return coreproviders.CodexSession{}, invocation("openai_codex: active connection has no access token")
-	}
-	return coreproviders.CodexSession{
-		Token:     &providerauth.Token{AccessToken: strings.TrimSpace(accessToken), TokenType: strings.TrimSpace(tokenType)},
-		AccountID: headers.Get("ChatGPT-Account-ID"),
-	}, nil
-}
-
-// codexRefreshTransport supplies the one gateway-owned behavior intentionally
-// outside the shared transport: rotate the private IAM session after a 401 and
-// replay the request once with the CAS-protected replacement.
-type codexRefreshTransport struct {
-	auth  codexAuth
-	inner http.RoundTripper
-}
-
-func (t codexRefreshTransport) RoundTrip(request *http.Request) (*http.Response, error) {
-	if request.Method == http.MethodGet && request.Header.Get("OpenAI-Beta") != "" {
-		request = request.Clone(request.Context())
-		request.Header.Del("OpenAI-Beta")
-	}
-	response, err := t.inner.RoundTrip(request)
-	if err != nil || response.StatusCode != http.StatusUnauthorized {
-		return response, err
-	}
-	response.Body.Close()
-	if err := t.auth.Refresh(); err != nil {
-		return nil, err
-	}
-	_, headers, _, err := t.auth.PrepareObserved()
-	if err != nil {
-		return nil, err
-	}
-	retry := request.Clone(request.Context())
-	if request.GetBody != nil {
-		retry.Body, err = request.GetBody()
-		if err != nil {
-			return nil, err
-		}
-	}
-	for _, name := range []string{"Authorization", "ChatGPT-Account-ID", "originator"} {
-		if value := headers.Get(name); value != "" {
-			retry.Header.Set(name, value)
-		} else {
-			retry.Header.Del(name)
-		}
-	}
-	if request.Header.Get("OpenAI-Beta") != "" {
-		retry.Header.Set("OpenAI-Beta", headers.Get("OpenAI-Beta"))
-	} else {
-		retry.Header.Del("OpenAI-Beta")
-	}
-	return t.inner.RoundTrip(retry)
+// call returns ctx carrying the codexCall of one operation of this facade.
+func (p CodexProvider) call(ctx context.Context) (context.Context, *codexCall) {
+	return withCodexCall(ctx, callerPrincipalID(p.caller), p.instance)
 }
 
 func (p CodexProvider) IsStub() bool { return false }
@@ -381,8 +172,7 @@ func (p CodexProvider) PreservesWireNativeSurface(_ string, surface core.ModelSu
 	return surface == core.ModelSurfaceResponses
 }
 func (p CodexProvider) Complete(model string, messages []Message, kw Kwargs) (map[string]any, error) {
-	response, _, err := p.CompleteWithObservation(model, messages, kw)
-	return response, err
+	return p.CompleteContext(context.Background(), model, messages, kw)
 }
 func (p CodexProvider) CompleteWithObservation(
 	model string, messages []Message, kw Kwargs,
@@ -411,19 +201,11 @@ func (p CodexProvider) ListModels() []ModelInfo {
 func (p CodexProvider) ListModelsWithError() (
 	[]ModelInfo, *CredentialObservation, error,
 ) {
-	observation, err := p.observation()
+	ctx, collector := collectCredentials(context.Background())
+	models, err := p.listModels(ctx)
 	if err != nil {
-		return nil, observation, catalogError(
-			"catalog_authentication_failed",
-			"Provider authentication failed before catalog access.",
-			0,
-		)
+		return nil, collector.Observation(), err
 	}
-	models, err := p.inner.ListModels(context.Background(), nil)
-	if err != nil {
-		return nil, observation, codexCatalogError(err)
-	}
-	observation = p.currentObservation(observation)
 	rows := make([]ModelInfo, 0, len(models))
 	for _, model := range models {
 		if model.APIEligible == nil || !*model.APIEligible || model.APIVisibility != "list" {
@@ -439,47 +221,60 @@ func (p CodexProvider) ListModelsWithError() (
 		})
 	}
 	if len(rows) == 0 {
-		return nil, observation, catalogError(
+		return nil, collector.Observation(), catalogError(
 			"catalog_no_usable_models",
 			"Provider catalog returned no API-eligible visible models.",
 			0,
 		)
 	}
-	return rows, observation, nil
+	return rows, collector.Observation(), nil
 }
 
-var _ OpenAIAuth = codexAuth{}
+// listModels fetches the catalog the way the core Runtime performs an
+// operation: it resolves the caller's connection, takes a fresh token, and
+// refreshes and retries once when the upstream rejects that token.
+func (p CodexProvider) listModels(ctx context.Context) ([]core.ModelInfo, error) {
+	ctx, call := p.call(ctx)
+	coordinator, err := p.runtime.codexCoordinator()
+	var key string
+	if err == nil {
+		key, err = p.runtime.codexCredentials.Resolve(ctx, p.caller, p.instance)
+	}
+	var record tokenstore.Record
+	if err == nil {
+		record, err = coordinator.Token(ctx, key)
+	}
+	if err != nil {
+		return nil, catalogError("catalog_authentication_failed", "Provider authentication failed before catalog access.", 0)
+	}
+	call.attempt()
+	models, err := p.catalog.ListModels(ctx, core.CredentialFromRecord(key, record))
+	var catalog *coreproviders.CatalogError
+	if errors.As(err, &catalog) && catalog.Status == http.StatusUnauthorized {
+		refreshed, refreshErr := coordinator.Rejected(ctx, key, record)
+		switch {
+		case errors.Is(refreshErr, tokenstore.ErrNoRefreshToken):
+			// Nothing can refresh the credential, so the upstream's
+			// rejection stands.
+		case refreshErr != nil:
+			return nil, catalogError("catalog_refresh_failed", "Provider credential refresh failed.", http.StatusUnauthorized)
+		default:
+			call.attempt()
+			models, err = p.catalog.ListModels(ctx, core.CredentialFromRecord(key, refreshed))
+		}
+	}
+	if err != nil {
+		return nil, codexCatalogError(err)
+	}
+	return models, nil
+}
+
 var _ Provider = CodexProvider{}
-
-func (p CodexProvider) observation() (*CredentialObservation, error) {
-	if p.auth.providerID == "" {
-		return nil, nil
-	}
-	_, _, observation, err := p.auth.PrepareObserved()
-	return observation, err
-}
-
-func (p CodexProvider) currentObservation(fallback *CredentialObservation) *CredentialObservation {
-	if p.auth.providerID == "" {
-		return fallback
-	}
-	_, _, observation, ok, err := iam.OAuthProviderConnectionSecretWithObservation(
-		p.auth.principalID, p.auth.providerID, p.auth.connectionName,
-	)
-	if err == nil && ok {
-		return credentialObservation(&observation)
-	}
-	return fallback
-}
 
 func codexCatalogError(err error) error {
 	var catalog *coreproviders.CatalogError
 	if !errors.As(err, &catalog) {
 		return catalogError("catalog_failed", "Provider catalog failed.", 0)
-	}
-	var refreshErr *InvocationError
-	if errors.As(catalog.Cause, &refreshErr) {
-		return catalogError("catalog_refresh_failed", "Provider credential refresh failed.", http.StatusUnauthorized)
 	}
 	if catalog.Status == http.StatusUnauthorized || catalog.Status == http.StatusForbidden {
 		return catalogError("catalog_authentication_failed", "Provider authentication failed during catalog access.", catalog.Status)
@@ -510,7 +305,7 @@ func (s *codexCoreStream) Next() (string, bool) {
 		frame, err := s.inner.Next()
 		if err != nil {
 			if !errors.Is(err, io.EOF) {
-				s.err = codexInvocationError(err)
+				s.err = codexFailure(err)
 			}
 			return "", false
 		}
@@ -526,23 +321,59 @@ func (s *codexCoreStream) Next() (string, bool) {
 func (s *codexCoreStream) Err() error   { return s.err }
 func (s *codexCoreStream) Close() error { return s.inner.Close() }
 
-func codexInvocationError(err error) error {
-	if err == nil || IsInvocation(err) || IsConfig(err) || errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+// failure returns the error the Codex path returned for err, which the core
+// Runtime returned for this call. After an upstream 401 the Runtime refreshes
+// once and, when the refresh fails, returns the 401; the Codex path returned
+// the refresh failure, which the call recorded, so that is what it reports.
+func (c *codexCall) failure(err error) error {
+	if rejection := c.rejected(); rejection != nil && core.ClassifyError(err).StatusCode == http.StatusUnauthorized {
+		err = rejection
+	}
+	return codexFailure(err)
+}
+
+// codexFailure maps what the core Runtime and a Coordinator return for a
+// Codex operation to the gateway error the Codex path returned, so status,
+// retry, failover and circuit decisions stay as they were. A gateway error
+// in the chain is the store's or the refresh's own report and wins; an
+// upstream failure keeps core's classification, as before.
+func codexFailure(err error) error {
+	if err == nil || isContextError(err) {
 		return err
 	}
-	var invocationErr *coreproviders.InvocationError
-	if !errors.As(err, &invocationErr) {
-		return invocation("openai_codex: shared transport failed")
+	var invocationErr *InvocationError
+	if errors.As(err, &invocationErr) {
+		return invocationErr
 	}
-	retryAfter := ""
-	if invocationErr.RetryAfter > 0 {
-		retryAfter = strconv.FormatInt(int64(invocationErr.RetryAfter/time.Second), 10)
+	var configErr *ConfigError
+	if errors.As(err, &configErr) {
+		return configErr
 	}
-	return &InvocationError{
-		Msg: "openai_codex: " + invocationErr.Error(), Status: invocationErr.Status,
-		RetryAfter: retryAfter, Retryable: invocationErr.Retryable,
-		FailoverEligible: invocationErr.FailoverEligible, CircuitFailure: invocationErr.CircuitFailure,
+	switch {
+	case errors.Is(err, tokenstore.ErrNoRefreshToken):
+		return errNoCodexRefreshToken()
+	case errors.Is(err, tokenstore.ErrIdentityChanged):
+		return errCodexAccountChanged()
 	}
+	var upstream *coreproviders.InvocationError
+	if errors.As(err, &upstream) {
+		retryAfter := ""
+		if upstream.RetryAfter > 0 {
+			retryAfter = strconv.FormatInt(int64(upstream.RetryAfter/time.Second), 10)
+		}
+		return &InvocationError{
+			Msg: "openai_codex: " + upstream.Error(), Status: upstream.Status,
+			RetryAfter: retryAfter, Retryable: upstream.Retryable,
+			FailoverEligible: upstream.FailoverEligible, CircuitFailure: upstream.CircuitFailure,
+		}
+	}
+	// The Runtime reports a credential it could not obtain, a failed lease
+	// or a refresh that lost to a stale write, as an authentication failure.
+	var providerErr *core.ProviderError
+	if errors.As(err, &providerErr) && providerErr.Class == core.ProviderErrorAuth {
+		return invocation("openai_codex: refresh failed")
+	}
+	return invocation("openai_codex: shared transport failed")
 }
 
 // codexChatPayload builds the Chat facade request. The Codex Responses
@@ -596,59 +427,80 @@ func codexChatFieldAllowed(field string, value any) bool {
 }
 
 func (p CodexProvider) CompleteContext(ctx context.Context, model string, messages []Message, kw Kwargs) (map[string]any, error) {
-	response, _, err := p.CompleteContextWithObservation(ctx, model, messages, kw)
-	return response, err
-}
-
-func (p CodexProvider) CompleteContextWithObservation(ctx context.Context, model string, messages []Message, kw Kwargs) (map[string]any, *CredentialObservation, error) {
-	observation, err := p.observation()
-	if err != nil {
-		return nil, observation, err
-	}
 	payload, err := codexChatPayload(model, messages, kw)
 	if err != nil {
-		return nil, observation, err
+		return nil, err
 	}
-	response, err := p.inner.Complete(ctx, model, payload, nil)
-	return response, p.currentObservation(observation), codexInvocationError(err)
+	return p.invoke(ctx, core.ModelSurfaceChatCompletions, model, payload)
+}
+
+// CompleteContextWithObservation also reports the credential the request
+// used; see credentialCollector.
+func (p CodexProvider) CompleteContextWithObservation(ctx context.Context, model string, messages []Message, kw Kwargs) (map[string]any, *CredentialObservation, error) {
+	ctx, collector := collectCredentials(ctx)
+	response, err := p.CompleteContext(ctx, model, messages, kw)
+	return response, collector.Observation(), err
 }
 
 func (p CodexProvider) StreamContext(ctx context.Context, model string, messages []Message, kw Kwargs) (StreamIter, error) {
-	if _, err := p.observation(); err != nil {
-		return nil, err
-	}
 	payload, err := codexChatPayload(model, messages, kw)
 	if err != nil {
 		return nil, err
 	}
-	stream, err := p.inner.Stream(ctx, model, payload, nil)
+	return p.stream(ctx, core.ModelSurfaceChatCompletions, model, payload)
+}
+
+func (p CodexProvider) CompleteResponsesContext(ctx context.Context, model string, payload map[string]any) (map[string]any, *CredentialObservation, error) {
+	ctx, collector := collectCredentials(ctx)
+	response, err := p.invoke(ctx, core.ModelSurfaceResponses, model, normalizeCodexResponsesInput(payload))
+	return response, collector.Observation(), err
+}
+
+func (p CodexProvider) StreamResponsesContext(ctx context.Context, model string, payload map[string]any) (StreamIter, *CredentialObservation, error) {
+	ctx, collector := collectCredentials(ctx)
+	stream, err := p.stream(ctx, core.ModelSurfaceResponses, model, normalizeCodexResponsesInput(payload))
+	return stream, collector.Observation(), err
+}
+
+// invoke sends payload, the body the Codex path handed core's CodexProvider,
+// through the core Runtime. Core's Codex shapes it for upstream exactly as
+// that provider did, so the upstream request is unchanged.
+func (p CodexProvider) invoke(ctx context.Context, surface core.ModelSurface, model string, payload map[string]any) (map[string]any, error) {
+	request, err := codexRequest(surface, model, payload)
 	if err != nil {
-		return nil, codexInvocationError(err)
+		return nil, err
+	}
+	ctx, call := p.call(ctx)
+	response, err := p.runtime.core.Invoke(ctx, p.caller, p.instance, request)
+	if err != nil {
+		return nil, call.failure(err)
+	}
+	var result map[string]any
+	if err := json.Unmarshal(response.Body, &result); err != nil {
+		return nil, invocation("openai_codex: shared transport returned an invalid response")
+	}
+	return result, nil
+}
+
+func (p CodexProvider) stream(ctx context.Context, surface core.ModelSurface, model string, payload map[string]any) (StreamIter, error) {
+	request, err := codexRequest(surface, model, payload)
+	if err != nil {
+		return nil, err
+	}
+	ctx, call := p.call(ctx)
+	stream, err := p.runtime.core.Stream(ctx, p.caller, p.instance, request)
+	if err != nil {
+		return nil, call.failure(err)
 	}
 	return &codexCoreStream{inner: stream}, nil
 }
 
-func (p CodexProvider) CompleteResponsesContext(ctx context.Context, model string, payload map[string]any) (map[string]any, *CredentialObservation, error) {
-	observation, err := p.observation()
+func codexRequest(surface core.ModelSurface, model string, payload map[string]any) (core.Request, error) {
+	body, err := json.Marshal(payload)
 	if err != nil {
-		return nil, observation, err
+		return core.Request{}, invocation("openai_codex: Codex request encoding failed")
 	}
-	payload = normalizeCodexResponsesInput(payload)
-	response, err := p.inner.CompleteResponses(ctx, model, payload, nil)
-	return response, p.currentObservation(observation), codexInvocationError(err)
-}
-
-func (p CodexProvider) StreamResponsesContext(ctx context.Context, model string, payload map[string]any) (StreamIter, *CredentialObservation, error) {
-	observation, err := p.observation()
-	if err != nil {
-		return nil, observation, err
-	}
-	payload = normalizeCodexResponsesInput(payload)
-	stream, err := p.inner.StreamResponses(ctx, model, payload, nil)
-	if err != nil {
-		return nil, p.currentObservation(observation), codexInvocationError(err)
-	}
-	return &codexCoreStream{inner: stream}, p.currentObservation(observation), nil
+	return core.Request{Surface: surface, Model: model, Body: body, ContentType: core.ContentTypeJSON}, nil
 }
 
 func normalizeCodexResponsesInput(payload map[string]any) map[string]any {

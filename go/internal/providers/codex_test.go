@@ -1,6 +1,7 @@
 package providers
 
 import (
+	"context"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
@@ -14,12 +15,42 @@ import (
 	"llmgw/internal/config"
 	"llmgw/internal/iam"
 
-	providerauth "github.com/xibodev/llm-provider-auth"
 	browseroauth "github.com/xibodev/llm-provider-auth/browseroauth"
 	codexauth "github.com/xibodev/llm-provider-auth/codex"
+	"github.com/xibodev/llm-provider-auth/tokenstore"
 	core "github.com/xibodev/llmgw-core"
-	coreproviders "github.com/xibodev/llmgw-core/providers"
 )
+
+// codexFixture returns the Codex facade of instance for the gateway caller.
+// Its Runtime is not installed, sends Codex calls to endpoints, and resolves
+// every caller of instance to one static access token held in core's
+// in-memory credential store.
+func codexFixture(t *testing.T, instance string, endpoints CodexEndpoints, clientVersion string) CodexProvider {
+	t.Helper()
+	store := core.NewMemoryCredentialStore()
+	if _, err := store.Save(context.Background(), "fixture-connection", tokenstore.Record{AccessToken: "fixture", TokenType: "Bearer"}); err != nil {
+		t.Fatal(err)
+	}
+	store.BindShared(instance, "fixture-connection")
+	runtime := newRuntime(func() (core.CredentialStore, error) { return store, nil })
+	runtime.codexEndpoints.swap(endpoints)
+	provider, err := runtime.newCodexProvider(instance, gatewayCaller(), 5, nil, clientVersion)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return provider
+}
+
+// configureCodexInstance configures instance as a Codex provider until the
+// test ends, as the core Runtime needs to serve inference for it.
+func configureCodexInstance(t *testing.T, instance string) {
+	t.Helper()
+	old := config.Get().Providers
+	config.Update(func(s *config.Settings) {
+		s.Providers = map[string]*config.ProviderConfig{instance: {Type: "openai_compatible", RegistryID: "openai_codex"}}
+	})
+	t.Cleanup(func() { config.Update(func(s *config.Settings) { s.Providers = old }) })
+}
 
 func TestCodexResponsesIsWireNative(t *testing.T) {
 	provider := CodexProvider{}
@@ -153,17 +184,7 @@ func TestCodexCatalogEvidenceSeparatesOAuthFromCatalogContents(t *testing.T) {
 				_, _ = w.Write([]byte(scenario.body))
 			}))
 			defer server.Close()
-			inner, createErr := coreproviders.NewCodexProvider(coreproviders.CodexProviderConfig{
-				SessionSource: coreproviders.NewCodexTokenSessionSource(
-					providerauth.NewStaticTokenSource(&providerauth.Token{AccessToken: "fixture"}), "",
-				),
-				Instructions: codexInstructions, ResponsesURL: server.URL + "/responses",
-				ModelsURL: server.URL, ClientVersion: codexCatalogClientVersion, Client: server.Client(),
-			})
-			if createErr != nil {
-				t.Fatal(createErr)
-			}
-			provider := CodexProvider{inner: inner}
+			provider := codexFixture(t, "codex", CodexEndpoints{ResponsesBaseURL: server.URL, ModelsURL: server.URL}, codexCatalogClientVersion)
 			models, _, err := provider.ListModelsWithError()
 			evidence := ClassifyProviderEvidence(err, len(models), false, false)
 			if evidence.Authentication != scenario.wantAuth || evidence.Catalog != scenario.wantCatalog || evidence.Completion != "not_probed" {
@@ -260,9 +281,9 @@ func TestCodexProviderUsesResponsesRefreshesOnceAndCatalogsWithClientVersion(t *
 		ModelsURL:        server.URL + "/backend-api/codex/models",
 	})
 
-	instance, err := newCodexProvider(codexAuth{
-		principalID: human.ID, providerID: "codex", clientID: "fixture-client",
-	}, 120, server.Client(), "fixture-catalog-version")
+	instance, err := Current().newCodexProvider(
+		"codex", core.Caller{ID: human.ID, Kind: core.CallerHuman}, 120, server.Client(), "fixture-catalog-version",
+	)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -340,7 +361,7 @@ func TestCodexCatalogRefreshRetryDoesNotGainInferenceBetaHeader(t *testing.T) {
 	SetCodexEndpointsForTests(t, CodexEndpoints{
 		OAuth: codexauth.Endpoints{OAuthTokenURL: server.URL + "/oauth/token"}, ModelsURL: server.URL + "/models",
 	})
-	provider, err := newCodexProvider(codexAuth{principalID: human.ID, providerID: "codex", clientID: "fixture-client"}, 30, server.Client(), "fixture")
+	provider, err := Current().newCodexProvider("codex", core.Caller{ID: human.ID, Kind: core.CallerHuman}, 30, server.Client(), "fixture")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -363,17 +384,8 @@ func TestCodexCatalogFiltersEligibilityAndVisibility(t *testing.T) {
 		]}`))
 	}))
 	defer server.Close()
-	inner, err := coreproviders.NewCodexProvider(coreproviders.CodexProviderConfig{
-		SessionSource: coreproviders.NewCodexTokenSessionSource(
-			providerauth.NewStaticTokenSource(&providerauth.Token{AccessToken: "fixture"}), "",
-		),
-		Instructions: codexInstructions, ResponsesURL: server.URL + "/responses",
-		ModelsURL: server.URL, ClientVersion: "fixture-version", Client: server.Client(),
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	models, _, err := (CodexProvider{inner: inner}).ListModelsWithError()
+	provider := codexFixture(t, "codex", CodexEndpoints{ResponsesBaseURL: server.URL, ModelsURL: server.URL}, "fixture-version")
+	models, _, err := provider.ListModelsWithError()
 	if err != nil || len(models) != 1 || models[0].ID != "usable" {
 		t.Fatalf("models=%+v err=%v", models, err)
 	}
@@ -385,17 +397,8 @@ func TestCodexCatalogFailsWhenNoUsableModelsRemain(t *testing.T) {
 		_, _ = w.Write([]byte(`{"data":[{"id":"hidden","supported_in_api":true,"visibility":"hide"}]}`))
 	}))
 	defer server.Close()
-	inner, err := coreproviders.NewCodexProvider(coreproviders.CodexProviderConfig{
-		SessionSource: coreproviders.NewCodexTokenSessionSource(
-			providerauth.NewStaticTokenSource(&providerauth.Token{AccessToken: "fixture"}), "",
-		),
-		Instructions: codexInstructions, ResponsesURL: server.URL + "/responses",
-		ModelsURL: server.URL, ClientVersion: codexCatalogClientVersion, Client: server.Client(),
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	models, _, err := (CodexProvider{inner: inner}).ListModelsWithError()
+	provider := codexFixture(t, "codex", CodexEndpoints{ResponsesBaseURL: server.URL, ModelsURL: server.URL}, codexCatalogClientVersion)
+	models, _, err := provider.ListModelsWithError()
 	code, detail, _ := CatalogFailure(err)
 	if models != nil || code != "catalog_no_usable_models" || detail != "Provider catalog returned no API-eligible visible models." {
 		t.Fatalf("models=%+v code=%q detail=%q err=%v", models, code, detail, err)
@@ -421,17 +424,8 @@ func TestCodexSharedTransportPreservesStreamingAndResponsesSurface(t *testing.T)
 			"data: {\"type\":\"response.completed\",\"sequence_number\":3,\"response\":{\"id\":\"resp_shared\",\"object\":\"response\",\"status\":\"completed\",\"model\":\"gpt-codex\",\"conversation\":{\"id\":\"conv_shared\"},\"output\":[{\"type\":\"reasoning\",\"encrypted_content\":\"opaque\",\"summary\":[{\"type\":\"summary_text\",\"text\":\"thinking\"}]},{\"type\":\"message\",\"role\":\"assistant\",\"content\":[{\"type\":\"output_text\",\"text\":\"hello\"}]}],\"usage\":{\"input_tokens\":1,\"output_tokens\":1,\"total_tokens\":2}}}\n\n"))
 	}))
 	defer server.Close()
-	inner, err := coreproviders.NewCodexProvider(coreproviders.CodexProviderConfig{
-		SessionSource: coreproviders.NewCodexTokenSessionSource(
-			providerauth.NewStaticTokenSource(&providerauth.Token{AccessToken: "fixture"}), "",
-		),
-		Instructions: codexInstructions, ResponsesURL: server.URL, ModelsURL: server.URL,
-		ClientVersion: codexCatalogClientVersion, Client: server.Client(),
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	provider := CodexProvider{inner: inner}
+	configureCodexInstance(t, "codex")
+	provider := codexFixture(t, "codex", CodexEndpoints{ResponsesBaseURL: server.URL, ModelsURL: server.URL}, codexCatalogClientVersion)
 
 	stream, err := provider.Stream("gpt-codex", []Message{{"role": "user", "content": "hello"}}, nil)
 	if err != nil {
@@ -498,7 +492,7 @@ func TestCodexBrowserRefreshEndpointErrorUsesTypedRevocationContract(t *testing.
 		t.Fatal("fixture endpoint error did not match")
 	}
 	translated := &codexauth.RefreshError{StatusCode: endpoint.StatusCode, Code: endpoint.Code, Description: endpoint.Description}
-	if !shouldRevokeCodexRefresh(translated.Code) || codexRefreshInvocationError(translated) == nil {
+	if !tokenstore.IsTerminal(translated) || codexRefreshInvocationError(translated) == nil {
 		t.Fatalf("translated refresh error=%+v", translated)
 	}
 }
@@ -524,12 +518,20 @@ func TestCodexInvalidRefreshRevokesPrivateConnection(t *testing.T) {
 	}))
 	defer server.Close()
 	SetCodexEndpointsForTests(t, CodexEndpoints{OAuth: codexauth.Endpoints{OAuthTokenURL: server.URL}})
-	auth := codexAuth{principalID: human.ID, providerID: "codex", clientID: "fixture-client"}
-	if err := auth.Refresh(); err == nil {
+	cached := "codex@" + human.ID
+	putProvider(cached, EchoProvider{})
+	_, _, err = RefreshCodexOAuthConnection(human.ID, "codex", "")
+	if err == nil {
 		t.Fatal("invalid refresh unexpectedly succeeded")
+	}
+	if status := UpstreamStatus(err); status != http.StatusBadRequest || !InvocationFailoverEligible(err) {
+		t.Fatalf("refresh err=%v status=%d, want the token endpoint's failover-eligible 400", err, status)
 	}
 	if _, _, ok, err := iam.OAuthProviderConnectionSecret(human.ID, "codex", ""); err != nil || ok {
 		t.Fatalf("invalid refresh left active connection: ok=%v err=%v", ok, err)
+	}
+	if _, found := Current().instances.instances[cached]; found {
+		t.Fatal("the revocation left the owner's provider cached")
 	}
 }
 
@@ -559,7 +561,7 @@ func TestCodexRefreshUsesConnectionBoundClientID(t *testing.T) {
 	}))
 	defer server.Close()
 	SetCodexEndpointsForTests(t, CodexEndpoints{OAuth: codexauth.Endpoints{OAuthTokenURL: server.URL}})
-	if err := (codexAuth{principalID: human.ID, providerID: "codex", clientID: "mutable-global-client"}).Refresh(); err != nil {
+	if _, _, err := RefreshCodexOAuthConnection(human.ID, "codex", ""); err != nil {
 		t.Fatal(err)
 	}
 	current, _, ok, err := iam.OAuthProviderConnectionSecret(human.ID, "codex", "")
@@ -568,21 +570,48 @@ func TestCodexRefreshUsesConnectionBoundClientID(t *testing.T) {
 	}
 }
 
+// A connection without a stored client profile predates them. Core would
+// refresh it with the configured client; the gateway refuses, on the
+// console's refresh and on inference alike, before anything is sent.
 func TestCodexLegacyRefreshWithoutProfileFailsClosed(t *testing.T) {
 	setupCodexProviderTest(t)
+	configureCodexInstance(t, "codex")
 	human, err := iam.CreatePrincipal("human", "authentik:codex-legacy", "", "Codex Legacy")
 	if err != nil {
 		t.Fatal(err)
 	}
+	oldClientID := config.Get().OpenAICodexClientID
+	t.Cleanup(func() { config.Update(func(s *config.Settings) { s.OpenAICodexClientID = oldClientID }) })
+	config.Update(func(s *config.Settings) { s.OpenAICodexClientID = "global-client" })
 	if _, err := iam.PutOAuthProviderConnection(iam.OAuthConnectionCreate{
 		PrincipalID: human.ID, ProviderID: "codex", Kind: "openai_codex_oauth",
-		AccessToken: "old", RefreshToken: "refresh",
+		AccessToken: "old", RefreshToken: "refresh", ExpiresAt: time.Now().Add(-time.Minute).Unix(),
 	}); err != nil {
 		t.Fatal(err)
 	}
-	err = (codexAuth{principalID: human.ID, providerID: "codex", clientID: "global-client"}).Refresh()
-	if err == nil || !strings.Contains(err.Error(), "reauthorize") {
+	var calls atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		calls.Add(1)
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	defer server.Close()
+	SetCodexEndpointsForTests(t, CodexEndpoints{
+		OAuth: codexauth.Endpoints{OAuthTokenURL: server.URL + "/oauth/token"}, ResponsesBaseURL: server.URL,
+	})
+	_, _, err = RefreshCodexOAuthConnection(human.ID, "codex", "")
+	if err == nil || !IsConfig(err) || !strings.Contains(err.Error(), "reauthorize") {
 		t.Fatalf("legacy refresh error=%v", err)
+	}
+	provider, err := Current().newCodexProvider("codex", core.Caller{ID: human.ID, Kind: core.CallerHuman}, 30, nil, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, _, err = provider.CompleteResponses("gpt-codex", map[string]any{"input": "hello"})
+	if err == nil || !IsConfig(err) || !strings.Contains(err.Error(), "reauthorize") {
+		t.Fatalf("legacy inference error=%v", err)
+	}
+	if calls.Load() != 0 {
+		t.Fatalf("a legacy grant reached upstream: calls=%d", calls.Load())
 	}
 }
 
@@ -618,13 +647,23 @@ func TestCodexRefreshSerializesConcurrentRotation(t *testing.T) {
 	defer server.Close()
 	SetCodexEndpointsForTests(t, CodexEndpoints{OAuth: codexauth.Endpoints{OAuthTokenURL: server.URL}})
 
-	auth := codexAuth{principalID: human.ID, providerID: "codex", clientID: "fixture-client"}
+	// Two coordinators stand for two processes; the credential store's
+	// lease is all they share.
+	record, err := Current().codexCredentials.Load(context.Background(), connection.ID)
+	if err != nil || record.AccessToken != initial.AccessToken {
+		t.Fatalf("record=%v err=%v", record, err)
+	}
 	start := make(chan struct{})
 	errs := make(chan error, 2)
 	for range 2 {
+		coordinator, err := Current().codexCoordinator()
+		if err != nil {
+			t.Fatal(err)
+		}
 		go func() {
 			<-start
-			errs <- auth.refreshConnection(initial, connection)
+			_, err := coordinator.Rejected(context.Background(), connection.ID, record)
+			errs <- err
 		}()
 	}
 	close(start)
@@ -656,10 +695,6 @@ func TestCodexRefreshRejectsChangedAccount(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	initial, connection, ok, err := iam.OAuthProviderConnectionSecret(human.ID, "codex", "")
-	if err != nil || !ok {
-		t.Fatalf("initial connection ok=%v err=%v", ok, err)
-	}
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`{"access_token":"new-access","refresh_token":"new-refresh","account_id":"account-b"}`))
@@ -667,8 +702,7 @@ func TestCodexRefreshRejectsChangedAccount(t *testing.T) {
 	defer server.Close()
 	SetCodexEndpointsForTests(t, CodexEndpoints{OAuth: codexauth.Endpoints{OAuthTokenURL: server.URL}})
 
-	auth := codexAuth{principalID: human.ID, providerID: "codex", clientID: "fixture-client"}
-	err = auth.refreshConnection(initial, connection)
+	_, _, err = RefreshCodexOAuthConnection(human.ID, "codex", "")
 	if err == nil || !strings.Contains(err.Error(), "account changed") {
 		t.Fatalf("refresh err=%v", err)
 	}
@@ -678,8 +712,13 @@ func TestCodexRefreshRejectsChangedAccount(t *testing.T) {
 	}
 }
 
+// The connection is signed in again to another account while a request
+// refreshes it. The Coordinator's compare-and-swap loses and it would serve
+// the new sign-in; the request was bound to the first account and must fail
+// instead, before anything reaches Codex. See codexCall.pin.
 func TestCodexPrepareRejectsConcurrentAccountReplacement(t *testing.T) {
 	setupCodexProviderTest(t)
+	configureCodexInstance(t, "codex")
 	human, err := iam.CreatePrincipal("human", "authentik:codex-account-replacement", "", "Codex Account Replacement")
 	if err != nil {
 		t.Fatal(err)
@@ -697,22 +736,36 @@ func TestCodexPrepareRejectsConcurrentAccountReplacement(t *testing.T) {
 		t.Fatalf("initial connection ok=%v err=%v", ok, err)
 	}
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/oauth/token" {
+			t.Errorf("a request reached Codex at %s", r.URL.Path)
+			w.WriteHeader(http.StatusInternalServerError)
+			return
+		}
 		if _, err := iam.PutOAuthProviderConnection(iam.OAuthConnectionCreate{
 			PrincipalID: human.ID, ProviderID: "codex", Name: connection.Name, Kind: connection.Kind, Source: connection.Source, MakeDefault: connection.IsDefault,
 			AccessToken: "replacement-access", RefreshToken: "replacement-refresh", AccountID: "account-b", Status: "active",
 			OAuthProfile: codexOAuthProfileDevice, OAuthClientID: "fixture-client",
 		}); err != nil {
-			t.Fatalf("replace connection: %v", err)
+			t.Errorf("replace connection: %v", err)
 		}
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`{"access_token":"new-access","refresh_token":"new-refresh","account_id":"account-a"}`))
 	}))
 	defer server.Close()
-	SetCodexEndpointsForTests(t, CodexEndpoints{OAuth: codexauth.Endpoints{OAuthTokenURL: server.URL}})
+	SetCodexEndpointsForTests(t, CodexEndpoints{
+		OAuth: codexauth.Endpoints{OAuthTokenURL: server.URL + "/oauth/token"}, ResponsesBaseURL: server.URL,
+	})
 
-	auth := codexAuth{principalID: human.ID, providerID: "codex", clientID: "fixture-client"}
-	if _, _, err = auth.Prepare(); err == nil || !strings.Contains(err.Error(), "account changed") {
-		t.Fatalf("prepare err=%v", err)
+	provider, err := Current().newCodexProvider("codex", core.Caller{ID: human.ID, Kind: core.CallerHuman}, 30, nil, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, observation, err := provider.CompleteResponses("gpt-codex", map[string]any{"input": "hello"})
+	if err == nil || !strings.Contains(err.Error(), "account changed") {
+		t.Fatalf("request err=%v", err)
+	}
+	if observation == nil || observation.ConnectionID != connection.ID {
+		t.Fatalf("observation=%+v, want the connection the refresh started from", observation)
 	}
 	current, _, ok, err := iam.OAuthProviderConnectionSecret(human.ID, "codex", "")
 	if err != nil || !ok || current.AccessToken != "replacement-access" || current.AccountID != "account-b" {
@@ -734,7 +787,7 @@ func TestCodexReusedRefreshDoesNotRevokeRotatedConnection(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	initial, connection, ok, err := iam.OAuthProviderConnectionSecret(human.ID, "codex", "")
+	_, connection, ok, err := iam.OAuthProviderConnectionSecret(human.ID, "codex", "")
 	if err != nil || !ok {
 		t.Fatalf("initial connection ok=%v err=%v", ok, err)
 	}
@@ -744,7 +797,7 @@ func TestCodexReusedRefreshDoesNotRevokeRotatedConnection(t *testing.T) {
 			AccessToken: "rotated-access", RefreshToken: "rotated-refresh", Status: "active",
 			OAuthProfile: codexOAuthProfileDevice, OAuthClientID: "fixture-client",
 		}); err != nil {
-			t.Fatalf("rotate connection: %v", err)
+			t.Errorf("rotate connection: %v", err)
 		}
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusBadRequest)
@@ -753,8 +806,9 @@ func TestCodexReusedRefreshDoesNotRevokeRotatedConnection(t *testing.T) {
 	defer server.Close()
 	SetCodexEndpointsForTests(t, CodexEndpoints{OAuth: codexauth.Endpoints{OAuthTokenURL: server.URL}})
 
-	auth := codexAuth{principalID: human.ID, providerID: "codex", clientID: "fixture-client"}
-	if err := auth.refreshConnection(initial, connection); err == nil {
+	// The grant is rejected for good, but the revocation is fenced by the
+	// revision the refresh started from, which the rotation replaced.
+	if _, _, err := RefreshCodexOAuthConnection(human.ID, "codex", ""); err == nil {
 		t.Fatal("reused refresh unexpectedly succeeded")
 	}
 	current, _, ok, err := iam.OAuthProviderConnectionSecret(human.ID, "codex", "")
@@ -893,16 +947,8 @@ func TestCodexChatFacadeServesThoughtSignatureHistory(t *testing.T) {
 		_, _ = w.Write([]byte("data: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_fixture\",\"object\":\"response\",\"status\":\"completed\",\"model\":\"gpt-codex\",\"output\":[{\"type\":\"message\",\"role\":\"assistant\",\"content\":[{\"type\":\"output_text\",\"text\":\"ok\"}]}]}}\n\n"))
 	}))
 	defer server.Close()
-	inner, err := coreproviders.NewCodexProvider(coreproviders.CodexProviderConfig{
-		SessionSource: coreproviders.NewCodexTokenSessionSource(
-			providerauth.NewStaticTokenSource(&providerauth.Token{AccessToken: "fixture"}), "",
-		),
-		Instructions: codexInstructions, ResponsesURL: server.URL, ModelsURL: server.URL,
-		ClientVersion: codexCatalogClientVersion, Client: server.Client(),
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
+	configureCodexInstance(t, "codex")
+	provider := codexFixture(t, "codex", CodexEndpoints{ResponsesBaseURL: server.URL, ModelsURL: server.URL}, codexCatalogClientVersion)
 	function := map[string]any{"name": "lookup", "arguments": "{}", "thought_signature": "fixture-signature"}
 	google := map[string]any{"thought_signature": "fixture-signature"}
 	call := map[string]any{
@@ -914,7 +960,7 @@ func TestCodexChatFacadeServesThoughtSignatureHistory(t *testing.T) {
 		{"role": "assistant", "content": nil, "tool_calls": []any{call}},
 		{"role": "tool", "tool_call_id": "call_fixture", "content": "found"},
 	}
-	response, err := (CodexProvider{inner: inner}).Complete("gpt-codex", history, nil)
+	response, err := provider.Complete("gpt-codex", history, nil)
 	if err != nil {
 		t.Fatalf("history with thought signatures was rejected: %v", err)
 	}
