@@ -1,0 +1,173 @@
+{
+  "schema_version": "1.0.0",
+  "mode": "change",
+  "contract": {
+    "digest": "31b393ab3e80162226619c441694573993ac618382d74642101484a0bf2e9c80"
+  },
+  "authoring_provenance": {
+    "status": "established",
+    "path": ".release-harness/drafts/llm-gateway.record.json",
+    "digest": "6732ddf3dc8236b974e2aae5f81b546d89c2a466b6fb0a368d76620955bf981e"
+  },
+  "sources": [
+    {
+      "source_id": "primary",
+      "status": "established",
+      "repository_identity": "https://github.com/xibodev/llm-gateway.git",
+      "base_ref": "origin/main",
+      "base_commit": "16f24d200dc36dd5a198830986c1b7feb757dd0a",
+      "merge_base": "3d59e28f68d212480df03cf801246db897ca855b",
+      "head_commit": "cf67c17eac608bd0ace56466b9d215efa7e20eec",
+      "head_tree": "4e669f74c4d2e63a03d7075323da2db138ad55c1",
+      "reviewed_source_digest": "fec8d7cb0f68eb5b1cf5e3afb40a7166a0e8f65fcd853a66f659f2fb3ebf4c1f",
+      "changed_paths": [
+        {
+          "status": "modified",
+          "path": "go/go.mod",
+          "old_blob": "f975b4014b27015a1be0a8d4a427f6580cfdaf68",
+          "new_blob": "7e72ea096e3e3d8b0b17dab2fd34778425c95d6b"
+        },
+        {
+          "status": "modified",
+          "path": "go/go.sum",
+          "old_blob": "c621db20dc1bc59af13cf7e1bb1e574ecf259d75",
+          "new_blob": "be9f34cf1759da30b1ea7d72ce41917ebcbebcdc"
+        },
+        {
+          "status": "added",
+          "path": "go/internal/api/vendor_fields_test.go",
+          "old_blob": "0000000000000000000000000000000000000000",
+          "new_blob": "391d1ee726ad6b2e02cef79a3bb3c68a02f8032a"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/providers/anthropic.go",
+          "old_blob": "68589eca150e69fd9b39954e5a7617a8fcf16325",
+          "new_blob": "eb36c7a61d3c930a945971f4f7e843e127f6ed1c"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/providers/codex_test.go",
+          "old_blob": "b85d0e2cf85a50f7c2ad9dc76bfe47dcabf21f0f",
+          "new_blob": "386159d0da3e2020ffb76ccb2ec822da3d8f03f9"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/providers/codex.go",
+          "old_blob": "965771341ac67287099ebc150a7dd1474f8dd829",
+          "new_blob": "ac34257c32e5b5a40c3d81b0296b53f8cf4942ba"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/providers/openai.go",
+          "old_blob": "8af58723704828998026609db1b28d90e2f027a0",
+          "new_blob": "418274dc121dd4ebfe4f4c41e1335208e9dd1ea6"
+        },
+        {
+          "status": "added",
+          "path": "go/internal/providers/thought_signatures_test.go",
+          "old_blob": "0000000000000000000000000000000000000000",
+          "new_blob": "ddf5bc744fc5ab4cbbf37cf8ffc118f4abaa39ba"
+        },
+        {
+          "status": "added",
+          "path": "go/internal/providers/thought_signatures.go",
+          "old_blob": "0000000000000000000000000000000000000000",
+          "new_blob": "fc361c74aba02ea9cb5b79aa3698e2b1a6c532f5"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/router/failover.go",
+          "old_blob": "33cb800f02fccba0f02b47b3009cb6753a8f1685",
+          "new_blob": "48be653552a19e8fb3c205115ef1f680abacb96b"
+        }
+      ]
+    }
+  ],
+  "facts": [
+    {
+      "id": "deps",
+      "claim": "go.mod moves llmgw-core from v0.9.0 to v0.10.0 and llm-translate from v0.2.0 to v0.3.0; llm-provider-auth stays at v0.5.0. core v0.10.0 is additive (execution, oauthflow, Credential account fields with redacting formatters); nothing in the gateway prints or encodes a core.Credential outside tests.",
+      "status": "observed",
+      "evidence": {
+        "source": "go/go.mod; release notes of llmgw-core v0.10.0 and llm-translate v0.3.0"
+      }
+    },
+    {
+      "id": "decisions-kept",
+      "claim": "llm-translate v0.3.0 reports dropped Gemini thought signatures as material. RejectMaterialLossExceptThoughtSignatures ignores only those entries at every call site where one can occur, and the Codex facade strips signatures from copies of the messages before the shared Codex provider, so every request and response the gateway served before is still served with the same upstream payload. Tests pinning this pass on both the old and new versions.",
+      "status": "observed",
+      "evidence": {
+        "source": "go/internal/providers/thought_signatures.go; go/internal/api/vendor_fields_test.go; go/internal/providers/codex_test.go"
+      }
+    },
+    {
+      "id": "system-breakpoints",
+      "claim": "A Chat request with cache_control on a system text part now reaches an Anthropic upstream with that breakpoint on a system block; message-level cache_control is carried by llm-translate v0.3.0. Requests without cache_control are unchanged.",
+      "status": "observed",
+      "evidence": {
+        "source": "go/internal/providers/anthropic.go and its test"
+      }
+    },
+    {
+      "id": "suite",
+      "claim": "The full Go suite passes with HTTP_PROXY and HTTPS_PROXY unreachable; characterization goldens and coupling budgets are unchanged. gofmt, vet, govulncheck (0 reachable), check-docs and git diff --check pass.",
+      "status": "observed",
+      "evidence": {
+        "source": "local gate run on the reviewed head"
+      }
+    }
+  ],
+  "impact": {
+    "assertions": [
+      {
+        "id": "A1",
+        "impact": "unchanged",
+        "supported_by": [
+          "deps",
+          "decisions-kept",
+          "suite"
+        ]
+      },
+      {
+        "id": "A2",
+        "impact": "unchanged",
+        "supported_by": [
+          "deps",
+          "decisions-kept",
+          "suite"
+        ]
+      },
+      {
+        "id": "A3",
+        "impact": "unchanged",
+        "supported_by": [
+          "deps",
+          "decisions-kept",
+          "suite"
+        ]
+      },
+      {
+        "id": "A4",
+        "impact": "unchanged",
+        "supported_by": [
+          "deps",
+          "decisions-kept",
+          "suite"
+        ]
+      }
+    ],
+    "requires": [],
+    "possible_binding_changes": []
+  },
+  "questions": [],
+  "conclusion": {
+    "action": "reuse_contract",
+    "summary": "Adopts llmgw-core v0.10.0 and llm-translate v0.3.0 while keeping every accept/reject decision, and carries system cache_control breakpoints to Anthropic; CLI, health and models behavior is unchanged."
+  },
+  "proposed": {
+    "by": "adopt-core-v0100",
+    "at": "2026-09-25T02:26:31.948Z"
+  },
+  "digest": "d36647ffc9a7097fa1b32b9b129dc8b6ea83936a9471162dc98cd229ca6a7506"
+}
