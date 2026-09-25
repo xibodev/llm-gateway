@@ -8,7 +8,6 @@ import (
 
 	"llmgw/internal/config"
 
-	"github.com/xibodev/llm-provider-auth/tokenstore"
 	core "github.com/xibodev/llmgw-core"
 	coreproviders "github.com/xibodev/llmgw-core/providers"
 )
@@ -22,13 +21,20 @@ const zenCoreType = "opencode_zen"
 // over the caller's cached catalog, and the credential the provider factory
 // resolves for an OpenAI-compatible instance, or none. API keys never
 // refresh, so there is no refresh.
+//
+// Zen's store is a connectionStore of API keys. When none resolves, core's
+// Zen sends the request anonymously, as the transport sent the factory's
+// empty key. A configured anonymous sentinel resolves as the configured key,
+// which core's Zen reads as anonymous access too.
 func (rt *Runtime) zenCoreVertical() coreVertical {
 	return coreVertical{
 		serves:   zenInstance,
 		provider: rt.coreZen,
-		credentials: zenStore{open: func() (core.CredentialStore, error) {
-			return rt.openCredentials(false)
-		}},
+		credentials: connectionStore{
+			open:       func() (core.CredentialStore, error) { return rt.openCredentials(false) },
+			tokenTypes: []string{core.TokenTypeAPIKey},
+			refusal:    "opencode_zen: the resolved connection is not an API key",
+		},
 	}
 }
 
@@ -148,78 +154,4 @@ func (rt *Runtime) newCoreZen(instance, base string, caller core.Caller, client 
 			return info, true
 		},
 	})
-}
-
-// zenStore is the credential store of Zen instances: the IAM store with the
-// provider factory's precedence, the caller's connection, then the system
-// connection, then the configured key, read from the config: namespace. When
-// none resolves it reports core.ErrNoCredential, on which the core Runtime
-// sends the request without a credential and core's Zen sends it
-// anonymously, as the transport sent the factory's empty key. A configured
-// anonymous sentinel resolves as the configured key, which core's Zen reads
-// as anonymous access too.
-type zenStore struct {
-	open func() (core.CredentialStore, error)
-}
-
-var _ core.CredentialStore = zenStore{}
-
-// Resolve implements core.CredentialStore.
-func (s zenStore) Resolve(ctx context.Context, caller core.Caller, instance string) (string, error) {
-	store, err := s.open()
-	if err != nil {
-		return "", err
-	}
-	return store.Resolve(ctx, caller, instance)
-}
-
-// Load implements tokenstore.Store. The factory refuses a connection of any
-// kind but an API key, so the store refuses one too, should one replace the
-// connection a facade was built with.
-func (s zenStore) Load(ctx context.Context, key string) (tokenstore.Record, error) {
-	store, err := s.open()
-	if err != nil {
-		return tokenstore.Record{}, err
-	}
-	record, err := store.Load(ctx, key)
-	if err == nil && record.TokenType != core.TokenTypeAPIKey {
-		return tokenstore.Record{}, &ConfigError{Msg: "opencode_zen: the resolved connection is not an API key"}
-	}
-	return record, err
-}
-
-// Save, ReplaceIfCurrent, RevokeIfCurrent and Lease implement
-// tokenstore.Store. An API key never refreshes, so nothing calls them for a
-// Zen key; they pass to the IAM store all the same.
-
-func (s zenStore) Save(ctx context.Context, key string, record tokenstore.Record) (tokenstore.Record, error) {
-	store, err := s.open()
-	if err != nil {
-		return tokenstore.Record{}, err
-	}
-	return store.Save(ctx, key, record)
-}
-
-func (s zenStore) ReplaceIfCurrent(ctx context.Context, key, revision string, record tokenstore.Record) (tokenstore.Record, error) {
-	store, err := s.open()
-	if err != nil {
-		return tokenstore.Record{}, err
-	}
-	return store.ReplaceIfCurrent(ctx, key, revision, record)
-}
-
-func (s zenStore) RevokeIfCurrent(ctx context.Context, key, revision string) error {
-	store, err := s.open()
-	if err != nil {
-		return err
-	}
-	return store.RevokeIfCurrent(ctx, key, revision)
-}
-
-func (s zenStore) Lease(ctx context.Context, key string) (func(), error) {
-	store, err := s.open()
-	if err != nil {
-		return nil, err
-	}
-	return store.Lease(ctx, key)
 }
