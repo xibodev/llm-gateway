@@ -1,0 +1,155 @@
+{
+  "schema_version": "1.0.0",
+  "mode": "change",
+  "contract": {
+    "digest": "31b393ab3e80162226619c441694573993ac618382d74642101484a0bf2e9c80"
+  },
+  "authoring_provenance": {
+    "status": "established",
+    "path": ".release-harness/drafts/llm-gateway.record.json",
+    "digest": "6732ddf3dc8236b974e2aae5f81b546d89c2a466b6fb0a368d76620955bf981e"
+  },
+  "sources": [
+    {
+      "source_id": "primary",
+      "status": "established",
+      "repository_identity": "https://github.com/xibodev/llm-gateway.git",
+      "base_ref": "origin/main",
+      "base_commit": "91c7429b02173d17c9e072bb9dfbaa1d2be8478a",
+      "merge_base": "6e25987eb82dddab6ecbfec1d006a9b330a5b903",
+      "head_commit": "a967786708635054200ff50ce42e349bd066f1dc",
+      "head_tree": "1c9e85c770146bbb017cc8763e27b8632ec8e682",
+      "reviewed_source_digest": "81318065694c9c571b2f6296145745fc0e41839ec75b943fdcb1fad390cc02e6",
+      "changed_paths": [
+        {
+          "status": "modified",
+          "path": "go/internal/api/anonymous_provider_automation_test.go",
+          "old_blob": "c1c65f9a4d6e4b8f7a87578da6576e41d1d8507f",
+          "new_blob": "8c578f8b65f7023156aa0eee0b3d584cb74713ee"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/api/anonymous_provider_automation.go",
+          "old_blob": "49cb016eccc4b1ef3699f6071e6f6d074590cdb3",
+          "new_blob": "2fe9828d0ed5bb4fdf52d62f3fa7c5b1483f4ce2"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/architecture/boundary_test.go",
+          "old_blob": "2b4889f66ad89b47aa08aa83a8541db34d5d1f1f",
+          "new_blob": "f4cc4a76ffd704c6275664b596c7147ac78e964b"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/providers/installed.go",
+          "old_blob": "07910ede08d4309669cbeb87a8c3affbfd14b6c0",
+          "new_blob": "659f3678a464cd875b0c7d8ef414bf70f1ff9ecb"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/providers/provider_orchestrator_test.go",
+          "old_blob": "0d49c3702cf4baf96af97c20f34e9d6f05514d68",
+          "new_blob": "88fd16c51566d7dc99a3eaea6969048b8ff65234"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/providers/provider_orchestrator.go",
+          "old_blob": "6fc93bce2974fdc8ad57fbcb829e5c2069c2fd86",
+          "new_blob": "98b56051f7307466438aee07ce5922e17facaaf8"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/providers/registry.go",
+          "old_blob": "425d693adf38f3b384a33adc1da814036c740995",
+          "new_blob": "1f96338ad20186528e00ee49544d5f833db0f9b8"
+        }
+      ]
+    }
+  ],
+  "facts": [
+    {
+      "id": "orchestrator",
+      "claim": "The anonymous-provider automation runs on llmgw-core's anonymous.Orchestrator. The gateway supplies the hooks: Enabled reads the effective setting; Enroll calls the unchanged ensureAnonymousProvider with its config and iam writes and cache invalidations; Claim takes the iam daily claim and declines if the provider changed, replacing the second enrollment check; Generation reads the iam generation; Record writes checks, model evidence and audit. Start runs hourly with the existing wake channel and auto-connect calls ConnectAll. The gateway run loop, scheduler, connect function, status and failure-code copies, gateway orchestrator constructor and probe selector are removed.",
+      "status": "observed",
+      "evidence": {
+        "source": "go/internal/api/anonymous_provider_automation.go; go/internal/providers anonymous adapters"
+      }
+    },
+    {
+      "id": "adapters",
+      "claim": "AnonymousCatalog wraps the existing catalog refresh and keeps the upstream status on failure; AnonymousInvoker keeps the old probe paths and passes Retry-After through; EffectiveRegistry gives core the gateway's registry so profiles are vetted against the same list.",
+      "status": "observed",
+      "evidence": {
+        "source": "go/internal/providers anonymous adapter tests"
+      }
+    },
+    {
+      "id": "differences",
+      "claim": "A check cancelled at shutdown or by a disconnecting auto-connect client is no longer recorded as a failure and its models stay unverified until the next check, and auto-connect stops at the next provider; the post-claim enrollment check runs once; an evidence-store failure detail reads provider catalog failed while the failure code is unchanged.",
+      "status": "observed",
+      "evidence": {
+        "source": "go/internal/api anonymous automation tests"
+      }
+    },
+    {
+      "id": "suite",
+      "claim": "The full Go suite passes with HTTP_PROXY and HTTPS_PROXY unreachable with unchanged characterization goldens; the providers iam.* budget moves from 58 to 56; gofmt, vet, govulncheck (0 reachable), check-docs and git diff --check pass.",
+      "status": "observed",
+      "evidence": {
+        "source": "local gate run on the reviewed head"
+      }
+    }
+  ],
+  "impact": {
+    "assertions": [
+      {
+        "id": "A1",
+        "impact": "unchanged",
+        "supported_by": [
+          "orchestrator",
+          "differences",
+          "suite"
+        ]
+      },
+      {
+        "id": "A2",
+        "impact": "unchanged",
+        "supported_by": [
+          "orchestrator",
+          "differences",
+          "suite"
+        ]
+      },
+      {
+        "id": "A3",
+        "impact": "unchanged",
+        "supported_by": [
+          "orchestrator",
+          "differences",
+          "suite"
+        ]
+      },
+      {
+        "id": "A4",
+        "impact": "unchanged",
+        "supported_by": [
+          "orchestrator",
+          "differences",
+          "suite"
+        ]
+      }
+    ],
+    "requires": [],
+    "possible_binding_changes": []
+  },
+  "questions": [],
+  "conclusion": {
+    "action": "reuse_contract",
+    "summary": "The anonymous-provider automation runs on the llmgw-core orchestrator with gateway hooks; CLI, health and models behavior is unchanged."
+  },
+  "proposed": {
+    "by": "anonymous-orchestrator",
+    "at": "2026-09-25T13:15:23.132Z"
+  },
+  "digest": "3d768452d98167c825cee419b559579fc50a3928d5b6e01eeb4feae45810f872"
+}
