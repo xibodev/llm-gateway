@@ -895,6 +895,58 @@ func TestCodexChatFacadeRejectsStructuralFields(t *testing.T) {
 	}
 }
 
+// A client replays a Gemini history, thought signatures included, when it
+// fails over to Codex. Responses cannot carry a signature, so the facade must
+// serve the history without it and leave the caller's messages intact for the
+// next target.
+func TestCodexChatFacadeServesThoughtSignatureHistory(t *testing.T) {
+	var input []any
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var request map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+			t.Error(err)
+		}
+		input, _ = request["input"].([]any)
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = w.Write([]byte("data: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_fixture\",\"object\":\"response\",\"status\":\"completed\",\"model\":\"gpt-codex\",\"output\":[{\"type\":\"message\",\"role\":\"assistant\",\"content\":[{\"type\":\"output_text\",\"text\":\"ok\"}]}]}}\n\n"))
+	}))
+	defer server.Close()
+	inner, err := coreproviders.NewCodexProvider(coreproviders.CodexProviderConfig{
+		SessionSource: coreproviders.NewCodexTokenSessionSource(
+			providerauth.NewStaticTokenSource(&providerauth.Token{AccessToken: "fixture"}), "",
+		),
+		Instructions: codexInstructions, ResponsesURL: server.URL, ModelsURL: server.URL,
+		Client: server.Client(),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	function := map[string]any{"name": "lookup", "arguments": "{}", "thought_signature": "fixture-signature"}
+	google := map[string]any{"thought_signature": "fixture-signature"}
+	call := map[string]any{
+		"id": "call_fixture", "type": "function", "function": function,
+		"thought_signature": "fixture-signature", "extra_content": map[string]any{"google": google},
+	}
+	history := []Message{
+		{"role": "user", "content": "Look it up"},
+		{"role": "assistant", "content": nil, "tool_calls": []any{call}},
+		{"role": "tool", "tool_call_id": "call_fixture", "content": "found"},
+	}
+	response, err := (CodexProvider{inner: inner}).Complete("gpt-codex", history, nil)
+	if err != nil {
+		t.Fatalf("history with thought signatures was rejected: %v", err)
+	}
+	if len(input) != 3 || input[1].(map[string]any)["call_id"] != "call_fixture" {
+		t.Fatalf("input=%+v", input)
+	}
+	if message := response["choices"].([]any)[0].(map[string]any)["message"].(map[string]any); message["content"] != "ok" {
+		t.Fatalf("response=%+v", response)
+	}
+	if function["thought_signature"] == nil || google["thought_signature"] == nil || call["thought_signature"] == nil {
+		t.Fatal("the caller's history lost a signature that the next target may need")
+	}
+}
+
 func TestAdaptsChatToNativeResponses(t *testing.T) {
 	for name, tc := range map[string]struct {
 		cfg  *config.ProviderConfig
