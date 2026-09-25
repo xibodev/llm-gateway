@@ -36,6 +36,7 @@ var coreVerticalCases = map[string]struct {
 	"anthropic spaced": {&config.ProviderConfig{Type: " Anthropic ", RegistryID: "custom_anthropic"}, anthropicCoreType},
 	"azure":            {&config.ProviderConfig{Type: "azure_openai", RegistryID: "azure_openai"}, azureCoreType},
 	"ollama":           {&config.ProviderConfig{Type: " Ollama "}, ollamaCoreType},
+	"edge tts":         {&config.ProviderConfig{Type: "edge_tts"}, ""},
 }
 
 func TestCoreVerticalsServeDisjointInstances(t *testing.T) {

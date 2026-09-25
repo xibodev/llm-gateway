@@ -52,7 +52,6 @@ type Runtime struct {
 	copilot       *copilotauth.Client
 	authAdapters  authAdapterRegistry
 	quotaAdapters quotaAdapterRegistry
-	edgeTTSClock  edgeTTSClock
 
 	// Only tests set the seams; production keeps the canonical endpoints and
 	// the OAuth client configured in settings.

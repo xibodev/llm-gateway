@@ -1,6 +1,7 @@
 package providers
 
 import (
+	"context"
 	"encoding/binary"
 	"encoding/json"
 	"errors"
@@ -10,10 +11,14 @@ import (
 	"net/url"
 	"regexp"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
+	"llmgw/internal/config"
+
 	"github.com/gorilla/websocket"
+	coreproviders "github.com/xibodev/llmgw-core/providers"
 )
 
 type trackingReadCloser struct {
@@ -26,56 +31,165 @@ func (body *trackingReadCloser) Close() error {
 	return nil
 }
 
+// edgeTTSAudioFrame is a binary audio message: the two-byte big-endian
+// length of its headers, the headers, then the audio.
+func edgeTTSAudioFrame(audio string) []byte {
+	headers := "X-RequestId:abc\r\nContent-Type:audio/mpeg\r\nPath:audio\r\n"
+	frame := make([]byte, 2, 2+len(headers)+len(audio))
+	binary.BigEndian.PutUint16(frame, uint16(len(headers)))
+	return append(append(frame, headers...), audio...)
+}
+
+// edgeTTSHandshake is how the fake service answers one dial: a refusal
+// with its response, or, with a nil err, a connection.
+type edgeTTSHandshake struct {
+	response *http.Response
+	err      error
+}
+
+// edgeTTSFake is an in-memory Edge TTS service behind core's dialer seam.
+// Each dial takes the next queued handshake and accepts once none is left.
+// An accepted connection records the text frames written to it and answers
+// with the audio and turn.end, or, when broken, with a failed read.
+type edgeTTSFake struct {
+	mu         sync.Mutex
+	handshakes []edgeTTSHandshake
+	urls       []string
+	frames     [][]string
+	audio      string
+	broken     bool
+}
+
+func (f *edgeTTSFake) dial(_ context.Context, rawURL string, _ http.Header, subprotocols []string) (coreproviders.WebSocketConn, *http.Response, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.urls = append(f.urls, rawURL)
+	if len(subprotocols) != 1 || subprotocols[0] != "synthesize" {
+		return nil, nil, errors.New("the synthesize subprotocol was not offered")
+	}
+	if len(f.handshakes) > 0 {
+		handshake := f.handshakes[0]
+		f.handshakes = f.handshakes[1:]
+		if handshake.err != nil {
+			return nil, handshake.response, handshake.err
+		}
+	}
+	f.frames = append(f.frames, nil)
+	return &edgeTTSFakeConn{fake: f, index: len(f.frames) - 1}, nil, nil
+}
+
+type edgeTTSFakeConn struct {
+	fake  *edgeTTSFake
+	index int
+	reads int
+}
+
+func (c *edgeTTSFakeConn) WriteText(_ context.Context, data []byte) error {
+	c.fake.mu.Lock()
+	defer c.fake.mu.Unlock()
+	c.fake.frames[c.index] = append(c.fake.frames[c.index], string(data))
+	return nil
+}
+
+func (c *edgeTTSFakeConn) Read(context.Context) (int, []byte, error) {
+	c.reads++
+	switch {
+	case c.fake.broken:
+		return 0, nil, io.ErrUnexpectedEOF
+	case c.reads == 1:
+		return coreproviders.WebSocketBinaryMessage, edgeTTSAudioFrame(c.fake.audio), nil
+	case c.reads == 2:
+		return coreproviders.WebSocketTextMessage, []byte("X-RequestId:abc\r\nPath:turn.end\r\n\r\n{}"), nil
+	}
+	return 0, nil, io.ErrUnexpectedEOF
+}
+
+func (c *edgeTTSFakeConn) Close() error { return nil }
+
+// edgeTTSFixture returns the provider at base over the fake service, with a
+// clock stopped at now.
+func edgeTTSFixture(t *testing.T, fake *edgeTTSFake, base, token, voice string, now time.Time) *EdgeTTSProvider {
+	t.Helper()
+	provider, err := newEdgeTTS(coreproviders.EdgeTTSConfig{
+		Dial: fake.dial, BaseURL: base, DefaultVoice: voice, Timeout: time.Second,
+		Now: func() time.Time { return now },
+	}, token)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return provider
+}
+
+// Every dial is signed: the access token, a Sec-MS-GEC signature of upper-
+// case SHA-256 hex, its version and a connection ID. An explicit http://
+// base opts into plaintext; any other uses TLS.
 func TestNewEdgeTTSDefaultsAndOverrides(t *testing.T) {
-	defaults := NewEdgeTTS("", "", "", 0)
-	if defaults.base != edgeTTSDefaultBase || defaults.token != edgeTTSDefaultToken || defaults.voice != edgeTTSDefaultVoice {
-		t.Fatalf("defaults not applied: %+v", defaults)
-	}
-	if defaults.insecure {
-		t.Fatalf("default transport must be TLS")
-	}
-	overridden := NewEdgeTTS("https://relay.example.com/tts/", "custom-token", "en-GB-SoniaNeural", 5)
-	if overridden.base != "relay.example.com/tts" || overridden.token != "custom-token" || overridden.voice != "en-GB-SoniaNeural" {
-		t.Fatalf("overrides not applied: %+v", overridden)
-	}
-	insecure := NewEdgeTTS("http://127.0.0.1:9999/base", "", "", 0)
-	if !insecure.insecure || insecure.base != "127.0.0.1:9999/base" {
-		t.Fatalf("insecure base not detected: %+v", insecure)
+	for _, tc := range []struct {
+		base, token, voice      string
+		scheme, host, path      string
+		wantVoice, wantOverride string
+	}{
+		{scheme: "wss", path: "/tts/cognitiveservices/websocket/v1", wantVoice: "en-US-EmmaMultilingualNeural"},
+		{base: "https://relay.example.com/tts/", token: " custom-token ", voice: "en-GB-SoniaNeural",
+			scheme: "wss", host: "relay.example.com", path: "/tts/websocket/v1", wantVoice: "en-GB-SoniaNeural", wantOverride: "custom-token"},
+		{base: "http://127.0.0.1:9999/base", scheme: "ws", host: "127.0.0.1:9999", path: "/base/websocket/v1", wantVoice: "en-US-EmmaMultilingualNeural"},
+	} {
+		fake := &edgeTTSFake{audio: "MP3"}
+		provider := edgeTTSFixture(t, fake, tc.base, tc.token, tc.voice, time.Now())
+		if _, _, err := provider.Synthesize("", "hi", ""); err != nil || provider.DefaultVoice() != tc.wantVoice {
+			t.Fatalf("%q: err=%v default voice=%q", tc.base, err, provider.DefaultVoice())
+		}
+		dialed, err := url.Parse(fake.urls[0])
+		if err != nil || dialed.Scheme != tc.scheme || tc.host != "" && dialed.Host != tc.host || dialed.Host == "" || dialed.Path != tc.path {
+			t.Fatalf("%q: dialed %s", tc.base, fake.urls[0])
+		}
+		query := dialed.Query()
+		if key := query.Get("Ocp-Apim-Subscription-Key"); key == "" || tc.wantOverride != "" && key != tc.wantOverride || tc.wantOverride == "" && key == "custom-token" {
+			t.Fatalf("%q: access token %q", tc.base, key)
+		}
+		if !regexp.MustCompile(`^[0-9A-F]{64}$`).MatchString(query.Get("Sec-MS-GEC")) || query.Get("Sec-MS-GEC-Version") == "" || query.Get("ConnectionId") == "" {
+			t.Fatalf("%q: unsigned dial %s", tc.base, fake.urls[0])
+		}
+		if ssml := fake.frames[0][1]; !strings.Contains(ssml, "<voice name='"+tc.wantVoice+"'>") || !strings.Contains(ssml, "rate='+0%'") {
+			t.Fatalf("%q: ssml %q", tc.base, ssml)
+		}
 	}
 }
 
-func TestEdgeTTSSecurityTokenShape(t *testing.T) {
-	provider := NewEdgeTTS("", "", "", 0)
-	token := provider.securityToken()
-	if !regexp.MustCompile(`^[0-9A-F]{64}$`).MatchString(token) {
-		t.Fatalf("security token is not upper-hex sha256: %q", token)
+// Long text is escaped and spoken in chunks of at most 4096 bytes, each over
+// its own connection, split at whitespace and never inside an entity; the
+// audio of the chunks is joined.
+func TestEdgeTTSSpeaksLongTextInChunks(t *testing.T) {
+	fake := &edgeTTSFake{audio: "MP3|"}
+	provider := edgeTTSFixture(t, fake, "", "", "", time.Now())
+	text := strings.Repeat("hello world ", 400) + "you & me" + strings.Repeat(" tail text", 300)
+	audio, format, err := provider.Synthesize("en-US-TestNeural", text, "-25%")
+	if err != nil || format != coreproviders.EdgeTTSOutputFormat {
+		t.Fatalf("format=%q err=%v", format, err)
 	}
-}
-
-func TestEdgeTTSSplitPreservesEntitiesAndLength(t *testing.T) {
-	text := strings.Repeat("hello world ", 40) + "&amp;" + strings.Repeat(" tail text", 30)
-	chunks := edgeTTSSplit(text, 128)
-	var rebuilt []string
-	for _, chunk := range chunks {
-		if len(chunk) > 128 {
-			t.Fatalf("chunk exceeds limit: %d bytes", len(chunk))
+	var spoken []string
+	for _, frames := range fake.frames {
+		ssml := frames[1]
+		start := strings.Index(ssml, "volume='+0%'>") + len("volume='+0%'>")
+		chunk := ssml[start:strings.Index(ssml, "</prosody>")]
+		if len(chunk) > 4096 || !strings.Contains(ssml, "rate='-25%'") {
+			t.Fatalf("chunk of %d bytes in %q", len(chunk), ssml[:200])
 		}
-		if strings.Count(chunk, "&") != strings.Count(chunk, ";") && strings.Contains(chunk, "&") {
-			// A chunk containing a bare & without its ; was split mid-entity.
-			if !strings.Contains(chunk, "&amp;") {
-				t.Fatalf("entity split across chunks: %q", chunk)
-			}
-		}
-		rebuilt = append(rebuilt, chunk)
+		spoken = append(spoken, chunk)
 	}
-	joined := strings.Join(rebuilt, " ")
-	if !strings.Contains(joined, "&amp;") {
-		t.Fatalf("entity lost during split")
+	if len(spoken) < 2 || string(audio) != strings.Repeat("MP3|", len(spoken)) {
+		t.Fatalf("chunks=%d audio=%q", len(spoken), audio)
+	}
+	if joined := strings.Join(spoken, " "); !strings.Contains(joined, "you &amp; me") || joined != strings.ReplaceAll(strings.TrimSpace(text), "&", "&amp;") {
+		t.Fatal("chunks did not rebuild the escaped text")
 	}
 }
 
 func TestEdgeTTSCompleteRefusesChat(t *testing.T) {
-	provider := NewEdgeTTS("", "", "", 0)
+	provider, err := NewEdgeTTS("", "", "", 0)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if _, err := provider.Complete("voice", nil, nil); err == nil || !strings.Contains(err.Error(), "/v1/audio/speech") {
 		t.Fatalf("Complete should redirect to the speech endpoint, got %v", err)
 	}
@@ -83,8 +197,8 @@ func TestEdgeTTSCompleteRefusesChat(t *testing.T) {
 
 // mockEdgeTTSService speaks the Edge read-aloud websocket protocol: it expects
 // speech.config and ssml text frames, then streams binary audio frames and a
-// turn.end marker.
-func mockEdgeTTSService(t *testing.T, audioPayload []byte) (*httptest.Server, *string) {
+// turn.end marker. A silent service upgrades and then never answers.
+func mockEdgeTTSService(t *testing.T, audioPayload []byte, silent bool) (*httptest.Server, *string) {
 	t.Helper()
 	upgrader := websocket.Upgrader{
 		Subprotocols: []string{"synthesize"},
@@ -135,13 +249,12 @@ func mockEdgeTTSService(t *testing.T, audioPayload []byte) (*httptest.Server, *s
 			return
 		}
 		receivedSSML = string(ssml)
-		// binary audio frame: 2-byte BE header length + headers + payload
-		headers := []byte("X-RequestId:abc\r\nContent-Type:audio/mpeg\r\nPath:audio\r\n")
-		frame := make([]byte, 2+len(headers)+len(audioPayload))
-		binary.BigEndian.PutUint16(frame[:2], uint16(len(headers)))
-		copy(frame[2:], headers)
-		copy(frame[2+len(headers):], audioPayload)
-		if err := connection.WriteMessage(websocket.BinaryMessage, frame); err != nil {
+		if silent {
+			// Wait for the client to give up and close the connection.
+			_, _, _ = connection.ReadMessage()
+			return
+		}
+		if err := connection.WriteMessage(websocket.BinaryMessage, edgeTTSAudioFrame(string(audioPayload))); err != nil {
 			t.Errorf("write audio: %v", err)
 			return
 		}
@@ -155,11 +268,15 @@ func mockEdgeTTSService(t *testing.T, audioPayload []byte) (*httptest.Server, *s
 	return server, &receivedSSML
 }
 
+// The gorilla dialer and connection carry core's Edge TTS end to end.
 func TestEdgeTTSSynthesizeAgainstMockService(t *testing.T) {
 	wantAudio := []byte("FAKE-MP3-BYTES")
-	server, receivedSSML := mockEdgeTTSService(t, wantAudio)
+	server, receivedSSML := mockEdgeTTSService(t, wantAudio, false)
 	base := strings.TrimPrefix(server.URL, "http://") + "/tts"
-	provider := NewEdgeTTS("http://"+base, "test-token", "en-US-TestNeural", 10)
+	provider, err := NewEdgeTTS("http://"+base, "test-token", "en-US-TestNeural", 10)
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	audio, format, err := provider.Synthesize("", "Hello <world> & friends", "+10%")
 	if err != nil {
@@ -168,7 +285,7 @@ func TestEdgeTTSSynthesizeAgainstMockService(t *testing.T) {
 	if string(audio) != string(wantAudio) {
 		t.Fatalf("audio = %q, want %q", audio, wantAudio)
 	}
-	if format != edgeTTSOutputFormat {
+	if format != "audio-24khz-48kbitrate-mono-mp3" {
 		t.Fatalf("format = %q", format)
 	}
 	if !strings.Contains(*receivedSSML, "en-US-TestNeural") || !strings.Contains(*receivedSSML, "rate='+10%'") {
@@ -179,15 +296,36 @@ func TestEdgeTTSSynthesizeAgainstMockService(t *testing.T) {
 	}
 
 	models := provider.ListModels()
-	if len(models) != 1 || models[0].ID != "en-US-TestNeural" {
+	if len(models) != 1 || models[0].ID != "en-US-TestNeural" || models[0].Vendor != "microsoft" || models[0].Label != "Test voice" {
 		t.Fatalf("voice catalog: %+v", models)
 	}
 	if surfaces := models[0].SupportedSurfaces; len(surfaces) != 1 || surfaces[0] != "/v1/audio/speech" {
 		t.Fatalf("supported surfaces: %+v", surfaces)
 	}
+	if capabilities := models[0].Capabilities; capabilities["tts"] != true || capabilities["audio"] != true {
+		t.Fatalf("capabilities: %+v", capabilities)
+	}
 }
 
-func TestEdgeTTSDialHTTPFailuresAreClosedAndSafe(t *testing.T) {
+// A read waits no longer than the exchange's deadline: a service that never
+// answers fails the synthesis at the timeout, as a websocket that broke.
+func TestEdgeTTSExchangeEndsAtTheTimeout(t *testing.T) {
+	server, _ := mockEdgeTTSService(t, nil, true)
+	provider, err := NewEdgeTTS("http://"+strings.TrimPrefix(server.URL, "http://")+"/tts", "test-token", "", 0.2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	started := time.Now()
+	_, _, err = provider.Synthesize("", "hello", "")
+	if !IsInvocation(err) || !InvocationRetryable(err) || UpstreamStatus(err) != 0 || time.Since(started) > 5*time.Second {
+		t.Fatalf("err=%v after %v", err, time.Since(started))
+	}
+}
+
+// A refused handshake keeps its status, closes the response the dialer
+// returned, and leaks neither the token, the signature, the connection ID
+// nor the host; the Retry-After the client never read stays unread.
+func TestEdgeTTSHandshakeRefusalsAreClosedAndSafe(t *testing.T) {
 	const (
 		subscriptionKey = "llmgw_edge_subscription_secret_123456"
 		gecSignature    = "ABCDEF0123456789ABCDEF0123456789ABCDEF0123456789ABCDEF0123456789"
@@ -196,20 +334,19 @@ func TestEdgeTTSDialHTTPFailuresAreClosedAndSafe(t *testing.T) {
 	for _, status := range []int{http.StatusUnauthorized, http.StatusTooManyRequests} {
 		t.Run(http.StatusText(status), func(t *testing.T) {
 			body := &trackingReadCloser{}
-			provider := NewEdgeTTS("https://speech.example.invalid/tts", subscriptionKey, "", 1)
-			provider.dialWebsocket = func(rawURL string, _ http.Header) (*websocket.Conn, *http.Response, error) {
-				if !strings.Contains(rawURL, "Ocp-Apim-Subscription-Key="+subscriptionKey) ||
-					!strings.Contains(rawURL, "Sec-MS-GEC=") || !strings.Contains(rawURL, "ConnectionId=") {
-					t.Fatalf("dial URL did not carry required protocol parameters")
-				}
-				return nil, &http.Response{StatusCode: status, Body: body}, errors.New(
-					"websocket: bad handshake: " + rawURL + "&Sec-MS-GEC=" + gecSignature + "&ConnectionId=" + connectionID,
-				)
-			}
+			refusal := errors.New("websocket: bad handshake: https://speech.example.invalid/tts?Ocp-Apim-Subscription-Key=" +
+				subscriptionKey + "&Sec-MS-GEC=" + gecSignature + "&ConnectionId=" + connectionID)
+			fake := &edgeTTSFake{handshakes: []edgeTTSHandshake{{
+				response: &http.Response{StatusCode: status, Header: http.Header{"Retry-After": {"7"}}, Body: body}, err: refusal,
+			}}}
+			provider := edgeTTSFixture(t, fake, "https://speech.example.invalid/tts", subscriptionKey, "", time.Now())
 
-			_, err := provider.dial()
-			if err == nil || !IsInvocation(err) || UpstreamStatus(err) != status {
-				t.Fatalf("dial error = %v, invocation=%v status=%d", err, IsInvocation(err), UpstreamStatus(err))
+			_, _, err := provider.Synthesize("", "hello", "")
+			if !IsInvocation(err) || UpstreamStatus(err) != status || InvocationRetryAfter(err) != "" {
+				t.Fatalf("err=%v invocation=%v status=%d", err, IsInvocation(err), UpstreamStatus(err))
+			}
+			if len(fake.urls) != 1 || !strings.Contains(fake.urls[0], "Ocp-Apim-Subscription-Key="+subscriptionKey) {
+				t.Fatalf("dials=%d, want one carrying the access token", len(fake.urls))
 			}
 			if body.closeCount != 1 {
 				t.Fatalf("HTTP %d response body close count = %d, want 1", status, body.closeCount)
@@ -224,119 +361,142 @@ func TestEdgeTTSDialHTTPFailuresAreClosedAndSafe(t *testing.T) {
 	}
 }
 
-func TestEdgeTTSDialRetriesForbiddenOnceAndClosesResponses(t *testing.T) {
+// A handshake refused with 403 teaches the provider's core instance the
+// service's clock from its Date, and the dial is repeated once with a new
+// signature and connection ID. The provider keeps that instance, so its
+// next request is signed with the learned clock and needs no refusal.
+func TestEdgeTTSLearnsTheClockSkewOnceAndKeepsIt(t *testing.T) {
+	now := time.Date(2026, time.March, 4, 5, 6, 7, 0, time.UTC)
+	forbidden := func(body io.ReadCloser, date time.Time) edgeTTSHandshake {
+		return edgeTTSHandshake{
+			response: &http.Response{StatusCode: http.StatusForbidden, Header: http.Header{"Date": {date.Format(time.RFC1123)}}, Body: body},
+			err:      errors.New("websocket: bad handshake"),
+		}
+	}
 	t.Run("success", func(t *testing.T) {
 		firstBody := &trackingReadCloser{}
-		// A fresh Runtime starts without learned clock skew.
-		InstallForTests(t)
-		upgrader := websocket.Upgrader{
-			Subprotocols: []string{"synthesize"},
-			CheckOrigin:  func(*http.Request) bool { return true },
+		fake := &edgeTTSFake{audio: "MP3", handshakes: []edgeTTSHandshake{forbidden(firstBody, now.Add(time.Hour))}}
+		provider := edgeTTSFixture(t, fake, "https://speech.example.invalid/tts", "test-token", "", now)
+		for request := 0; request < 2; request++ {
+			if _, _, err := provider.Synthesize("", "hello", ""); err != nil {
+				t.Fatalf("request %d: %v", request, err)
+			}
 		}
-		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			connection, err := upgrader.Upgrade(w, r, nil)
+		if len(fake.urls) != 3 || firstBody.closeCount != 1 {
+			t.Fatalf("dials=%d first body closes=%d, want 3 and 1", len(fake.urls), firstBody.closeCount)
+		}
+		queries := make([]url.Values, len(fake.urls))
+		for index, rawURL := range fake.urls {
+			parsed, err := url.Parse(rawURL)
 			if err != nil {
-				t.Errorf("upgrade: %v", err)
-				return
-			}
-			defer connection.Close()
-			_, _, _ = connection.ReadMessage()
-		}))
-		t.Cleanup(server.Close)
-		provider := NewEdgeTTS(server.URL+"/tts", "test-token", "", 10)
-		realDialer := websocket.Dialer{Subprotocols: []string{"synthesize"}}
-		var dialURLs []string
-		provider.dialWebsocket = func(rawURL string, header http.Header) (*websocket.Conn, *http.Response, error) {
-			dialURLs = append(dialURLs, rawURL)
-			if len(dialURLs) == 1 {
-				return nil, &http.Response{
-					StatusCode: http.StatusForbidden,
-					Header:     http.Header{"Date": []string{time.Now().UTC().Add(time.Hour).Format(time.RFC1123)}},
-					Body:       firstBody,
-				}, errors.New("websocket: bad handshake")
-			}
-			return realDialer.Dial(rawURL, header)
-		}
-
-		connection, err := provider.dial()
-		if err != nil {
-			t.Fatalf("dial after skew retry: %v", err)
-		}
-		connection.Close()
-		if len(dialURLs) != 2 {
-			t.Fatalf("dial attempts = %d, want 2", len(dialURLs))
-		}
-		if firstBody.closeCount != 1 {
-			t.Fatalf("first response body close count = %d, want 1", firstBody.closeCount)
-		}
-		queries := make([]url.Values, len(dialURLs))
-		for index, rawURL := range dialURLs {
-			parsed, parseErr := url.Parse(rawURL)
-			if parseErr != nil {
-				t.Fatalf("parse dial URL %d: %v", index+1, parseErr)
+				t.Fatalf("parse dial URL %d: %v", index+1, err)
 			}
 			queries[index] = parsed.Query()
-			for _, key := range []string{"Ocp-Apim-Subscription-Key", "Sec-MS-GEC", "Sec-MS-GEC-Version", "ConnectionId"} {
-				if queries[index].Get(key) == "" {
-					t.Fatalf("dial URL %d missing %s", index+1, key)
-				}
+		}
+		if queries[0].Get("Sec-MS-GEC") == queries[1].Get("Sec-MS-GEC") || queries[0].Get("ConnectionId") == queries[1].Get("ConnectionId") {
+			t.Fatalf("retry was not signed anew: %q", fake.urls[:2])
+		}
+		if queries[2].Get("Sec-MS-GEC") != queries[1].Get("Sec-MS-GEC") {
+			t.Fatal("the next request did not keep the learned clock skew")
+		}
+		for _, key := range []string{"Ocp-Apim-Subscription-Key", "Sec-MS-GEC-Version"} {
+			if queries[0].Get(key) == "" || queries[0].Get(key) != queries[1].Get(key) || queries[1].Get(key) != queries[2].Get(key) {
+				t.Fatalf("stable signing input %s changed across dials", key)
 			}
-		}
-		if queries[0].Encode() == queries[1].Encode() {
-			t.Fatalf("retry query was not rebuilt: %q", queries[0].Encode())
-		}
-		if queries[0].Get("Sec-MS-GEC") == queries[1].Get("Sec-MS-GEC") {
-			t.Fatalf("retry Sec-MS-GEC did not reflect induced clock skew: %q", queries[0].Get("Sec-MS-GEC"))
-		}
-		if queries[0].Get("Ocp-Apim-Subscription-Key") != queries[1].Get("Ocp-Apim-Subscription-Key") ||
-			queries[0].Get("Sec-MS-GEC-Version") != queries[1].Get("Sec-MS-GEC-Version") {
-			t.Fatalf("stable signing inputs changed across retry")
 		}
 	})
 
 	t.Run("final forbidden", func(t *testing.T) {
 		bodies := []*trackingReadCloser{{}, {}}
-		provider := NewEdgeTTS("https://speech.example.invalid/tts", "secret-token", "", 1)
-		attempts := 0
-		provider.dialWebsocket = func(string, http.Header) (*websocket.Conn, *http.Response, error) {
-			body := bodies[attempts]
-			attempts++
-			return nil, &http.Response{StatusCode: http.StatusForbidden, Body: body}, errors.New("unsafe URL")
+		fake := &edgeTTSFake{handshakes: []edgeTTSHandshake{forbidden(bodies[0], now), forbidden(bodies[1], now)}}
+		provider := edgeTTSFixture(t, fake, "https://speech.example.invalid/tts", "secret-token", "", now)
+		_, _, err := provider.Synthesize("", "hello", "")
+		if UpstreamStatus(err) != http.StatusForbidden || InvocationRetryable(err) {
+			t.Fatalf("err=%v status=%d", err, UpstreamStatus(err))
 		}
-
-		_, err := provider.dial()
-		if err == nil || UpstreamStatus(err) != http.StatusForbidden {
-			t.Fatalf("dial error = %v, status=%d", err, UpstreamStatus(err))
-		}
-		if attempts != 2 || bodies[0].closeCount != 1 || bodies[1].closeCount != 1 {
-			t.Fatalf("attempts=%d body close counts=%d,%d; want 2 and 1,1", attempts, bodies[0].closeCount, bodies[1].closeCount)
+		if len(fake.urls) != 2 || bodies[0].closeCount != 1 || bodies[1].closeCount != 1 {
+			t.Fatalf("dials=%d body close counts=%d,%d; want 2 and 1,1", len(fake.urls), bodies[0].closeCount, bodies[1].closeCount)
 		}
 	})
 }
 
-func TestEdgeTTSDialTransportFailureIsGeneric(t *testing.T) {
-	provider := NewEdgeTTS("https://speech.example.invalid/tts", "secret-token", "", 1)
-	provider.dialWebsocket = func(rawURL string, _ http.Header) (*websocket.Conn, *http.Response, error) {
-		return nil, nil, errors.New("transport failed for " + rawURL)
-	}
-
-	_, err := provider.dial()
-	if err == nil || !IsInvocation(err) || UpstreamStatus(err) != 0 {
+// A websocket that cannot be opened, or that breaks, may be repeated, and
+// the error quotes nothing of the dial, whose URL carries the token.
+func TestEdgeTTSTransportFailuresAreGeneric(t *testing.T) {
+	fake := &edgeTTSFake{handshakes: []edgeTTSHandshake{{err: errors.New("transport failed for wss://speech.example.invalid/tts?Ocp-Apim-Subscription-Key=secret-token")}}}
+	provider := edgeTTSFixture(t, fake, "https://speech.example.invalid/tts", "secret-token", "", time.Now())
+	_, _, err := provider.Synthesize("", "hello", "")
+	if !IsInvocation(err) || UpstreamStatus(err) != 0 || !InvocationRetryable(err) {
 		t.Fatalf("dial error = %v, invocation=%v status=%d", err, IsInvocation(err), UpstreamStatus(err))
 	}
-	if got, want := err.Error(), "edge_tts: websocket transport failed"; got != want {
+	if got, want := err.Error(), "edge_tts: Edge TTS could not open its websocket"; got != want {
 		t.Fatalf("error = %q, want %q", got, want)
+	}
+	fake.broken = true
+	if _, _, err := provider.Synthesize("", "hello", ""); !InvocationRetryable(err) || !InvocationCircuitFailure(err) || strings.Contains(err.Error(), "secret-token") {
+		t.Fatalf("broken socket: err=%v", err)
+	}
+}
+
+// What core refuses before anything is sent fails as the client failed it:
+// text with nothing to speak is a plain invocation failure, an access token
+// the URLs cannot carry a configuration error, and a canceled request its
+// context's error.
+func TestEdgeTTSRefusalsBeforeSending(t *testing.T) {
+	fake := &edgeTTSFake{audio: "MP3"}
+	provider := edgeTTSFixture(t, fake, "", "", "", time.Now())
+	if _, _, err := provider.Synthesize("", "\x01\x02", ""); !IsInvocation(err) || UpstreamStatus(err) != 0 || InvocationRetryable(err) || InvocationCircuitFailure(err) {
+		t.Fatalf("empty text: err=%v", err)
+	}
+	if _, _, err := edgeTTSFixture(t, fake, "", "not a token", "", time.Now()).Synthesize("", "hello", ""); !IsConfig(err) {
+		t.Fatalf("unusable token: err=%v", err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if _, _, err := provider.SynthesizeContext(ctx, "", "hello", ""); !errors.Is(err, context.Canceled) {
+		t.Fatalf("canceled: err=%v", err)
+	}
+	if len(fake.urls) != 0 {
+		t.Fatalf("refused requests dialed %d times", len(fake.urls))
+	}
+	if _, err := NewEdgeTTS("https://relay.example.com/tts?query=1", "", "", 0); !IsConfig(err) {
+		t.Fatalf("a base with a query built a provider: err=%v", err)
+	}
+}
+
+// The provider cache keeps one provider per instance and caller, so its core
+// instance, and the clock skew that instance learns, serve every request.
+func TestEdgeTTSProviderIsCachedPerInstance(t *testing.T) {
+	runtime := InstallForTests(t)
+	old := config.Get().Providers
+	config.Update(func(s *config.Settings) {
+		s.Providers = map[string]*config.ProviderConfig{"edge": {Type: "edge_tts"}}
+	})
+	t.Cleanup(func() { config.Update(func(s *config.Settings) { s.Providers = old }) })
+	first, err := runtime.GetProvider("edge")
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := runtime.GetProvider("edge")
+	if err != nil || first != second {
+		t.Fatalf("the provider was rebuilt: err=%v", err)
+	}
+	if _, ok := AsSpeechSynthesizer(first); !ok {
+		t.Fatalf("provider=%T, want a speech synthesizer", first)
 	}
 }
 
 func TestAsSpeechSynthesizerUnwrapsResilientDecorator(t *testing.T) {
-	inner := NewEdgeTTS("", "", "", 0)
+	inner, err := NewEdgeTTS("", "", "", 0)
+	if err != nil {
+		t.Fatal(err)
+	}
 	wrapped := &ResilientProvider{inner: inner, name: "edge_tts"}
 	synthesizer, ok := AsSpeechSynthesizer(wrapped)
 	if !ok {
 		t.Fatalf("wrapped edge_tts not detected as speech synthesizer")
 	}
-	if synthesizer.DefaultVoice() != edgeTTSDefaultVoice {
+	if synthesizer.DefaultVoice() != "en-US-EmmaMultilingualNeural" {
 		t.Fatalf("unwrapped synthesizer lost configuration")
 	}
 	if _, ok := AsSpeechSynthesizer(EchoProvider{}); ok {

@@ -57,14 +57,14 @@ func (rt *Runtime) instantiate(
 		}
 		return rt.newGoogleProvider(providerID, cfg, caller, legacy)
 	case "edge_tts":
-		// The access token is optional: a baked-in public default applies.
+		// The access token is optional: core's public default applies.
 		// resolveAPIKey still runs so a stored override (config secret or
 		// encrypted connection) wins when present.
 		token, err := resolveAPIKey(providerID, cfg, caller)
 		if err != nil {
 			token = ""
 		}
-		return NewEdgeTTS(cfg.BaseURL, token, cfg.DefaultVoice, cfg.TimeoutOr(60)), nil
+		return NewEdgeTTS(cfg.BaseURL, token, cfg.DefaultVoice, cfg.TimeoutOr(60))
 	case "openai_compatible", "openai", "litellm":
 		if codexInstance(providerID, cfg) {
 			if strings.TrimSpace(callerPrincipalID(caller)) == "" {
