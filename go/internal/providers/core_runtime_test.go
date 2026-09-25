@@ -27,11 +27,15 @@ var coreVerticalCases = map[string]struct {
 	"vertex":           {&config.ProviderConfig{Type: "Vertex_AI"}, googleCoreType},
 	"zen":              {&config.ProviderConfig{Type: "openai_compatible", RegistryID: "opencode_zen"}, zenCoreType},
 	"zen by URL":       {&config.ProviderConfig{Type: "litellm", BaseURL: "https://opencode.ai/zen/v1"}, zenCoreType},
-	"bedrock at zen":   {&config.ProviderConfig{Type: "bedrock", BaseURL: "https://opencode.ai/zen/v1"}, ""},
-	"plain":            {&config.ProviderConfig{Type: "openai_compatible", BaseURL: "https://api.example.test/v1"}, ""},
+	"bedrock at zen":   {&config.ProviderConfig{Type: "bedrock", BaseURL: "https://opencode.ai/zen/v1"}, bedrockCoreType},
+	"bedrock":          {&config.ProviderConfig{Type: " Bedrock ", Region: "eu-central-1"}, bedrockCoreType},
+	"plain":            {&config.ProviderConfig{Type: "openai_compatible", BaseURL: "https://api.example.test/v1"}, openAICompatibleCoreType},
+	"openai":           {&config.ProviderConfig{Type: "OpenAI", RegistryID: "openai"}, openAICompatibleCoreType},
+	"litellm":          {&config.ProviderConfig{Type: "litellm", BaseURL: "http://127.0.0.1:4000"}, openAICompatibleCoreType},
+	"pollinations":     {&config.ProviderConfig{Type: "openai_compatible", RegistryID: "pollinations"}, openAICompatibleCoreType},
 	"copilot":          {&config.ProviderConfig{Type: "github_copilot"}, copilotCoreType},
 	"copilot by type":  {&config.ProviderConfig{Type: " GitHub_Copilot "}, copilotCoreType},
-	"copilot registry": {&config.ProviderConfig{Type: "openai_compatible", RegistryID: "github_copilot"}, ""},
+	"copilot registry": {&config.ProviderConfig{Type: "openai_compatible", RegistryID: "github_copilot"}, openAICompatibleCoreType},
 	"anthropic":        {&config.ProviderConfig{Type: "anthropic"}, anthropicCoreType},
 	"anthropic spaced": {&config.ProviderConfig{Type: " Anthropic ", RegistryID: "custom_anthropic"}, anthropicCoreType},
 	"azure":            {&config.ProviderConfig{Type: "azure_openai", RegistryID: "azure_openai"}, azureCoreType},
@@ -60,14 +64,16 @@ func TestCoreVerticalsServeDisjointInstances(t *testing.T) {
 			t.Errorf("%s: served by %q, want %q", instance, name, fixture.want)
 		}
 	}
-	if _, err := runtime.coreProvider(settings, "plain"); !IsConfig(err) {
+	if _, err := runtime.coreProvider(settings, "edge tts"); !IsConfig(err) {
 		t.Fatalf("an instance no type serves built a core provider: err=%v", err)
 	}
-	if refresh := runtime.coreRefresh(settings, "plain"); refresh != nil {
+	if refresh := runtime.coreRefresh(settings, "edge tts"); refresh != nil {
 		t.Fatal("an instance no type serves has a refresh")
 	}
-	if refresh := runtime.coreRefresh(settings, "zen"); refresh != nil {
-		t.Fatal("a Zen API key would refresh")
+	for _, instance := range []string{"zen", "plain", "bedrock"} {
+		if refresh := runtime.coreRefresh(settings, instance); refresh != nil {
+			t.Fatalf("an API key of %s would refresh", instance)
+		}
 	}
 	// An instance without a base URL of its own is Zen when the default is.
 	settings.OpenAICompatibleBaseURL = "https://opencode.ai/zen/v1"
@@ -77,6 +83,10 @@ func TestCoreVerticalsServeDisjointInstances(t *testing.T) {
 	settings.Providers["plain-default"] = &config.ProviderConfig{Type: "openai_compatible"}
 	if name, _, _ := runtime.vertical(settings, "plain-default"); name != zenCoreType {
 		t.Fatalf("an instance at the Zen default is served by %q", name)
+	}
+	settings.OpenAICompatibleBaseURL = "https://api.example.test/v1"
+	if name, _, _ := runtime.vertical(settings, "plain-default"); name != openAICompatibleCoreType {
+		t.Fatalf("an instance at another default is served by %q", name)
 	}
 }
 
@@ -105,8 +115,9 @@ func TestCoreCredentialsDispatchesByType(t *testing.T) {
 	}
 	settings := config.Defaults()
 	settings.Providers = map[string]*config.ProviderConfig{
-		"codex":   {Type: "openai_compatible", RegistryID: "openai_codex"},
-		"fixture": {Type: "openai_compatible"},
+		"codex": {Type: "openai_compatible", RegistryID: "openai_codex"},
+		// A type no registered vertical serves, so only the fixture's does.
+		"fixture": {Type: "fixture"},
 	}
 	credentials := coreCredentials{runtime: runtime, settings: coreruntime.NewMemorySettings(settings)}
 

@@ -33,14 +33,16 @@ type coreVertical struct {
 // Runtime serves, one line per type. The Runtime holds what it returns.
 func (rt *Runtime) coreVerticals() map[string]coreVertical {
 	return map[string]coreVertical{
-		"openai_codex":       rt.codexCoreVertical(),
-		"google_antigravity": rt.antigravityCoreVertical(),
-		zenCoreType:          rt.zenCoreVertical(),
-		copilotCoreType:      rt.copilotCoreVertical(),
-		anthropicCoreType:    rt.anthropicCoreVertical(),
-		azureCoreType:        rt.azureCoreVertical(),
-		googleCoreType:       rt.googleCoreVertical(),
-		ollamaCoreType:       rt.ollamaCoreVertical(),
+		"openai_codex":           rt.codexCoreVertical(),
+		"google_antigravity":     rt.antigravityCoreVertical(),
+		zenCoreType:              rt.zenCoreVertical(),
+		copilotCoreType:          rt.copilotCoreVertical(),
+		anthropicCoreType:        rt.anthropicCoreVertical(),
+		azureCoreType:            rt.azureCoreVertical(),
+		googleCoreType:           rt.googleCoreVertical(),
+		ollamaCoreType:           rt.ollamaCoreVertical(),
+		openAICompatibleCoreType: rt.openAICompatibleCoreVertical(),
+		bedrockCoreType:          rt.bedrockCoreVertical(),
 	}
 }
 
