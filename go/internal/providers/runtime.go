@@ -68,9 +68,9 @@ type Runtime struct {
 func NewRuntime() *Runtime { return newRuntime(iamCredentialStore) }
 
 // newRuntime returns a Runtime that opens the stores of its credentials with
-// open, once per operation: the OAuth store of Codex and Antigravity with
-// oauth set, and any other vertical's without (see iamCredentialStore).
-// Tests pass in-memory stores.
+// open, once per operation: the OAuth store of Codex and Antigravity and
+// Copilot's store with oauth set, and any other vertical's without (see
+// iamCredentialStore). Tests pass in-memory stores.
 func newRuntime(open func(oauth bool) (core.CredentialStore, error)) *Runtime {
 	runtime := &Runtime{}
 	runtime.instances.instances = map[string]Provider{}
