@@ -149,8 +149,24 @@ func TestCredentialStoreMapsNonOAuthKinds(t *testing.T) {
 		t.Fatal(err)
 	}
 	setup, _, _ := ActiveProviderConnection(system.ID, "fixture-anthropic")
-	if record, err := store.Load(ctx, setup.ID); err != nil || record.TokenType != "setup_token" ||
+	record, err = store.Load(ctx, setup.ID)
+	if err != nil || record.TokenType != core.TokenTypeAnthropicSetupToken ||
 		record.AccessToken != "fixture-setup-token" {
 		t.Fatalf("setup token record=%s err=%v", record, err)
+	}
+	// Core's Anthropic reads a setup token from Token, under its own type.
+	if credential := core.CredentialFromRecord(setup.ID, record); credential.Token != "fixture-setup-token" ||
+		credential.APIKey != "" || credential.TokenType != core.TokenTypeAnthropicSetupToken {
+		t.Fatalf("setup token credential=%+v", credential)
+	}
+	// The inverse holds too: a setup-token record replaces the connection's
+	// secret, and an API-key record does not.
+	if _, err := store.ReplaceIfCurrent(ctx, setup.ID, record.Revision, core.APIKeyRecord("fixture-api-key-3")); err == nil ||
+		errors.Is(err, tokenstore.ErrConflict) {
+		t.Fatalf("an API key replaced a setup token: err=%v", err)
+	}
+	replaced := tokenstore.Record{AccessToken: "fixture-setup-token-2", TokenType: core.TokenTypeAnthropicSetupToken}
+	if _, err := store.ReplaceIfCurrent(ctx, setup.ID, record.Revision, replaced); err != nil {
+		t.Fatal(err)
 	}
 }

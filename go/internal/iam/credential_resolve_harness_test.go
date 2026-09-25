@@ -123,7 +123,7 @@ func assertRecordKind(t *testing.T, name, tokenType, kind string) {
 		if tokenType == core.TokenTypeAPIKey {
 			t.Fatalf("%s: OAuth credential loaded as an API key", name)
 		}
-	case tokenType != kind:
+	case tokenType != connectionTokenType(kind):
 		t.Fatalf("%s: kind %q loaded as token type %q", name, kind, tokenType)
 	}
 }

@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	anthropicauth "github.com/xibodev/llm-provider-auth/anthropic"
 	gcpauth "github.com/xibodev/llm-provider-auth/gcp"
 	"github.com/xibodev/llm-provider-auth/tokenstore"
 	core "github.com/xibodev/llmgw-core"
@@ -43,7 +44,7 @@ var errCredentialKindMismatch = errors.New("record does not match the connection
 // connectionRecord maps a decrypted connection secret to a record. OAuth
 // kinds hold an envelope; API keys become core.APIKeyRecord; any other kind,
 // such as a service-account key or a setup token, keeps its raw secret with
-// the kind as TokenType, so the consumer can tell how to use it.
+// the kind's token type, so the consumer can tell how to use it.
 func connectionRecord(kind, secret string) (tokenstore.Record, error) {
 	kind = strings.TrimSpace(kind)
 	switch {
@@ -56,8 +57,24 @@ func connectionRecord(kind, secret string) (tokenstore.Record, error) {
 		}
 		return envelopeRecord(envelope), nil
 	default:
-		return tokenstore.Record{AccessToken: secret, TokenType: kind}, nil
+		return tokenstore.Record{AccessToken: secret, TokenType: connectionTokenType(kind)}, nil
 	}
+}
+
+// connectionTokenType is the token type of a record of a connection of a
+// kind that is not OAuth. A setup token is the one kind whose name llmgw-core
+// spells differently: core's Anthropic reads a setup token only as
+// core.TokenTypeAnthropicSetupToken, and would refuse one of the connection's
+// kind. Every other kind is its own token type, a service-account key's
+// spelling being core's already.
+func connectionTokenType(kind string) string {
+	switch {
+	case strings.EqualFold(kind, core.TokenTypeAPIKey):
+		return core.TokenTypeAPIKey
+	case strings.EqualFold(kind, string(anthropicauth.CredentialSetupToken)):
+		return core.TokenTypeAnthropicSetupToken
+	}
+	return kind
 }
 
 // legacyCredentialRecord maps a provider_credentials secret. Those rows hold
@@ -70,7 +87,7 @@ func legacyCredentialRecord(kind, secret string) tokenstore.Record {
 	case isOAuthCredentialKind(kind):
 		return tokenstore.Record{AccessToken: secret}
 	default:
-		return tokenstore.Record{AccessToken: secret, TokenType: kind}
+		return tokenstore.Record{AccessToken: secret, TokenType: connectionTokenType(kind)}
 	}
 }
 
@@ -112,11 +129,7 @@ func connectionSecret(kind string, record tokenstore.Record) (string, error) {
 		}
 		return encodeOAuthEnvelope(envelope)
 	}
-	want := kind
-	if strings.EqualFold(kind, core.TokenTypeAPIKey) {
-		want = core.TokenTypeAPIKey
-	}
-	if !strings.EqualFold(record.TokenType, want) || record.RefreshToken != "" ||
+	if !strings.EqualFold(record.TokenType, connectionTokenType(kind)) || record.RefreshToken != "" ||
 		record.IDToken != "" || !record.Expiry.IsZero() || record.AccountID != "" ||
 		len(record.Metadata) != 0 {
 		return "", errCredentialKindMismatch
