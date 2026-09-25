@@ -530,7 +530,7 @@ func TestVerifyProviderRunsRealCompletionAndPersistsCheck(t *testing.T) {
 	providers.ResetProviders()
 	t.Cleanup(providers.ResetProviders)
 
-	server := httptest.NewServer(NewServer())
+	server := httptest.NewServer(NewServer(Runtime{}))
 	defer server.Close()
 
 	status, result := jsonRequest(t, server.URL+"/admin/api/providers/echo-verify/verify", http.MethodPost, "admin-secret", map[string]any{})
@@ -605,7 +605,7 @@ func TestVerifyProviderFailureIsRecordedAndSurfaced(t *testing.T) {
 	providers.ResetProviders()
 	t.Cleanup(providers.ResetProviders)
 
-	server := httptest.NewServer(NewServer())
+	server := httptest.NewServer(NewServer(Runtime{}))
 	defer server.Close()
 
 	status, result := jsonRequest(t, server.URL+"/admin/api/providers/dead-upstream/verify?model=gpt-test", http.MethodPost, "admin-secret", map[string]any{})
@@ -695,7 +695,7 @@ func TestVerifyProviderImmediateFailureDetailsAreSanitized(t *testing.T) {
 	providers.ResetProviders()
 	t.Cleanup(providers.ResetProviders)
 
-	server := httptest.NewServer(NewServer())
+	server := httptest.NewServer(NewServer(Runtime{}))
 	defer server.Close()
 	status, result := jsonRequest(
 		t,
@@ -854,7 +854,7 @@ func TestProviderEnabledToggleTakesProviderOutOfService(t *testing.T) {
 	providers.ResetProviders()
 	t.Cleanup(providers.ResetProviders)
 
-	server := httptest.NewServer(NewServer())
+	server := httptest.NewServer(NewServer(Runtime{}))
 	defer server.Close()
 
 	status, result := jsonRequest(t, server.URL+"/admin/api/providers/echo-toggle/enabled", http.MethodPost, "admin-secret", map[string]any{"enabled": false})
@@ -928,7 +928,7 @@ func TestEdgeTTSNeedsNoCredentials(t *testing.T) {
 	providers.ResetProviders()
 	t.Cleanup(providers.ResetProviders)
 
-	server := httptest.NewServer(NewServer())
+	server := httptest.NewServer(NewServer(Runtime{}))
 	defer server.Close()
 	status, state := jsonRequest(t, server.URL+"/admin/api/state", http.MethodGet, "admin-secret", nil)
 	if status != http.StatusOK {
@@ -972,7 +972,7 @@ func TestUpsertProviderPersistsProjectAndLocation(t *testing.T) {
 	providers.ResetProviders()
 	t.Cleanup(providers.ResetProviders)
 
-	server := httptest.NewServer(NewServer())
+	server := httptest.NewServer(NewServer(Runtime{}))
 	defer server.Close()
 	status, created := jsonRequest(t, server.URL+"/admin/api/providers", http.MethodPost, "admin-secret", map[string]any{
 		"registry_id": "vertex_ai", "id": "vertex", "api_key": "test-key",

@@ -301,7 +301,7 @@ func setupCharacterization(t *testing.T) *characterizationFixture {
 		}
 	}
 	upstream.reset()
-	return &characterizationFixture{handler: NewServer(), upstream: upstream, humanKey: issued.Token}
+	return &characterizationFixture{handler: NewServer(Runtime{}), upstream: upstream, humanKey: issued.Token}
 }
 
 func (f *characterizationFixture) do(method, path, token string, payload any) *httptest.ResponseRecorder {

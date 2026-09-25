@@ -264,7 +264,7 @@ func TestTransparentHeaderRejectsEndpointWhileUserAgentKeepsNormalRouting(t *tes
 	request.Header.Set("Content-Type", "application/json")
 	request.Header.Set(transportModeHeader, "transparent")
 	response := httptest.NewRecorder()
-	NewServer().ServeHTTP(response, request)
+	NewServer(Runtime{}).ServeHTTP(response, request)
 	if response.Code != http.StatusBadRequest || !strings.Contains(response.Body.String(), "exact provider/model") {
 		t.Fatalf("transparent route status=%d body=%s", response.Code, response.Body.String())
 	}
@@ -273,7 +273,7 @@ func TestTransparentHeaderRejectsEndpointWhileUserAgentKeepsNormalRouting(t *tes
 	request.Header.Set("Content-Type", "application/json")
 	request.Header.Set("User-Agent", "OpenCode/fixture")
 	response = httptest.NewRecorder()
-	NewServer().ServeHTTP(response, request)
+	NewServer(Runtime{}).ServeHTTP(response, request)
 	if response.Code != http.StatusOK {
 		t.Fatalf("User-Agent changed normal routing: status=%d body=%s", response.Code, response.Body.String())
 	}

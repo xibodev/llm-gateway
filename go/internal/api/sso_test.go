@@ -45,7 +45,7 @@ func TestAdminRejectsProjectKeyAndAcceptsVerifiedSSO(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	server := httptest.NewServer(NewServer())
+	server := httptest.NewServer(NewServer(Runtime{}))
 	defer server.Close()
 
 	req, _ := http.NewRequest("GET", server.URL+"/admin/api/state", nil)

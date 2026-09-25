@@ -111,7 +111,7 @@ func TestVideoPollingEnforcesResolvedRouteTarget(t *testing.T) {
 				req.Header.Set("Authorization", "Bearer "+issued.Token)
 				rec := httptest.NewRecorder()
 				before := requests.Load()
-				NewServer().ServeHTTP(rec, req)
+				NewServer(Runtime{}).ServeHTTP(rec, req)
 				if rec.Code != tc.status {
 					t.Fatalf("operation=%s status=%d want=%d body=%s", tc.operation, rec.Code, tc.status, rec.Body.String())
 				}
@@ -154,7 +154,7 @@ func TestPlaygroundVideoPollingEnforcesResolvedRouteTarget(t *testing.T) {
 	if err := iam.SetMembership(project.ID, owner.ID, "owner"); err != nil {
 		t.Fatal(err)
 	}
-	server := httptest.NewServer(NewServer())
+	server := httptest.NewServer(NewServer(Runtime{}))
 	defer server.Close()
 	for _, testCase := range []struct {
 		operation string

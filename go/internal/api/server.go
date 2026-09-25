@@ -6,6 +6,8 @@ import (
 	"strings"
 	"time"
 
+	"llmgw/internal/providers"
+	"llmgw/internal/router"
 	"llmgw/internal/web"
 )
 
@@ -25,8 +27,37 @@ var pathAliases = map[string]string{
 	"/videos/generations":    "/v1/videos/generations",
 }
 
-// NewServer builds the http.Handler with all routes registered.
-func NewServer() http.Handler {
+// Runtime is the state a server acts on. A nil field follows the installed
+// runtime of its package.
+type Runtime struct {
+	Providers *providers.Runtime
+	Router    *router.Runtime
+}
+
+// server owns the Runtime it serves. Handlers become its methods as they take
+// their state from it: so far the usage, telemetry, Copilot sign-in and
+// free-provider handlers. The rest reach the same state through the installed
+// runtimes, which the process installs before it serves.
+type server struct{ runtime Runtime }
+
+func (s *server) providers() *providers.Runtime {
+	if s.runtime.Providers != nil {
+		return s.runtime.Providers
+	}
+	return providers.Current()
+}
+
+func (s *server) router() *router.Runtime {
+	if s.runtime.Router != nil {
+		return s.runtime.Router
+	}
+	return router.Current()
+}
+
+// NewServer builds the http.Handler with all routes registered, acting on
+// runtime.
+func NewServer(runtime Runtime) http.Handler {
+	s := &server{runtime: runtime}
 	mux := http.NewServeMux()
 
 	// health (no auth)
@@ -122,7 +153,7 @@ func NewServer() http.Handler {
 	mux.HandleFunc("GET /admin/api/state", handleState)
 	mux.HandleFunc("GET /admin/api/settings/anonymous-provider-automation", handleGetAnonymousProviderAutomation)
 	mux.HandleFunc("POST /admin/api/settings/anonymous-provider-automation", handleSetAnonymousProviderAutomation)
-	mux.HandleFunc("POST /admin/api/providers/auto-connect-free", handleAutoConnectFreeProviders)
+	mux.HandleFunc("POST /admin/api/providers/auto-connect-free", s.handleAutoConnectFreeProviders)
 	mux.HandleFunc("GET /admin/api/provider-roster", handleAdminRoster)
 	mux.HandleFunc("POST /admin/api/provider-roster/refresh", handleRefreshRoster)
 	mux.HandleFunc("POST /admin/api/playground", handleAdminPlayground)
@@ -193,11 +224,11 @@ func NewServer() http.Handler {
 	mux.HandleFunc("POST /admin/api/outbox/{id}/failed", handleOutboxFailed)
 	mux.HandleFunc("GET /admin/api/audit", handleAudit)
 	mux.HandleFunc("POST /admin/api/detect", handleDetect)
-	mux.HandleFunc("GET /admin/api/usage", handleUsage)
-	mux.HandleFunc("GET /admin/api/telemetry", handleTelemetry)
-	mux.HandleFunc("POST /admin/api/copilot/login/start", handleCopilotLoginStart)
-	mux.HandleFunc("POST /admin/api/copilot/login/poll", handleCopilotLoginPoll)
-	mux.HandleFunc("POST /admin/api/copilot/logout", handleCopilotLogout)
+	mux.HandleFunc("GET /admin/api/usage", s.handleUsage)
+	mux.HandleFunc("GET /admin/api/telemetry", s.handleTelemetry)
+	mux.HandleFunc("POST /admin/api/copilot/login/start", s.handleCopilotLoginStart)
+	mux.HandleFunc("POST /admin/api/copilot/login/poll", s.handleCopilotLoginPoll)
+	mux.HandleFunc("POST /admin/api/copilot/logout", s.handleCopilotLogout)
 
 	return aliasMiddleware(requestLogMiddleware(mux))
 }

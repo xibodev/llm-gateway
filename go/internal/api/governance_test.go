@@ -42,7 +42,7 @@ func TestGovernanceKeepsNotFoundAndForbiddenApart(t *testing.T) {
 	}
 	routesOnly := issue("routes-only", iam.KeyPolicy{AllowedRoutes: []string{"echo-default"}, RoutesOnly: true})
 	models := issue("models", iam.KeyPolicy{AllowedModels: []string{"echo-default"}})
-	server := httptest.NewServer(NewServer())
+	server := httptest.NewServer(NewServer(Runtime{}))
 	defer server.Close()
 	messages := []map[string]any{{"role": "user", "content": "hi"}}
 	surfaces := map[string]func(string) map[string]any{
@@ -104,7 +104,7 @@ func TestGovernanceNamesTheKeyInFailoverTelemetry(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	server := httptest.NewServer(NewServer())
+	server := httptest.NewServer(NewServer(Runtime{}))
 	defer server.Close()
 	messages := []map[string]any{{"role": "user", "content": "hi"}}
 	requests := []struct {

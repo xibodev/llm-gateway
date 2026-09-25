@@ -50,7 +50,7 @@ func TestAPIKeyConnectionFollowsTheManifestForRegistrylessProviders(t *testing.T
 	if err != nil {
 		t.Fatal(err)
 	}
-	server := httptest.NewServer(NewServer())
+	server := httptest.NewServer(NewServer(Runtime{}))
 	defer server.Close()
 
 	status, body := jsonRequest(

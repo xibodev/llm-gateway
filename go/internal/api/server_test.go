@@ -9,7 +9,7 @@ import (
 )
 
 func TestConsoleRoutesPreserveLegacySurfaces(t *testing.T) {
-	handler := NewServer()
+	handler := NewServer(Runtime{})
 
 	admin := httptest.NewRecorder()
 	handler.ServeHTTP(admin, httptest.NewRequest(http.MethodGet, "/admin", nil))
@@ -46,7 +46,7 @@ func TestConsoleRoutesPreserveLegacySurfaces(t *testing.T) {
 }
 
 func TestConsoleAssetsAreServedFromEmbeddedDist(t *testing.T) {
-	handler := NewServer()
+	handler := NewServer(Runtime{})
 	index := httptest.NewRecorder()
 	handler.ServeHTTP(index, httptest.NewRequest(http.MethodGet, "/console", nil))
 

@@ -1367,7 +1367,7 @@ func handleDetect(w http.ResponseWriter, r *http.Request) {
 }
 
 // GET /admin/api/usage
-func handleUsage(w http.ResponseWriter, r *http.Request) {
+func (s *server) handleUsage(w http.ResponseWriter, r *http.Request) {
 	if !adminAuthed(w, r) {
 		return
 	}
@@ -1392,27 +1392,27 @@ func handleUsage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, 200, map[string]any{
-		"totals": router.Totals(false), "by_project": router.ByProject(false),
-		"recent": router.RecentUsage(50), "control_plane": controlPlane,
+		"totals": s.router().Totals(false), "by_project": s.router().ByProject(false),
+		"recent": s.router().RecentUsage(50), "control_plane": controlPlane,
 		"series": series, "quota_advisories": quotaAdvisories,
 	})
 }
 
 // GET /admin/api/telemetry
-func handleTelemetry(w http.ResponseWriter, r *http.Request) {
+func (s *server) handleTelemetry(w http.ResponseWriter, r *http.Request) {
 	if !adminAuthed(w, r) {
 		return
 	}
-	writeJSON(w, 200, map[string]any{"stats": router.TelemetryStats(), "recent": router.RecentTelemetry(50)})
+	writeJSON(w, 200, map[string]any{"stats": s.router().TelemetryStats(), "recent": s.router().RecentTelemetry(50)})
 }
 
 // ---- copilot device login ---------------------------------------------- //
 
-func handleCopilotLoginStart(w http.ResponseWriter, r *http.Request) {
+func (s *server) handleCopilotLoginStart(w http.ResponseWriter, r *http.Request) {
 	if !adminAuthed(w, r) {
 		return
 	}
-	dc, err := providers.CopilotAuth().StartDeviceFlow()
+	dc, err := s.providers().CopilotAuth().StartDeviceFlow()
 	if err != nil {
 		writeJSON(w, 200, map[string]any{"error": oauthErrorText(err.Error())})
 		return
@@ -1423,7 +1423,7 @@ func handleCopilotLoginStart(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-func handleCopilotLoginPoll(w http.ResponseWriter, r *http.Request) {
+func (s *server) handleCopilotLoginPoll(w http.ResponseWriter, r *http.Request) {
 	if !adminAuthed(w, r) {
 		return
 	}
@@ -1431,17 +1431,17 @@ func handleCopilotLoginPoll(w http.ResponseWriter, r *http.Request) {
 		DeviceCode string `json:"device_code"`
 	}
 	_ = decodeBody(r, &body)
-	result := providers.CopilotAuth().PollDeviceFlowOnce(body.DeviceCode)
+	result := s.providers().CopilotAuth().PollDeviceFlowOnce(body.DeviceCode)
 	status, _ := result["status"].(string)
 	detail, _ := result["error"].(string)
 	writeJSON(w, 200, safeOAuthPollResponse(status, detail))
 }
 
-func handleCopilotLogout(w http.ResponseWriter, r *http.Request) {
+func (s *server) handleCopilotLogout(w http.ResponseWriter, r *http.Request) {
 	if !adminAuthed(w, r) {
 		return
 	}
-	writeJSON(w, 200, providers.CopilotAuth().ClearCachedCredentials())
+	writeJSON(w, 200, s.providers().CopilotAuth().ClearCachedCredentials())
 }
 
 // ---- helpers ------------------------------------------------------------ //

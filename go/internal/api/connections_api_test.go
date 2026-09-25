@@ -55,7 +55,7 @@ func TestAdminProviderConnectionLifecycle(t *testing.T) {
 	if err != nil {
 		t.Fatalf("cache provider before connection: %v", err)
 	}
-	server := httptest.NewServer(NewServer())
+	server := httptest.NewServer(NewServer(Runtime{}))
 	defer server.Close()
 
 	status, created := jsonRequest(
@@ -133,7 +133,7 @@ func TestAnthropicSetupTokenConnectionIsValidatedAndWriteOnly(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	server := httptest.NewServer(NewServer())
+	server := httptest.NewServer(NewServer(Runtime{}))
 	defer server.Close()
 
 	status, rejected := jsonRequest(t, server.URL+"/admin/api/principals/"+human.ID+"/connections", http.MethodPost, "admin-secret", map[string]any{
@@ -199,7 +199,7 @@ func TestUserConnectionsAreOwnerScoped(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	server := httptest.NewServer(NewServer())
+	server := httptest.NewServer(NewServer(Runtime{}))
 	defer server.Close()
 
 	status, initial := ssoConnectionRequest(

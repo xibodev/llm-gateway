@@ -112,24 +112,25 @@ func handleSetAnonymousProviderAutomation(w http.ResponseWriter, r *http.Request
 	writeJSON(w, http.StatusOK, state)
 }
 
-func handleAutoConnectFreeProviders(w http.ResponseWriter, r *http.Request) {
+func (s *server) handleAutoConnectFreeProviders(w http.ResponseWriter, r *http.Request) {
 	if !adminAuthed(w, r) {
 		return
 	}
 	w.Header().Set("Cache-Control", "no-store")
 	_ = iam.SetAnonymousProviderAutomationOverride("on")
 
+	runtime := s.providers()
 	profiles := providers.AnonymousProviderProfiles()
 	results := make([]map[string]any, 0, len(profiles))
 	verifiedCount := 0
 
-	orchestrator, err := providers.NewGatewayProviderOrchestrator(profiles)
+	orchestrator, err := runtime.NewGatewayProviderOrchestrator(profiles)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "Provider automation is unavailable.")
 		return
 	}
 	for _, profile := range profiles {
-		providerID, status := ensureAnonymousProvider(profile)
+		providerID, status := ensureAnonymousProvider(runtime, profile)
 		item := map[string]any{
 			"provider_id": providerID,
 			"registry_id": profile.RegistryID,
@@ -173,7 +174,9 @@ func requestAnonymousProviderAutomation() {
 	}
 }
 
-func StartAnonymousProviderAutomation(parent context.Context) func() {
+// StartAnonymousProviderAutomation runs the automation hourly, and when a
+// setting change requests it, against runtime until the returned stop runs.
+func StartAnonymousProviderAutomation(parent context.Context, runtime *providers.Runtime) func() {
 	ctx, cancel := context.WithCancel(parent)
 	done := make(chan struct{})
 	go func() {
@@ -181,7 +184,7 @@ func StartAnonymousProviderAutomation(parent context.Context) func() {
 		ticker := time.NewTicker(time.Hour)
 		defer ticker.Stop()
 		for {
-			runAnonymousProviderAutomation(ctx)
+			runAnonymousProviderAutomation(ctx, runtime)
 			select {
 			case <-ctx.Done():
 				return
@@ -194,18 +197,18 @@ func StartAnonymousProviderAutomation(parent context.Context) func() {
 	return func() { once.Do(func() { cancel(); <-done }) }
 }
 
-func runAnonymousProviderAutomation(ctx context.Context) []map[string]any {
-	return runAnonymousProviderAutomationProfiles(ctx, providers.AnonymousProviderProfiles())
+func runAnonymousProviderAutomation(ctx context.Context, runtime *providers.Runtime) []map[string]any {
+	return runAnonymousProviderAutomationProfiles(ctx, runtime, providers.AnonymousProviderProfiles())
 }
 
 func runAnonymousProviderAutomationProfiles(
-	ctx context.Context, profiles []providers.AnonymousProviderProfile,
+	ctx context.Context, runtime *providers.Runtime, profiles []providers.AnonymousProviderProfile,
 ) []map[string]any {
 	state, err := anonymousProviderAutomationState()
 	if err != nil || !state.Effective || ctx.Err() != nil {
 		return nil
 	}
-	orchestrator, err := providers.NewGatewayProviderOrchestrator(profiles)
+	orchestrator, err := runtime.NewGatewayProviderOrchestrator(profiles)
 	if err != nil {
 		return []map[string]any{{"status": "failed", "failure_code": "orchestrator_unavailable"}}
 	}
@@ -218,7 +221,7 @@ func runAnonymousProviderAutomationProfiles(
 		if stateErr != nil || !current.Effective {
 			break
 		}
-		providerID, status := ensureAnonymousProvider(profile)
+		providerID, status := ensureAnonymousProvider(runtime, profile)
 		if status != "managed" {
 			results = append(results, map[string]any{"provider_id": providerID, "status": status})
 			continue
@@ -385,7 +388,7 @@ func recordOrchestratorChecks(providerID string, generation int64, result core.P
 	}
 }
 
-func ensureAnonymousProvider(profile providers.AnonymousProviderProfile) (string, string) {
+func ensureAnonymousProvider(runtime *providers.Runtime, profile providers.AnonymousProviderProfile) (string, string) {
 	anonymousProviderMutationMu.Lock()
 	defer anonymousProviderMutationMu.Unlock()
 	endpointMutationMu.Lock()
@@ -423,8 +426,8 @@ func ensureAnonymousProvider(profile providers.AnonymousProviderProfile) (string
 		return profile.ProviderID, "save_failed"
 	}
 	if added {
-		providers.ForgetProvider(profile.ProviderID)
-		providers.ForgetCatalog(profile.ProviderID)
+		runtime.ForgetProvider(profile.ProviderID)
+		runtime.ForgetCatalog(profile.ProviderID)
 		_ = iam.InvalidateProviderChecks(profile.ProviderID)
 		_ = iam.RecordAudit(iam.AuditEvent{
 			Action: "provider_automation.connect", TargetType: "provider", TargetID: profile.ProviderID,

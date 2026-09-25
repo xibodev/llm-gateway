@@ -39,7 +39,7 @@ func TestAdminCreatesProviderFromRegistry(t *testing.T) {
 	providers.ResetProviders()
 	t.Cleanup(providers.ResetProviders)
 
-	server := httptest.NewServer(NewServer())
+	server := httptest.NewServer(NewServer(Runtime{}))
 	defer server.Close()
 	status, created := jsonRequest(t, server.URL+"/admin/api/providers", http.MethodPost, "admin-secret", map[string]any{
 		"registry_id": "gemini",
@@ -122,7 +122,7 @@ func TestProviderUpsertRejectsEndpointNameCollision(t *testing.T) {
 			"Coding": {Failover: []config.EndpointMember{{Provider: "echo", Model: "echo-default"}}},
 		}
 	})
-	server := httptest.NewServer(NewServer())
+	server := httptest.NewServer(NewServer(Runtime{}))
 	defer server.Close()
 	status, body := jsonRequest(t, server.URL+"/admin/api/providers", http.MethodPost, "admin-secret", map[string]any{
 		"id": "coding", "type": "edge_tts",
@@ -163,7 +163,7 @@ func TestProviderUpsertAcceptsAndPreservesPublicOAuthClientID(t *testing.T) {
 	if _, err := iam.Initialize(); err != nil {
 		t.Fatal(err)
 	}
-	server := httptest.NewServer(NewServer())
+	server := httptest.NewServer(NewServer(Runtime{}))
 	defer server.Close()
 
 	status, body := jsonRequest(t, server.URL+"/admin/api/providers", http.MethodPost, "admin-secret", map[string]any{
@@ -266,7 +266,7 @@ func TestAdminSetupTokenRequiresEncryptedStorageAndRemovesLegacySecret(t *testin
 	if _, err := iam.Initialize(); err != nil {
 		t.Fatal(err)
 	}
-	server := httptest.NewServer(NewServer())
+	server := httptest.NewServer(NewServer(Runtime{}))
 	defer server.Close()
 	token := anthropicauth.SetupTokenPrefix + strings.Repeat("a", 80)
 	status, _ := jsonRequest(t, server.URL+"/admin/api/providers", http.MethodPost, "admin-secret", map[string]any{
@@ -309,7 +309,7 @@ func TestAdminRejectsSetupTokenLookingCredentialForNonAnthropicProvider(t *testi
 	if _, err := iam.Initialize(); err != nil {
 		t.Fatal(err)
 	}
-	server := httptest.NewServer(NewServer())
+	server := httptest.NewServer(NewServer(Runtime{}))
 	defer server.Close()
 	token := anthropicauth.SetupTokenPrefix + strings.Repeat("a", 80)
 	status, _ := jsonRequest(t, server.URL+"/admin/api/providers", http.MethodPost, "admin-secret", map[string]any{
@@ -339,7 +339,7 @@ func TestAdminRejectsPlannedRegistryProvider(t *testing.T) {
 		s.AllowUnauthenticatedAPI = false
 		s.Providers = map[string]*config.ProviderConfig{}
 	})
-	server := httptest.NewServer(NewServer())
+	server := httptest.NewServer(NewServer(Runtime{}))
 	defer server.Close()
 	status, _ := jsonRequest(t, server.URL+"/admin/api/providers", http.MethodPost, "admin-secret", map[string]any{
 		"registry_id": "claude_code",
@@ -397,7 +397,7 @@ func TestProviderProbeReturnsExplicitSafeDetails(t *testing.T) {
 	})
 	providers.ResetProviders()
 	t.Cleanup(providers.ResetProviders)
-	server := httptest.NewServer(NewServer())
+	server := httptest.NewServer(NewServer(Runtime{}))
 	defer server.Close()
 
 	for _, operation := range []string{"test", "repair", "refresh"} {
@@ -450,7 +450,7 @@ func TestProviderUpsertInvalidatesCatalogAndLifecycleEvidence(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	server := httptest.NewServer(NewServer())
+	server := httptest.NewServer(NewServer(Runtime{}))
 	defer server.Close()
 	status, result := jsonRequest(
 		t, server.URL+"/admin/api/providers", http.MethodPost, "admin-secret",

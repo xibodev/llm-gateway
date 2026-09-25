@@ -43,7 +43,7 @@ func setupAPISmokeFixture(t *testing.T, upstream http.Handler) http.Handler {
 		s.Policies.Defaults.CircuitFailureThreshold = 0
 	})
 	providers.ResetProviders()
-	return NewServer()
+	return NewServer(Runtime{})
 }
 
 func apiSmokeRequest(handler http.Handler, path string, payload any) *httptest.ResponseRecorder {

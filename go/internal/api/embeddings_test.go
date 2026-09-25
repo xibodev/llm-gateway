@@ -41,7 +41,7 @@ func resetState(t *testing.T) {
 // answers in the gateway's own error vocabulary.
 func TestEmbeddingsRouteIsRegistered(t *testing.T) {
 	resetState(t)
-	srv := NewServer()
+	srv := NewServer(Runtime{})
 
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest("POST", "/v1/embeddings", strings.NewReader(`{}`))
@@ -208,7 +208,7 @@ func TestEmbeddingsProxiesToUpstream(t *testing.T) {
 	})
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest("POST", "/v1/embeddings", bytes.NewReader(body))
-	NewServer().ServeHTTP(rec, req)
+	NewServer(Runtime{}).ServeHTTP(rec, req)
 
 	if rec.Code != 200 {
 		t.Fatalf("status %d body %s", rec.Code, rec.Body.String())
@@ -275,7 +275,7 @@ func TestNativeGoogleEmbeddingsRejectUnsupportedOpenAIOptions(t *testing.T) {
 		}
 		raw, _ := json.Marshal(body)
 		rec := httptest.NewRecorder()
-		NewServer().ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/v1/embeddings", bytes.NewReader(raw)))
+		NewServer(Runtime{}).ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/v1/embeddings", bytes.NewReader(raw)))
 		if rec.Code != http.StatusBadRequest {
 			t.Fatalf("field=%v status=%d body=%s", field, rec.Code, rec.Body.String())
 		}
@@ -300,7 +300,7 @@ func TestEmbeddingsNon2xxIsBoundedAndSanitized(t *testing.T) {
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest("POST", "/v1/embeddings", strings.NewReader(
 		`{"model":"proxy/embedding-model","input":"hello"}`))
-	NewServer().ServeHTTP(rec, req)
+	NewServer(Runtime{}).ServeHTTP(rec, req)
 	assertSafeProxyError(t, rec, http.StatusServiceUnavailable, token, email, token[:16])
 
 	db, err := iam.DB()
@@ -336,7 +336,7 @@ func TestEmbeddingsRedirectIsNotFollowed(t *testing.T) {
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest("POST", "/v1/embeddings", strings.NewReader(
 		`{"model":"proxy/embedding-model","input":"hello"}`))
-	NewServer().ServeHTTP(rec, req)
+	NewServer(Runtime{}).ServeHTTP(rec, req)
 	assertSafeProxyError(t, rec, http.StatusTemporaryRedirect, token)
 	if requests != 1 || rec.Header().Get("Location") != "" {
 		t.Fatalf("requests=%d Location=%q", requests, rec.Header().Get("Location"))
@@ -369,7 +369,7 @@ func TestEmbeddingsBodyReadFailureRecordsEffectiveFailure(t *testing.T) {
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest("POST", "/v1/embeddings", strings.NewReader(
 		`{"model":"proxy/embedding-model","input":"hello"}`))
-	NewServer().ServeHTTP(rec, req)
+	NewServer(Runtime{}).ServeHTTP(rec, req)
 	assertSafeProxyError(t, rec, http.StatusBadGateway)
 	if !body.closed {
 		t.Fatal("upstream response body was not closed")

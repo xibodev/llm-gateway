@@ -43,7 +43,7 @@ func TestSSOUserSelfServiceKeyLifecycle(t *testing.T) {
 	if err := iam.SetMembership(project.ID, principal.ID, "member"); err != nil {
 		t.Fatal(err)
 	}
-	server := httptest.NewServer(NewServer())
+	server := httptest.NewServer(NewServer(Runtime{}))
 	defer server.Close()
 	origin, _ := url.Parse(server.URL)
 
@@ -118,7 +118,7 @@ func TestSSOUserCannotRevealAnotherPrincipalsKey(t *testing.T) {
 	project, _ := iam.CreateProject("private-key", "Private Key")
 	_ = iam.SetMembership(project.ID, owner.ID, "owner")
 	issued, _ := iam.IssueKey(iam.KeyCreate{ProjectID: project.ID, PrincipalID: owner.ID, Name: "private"})
-	server := httptest.NewServer(NewServer())
+	server := httptest.NewServer(NewServer(Runtime{}))
 	defer server.Close()
 	origin, _ := url.Parse(server.URL)
 	req, _ := http.NewRequest(http.MethodPost, server.URL+"/user/api/keys/"+issued.ID+"/reveal", nil)
@@ -150,7 +150,7 @@ func TestSSOViewerCannotMintKey(t *testing.T) {
 	)
 	project, _ := iam.CreateProject("viewer-project", "Viewer Project")
 	_ = iam.SetMembership(project.ID, principal.ID, "viewer")
-	server := httptest.NewServer(NewServer())
+	server := httptest.NewServer(NewServer(Runtime{}))
 	defer server.Close()
 	origin, _ := url.Parse(server.URL)
 	body, _ := json.Marshal(map[string]any{"project_id": project.ID, "name": "denied"})
@@ -182,7 +182,7 @@ func TestSSOUserHonorsDisabledAutoProvision(t *testing.T) {
 		s.SSOSharedSecret = "proxy-secret"
 		s.SSOAutoProvision = false
 	})
-	server := httptest.NewServer(NewServer())
+	server := httptest.NewServer(NewServer(Runtime{}))
 	defer server.Close()
 	request := func() int {
 		req, _ := http.NewRequest("GET", server.URL+"/user/api/me", nil)

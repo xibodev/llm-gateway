@@ -60,7 +60,7 @@ func TestUserCanTestProviderWithOwnPrincipal(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	server := httptest.NewServer(NewServer())
+	server := httptest.NewServer(NewServer(Runtime{}))
 	defer server.Close()
 	status, response := ssoConnectionRequest(
 		t, server.URL, "provider-test-user", http.MethodPost,

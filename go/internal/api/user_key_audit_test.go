@@ -49,7 +49,7 @@ func TestOwnerUpdatesOwnKeyAndReadsSecretFreeAudit(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	server := httptest.NewServer(NewServer())
+	server := httptest.NewServer(NewServer(Runtime{}))
 	defer server.Close()
 
 	status, updated := ssoConnectionRequest(t, server.URL, "key-owner", http.MethodPost, "/user/api/keys/"+issued.ID+"/update", map[string]any{"daily_requests": 3})
@@ -112,7 +112,7 @@ func TestOwnerCannotChangeRevokedKeyStatusThroughPortal(t *testing.T) {
 	if err := iam.RevokeAPIKey(issued.ID); err != nil {
 		t.Fatal(err)
 	}
-	server := httptest.NewServer(NewServer())
+	server := httptest.NewServer(NewServer(Runtime{}))
 	defer server.Close()
 	status, response := ssoConnectionRequest(t, server.URL, "revoked-owner", http.MethodPost, "/user/api/keys/"+issued.ID+"/update", map[string]any{"disabled": false})
 	if status != http.StatusBadRequest || response["error"] == nil {

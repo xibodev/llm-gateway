@@ -39,7 +39,7 @@ func TestIAMAdminAndKeyAuthenticationE2E(t *testing.T) {
 	})
 	providers.ResetProviders()
 	t.Cleanup(providers.ResetProviders)
-	server := httptest.NewServer(NewServer())
+	server := httptest.NewServer(NewServer(Runtime{}))
 	defer server.Close()
 
 	admin := func(method, path string, body any) (int, map[string]any) {
@@ -175,7 +175,7 @@ func TestProjectPolicyAdminAPIRoundTripReplacement(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	server := httptest.NewServer(NewServer())
+	server := httptest.NewServer(NewServer(Runtime{}))
 	defer server.Close()
 	path := server.URL + "/admin/api/projects/" + project.ID + "/policy"
 
@@ -296,7 +296,7 @@ func TestFailedRequestRecordedInUsageStats(t *testing.T) {
 	issued, _ := iam.IssueKey(iam.KeyCreate{
 		ProjectID: project.ID, PrincipalID: principal.ID, Name: "errors",
 	})
-	server := httptest.NewServer(NewServer())
+	server := httptest.NewServer(NewServer(Runtime{}))
 	defer server.Close()
 	status, _ := jsonRequest(
 		t, server.URL+"/v1/chat/completions", http.MethodPost, issued.Token,
@@ -332,7 +332,7 @@ func TestCreateKeyBindsToRequestedHumanPrincipal(t *testing.T) {
 		s.APIKey = "admin-secret"
 		s.AllowUnauthenticatedAPI = false
 	})
-	server := httptest.NewServer(NewServer())
+	server := httptest.NewServer(NewServer(Runtime{}))
 	defer server.Close()
 
 	status, principal := jsonRequest(t, server.URL+"/admin/api/principals", http.MethodPost, "admin-secret", map[string]any{

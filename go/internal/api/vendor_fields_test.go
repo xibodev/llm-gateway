@@ -127,7 +127,7 @@ func setupVendorFieldFixture(t *testing.T) (http.Handler, *vendorFieldUpstream) 
 	if rows := providers.RefreshCatalog("adapt"); len(rows) != 1 {
 		t.Fatalf("adapt catalog=%+v", rows)
 	}
-	return NewServer(), upstream
+	return NewServer(Runtime{}), upstream
 }
 
 func TestChatHistoryWithThoughtSignaturesIsServedByTranslatedTargets(t *testing.T) {

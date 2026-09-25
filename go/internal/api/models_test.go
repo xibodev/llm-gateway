@@ -611,7 +611,7 @@ func TestModelListRespectsKeyAndProjectPolicy(t *testing.T) {
 	})); len(rows) == 0 {
 		t.Fatal("service project refresh returned no models")
 	}
-	server := httptest.NewServer(NewServer())
+	server := httptest.NewServer(NewServer(Runtime{}))
 	defer server.Close()
 	status, payload := jsonRequest(
 		t, server.URL+"/v1/models", http.MethodGet, issued.Token, nil,
@@ -650,7 +650,7 @@ func TestEndpointRowsAreOwnedByEndpoint(t *testing.T) {
 	providers.ResetProviders()
 	t.Cleanup(providers.ResetProviders)
 
-	server := httptest.NewServer(NewServer())
+	server := httptest.NewServer(NewServer(Runtime{}))
 	defer server.Close()
 	status, payload := jsonRequest(t, server.URL+"/v1/models", http.MethodGet, "", nil)
 	if status != http.StatusOK {

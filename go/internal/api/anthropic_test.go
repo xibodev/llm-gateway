@@ -128,7 +128,7 @@ func anthropicFixtureRequest(t *testing.T, body map[string]any) *httptest.Respon
 	req := httptest.NewRequest(http.MethodPost, "/v1/messages", bytes.NewReader(raw))
 	req.Header.Set("Authorization", "Bearer gateway-token")
 	recorder := httptest.NewRecorder()
-	NewServer().ServeHTTP(recorder, req)
+	NewServer(Runtime{}).ServeHTTP(recorder, req)
 	return recorder
 }
 
@@ -143,7 +143,7 @@ func tokenCountFixtureRequest(t *testing.T, path, token string, body map[string]
 		}
 	}
 	recorder := httptest.NewRecorder()
-	NewServer().ServeHTTP(recorder, req)
+	NewServer(Runtime{}).ServeHTTP(recorder, req)
 	return recorder
 }
 
@@ -328,7 +328,7 @@ func TestAnthropicTokenCountAuthPrecedenceAndNativeFailures(t *testing.T) {
 			req.Header.Set("x-api-key", "wrong")
 			req.Header.Set("Authorization", "Bearer gateway-token")
 			auth := httptest.NewRecorder()
-			NewServer().ServeHTTP(auth, req)
+			NewServer(Runtime{}).ServeHTTP(auth, req)
 			if auth.Code != http.StatusUnauthorized {
 				t.Fatalf("auth precedence status=%d", auth.Code)
 			}
@@ -349,7 +349,7 @@ func TestAnthropicTokenCountRequestBodyLimit(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPost, "/v1/messages/count_tokens", io.MultiReader(prefix, padding))
 	req.Header.Set("Authorization", "Bearer gateway-token")
 	recorder := httptest.NewRecorder()
-	NewServer().ServeHTTP(recorder, req)
+	NewServer(Runtime{}).ServeHTTP(recorder, req)
 	if recorder.Code != http.StatusRequestEntityTooLarge || !strings.Contains(recorder.Body.String(), `"code":"413"`) || !strings.Contains(recorder.Body.String(), "request body too large") {
 		t.Fatalf("status=%d body=%s", recorder.Code, recorder.Body.String())
 	}

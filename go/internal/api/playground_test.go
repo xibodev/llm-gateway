@@ -60,7 +60,7 @@ func TestOwnerPlaygroundUsesRealRouteAndRecordsKeylessProjectUsage(t *testing.T)
 	if _, err := iam.SetProjectPolicy(project.ID, iam.KeyPolicy{DailyRequests: 1}); err != nil {
 		t.Fatal(err)
 	}
-	server := httptest.NewServer(NewServer())
+	server := httptest.NewServer(NewServer(Runtime{}))
 	defer server.Close()
 
 	body := map[string]any{
@@ -142,7 +142,7 @@ func TestPlaygroundRejectsOtherPrincipalAndExplainsStreamingLimit(t *testing.T) 
 	owner, _ := iam.EnsurePrincipalBySubject("human", "authentik:play-owner", "", "Owner")
 	project, _ := iam.CreateProject("play-owner", "Play Owner")
 	_ = iam.SetMembership(project.ID, owner.ID, "admin")
-	server := httptest.NewServer(NewServer())
+	server := httptest.NewServer(NewServer(Runtime{}))
 	defer server.Close()
 	body := map[string]any{"project_id": project.ID, "model": "echo/echo-default", "messages": []map[string]any{{"role": "user", "content": "hello"}}}
 	status, denied := ssoConnectionRequest(t, server.URL, "other-owner", http.MethodPost, "/user/api/playground", body)
@@ -215,7 +215,7 @@ func TestPlaygroundPreservesDefinitiveUpstreamErrorWithoutRetry(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	server := httptest.NewServer(NewServer())
+	server := httptest.NewServer(NewServer(Runtime{}))
 	defer server.Close()
 	status, response := ssoConnectionRequest(t, server.URL, "unavailable-owner", http.MethodPost, "/user/api/playground", map[string]any{
 		"project_id": project.ID,
@@ -349,7 +349,7 @@ func TestPlaygroundTextSurfaceRoutes(t *testing.T) {
 	owner, _ := iam.EnsurePrincipalBySubject("human", "authentik:surface-owner", "", "Surface Owner")
 	project, _ := iam.CreateProject("surface-project", "Surface Project")
 	_ = iam.SetMembership(project.ID, owner.ID, "owner")
-	server := httptest.NewServer(NewServer())
+	server := httptest.NewServer(NewServer(Runtime{}))
 	defer server.Close()
 	status, response := ssoConnectionRequest(t, server.URL, "surface-owner", http.MethodPost, "/user/api/playground/v1/messages", map[string]any{
 		"project_id": project.ID, "model": "echo/echo-default", "messages": []map[string]any{{"role": "user", "content": "missing limit"}},

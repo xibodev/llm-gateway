@@ -28,7 +28,7 @@ func TestBuildInfoIsConsistentAcrossHTTPStatusSurfaces(t *testing.T) {
 		settings.APIKey = "admin-secret"
 		settings.APIKeys = nil
 	})
-	server := httptest.NewServer(NewServer())
+	server := httptest.NewServer(NewServer(Runtime{}))
 	defer server.Close()
 	for _, test := range []struct {
 		path  string

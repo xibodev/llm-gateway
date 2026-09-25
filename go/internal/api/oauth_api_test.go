@@ -470,7 +470,7 @@ func TestOAuthHandlersSanitizeMaliciousPollDiagnostics(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	gateway := httptest.NewServer(NewServer())
+	gateway := httptest.NewServer(NewServer(Runtime{}))
 	defer gateway.Close()
 
 	checks := []struct {
@@ -541,7 +541,7 @@ func TestLegacyAdminCopilotPollPersistsAuthorizedTokenWithoutProjectingIt(t *tes
 		settings.GithubCopilotOAuthToken = ""
 		settings.GithubCopilotUseGhCLI = false
 	})
-	gateway := httptest.NewServer(NewServer())
+	gateway := httptest.NewServer(NewServer(Runtime{}))
 	defer gateway.Close()
 
 	status, response := jsonRequest(
@@ -654,7 +654,7 @@ func TestUserOAuthDeviceFlowUsesMockedEndpointsAndNeverReturnsTokens(t *testing.
 	if _, err := iam.Initialize(); err != nil {
 		t.Fatal(err)
 	}
-	server := httptest.NewServer(NewServer())
+	server := httptest.NewServer(NewServer(Runtime{}))
 	defer server.Close()
 
 	status, started := ssoConnectionRequest(t, server.URL, "oauth-user", http.MethodPost, "/user/api/connections/copilot/oauth/start", map[string]any{})
@@ -798,7 +798,7 @@ func TestUserCodexOAuthStoresBoundProfileAndSurvivesReload(t *testing.T) {
 	if _, err := iam.Initialize(); err != nil {
 		t.Fatal(err)
 	}
-	gateway := httptest.NewServer(NewServer())
+	gateway := httptest.NewServer(NewServer(Runtime{}))
 	defer gateway.Close()
 
 	status, started := ssoConnectionRequest(t, gateway.URL, "codex-user", http.MethodPost, "/user/api/connections/openai_codex/oauth/start", map[string]any{})

@@ -84,7 +84,7 @@ func TestAdminCatalogDiagnosticsEmptyHTTPAndDNS(t *testing.T) {
 			refresh := httptest.NewRequest(http.MethodPost, "/admin/api/providers/diagnostic/refresh?principal_id="+principal.ID, nil)
 			refresh.Header.Set("Authorization", "Bearer admin-secret")
 			refreshResponse := httptest.NewRecorder()
-			NewServer().ServeHTTP(refreshResponse, refresh)
+			NewServer(Runtime{}).ServeHTTP(refreshResponse, refresh)
 			var refreshPayload map[string]any
 			if err := json.Unmarshal(refreshResponse.Body.Bytes(), &refreshPayload); err != nil {
 				t.Fatal(err)
@@ -107,7 +107,7 @@ func TestAdminCatalogDiagnosticsEmptyHTTPAndDNS(t *testing.T) {
 				req := httptest.NewRequest(method, "/admin/api/providers/diagnostic/"+route+"?principal_id="+principal.ID, nil)
 				req.Header.Set("Authorization", "Bearer admin-secret")
 				rec := httptest.NewRecorder()
-				NewServer().ServeHTTP(rec, req)
+				NewServer(Runtime{}).ServeHTTP(rec, req)
 				var payload map[string]any
 				if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
 					t.Fatal(err)
@@ -150,7 +150,7 @@ func TestModelReadEndpointsUseCachedSnapshotUntilExplicitRefresh(t *testing.T) {
 	defer upstream.Close()
 	setupCatalogDiagnosticAPI(t, upstream.URL)
 	config.Update(func(s *config.Settings) { s.AllowUnauthenticatedAPI = true })
-	server := NewServer()
+	server := NewServer(Runtime{})
 
 	reads := []struct {
 		method string
@@ -228,7 +228,7 @@ func TestCatalogReadinessDoesNotBorrowAnotherScopeVerification(t *testing.T) {
 		req := httptest.NewRequest(http.MethodGet, "/admin/api/providers/diagnostic/catalog?principal_id="+id, nil)
 		req.Header.Set("Authorization", "Bearer admin-secret")
 		rec := httptest.NewRecorder()
-		NewServer().ServeHTTP(rec, req)
+		NewServer(Runtime{}).ServeHTTP(rec, req)
 		var payload map[string]any
 		if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil || rec.Code != 200 {
 			t.Fatalf("response: %d %s %v", rec.Code, rec.Body.String(), err)
@@ -385,7 +385,7 @@ func TestCatalogErrorPreservesScopedVerification(t *testing.T) {
 				refresh := httptest.NewRequest(http.MethodPost, refreshURL, nil)
 				refresh.Header.Set("Authorization", "Bearer admin-secret")
 				refreshResponse := httptest.NewRecorder()
-				NewServer().ServeHTTP(refreshResponse, refresh)
+				NewServer(Runtime{}).ServeHTTP(refreshResponse, refresh)
 				var refreshPayload map[string]any
 				if err := json.Unmarshal(refreshResponse.Body.Bytes(), &refreshPayload); err != nil ||
 					refreshResponse.Code != http.StatusOK || refreshPayload["failure_code"] != "catalog_http_error" {
@@ -394,7 +394,7 @@ func TestCatalogErrorPreservesScopedVerification(t *testing.T) {
 				req := httptest.NewRequest(method, url, nil)
 				req.Header.Set("Authorization", "Bearer admin-secret")
 				rec := httptest.NewRecorder()
-				NewServer().ServeHTTP(rec, req)
+				NewServer(Runtime{}).ServeHTTP(rec, req)
 				var payload map[string]any
 				if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil || rec.Code != 200 {
 					t.Fatalf("response: %d %s %v", rec.Code, rec.Body.String(), err)
@@ -465,14 +465,14 @@ func TestGoogleCatalogMethodsDoNotProveModelEntitlement(t *testing.T) {
 	refresh := httptest.NewRequest(http.MethodPost, "/admin/api/providers/diagnostic/refresh", nil)
 	refresh.Header.Set("Authorization", "Bearer admin-secret")
 	refreshResponse := httptest.NewRecorder()
-	NewServer().ServeHTTP(refreshResponse, refresh)
+	NewServer(Runtime{}).ServeHTTP(refreshResponse, refresh)
 	if refreshResponse.Code != http.StatusOK {
 		t.Fatalf("refresh: %d %s", refreshResponse.Code, refreshResponse.Body.String())
 	}
 	req := httptest.NewRequest(http.MethodGet, "/admin/api/providers/diagnostic/catalog", nil)
 	req.Header.Set("Authorization", "Bearer admin-secret")
 	rec := httptest.NewRecorder()
-	NewServer().ServeHTTP(rec, req)
+	NewServer(Runtime{}).ServeHTTP(rec, req)
 	var payload map[string]any
 	if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil || rec.Code != 200 {
 		t.Fatalf("catalog: %d %s %v", rec.Code, rec.Body.String(), err)

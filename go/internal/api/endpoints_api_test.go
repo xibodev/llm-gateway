@@ -34,7 +34,7 @@ func TestUpsertEndpointRoute(t *testing.T) {
 	providers.ResetProviders()
 	t.Cleanup(providers.ResetProviders)
 
-	server := httptest.NewServer(NewServer())
+	server := httptest.NewServer(NewServer(Runtime{}))
 	defer server.Close()
 
 	status, saved := jsonRequest(t, server.URL+"/admin/api/endpoints", http.MethodPost, "admin-secret", map[string]any{
@@ -81,7 +81,7 @@ func TestLegacyCategoriesRouteStillWorks(t *testing.T) {
 	providers.ResetProviders()
 	t.Cleanup(providers.ResetProviders)
 
-	server := httptest.NewServer(NewServer())
+	server := httptest.NewServer(NewServer(Runtime{}))
 	defer server.Close()
 
 	status, saved := jsonRequest(t, server.URL+"/admin/api/categories", http.MethodPost, "admin-secret", map[string]any{
@@ -128,7 +128,7 @@ func TestBothRoutesShareOneStore(t *testing.T) {
 	providers.ResetProviders()
 	t.Cleanup(providers.ResetProviders)
 
-	server := httptest.NewServer(NewServer())
+	server := httptest.NewServer(NewServer(Runtime{}))
 	defer server.Close()
 
 	// Create via the legacy /categories route.

@@ -110,7 +110,7 @@ func setupGatewayLoad(tb testing.TB, unauthenticated, minted bool) loadSetup {
 		s.Endpoints = map[string]*config.EndpointConfig{}
 	})
 	providers.ResetProviders()
-	setup := loadSetup{handler: NewServer(), token: "benchmark-admin"}
+	setup := loadSetup{handler: NewServer(Runtime{}), token: "benchmark-admin"}
 	if !minted {
 		return setup
 	}

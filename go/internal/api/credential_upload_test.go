@@ -74,7 +74,7 @@ func newCredentialTestEnvWith(t *testing.T, providers map[string]*config.Provide
 		t.Fatal(err)
 	}
 
-	server := httptest.NewServer(NewServer())
+	server := httptest.NewServer(NewServer(Runtime{}))
 	return credentialTestEnv{server: server, principalID: principal.ID}
 }
 

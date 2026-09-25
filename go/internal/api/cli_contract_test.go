@@ -89,7 +89,7 @@ func setupCLIContractTest(t *testing.T) (*httptest.Server, func() []cliUpstreamC
 			t.Fatalf("%s catalog=%+v", provider, rows)
 		}
 	}
-	gateway := httptest.NewServer(NewServer())
+	gateway := httptest.NewServer(NewServer(Runtime{}))
 	t.Cleanup(func() {
 		gateway.Close()
 		upstreamA.Close()

@@ -87,7 +87,7 @@ func TestCanceledNonStreamingRequestsCancelUpstreamWithoutRetry(t *testing.T) {
 			request.Header.Set("Content-Type", "application/json")
 			done := make(chan struct{})
 			go func() {
-				NewServer().ServeHTTP(httptest.NewRecorder(), request)
+				NewServer(Runtime{}).ServeHTTP(httptest.NewRecorder(), request)
 				close(done)
 			}()
 			select {
@@ -236,7 +236,7 @@ func TestChatResponseEnvelopeNormalization(t *testing.T) {
 	if models := providers.RefreshCatalog("fixture"); len(models) != 6 {
 		t.Fatalf("catalog=%+v", models)
 	}
-	server := httptest.NewServer(NewServer())
+	server := httptest.NewServer(NewServer(Runtime{}))
 	t.Cleanup(func() {
 		server.Close()
 		providers.ResetProviders()
@@ -319,7 +319,7 @@ func setupResponsesAPITest(t *testing.T) *httptest.Server {
 		s.Endpoints = map[string]*config.EndpointConfig{}
 	})
 	providers.ResetProviders()
-	server := httptest.NewServer(NewServer())
+	server := httptest.NewServer(NewServer(Runtime{}))
 	t.Cleanup(func() {
 		server.Close()
 		iam.ResetForTests()
@@ -797,7 +797,7 @@ func TestResponsesEndpointPreservesNativeResponsesPayload(t *testing.T) {
 	if models := providers.RefreshCatalog("native"); len(models) != 1 {
 		t.Fatalf("catalog=%+v", models)
 	}
-	server := httptest.NewServer(NewServer())
+	server := httptest.NewServer(NewServer(Runtime{}))
 	defer server.Close()
 	t.Cleanup(func() {
 		iam.ResetForTests()

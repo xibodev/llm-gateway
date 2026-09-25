@@ -67,7 +67,7 @@ func TestServiceProviderCredentialControlsModelsAndRoutes(t *testing.T) {
 		t, "unauthorized", "service:unauthorized", "service", credential.ID, false,
 	)
 	humanToken, humanPrincipal := issueHumanProviderTestKey(t, "human-secret")
-	server := httptest.NewServer(NewServer())
+	server := httptest.NewServer(NewServer(Runtime{}))
 	defer server.Close()
 
 	assertModelIDs(t, server.URL, unauthorizedToken, nil)
@@ -126,7 +126,7 @@ func TestAdminSharedCredentialBindingIsSecretFreeAndAudited(t *testing.T) {
 			"copilot": {Type: "github_copilot"},
 		}
 	})
-	server := httptest.NewServer(NewServer())
+	server := httptest.NewServer(NewServer(Runtime{}))
 	defer server.Close()
 
 	status, imported := jsonRequest(
@@ -208,7 +208,7 @@ func TestServiceBindingPreservesUnrelatedHumanCatalog(t *testing.T) {
 	humanToken, humanPrincipal := issueHumanProviderTestKeyForModels(
 		t, "human-secret", []string{"copilot/existing-human-model"},
 	)
-	server := httptest.NewServer(NewServer())
+	server := httptest.NewServer(NewServer(Runtime{}))
 	defer server.Close()
 	if rows := providers.RefreshCatalogForPrincipal("copilot", callerOf(humanPrincipal)); len(rows) != 1 {
 		t.Fatalf("human refresh returned %+v", rows)

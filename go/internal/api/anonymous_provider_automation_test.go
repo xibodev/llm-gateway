@@ -62,7 +62,7 @@ func TestAnonymousProviderAutomationSettingPrecedence(t *testing.T) {
 
 func TestAnonymousProviderAutomationAdminAPI(t *testing.T) {
 	setupAnonymousAutomationAPITest(t)
-	server := NewServer()
+	server := NewServer(Runtime{})
 	request := httptest.NewRequest(http.MethodPost, "/admin/api/settings/anonymous-provider-automation", jsonBody(map[string]any{"override": "on"}))
 	request.Header.Set("Authorization", "Bearer admin")
 	response := httptest.NewRecorder()
@@ -89,11 +89,11 @@ func TestEnsureAnonymousProviderDoesNotOverwriteOrEnable(t *testing.T) {
 	profile := providers.AnonymousProviderProfile{
 		RegistryID: "llm7", ProviderID: "llm7", RuntimeType: "openai_compatible", BaseURL: "https://api.llm7.io/v1",
 	}
-	if id, status := ensureAnonymousProvider(profile); id != "llm7" || status != "managed" {
+	if id, status := ensureAnonymousProvider(providers.Current(), profile); id != "llm7" || status != "managed" {
 		t.Fatalf("first ensure id=%q status=%q", id, status)
 	}
 	config.Update(func(s *config.Settings) { s.Providers["llm7"].Disabled = true })
-	if _, status := ensureAnonymousProvider(profile); status != "disabled" {
+	if _, status := ensureAnonymousProvider(providers.Current(), profile); status != "disabled" {
 		t.Fatalf("disabled status=%q", status)
 	}
 	if !config.Get().Providers["llm7"].Disabled {
@@ -103,7 +103,7 @@ func TestEnsureAnonymousProviderDoesNotOverwriteOrEnable(t *testing.T) {
 		s.Providers["collision"] = &config.ProviderConfig{Type: "openai_compatible", BaseURL: "https://custom.example/v1"}
 	})
 	profile.ProviderID = "collision"
-	if _, status := ensureAnonymousProvider(profile); status != "collision" {
+	if _, status := ensureAnonymousProvider(providers.Current(), profile); status != "collision" {
 		t.Fatalf("collision status=%q", status)
 	}
 	if config.Get().Providers["collision"].BaseURL != "https://custom.example/v1" {
@@ -115,7 +115,7 @@ func TestEnsureAnonymousProviderDoesNotOverwriteOrEnable(t *testing.T) {
 		}
 	})
 	profile.ProviderID = "runtime-mismatch"
-	if _, status := ensureAnonymousProvider(profile); status != "collision" {
+	if _, status := ensureAnonymousProvider(providers.Current(), profile); status != "collision" {
 		t.Fatalf("runtime mismatch status=%q", status)
 	}
 }
@@ -130,7 +130,7 @@ func TestEnsureAnonymousProviderRejectsEndpointNameCollision(t *testing.T) {
 	profile := providers.AnonymousProviderProfile{
 		RegistryID: "llm7", ProviderID: "llm7", RuntimeType: "openai_compatible", BaseURL: "https://api.llm7.io/v1",
 	}
-	if _, status := ensureAnonymousProvider(profile); status != "collision" {
+	if _, status := ensureAnonymousProvider(providers.Current(), profile); status != "collision" {
 		t.Fatalf("status=%q", status)
 	}
 	if _, exists := config.Provider("llm7"); exists {
@@ -153,7 +153,7 @@ func TestEnsureAnonymousProviderRefusesRetainedPersonalConnection(t *testing.T) 
 		t.Fatal(err)
 	}
 	profile := providers.AnonymousProviderProfile{RegistryID: "llm7", ProviderID: "llm7", RuntimeType: "openai_compatible", BaseURL: "https://api.llm7.io/v1"}
-	if _, status := ensureAnonymousProvider(profile); status != "credential_collision" {
+	if _, status := ensureAnonymousProvider(providers.Current(), profile); status != "credential_collision" {
 		t.Fatalf("status=%q", status)
 	}
 	if _, exists := config.Provider("llm7"); exists {
@@ -242,7 +242,7 @@ func TestDisabledAutomationDoesNotChangeProviders(t *testing.T) {
 	if err := iam.SetAnonymousProviderAutomationOverride("off"); err != nil {
 		t.Fatal(err)
 	}
-	if results := runAnonymousProviderAutomation(context.Background()); len(results) != 0 {
+	if results := runAnonymousProviderAutomation(context.Background(), providers.Current()); len(results) != 0 {
 		t.Fatalf("results=%+v", results)
 	}
 	if config.Get().Providers["keep"] == nil || len(config.Get().Providers) != 1 {
@@ -278,7 +278,7 @@ func TestAnonymousProviderAutomationRunsOncePerDay(t *testing.T) {
 		RegistryID: "llm7", ProviderID: "daily-fixture",
 		RuntimeType: "openai_compatible", BaseURL: upstream.URL,
 	}}
-	results := runAnonymousProviderAutomationProfiles(context.Background(), profiles)
+	results := runAnonymousProviderAutomationProfiles(context.Background(), providers.Current(), profiles)
 	if len(results) != 1 || results[0]["success"] != true || catalogs.Load() != 1 || completions.Load() != 1 {
 		t.Fatalf("results=%+v catalogs=%d completions=%d", results, catalogs.Load(), completions.Load())
 	}
@@ -290,7 +290,7 @@ func TestAnonymousProviderAutomationRunsOncePerDay(t *testing.T) {
 	if err != nil || len(checks["daily-fixture"]) != 2 {
 		t.Fatalf("checks=%+v err=%v", checks, err)
 	}
-	results = runAnonymousProviderAutomationProfiles(context.Background(), profiles)
+	results = runAnonymousProviderAutomationProfiles(context.Background(), providers.Current(), profiles)
 	if len(results) != 0 || catalogs.Load() != 1 || completions.Load() != 1 {
 		t.Fatalf("daily claim repeated work: results=%+v catalogs=%d completions=%d", results, catalogs.Load(), completions.Load())
 	}
@@ -315,7 +315,7 @@ func TestAnonymousProviderAutomationPreservesSharedFailureEvidence(t *testing.T)
 		RegistryID: "llm7", ProviderID: "shared-failure-fixture",
 		RuntimeType: "openai_compatible", BaseURL: upstream.URL,
 	}
-	results := runAnonymousProviderAutomationProfiles(context.Background(), []providers.AnonymousProviderProfile{profile})
+	results := runAnonymousProviderAutomationProfiles(context.Background(), providers.Current(), []providers.AnonymousProviderProfile{profile})
 	if len(results) != 1 {
 		t.Fatalf("results=%+v", results)
 	}
@@ -391,7 +391,7 @@ func TestAnonymousVerificationPreservesRetryAfterClassification(t *testing.T) {
 
 func TestAutoConnectFreeProvidersAPI(t *testing.T) {
 	setupAnonymousAutomationAPITest(t)
-	server := httptest.NewServer(NewServer())
+	server := httptest.NewServer(NewServer(Runtime{}))
 	defer server.Close()
 
 	// Anonymous request rejected

@@ -73,7 +73,7 @@ func TestAnonymousZenMuseChatFacadePreservesV066MultiTurnContract(t *testing.T) 
 	})
 	providers.ResetProviders()
 
-	recorder := apiSmokeRequest(NewServer(), "/v1/chat/completions", map[string]any{
+	recorder := apiSmokeRequest(NewServer(Runtime{}), "/v1/chat/completions", map[string]any{
 		"model": "zen/muse-spark-fixture",
 		"messages": []any{
 			map[string]any{"role": "user", "content": "turn one"},

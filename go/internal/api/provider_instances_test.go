@@ -39,7 +39,7 @@ func TestStatusPayloadCarriesEachInstance(t *testing.T) {
 	providers.ResetProviders()
 	t.Cleanup(providers.ResetProviders)
 
-	server := httptest.NewServer(NewServer())
+	server := httptest.NewServer(NewServer(Runtime{}))
 	defer server.Close()
 
 	status, state := jsonRequest(t, server.URL+"/admin/api/state", http.MethodGet, "admin-secret", nil)
@@ -131,7 +131,7 @@ func TestBrokenInstanceIsNotMaskedByASoundOne(t *testing.T) {
 	providers.ResetProviders()
 	t.Cleanup(providers.ResetProviders)
 
-	server := httptest.NewServer(NewServer())
+	server := httptest.NewServer(NewServer(Runtime{}))
 	defer server.Close()
 
 	_, state := jsonRequest(t, server.URL+"/admin/api/state", http.MethodGet, "admin-secret", nil)
@@ -216,7 +216,7 @@ func TestInstanceConfigurationIssuesStaySeparate(t *testing.T) {
 	providers.ResetProviders()
 	t.Cleanup(providers.ResetProviders)
 
-	server := httptest.NewServer(NewServer())
+	server := httptest.NewServer(NewServer(Runtime{}))
 	defer server.Close()
 
 	_, state := jsonRequest(t, server.URL+"/admin/api/state", http.MethodGet, "admin-secret", nil)
@@ -281,7 +281,7 @@ func TestCustomProviderRowCarriesItsOwnInstance(t *testing.T) {
 	providers.ResetProviders()
 	t.Cleanup(providers.ResetProviders)
 
-	server := httptest.NewServer(NewServer())
+	server := httptest.NewServer(NewServer(Runtime{}))
 	defer server.Close()
 
 	_, state := jsonRequest(t, server.URL+"/admin/api/state", http.MethodGet, "admin-secret", nil)
@@ -367,7 +367,7 @@ func TestCustomRowIsDistinguishableFromACollidingTile(t *testing.T) {
 	providers.ResetProviders()
 	t.Cleanup(providers.ResetProviders)
 
-	server := httptest.NewServer(NewServer())
+	server := httptest.NewServer(NewServer(Runtime{}))
 	defer server.Close()
 
 	_, state := jsonRequest(t, server.URL+"/admin/api/state", http.MethodGet, "admin-secret", nil)
@@ -454,7 +454,7 @@ func TestSuccessfulVerifyDoesNotClearNotDiscoverable(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	server := httptest.NewServer(NewServer())
+	server := httptest.NewServer(NewServer(Runtime{}))
 	defer server.Close()
 	_, state := jsonRequest(t, server.URL+"/admin/api/state", http.MethodGet, "admin-secret", nil)
 
@@ -546,7 +546,7 @@ func TestCatalogStateReportsNotDiscoverableFromLastFailedCheck(t *testing.T) {
 				t.Fatal(err)
 			}
 
-			server := httptest.NewServer(NewServer())
+			server := httptest.NewServer(NewServer(Runtime{}))
 			defer server.Close()
 			_, state := jsonRequest(t, server.URL+"/admin/api/state", http.MethodGet, "admin-secret", nil)
 
@@ -637,7 +637,7 @@ func TestNotDiscoverableIsNotClaimedWhenAnotherScopeDiscoveredModels(t *testing.
 	record(serviceAccount.ID, true, "", now-600)
 	record(keyOnly.ID, false, "catalog_not_discoverable", now)
 
-	server := httptest.NewServer(NewServer())
+	server := httptest.NewServer(NewServer(Runtime{}))
 	defer server.Close()
 	_, state := jsonRequest(t, server.URL+"/admin/api/state", http.MethodGet, "admin-secret", nil)
 
@@ -715,7 +715,7 @@ func TestNotDiscoverableHoldsWhenEveryScopeFailed(t *testing.T) {
 		}
 	}
 
-	server := httptest.NewServer(NewServer())
+	server := httptest.NewServer(NewServer(Runtime{}))
 	defer server.Close()
 	_, state := jsonRequest(t, server.URL+"/admin/api/state", http.MethodGet, "admin-secret", nil)
 

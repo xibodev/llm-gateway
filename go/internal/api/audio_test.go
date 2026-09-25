@@ -181,7 +181,7 @@ func TestAudioProxyResponses(t *testing.T) {
 					`{"model":"proxy/audio-model","input":"hello","voice":"default"}`))
 			}
 			rec := httptest.NewRecorder()
-			NewServer().ServeHTTP(rec, req)
+			NewServer(Runtime{}).ServeHTTP(rec, req)
 
 			if testCase.status >= 300 {
 				assertSafeProxyError(t, rec, testCase.status, token, email)
@@ -226,7 +226,7 @@ func TestAudioBodyReadFailureRecordsEffectiveFailureAndCloses(t *testing.T) {
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest("POST", "/v1/audio/speech", strings.NewReader(
 		`{"model":"proxy/audio-model","input":"hello","voice":"default"}`))
-	NewServer().ServeHTTP(rec, req)
+	NewServer(Runtime{}).ServeHTTP(rec, req)
 	assertSafeProxyError(t, rec, http.StatusBadGateway)
 	if !body.closed {
 		t.Fatal("upstream response body was not closed")

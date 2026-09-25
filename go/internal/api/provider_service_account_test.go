@@ -80,7 +80,7 @@ func TestAdminStoresServiceAccountWithItsOwnKind(t *testing.T) {
 	})
 	providers.ResetProviders()
 
-	server := httptest.NewServer(NewServer())
+	server := httptest.NewServer(NewServer(Runtime{}))
 	defer server.Close()
 
 	status, created := jsonRequest(t, server.URL+"/admin/api/providers", http.MethodPost, "admin-secret", map[string]any{
@@ -134,7 +134,7 @@ func TestAdminRejectsServiceAccountForNonGoogleProvider(t *testing.T) {
 	})
 	providers.ResetProviders()
 
-	server := httptest.NewServer(NewServer())
+	server := httptest.NewServer(NewServer(Runtime{}))
 	defer server.Close()
 
 	status, body := jsonRequest(t, server.URL+"/admin/api/providers", http.MethodPost, "admin-secret", map[string]any{

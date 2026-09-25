@@ -33,7 +33,7 @@ func TestProviderQuotaAdvisoriesAreHonestUnknownWithoutNumericLimits(t *testing.
 	if _, err := iam.Initialize(); err != nil {
 		t.Fatal(err)
 	}
-	server := httptest.NewServer(NewServer())
+	server := httptest.NewServer(NewServer(Runtime{}))
 	defer server.Close()
 	from := time.Now().Add(-time.Hour).Unix()
 	to := time.Now().Unix() + 1
@@ -217,7 +217,7 @@ func TestProviderProbeUsesSelectedCodexOwnerCatalog(t *testing.T) {
 	}))
 	defer upstream.Close()
 	providers.SetCodexEndpointsForTests(t, providers.CodexEndpoints{ModelsURL: upstream.URL})
-	server := httptest.NewServer(NewServer())
+	server := httptest.NewServer(NewServer(Runtime{}))
 	defer server.Close()
 
 	status, denied := jsonRequest(t, server.URL+"/admin/api/providers/codex/test", http.MethodPost, "admin-secret", map[string]any{})

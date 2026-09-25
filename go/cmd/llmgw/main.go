@@ -26,6 +26,7 @@ import (
 	"llmgw/internal/config"
 	"llmgw/internal/iam"
 	"llmgw/internal/operations"
+	"llmgw/internal/providers"
 	"llmgw/internal/roster"
 	"llmgw/internal/router"
 )
@@ -118,16 +119,23 @@ func serve() {
 			migrated.Keys, migrated.Projects, migrated.Principals,
 		)
 	}
+	// The runtimes own the provider and routing state. Code that does not take
+	// them explicitly yet reaches them as the installed ones, so they are
+	// installed before anything that could use them starts.
+	providerRuntime := providers.NewRuntime()
+	providers.Install(providerRuntime)
+	routerRuntime := router.NewRuntime(providerRuntime)
+	router.Install(routerRuntime)
 	externalKeysStop, err := iam.StartExternalKeysFromEnv(context.Background())
 	if err != nil {
 		log.Fatalf("initialize external gateway keys: %v", err)
 	}
 	defer externalKeysStop()
-	retentionStop := startRetention()
+	retentionStop := startRetention(routerRuntime)
 	defer retentionStop()
 	rosterStop := roster.Default().Start(context.Background())
 	defer rosterStop()
-	automationStop := api.StartAnonymousProviderAutomation(context.Background())
+	automationStop := api.StartAnonymousProviderAutomation(context.Background(), providerRuntime)
 	defer automationStop()
 
 	// Local providers are surfaced via the /admin "Detect local" button, not
@@ -148,7 +156,7 @@ func serve() {
 
 	srv := &http.Server{
 		Addr:              addr,
-		Handler:           api.NewServer(),
+		Handler:           api.NewServer(api.Runtime{Providers: providerRuntime, Router: routerRuntime}),
 		ReadHeaderTimeout: 10 * time.Second,
 	}
 
@@ -173,7 +181,7 @@ func printVersion(output io.Writer) {
 	fmt.Fprintf(output, "llm-gateway %s\ncommit %s\nbuild_time %s\n", info.Version, info.Commit, info.BuildTime)
 }
 
-func startRetention() func() {
+func startRetention(routes *router.Runtime) func() {
 	stop := make(chan struct{})
 	run := func() {
 		now := time.Now()
@@ -184,8 +192,8 @@ func startRetention() func() {
 			return
 		}
 		cutoff := now.AddDate(0, 0, -policy.UsageDays).Unix()
-		telemetry, telemetryErr := router.PruneTelemetryBefore(cutoff)
-		savings, savingsErr := router.PruneSavingsBefore(cutoff)
+		telemetry, telemetryErr := routes.PruneTelemetryBefore(cutoff)
+		savings, savingsErr := routes.PruneSavingsBefore(cutoff)
 		backups, backupErr := operations.PruneDefaultBackups()
 		if err := errors.Join(telemetryErr, savingsErr, backupErr); err != nil {
 			log.Printf("retention: %v", err)

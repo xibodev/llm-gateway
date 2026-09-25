@@ -35,7 +35,7 @@ func TestAdminRouteRejectsUnknownMembersAndPreservesOrder(t *testing.T) {
 	if _, err := iam.Initialize(); err != nil {
 		t.Fatal(err)
 	}
-	server := httptest.NewServer(NewServer())
+	server := httptest.NewServer(NewServer(Runtime{}))
 	defer server.Close()
 
 	status, _ := jsonRequest(t, server.URL+"/admin/api/categories", http.MethodPost, "admin-secret", map[string]any{
@@ -85,7 +85,7 @@ func TestEndpointDeleteIsCaseInsensitive(t *testing.T) {
 	if err := config.Save(); err != nil {
 		t.Fatal(err)
 	}
-	server := httptest.NewServer(NewServer())
+	server := httptest.NewServer(NewServer(Runtime{}))
 	defer server.Close()
 	status, _ := jsonRequest(t, server.URL+"/admin/api/endpoints/CODING", http.MethodDelete, "admin-secret", nil)
 	if status != http.StatusOK || config.Get().Endpoints["coding"] != nil {
@@ -104,7 +104,7 @@ func TestEndpointDeleteRejectsAmbiguousCaseFold(t *testing.T) {
 			"CODING": {Failover: []config.EndpointMember{{Provider: "echo", Model: "echo-strong"}}},
 		}
 	})
-	server := httptest.NewServer(NewServer())
+	server := httptest.NewServer(NewServer(Runtime{}))
 	defer server.Close()
 	status, _ := jsonRequest(t, server.URL+"/admin/api/endpoints/CoDiNg", http.MethodDelete, "admin-secret", nil)
 	if status != http.StatusConflict || len(config.Get().Endpoints) != 2 {
@@ -158,7 +158,7 @@ func TestRouteSaveFailureRestoresMemoryAndPublication(t *testing.T) {
 	}))
 	request.Header.Set("Authorization", "Bearer admin-secret")
 	response := httptest.NewRecorder()
-	NewServer().ServeHTTP(response, request)
+	NewServer(Runtime{}).ServeHTTP(response, request)
 	if response.Code != http.StatusInternalServerError {
 		t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
 	}
@@ -219,7 +219,7 @@ func TestAdminRouteRequiresExplicitUnverifiedAnonymousOptIn(t *testing.T) {
 		catalogModelsForPrincipal = originalCatalog
 		catalogLookupForPrincipal = originalLookup
 	})
-	server := httptest.NewServer(NewServer())
+	server := httptest.NewServer(NewServer(Runtime{}))
 	defer server.Close()
 	body := map[string]any{"name": "candidate-route", "failover": []map[string]any{{
 		"provider": profile.ProviderID, "model": "candidate",
@@ -299,7 +299,7 @@ func TestRouteEditRemovesUnverifiedPublicationOptIn(t *testing.T) {
 		return providers.ModelInfo{ID: modelID}, providerID == profile.ProviderID && (modelID == "candidate" || modelID == "verified")
 	}
 	t.Cleanup(func() { catalogLookupForPrincipal = originalLookup })
-	server := httptest.NewServer(NewServer())
+	server := httptest.NewServer(NewServer(Runtime{}))
 	defer server.Close()
 	body := map[string]any{"name": "candidate-route", "failover": []map[string]any{{
 		"provider": profile.ProviderID, "model": "candidate", "allow_unverified": true,
@@ -355,7 +355,7 @@ func TestVerifiedRouteMemberDoesNotPersistFutureUnverifiedOptIn(t *testing.T) {
 		return providers.ModelInfo{ID: modelID}, providerID == profile.ProviderID && modelID == "verified"
 	}
 	t.Cleanup(func() { catalogLookupForPrincipal = originalLookup })
-	server := httptest.NewServer(NewServer())
+	server := httptest.NewServer(NewServer(Runtime{}))
 	defer server.Close()
 	status, body := jsonRequest(t, server.URL+"/admin/api/endpoints", http.MethodPost, "admin-secret", map[string]any{
 		"name": "verified-route", "failover": []map[string]any{{
@@ -409,7 +409,7 @@ func TestRejectedRouteDoesNotPublishEarlierUnverifiedMember(t *testing.T) {
 	}
 	t.Cleanup(func() { catalogLookupForPrincipal = originalLookup })
 
-	server := httptest.NewServer(NewServer())
+	server := httptest.NewServer(NewServer(Runtime{}))
 	defer server.Close()
 	body := map[string]any{"name": "rejected-route", "failover": []map[string]any{
 		{"provider": profile.ProviderID, "model": "candidate", "allow_unverified": true},
@@ -495,7 +495,7 @@ func TestUserModelsUsesOnlyOwnerScopedPortalEndpoint(t *testing.T) {
 	})); len(rows) == 0 {
 		t.Fatal("owner refresh returned no models")
 	}
-	server := httptest.NewServer(NewServer())
+	server := httptest.NewServer(NewServer(Runtime{}))
 	defer server.Close()
 	status, payload := ssoConnectionRequest(t, server.URL, "model-owner", http.MethodGet, "/user/api/models", nil)
 	if status != http.StatusOK {
@@ -565,7 +565,7 @@ func TestAdminCodexCatalogAndRouteValidationArePrincipalScoped(t *testing.T) {
 	}))
 	defer upstream.Close()
 	providers.SetCodexEndpointsForTests(t, providers.CodexEndpoints{ModelsURL: upstream.URL + "/models"})
-	server := httptest.NewServer(NewServer())
+	server := httptest.NewServer(NewServer(Runtime{}))
 	defer server.Close()
 	contains := func(payload map[string]any, want string) bool {
 		for _, value := range payload["data"].([]any) {

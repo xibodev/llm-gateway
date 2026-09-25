@@ -208,7 +208,7 @@ func TestKeyScopeProjectPolicyRejectsKeyOnlyFields(t *testing.T) {
 	if _, err := iam.SetProjectPolicy(project.ID, existing); err != nil {
 		t.Fatal(err)
 	}
-	server := httptest.NewServer(NewServer())
+	server := httptest.NewServer(NewServer(Runtime{}))
 	defer server.Close()
 	path := server.URL + "/admin/api/projects/" + project.ID + "/policy"
 	for _, body := range []map[string]any{
@@ -238,7 +238,7 @@ func TestKeyScopeProjectPolicyRejectsKeyOnlyFields(t *testing.T) {
 
 func TestKeyScopeAdminPortalContract(t *testing.T) {
 	owner, project := setupKeyScope(t)
-	server := httptest.NewServer(NewServer())
+	server := httptest.NewServer(NewServer(Runtime{}))
 	defer server.Close()
 	portal := func(method, path string, body any) (int, map[string]any) {
 		t.Helper()

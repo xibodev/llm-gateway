@@ -67,7 +67,7 @@ func TestPlaygroundSpeechRejectsNonSpeechProvider(t *testing.T) {
 	providers.ResetProviders()
 	t.Cleanup(providers.ResetProviders)
 
-	server := httptest.NewServer(NewServer())
+	server := httptest.NewServer(NewServer(Runtime{}))
 	defer server.Close()
 	ownerID, projectID := uatScope(t, server.URL)
 
@@ -111,7 +111,7 @@ func TestPlaygroundSpeechProxiesOpenAICompatibleProvider(t *testing.T) {
 	providers.ResetProviders()
 	t.Cleanup(providers.ResetProviders)
 
-	server := httptest.NewServer(NewServer())
+	server := httptest.NewServer(NewServer(Runtime{}))
 	defer server.Close()
 	ownerID, projectID := uatScope(t, server.URL)
 	status, result := jsonRequest(
@@ -170,7 +170,7 @@ func TestPlaygroundEmbeddingsProxiesAndSummarizesVector(t *testing.T) {
 	})
 	providers.ResetProviders()
 	t.Cleanup(providers.ResetProviders)
-	server := httptest.NewServer(NewServer())
+	server := httptest.NewServer(NewServer(Runtime{}))
 	defer server.Close()
 	ownerID, projectID := uatScope(t, server.URL)
 	status, result := jsonRequest(t, server.URL+"/admin/api/playground/embeddings", http.MethodPost, "admin-secret", map[string]any{
@@ -195,7 +195,7 @@ func TestPlaygroundSpeechRequiresInputAndScope(t *testing.T) {
 	providers.ResetProviders()
 	t.Cleanup(providers.ResetProviders)
 
-	server := httptest.NewServer(NewServer())
+	server := httptest.NewServer(NewServer(Runtime{}))
 	defer server.Close()
 	ownerID, projectID := uatScope(t, server.URL)
 

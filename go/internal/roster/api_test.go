@@ -45,7 +45,7 @@ func TestRosterRoutesIsolateAdminAndSSOAndLeaveConfigUnchanged(t *testing.T) {
 		t.Fatal(err)
 	}
 	before, _ := json.Marshal(config.Get())
-	server := api.NewServer()
+	server := api.NewServer(api.Runtime{})
 	for _, tc := range []struct {
 		method, path, token, groups, origin string
 		status                              int

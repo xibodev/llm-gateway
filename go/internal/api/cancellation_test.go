@@ -184,7 +184,7 @@ func TestCodingStreamsCancelAfterFirstEvent(t *testing.T) {
 			request.Header.Set("Content-Type", "application/json")
 			done := make(chan struct{})
 			go func() {
-				NewServer().ServeHTTP(writer, request)
+				NewServer(Runtime{}).ServeHTTP(writer, request)
 				close(done)
 			}()
 			select {
@@ -272,7 +272,7 @@ func TestAdaptedCodingStreamsCancelWithoutFailover(t *testing.T) {
 			request.Header.Set("Content-Type", "application/json")
 			done := make(chan struct{})
 			go func() {
-				NewServer().ServeHTTP(writer, request)
+				NewServer(Runtime{}).ServeHTTP(writer, request)
 				close(done)
 			}()
 			select {
@@ -347,7 +347,7 @@ func TestCodingStreamWriteAndFlushFailuresCloseUpstream(t *testing.T) {
 			request.Header.Set("Content-Type", "application/json")
 			done := make(chan struct{})
 			go func() {
-				NewServer().ServeHTTP(writer, request)
+				NewServer(Runtime{}).ServeHTTP(writer, request)
 				close(done)
 			}()
 			select {
