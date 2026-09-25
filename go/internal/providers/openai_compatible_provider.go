@@ -67,15 +67,17 @@ func (rt *Runtime) newOpenAICompatibleProvider(
 		base:    strings.TrimRight(openAICompatibleBase(settings, cfg), "/"),
 		timeout: cfg.TimeoutOr(settings.OpenAICompatibleTimeoutSeconds), registryID: spec.config.RegistryID,
 	}
-	return rt.newOpenAIFacade(openAICompatibleCoreType, "OpenAI-compatible", spec, cfg, caller, catalog, entry.AnonymousAutomation)
+	return rt.newOpenAIFacade(settings, openAICompatibleCoreType, "OpenAI-compatible", spec, cfg, caller, catalog, entry.AnonymousAutomation)
 }
 
 // newBedrockProvider returns the facade of a Bedrock instance for caller.
 // Its catalog is at its endpoint and bounded by its timeout, as the
 // transport's was, which never timed out when none was configured.
-func (rt *Runtime) newBedrockProvider(instance string, cfg *config.ProviderConfig, caller core.Caller) (*openAICompatibleProvider, error) {
+func (rt *Runtime) newBedrockProvider(
+	settings *config.Settings, instance string, cfg *config.ProviderConfig, caller core.Caller,
+) (*openAICompatibleProvider, error) {
 	catalog := openAICatalog{base: bedrockBase(cfg), timeout: cfg.TimeoutOr(0)}
-	return rt.newOpenAIFacade(bedrockCoreType, "Bedrock", bedrockCore(instance, cfg), cfg, caller, catalog, false)
+	return rt.newOpenAIFacade(settings, bedrockCoreType, "Bedrock", bedrockCore(instance, cfg), cfg, caller, catalog, false)
 }
 
 // newOpenAIFacade builds the facade of the instance spec builds, with the
@@ -83,10 +85,10 @@ func (rt *Runtime) newBedrockProvider(instance string, cfg *config.ProviderConfi
 // another kind is refused here, as the factory refused it, and so is a
 // configuration core cannot build a provider for.
 func (rt *Runtime) newOpenAIFacade(
-	vertical, label string, spec openAICoreSpec, cfg *config.ProviderConfig, caller core.Caller,
+	settings *config.Settings, vertical, label string, spec openAICoreSpec, cfg *config.ProviderConfig, caller core.Caller,
 	catalog openAICatalog, anonymousEntry bool,
 ) (*openAICompatibleProvider, error) {
-	apiKey, observation, err := resolveAPIKeyObserved(spec.instance, cfg, caller)
+	apiKey, observation, err := resolveAPIKeyObserved(settings, spec.instance, cfg, caller)
 	if err != nil {
 		return nil, err
 	}

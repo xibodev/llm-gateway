@@ -118,7 +118,7 @@ func TestZenRequestsResolveTheFactoryPrecedence(t *testing.T) {
 		provider := zenFacade(t, runtime, caller)
 		if _, observation, err := provider.CompleteWithObservation("chat", []Message{{"role": "user", "content": "hi"}}, nil); err != nil || upstream.last() != want {
 			t.Fatalf("authorization=%q err=%v, want %q", upstream.last(), err, want)
-		} else if _, reference, _ := resolveAPIKeyObserved("zen", cfg, caller); fmt.Sprint(observation) != fmt.Sprint(reference) {
+		} else if _, reference, _ := resolveAPIKeyObserved(config.Get(), "zen", cfg, caller); fmt.Sprint(observation) != fmt.Sprint(reference) {
 			t.Fatalf("observation=%+v, want the factory's %+v", observation, reference)
 		}
 		return provider

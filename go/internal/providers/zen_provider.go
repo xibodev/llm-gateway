@@ -50,9 +50,9 @@ var _ Provider = (*zenProvider)(nil)
 // newZenProvider returns the facade of the Zen instance at base for caller,
 // with the credential the factory resolves for an OpenAI-compatible instance.
 func (rt *Runtime) newZenProvider(
-	instance string, cfg *config.ProviderConfig, caller core.Caller, base string, timeout float64,
+	settings *config.Settings, instance string, cfg *config.ProviderConfig, caller core.Caller, base string, timeout float64,
 ) (*zenProvider, error) {
-	apiKey, observation, err := resolveAPIKeyObserved(instance, cfg, caller)
+	apiKey, observation, err := resolveAPIKeyObserved(settings, instance, cfg, caller)
 	if err != nil {
 		return nil, err
 	}

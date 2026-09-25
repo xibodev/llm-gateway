@@ -32,8 +32,8 @@ var ProviderTypes = []string{
 }
 
 // instantiate builds the facade of providerID, configured as cfg, for
-// caller, with the rest of its settings from settings, the snapshot cfg was
-// read from.
+// caller. Every setting the build reads, credential resolution included,
+// comes from settings, the snapshot cfg was read from.
 func (rt *Runtime) instantiate(
 	settings *config.Settings, providerID string, cfg *config.ProviderConfig, caller core.Caller,
 ) (Provider, error) {
@@ -47,13 +47,13 @@ func (rt *Runtime) instantiate(
 	}
 	switch ptype {
 	case "ai_studio":
-		apiKey, err := resolveAPIKey(providerID, cfg, caller)
+		apiKey, err := resolveAPIKey(settings, providerID, cfg, caller)
 		if err != nil {
 			return nil, err
 		}
 		return rt.newGoogleProvider(providerID, cfg, caller, NewAIStudio(cfg.BaseURL, apiKey, cfg.TimeoutOr(120)))
 	case "vertex_ai":
-		legacy, err := newVertexProvider(&rt.gcpTokens, providerID, cfg, caller)
+		legacy, err := newVertexProvider(settings, &rt.gcpTokens, providerID, cfg, caller)
 		if err != nil {
 			return nil, err
 		}
@@ -62,7 +62,7 @@ func (rt *Runtime) instantiate(
 		// The access token is optional: core's public default applies.
 		// resolveAPIKey still runs so a stored override (config secret or
 		// encrypted connection) wins when present.
-		token, err := resolveAPIKey(providerID, cfg, caller)
+		token, err := resolveAPIKey(settings, providerID, cfg, caller)
 		if err != nil {
 			token = ""
 		}
@@ -76,7 +76,7 @@ func (rt *Runtime) instantiate(
 		}
 		base := openAICompatibleBase(settings, cfg)
 		if zenInstance(settings, providerID, cfg) {
-			return rt.newZenProvider(providerID, cfg, caller, base, timeout)
+			return rt.newZenProvider(settings, providerID, cfg, caller, base, timeout)
 		}
 		return rt.newOpenAICompatibleProvider(providerID, cfg, caller, settings)
 	case "azure_openai":
@@ -88,7 +88,7 @@ func (rt *Runtime) instantiate(
 		if err != nil {
 			return nil, &ConfigError{Msg: fmt.Sprintf("provider '%s': %v", providerID, err)}
 		}
-		apiKey, observation, err := resolveAPIKeyObserved(providerID, cfg, caller)
+		apiKey, observation, err := resolveAPIKeyObserved(settings, providerID, cfg, caller)
 		if err != nil {
 			return nil, err
 		}
@@ -104,7 +104,7 @@ func (rt *Runtime) instantiate(
 			caller:      caller,
 		}, nil
 	case "anthropic":
-		credential, kind, _, err := resolveCredentialObserved(providerID, cfg, caller)
+		credential, kind, _, err := resolveCredentialObserved(settings, providerID, cfg, caller)
 		if err != nil {
 			return nil, err
 		}
@@ -126,7 +126,7 @@ func (rt *Runtime) instantiate(
 	case "google_antigravity":
 		return rt.newAntigravityProvider(providerID, caller)
 	case "bedrock":
-		return rt.newBedrockProvider(providerID, cfg, caller)
+		return rt.newBedrockProvider(settings, providerID, cfg, caller)
 	case "github_copilot":
 		return rt.newCopilotProvider(providerID, cfg, caller, cfg.TimeoutOr(settings.GithubCopilotTimeoutSeconds)), nil
 	case "ollama":
@@ -246,9 +246,9 @@ func (rt *Runtime) SpeechSynthesizerForPrincipal(providerID string, caller core.
 }
 
 func resolveAPIKey(
-	providerID string, cfg *config.ProviderConfig, caller core.Caller,
+	settings *config.Settings, providerID string, cfg *config.ProviderConfig, caller core.Caller,
 ) (string, error) {
-	secret, _, err := resolveAPIKeyObserved(providerID, cfg, caller)
+	secret, _, err := resolveAPIKeyObserved(settings, providerID, cfg, caller)
 	return secret, err
 }
 
@@ -263,9 +263,9 @@ const (
 
 // resolveAPIKeyObserved resolves a credential and requires it to be an API key.
 func resolveAPIKeyObserved(
-	providerID string, cfg *config.ProviderConfig, caller core.Caller,
+	settings *config.Settings, providerID string, cfg *config.ProviderConfig, caller core.Caller,
 ) (string, *CredentialObservation, error) {
-	secret, kind, observation, err := resolveCredentialObserved(providerID, cfg, caller)
+	secret, kind, observation, err := resolveCredentialObserved(settings, providerID, cfg, caller)
 	if err != nil {
 		return "", nil, err
 	}
@@ -280,9 +280,9 @@ func resolveAPIKeyObserved(
 // resolveCredentialObserved applies the credential resolution order and reports
 // the stored kind alongside the secret.
 func resolveCredentialObserved(
-	providerID string, cfg *config.ProviderConfig, caller core.Caller,
+	settings *config.Settings, providerID string, cfg *config.ProviderConfig, caller core.Caller,
 ) (string, string, *CredentialObservation, error) {
-	if strings.TrimSpace(config.Get().CredentialEncryptionKey) == "" {
+	if strings.TrimSpace(settings.CredentialEncryptionKey) == "" {
 		return config.ResolveProviderAPIKey(providerID, cfg), CredentialKindAPIKey, nil, nil
 	}
 	if principalID := callerPrincipalID(caller); principalID != "" {
@@ -320,7 +320,7 @@ func resolveCredentialObserved(
 // request. An API key keeps the x-goog-api-key path; a service-account key is
 // exchanged for a short-lived OAuth2 access token, cached in tokens.
 func newVertexProvider(
-	tokens *gcpauth.TokenCache, providerID string, cfg *config.ProviderConfig, caller core.Caller,
+	settings *config.Settings, tokens *gcpauth.TokenCache, providerID string, cfg *config.ProviderConfig, caller core.Caller,
 ) (GoogleAIProvider, error) {
 	requestType := strings.ToLower(strings.TrimSpace(cfg.VertexRequestType))
 	switch requestType {
@@ -330,7 +330,7 @@ func newVertexProvider(
 			"provider '%s': vertex_request_type must be default, paygo, or dedicated", providerID,
 		)}
 	}
-	secret, kind, _, err := resolveCredentialObserved(providerID, cfg, caller)
+	secret, kind, _, err := resolveCredentialObserved(settings, providerID, cfg, caller)
 	if err != nil {
 		return GoogleAIProvider{}, err
 	}
@@ -461,7 +461,8 @@ func AdaptsChatToNativeResponses(providerID string, cfg *config.ProviderConfig) 
 // AnonymousZenForPrincipal reports the effective OpenCode Zen access mode
 // without exposing the resolved credential.
 func AnonymousZenForPrincipal(providerID string, caller core.Caller) (bool, error) {
-	cfg, ok := config.Get().Providers[providerID]
+	settings := config.Get()
+	cfg, ok := settings.Providers[providerID]
 	if !ok || cfg == nil {
 		return false, &ConfigError{Msg: fmt.Sprintf("provider '%s': not configured", providerID)}
 	}
@@ -469,7 +470,7 @@ func AnonymousZenForPrincipal(providerID string, caller core.Caller) (bool, erro
 	if registryID != "opencode_zen" && !isZenBaseURL(cfg.BaseURL) {
 		return false, nil
 	}
-	key, _, err := resolveAPIKeyObserved(providerID, cfg, caller)
+	key, _, err := resolveAPIKeyObserved(settings, providerID, cfg, caller)
 	if err != nil {
 		return false, err
 	}
