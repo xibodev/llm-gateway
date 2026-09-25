@@ -335,9 +335,7 @@ func TestAntigravityCatalogAcceptsProjectPersistenceFromSameOperation(t *testing
 	antigravity.inner.SetProjectObserver(func(_ context.Context, accessToken, projectID string) error {
 		return persistAntigravityProject(human.ID, "antigravity", "personal", accessToken, projectID)
 	})
-	cacheMu.Lock()
-	cache[providerCacheKey("antigravity", principal)] = antigravity
-	cacheMu.Unlock()
+	putProvider(providerCacheKey("antigravity", principal), antigravity)
 
 	models, _, err := RefreshCatalogForPrincipalWithError("antigravity", principal)
 	if err != nil || len(models) != 1 || models[0].ID != "model-a" {
@@ -395,9 +393,7 @@ func TestAntigravityCatalogAcceptsCredentialRefreshFromSameOperation(t *testing.
 		return envelope.AccessToken, envelope.ProjectID, nil
 	}
 	antigravity.inner = coreproviders.NewExperimentalAntigravityProvider(tokenSource, upstream.Client(), upstream.URL)
-	cacheMu.Lock()
-	cache[providerCacheKey("antigravity", principal)] = antigravity
-	cacheMu.Unlock()
+	putProvider(providerCacheKey("antigravity", principal), antigravity)
 
 	models, _, err := RefreshCatalogForPrincipalWithError("antigravity", principal)
 	if err != nil || len(models) != 1 || models[0].ID != "model-a" {

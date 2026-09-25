@@ -125,25 +125,15 @@ func TestBedrockCarriesPersonalCredentialObservation(t *testing.T) {
 
 func TestForgetCatalogForPrincipal(t *testing.T) {
 	t.Setenv("LLMGW_STATE_DIR", t.TempDir())
-	catMu.Lock()
-	catData = map[string]catalogEntry{}
-	catGeneration = map[string]uint64{}
-	catLoaded = true
-	catMu.Unlock()
-	t.Cleanup(func() {
-		catMu.Lock()
-		catData = nil
-		catGeneration = nil
-		catLoaded = false
-		catMu.Unlock()
-	})
-	storeEntry("copilot@prn_one", []ModelInfo{{ID: "old-model"}})
-	storeEntry("copilot@prn_two", []ModelInfo{{ID: "other-model"}})
+	// A fresh Runtime loads an empty catalog from this test's state directory.
+	catalogs := &InstallForTests(t).catalogs
+	catalogs.store("copilot@prn_one", []ModelInfo{{ID: "old-model"}})
+	catalogs.store("copilot@prn_two", []ModelInfo{{ID: "other-model"}})
 	ForgetCatalogForPrincipal("copilot", "prn_one")
-	if _, ok := cachedEntry("copilot@prn_one"); ok {
+	if _, ok := catalogs.entry("copilot@prn_one"); ok {
 		t.Fatal("principal catalog was not removed")
 	}
-	if entry, ok := cachedEntry("copilot@prn_two"); !ok || len(entry.Models) != 1 {
+	if entry, ok := catalogs.entry("copilot@prn_two"); !ok || len(entry.Models) != 1 {
 		t.Fatal("another principal catalog was removed")
 	}
 }
@@ -219,7 +209,7 @@ func TestHumanCopilotCatalogReusesPrincipalScopedEntry(t *testing.T) {
 	_ = iam.SetMembership(project.ID, human.ID, "member")
 	_, _ = iam.PutProviderCredential(human.ID, "copilot", "github_oauth", "human-secret")
 	principal := core.Caller{ID: human.ID, Kind: core.CallerHuman, ProjectID: project.ID}
-	storeEntry("copilot@"+human.ID, []ModelInfo{{ID: "existing-model"}})
+	Current().catalogs.store("copilot@"+human.ID, []ModelInfo{{ID: "existing-model"}})
 	models := CatalogModelsForPrincipal("copilot", principal)
 	if len(models) != 1 || models[0].ID != "existing-model" {
 		t.Fatalf("human principal-scoped catalog was not reused: %+v", models)
@@ -244,7 +234,7 @@ func TestCopilotCatalogRevalidatesBoundCredential(t *testing.T) {
 	credential, _ := iam.PutGatewayProviderCredential("copilot", "github_oauth", "shared-secret")
 	_, _ = iam.SetProviderCredentialBinding(project.ID, "copilot", "service", credential.ID)
 	principal := core.Caller{ID: service.ID, Kind: core.CallerService, ProjectID: project.ID}
-	storeEntry(catalogCacheKey("copilot", principal), []ModelInfo{{ID: "cached-model"}})
+	Current().catalogs.store(catalogCacheKey("copilot", principal), []ModelInfo{{ID: "cached-model"}})
 	if models := CatalogModelsForPrincipal("copilot", principal); len(models) != 1 {
 		t.Fatalf("active credential models=%+v", models)
 	}

@@ -144,13 +144,9 @@ func TestGoogleCatalogPaginationLimits(t *testing.T) {
 					// Retry through the cache reader: neither partial rows nor a fresh
 					// timestamp may replace the last complete snapshot on any limit.
 					setupCatalogReadTest(t, server.URL)
-					cacheMu.Lock()
-					cache["catalog-read"] = p
-					cacheMu.Unlock()
+					putProvider("catalog-read", p)
 					stale := time.Now().Add(-2 * catalogTTL)
-					catMu.Lock()
-					catData["catalog-read"] = catalogEntry{SchemaVersion: catalogSchemaVersion, Models: []ModelInfo{{ID: "old"}}, RefreshedAt: stale}
-					catMu.Unlock()
+					putCatalogEntry("catalog-read", catalogEntry{SchemaVersion: catalogSchemaVersion, Models: []ModelInfo{{ID: "old"}}, RefreshedAt: stale})
 					calls.Store(0)
 					result := ReadCatalogForPrincipal("catalog-read", gatewayCaller())
 					cached, refreshed := CatalogCached("catalog-read")

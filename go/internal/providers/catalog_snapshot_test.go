@@ -20,7 +20,7 @@ func TestCatalogSnapshotSeesPrincipalScopedEntries(t *testing.T) {
 	ForgetCatalog("other")
 
 	owner := core.Caller{ID: "prn_owner", Kind: core.CallerHuman}
-	storeEntry(catalogCacheKey("copilot", owner), []ModelInfo{{ID: "gpt-5-mini"}, {ID: "gpt-4o"}})
+	Current().catalogs.store(catalogCacheKey("copilot", owner), []ModelInfo{{ID: "gpt-5-mini"}, {ID: "gpt-4o"}})
 
 	if models, _ := CatalogCached("copilot"); len(models) != 0 {
 		t.Fatalf("unscoped cache should not expose a principal's catalog, got %d", len(models))
@@ -39,25 +39,13 @@ func TestCatalogSnapshotSeesPrincipalScopedEntries(t *testing.T) {
 
 func TestCatalogInvalidationRejectsInFlightStaleWrite(t *testing.T) {
 	t.Setenv("LLMGW_STATE_DIR", t.TempDir())
-	catMu.Lock()
-	catData = nil
-	catGeneration = nil
-	catPersistenceGeneration = nil
-	catLoaded = false
-	catMu.Unlock()
-	t.Cleanup(func() {
-		catMu.Lock()
-		catData = nil
-		catGeneration = nil
-		catPersistenceGeneration = nil
-		catLoaded = false
-		catMu.Unlock()
-	})
+	// A fresh Runtime loads the catalog from this test's state directory.
+	catalogs := &InstallForTests(t).catalogs
 
 	key := "copilot@owner"
-	generation := catalogGenerationFor(key)
+	generation := catalogs.generation(key)
 	ForgetCatalogForPrincipal("copilot", "owner")
-	if storeEntryIfGeneration(key, []ModelInfo{{ID: "stale"}}, generation) {
+	if catalogs.storeIfGeneration(key, []ModelInfo{{ID: "stale"}}, generation) {
 		t.Fatal("invalidated catalog accepted an in-flight stale write")
 	}
 	if models, _ := CatalogCachedForPrincipal(
@@ -69,25 +57,13 @@ func TestCatalogInvalidationRejectsInFlightStaleWrite(t *testing.T) {
 
 func TestCatalogProviderPersistenceRebasesWithoutWeakeningHardFence(t *testing.T) {
 	t.Setenv("LLMGW_STATE_DIR", t.TempDir())
-	catMu.Lock()
-	catData = nil
-	catGeneration = nil
-	catPersistenceGeneration = nil
-	catLoaded = false
-	catMu.Unlock()
-	t.Cleanup(func() {
-		catMu.Lock()
-		catData = nil
-		catGeneration = nil
-		catPersistenceGeneration = nil
-		catLoaded = false
-		catMu.Unlock()
-	})
+	// A fresh Runtime loads the catalog from this test's state directory.
+	catalogs := &InstallForTests(t).catalogs
 
 	key := "antigravity@owner"
-	revision := catalogRevisionFor(key)
-	forgetCatalogAfterProviderPersistence("antigravity", "owner")
-	if !storeEntryIfRevision(key, []ModelInfo{{ID: "fresh"}}, revision) {
+	revision := catalogs.revision(key)
+	catalogs.forgetAfterProviderPersistence("antigravity", "owner")
+	if !catalogs.storeIfRevision(key, []ModelInfo{{ID: "fresh"}}, revision) {
 		t.Fatal("credential refresh fenced the operation that performed it")
 	}
 
@@ -100,10 +76,10 @@ func TestCatalogProviderPersistenceRebasesWithoutWeakeningHardFence(t *testing.T
 		{name: "provider config", invalidate: func() { ForgetCatalog("antigravity") }},
 	} {
 		t.Run(mutation.name, func(t *testing.T) {
-			revision := catalogRevisionFor(key)
-			forgetCatalogAfterProviderPersistence("antigravity", "owner")
+			revision := catalogs.revision(key)
+			catalogs.forgetAfterProviderPersistence("antigravity", "owner")
 			mutation.invalidate()
-			if storeEntryIfRevision(key, []ModelInfo{{ID: "stale"}}, revision) {
+			if catalogs.storeIfRevision(key, []ModelInfo{{ID: "stale"}}, revision) {
 				t.Fatal("hard invalidation was mistaken for in-operation provider persistence")
 			}
 		})
@@ -123,8 +99,8 @@ func TestIncompleteProviderConfigurationHidesCachedCatalog(t *testing.T) {
 			"azure":     {Type: "azure_openai", RegistryID: "azure_openai"},
 		}
 	})
-	storeEntry("vertex_ai", []ModelInfo{{ID: "gemini-test"}})
-	storeEntry("azure", []ModelInfo{{ID: "azure-test"}})
+	Current().catalogs.store("vertex_ai", []ModelInfo{{ID: "gemini-test"}})
+	Current().catalogs.store("azure", []ModelInfo{{ID: "azure-test"}})
 
 	if issue := ProviderConfigurationIssue("vertex_ai"); issue == "" {
 		t.Fatal("Vertex without a project should report incomplete configuration")

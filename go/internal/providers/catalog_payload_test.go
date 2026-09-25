@@ -93,14 +93,10 @@ func TestCatalogPayloadValidationAndCache(t *testing.T) {
 					defer upstream.Close()
 					setupCatalogReadTest(t, upstream.URL)
 					p := provider.new(upstream.URL)
-					cacheMu.Lock()
-					cache["catalog-read"] = p
-					cacheMu.Unlock()
+					putProvider("catalog-read", p)
 					stale := time.Now().Add(-2 * catalogTTL)
-					catMu.Lock()
-					catData["catalog-read"] = catalogEntry{SchemaVersion: catalogSchemaVersion,
-						Models: []ModelInfo{{ID: "old"}}, RefreshedAt: stale}
-					catMu.Unlock()
+					putCatalogEntry("catalog-read", catalogEntry{SchemaVersion: catalogSchemaVersion,
+						Models: []ModelInfo{{ID: "old"}}, RefreshedAt: stale})
 					result := ReadCatalogForPrincipal("catalog-read", gatewayCaller())
 					cached, refreshed := CatalogCached("catalog-read")
 					if tc.code != "" {
@@ -201,17 +197,13 @@ func TestCodexCatalogPayloadValidationAndCache(t *testing.T) {
 
 			setupCatalogReadTest(t, upstream.URL)
 			p := catalogFixtureCodex(t, upstream.URL)
-			cacheMu.Lock()
-			cache["catalog-read"] = p
-			cacheMu.Unlock()
+			putProvider("catalog-read", p)
 			stale := time.Now().Add(-2 * catalogTTL)
-			catMu.Lock()
-			catData["catalog-read"] = catalogEntry{
+			putCatalogEntry("catalog-read", catalogEntry{
 				SchemaVersion: catalogSchemaVersion,
 				Models:        []ModelInfo{{ID: "old"}},
 				RefreshedAt:   stale,
-			}
-			catMu.Unlock()
+			})
 
 			result := ReadCatalogForPrincipal("catalog-read", gatewayCaller())
 			cached, refreshed := CatalogCached("catalog-read")
@@ -365,13 +357,9 @@ func TestGoogleCatalogPagesRetainStaleCacheOnInvalidPayload(t *testing.T) {
 					if version == "vertex" {
 						p = NewVertexAIWithAccessToken(server.URL+"/v1", "fixture-token", "fixture-project", "global", 2)
 					}
-					cacheMu.Lock()
-					cache["catalog-read"] = p
-					cacheMu.Unlock()
+					putProvider("catalog-read", p)
 					stale := time.Now().Add(-2 * catalogTTL)
-					catMu.Lock()
-					catData["catalog-read"] = catalogEntry{SchemaVersion: catalogSchemaVersion, Models: []ModelInfo{{ID: "old"}}, RefreshedAt: stale}
-					catMu.Unlock()
+					putCatalogEntry("catalog-read", catalogEntry{SchemaVersion: catalogSchemaVersion, Models: []ModelInfo{{ID: "old"}}, RefreshedAt: stale})
 					result := ReadCatalogForPrincipal("catalog-read", gatewayCaller())
 					cached, refreshed := CatalogCached("catalog-read")
 					if calls.Load() != 2 {
@@ -441,13 +429,9 @@ func TestVertexCatalogActionValuesAndCache(t *testing.T) {
 				}))
 				defer server.Close()
 				setupCatalogReadTest(t, server.URL)
-				cacheMu.Lock()
-				cache["catalog-read"] = NewVertexAIWithAccessToken(server.URL+"/v1", "fixture-token", "fixture-project", "global", 2)
-				cacheMu.Unlock()
+				putProvider("catalog-read", NewVertexAIWithAccessToken(server.URL+"/v1", "fixture-token", "fixture-project", "global", 2))
 				stale := time.Now().Add(-2 * catalogTTL)
-				catMu.Lock()
-				catData["catalog-read"] = catalogEntry{SchemaVersion: catalogSchemaVersion, Models: []ModelInfo{{ID: "old"}}, RefreshedAt: stale}
-				catMu.Unlock()
+				putCatalogEntry("catalog-read", catalogEntry{SchemaVersion: catalogSchemaVersion, Models: []ModelInfo{{ID: "old"}}, RefreshedAt: stale})
 				result := ReadCatalogForPrincipal("catalog-read", gatewayCaller())
 				cached, refreshed := CatalogCached("catalog-read")
 				if valid {

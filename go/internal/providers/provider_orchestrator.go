@@ -18,8 +18,9 @@ func WithProviderEvidenceGeneration(ctx context.Context, generation int64) conte
 }
 
 // NewGatewayProviderOrchestrator builds the shared connector surface for the
-// reviewed anonymous profiles supplied by the application registry.
-func NewGatewayProviderOrchestrator(profiles []AnonymousProviderProfile) (*core.ProviderOrchestrator, error) {
+// reviewed anonymous profiles supplied by the application registry. Its
+// adapters discover and complete through this Runtime.
+func (rt *Runtime) NewGatewayProviderOrchestrator(profiles []AnonymousProviderProfile) (*core.ProviderOrchestrator, error) {
 	orchestrator := core.NewProviderOrchestrator()
 	for _, profile := range profiles {
 		entry, ok := RegistryProviderByID(profile.RegistryID)
@@ -29,10 +30,10 @@ func NewGatewayProviderOrchestrator(profiles []AnonymousProviderProfile) (*core.
 		}
 
 		adapter := coreproviders.NewAnonymousOpenAICompatibleAdapter(profile.BaseURL, nil)
-		adapter.DiscoverModels = applicationModelDiscoverer(profile.ProviderID)
+		adapter.DiscoverModels = rt.applicationModelDiscoverer(profile.ProviderID)
 		adapter.SelectProbeTargets = anonymousProbeSelector(profile)
 		if usesApplicationAnonymousAdapter(profile.RegistryID) {
-			adapter.Complete = applicationCompletionRuntime(profile.ProviderID)
+			adapter.Complete = rt.applicationCompletionRuntime(profile.ProviderID)
 		}
 		if err := orchestrator.Register(profile.ProviderID, adapter); err != nil {
 			return nil, err
@@ -45,9 +46,9 @@ func usesApplicationAnonymousAdapter(registryID string) bool {
 	return registryID == "opencode_zen" || registryID == "pollinations"
 }
 
-func applicationModelDiscoverer(providerID string) core.ProviderModelDiscoverer {
+func (rt *Runtime) applicationModelDiscoverer(providerID string) core.ProviderModelDiscoverer {
 	return func(ctx context.Context, _ core.ProviderConnection) ([]core.ModelInfo, error) {
-		rows, _, err := RefreshCatalogForPrincipalWithError(providerID, gatewayCaller())
+		rows, _, err := rt.RefreshCatalogForPrincipalWithError(providerID, gatewayCaller())
 		if err != nil {
 			_, _, status := CatalogFailure(err)
 			return nil, core.NewProviderOperationError("provider catalog", status, "", err)
@@ -89,9 +90,9 @@ func anonymousProbeSelector(profile AnonymousProviderProfile) core.ProviderProbe
 	}
 }
 
-func applicationCompletionRuntime(providerID string) core.ProviderCompletionRuntime {
+func (rt *Runtime) applicationCompletionRuntime(providerID string) core.ProviderCompletionRuntime {
 	return func(ctx context.Context, _ core.ProviderConnection, target core.Target, payload map[string]any) (map[string]any, error) {
-		provider, err := GetProvider(providerID)
+		provider, err := rt.GetProvider(providerID)
 		if err != nil {
 			return nil, core.NewProviderOperationError("provider initialization", 0, "", err)
 		}

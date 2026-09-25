@@ -15,20 +15,24 @@ import (
 	core "github.com/xibodev/llmgw-core"
 )
 
-var (
-	cacheMu    sync.Mutex
-	cache      = map[string]Provider{}
-	cacheEpoch uint64
-)
+// providerCache holds the provider instances built for each caller scope.
+// Every eviction advances epoch, so an instance built from settings or
+// credentials that changed during the build is never stored.
+type providerCache struct {
+	mu        sync.Mutex
+	instances map[string]Provider
+	epoch     uint64
+}
 
 // ProviderTypes is the set of user-facing provider types (admin UI + validation).
-// (echo is an internal test stub, intentionally not listed.)
+// (echo is an internal test stub, intentionally not listed.) It is constant
+// after init: nothing writes it.
 var ProviderTypes = []string{
 	"openai_compatible", "anthropic", "bedrock", "github_copilot", "ollama", "litellm", "edge_tts",
 	"ai_studio", "vertex_ai", "azure_openai", "google_antigravity",
 }
 
-func instantiate(
+func (rt *Runtime) instantiate(
 	providerID string, cfg *config.ProviderConfig, caller core.Caller,
 ) (Provider, error) {
 	ptype := strings.ToLower(strings.TrimSpace(cfg.Type))
@@ -48,7 +52,7 @@ func instantiate(
 		}
 		return NewAIStudio(cfg.BaseURL, apiKey, cfg.TimeoutOr(120)), nil
 	case "vertex_ai":
-		return newVertexProvider(&Current().gcpTokens, providerID, cfg, caller)
+		return newVertexProvider(&rt.gcpTokens, providerID, cfg, caller)
 	case "edge_tts":
 		// The access token is optional: a baked-in public default applies.
 		// resolveAPIKey still runs so a stored override (config secret or
@@ -166,14 +170,14 @@ func policyFor(providerID string) config.ProviderPolicy {
 }
 
 // GetProvider builds (and caches) the provider instance for an id.
-func GetProvider(providerID string) (Provider, error) {
-	return GetProviderForPrincipal(providerID, gatewayCaller())
+func (rt *Runtime) GetProvider(providerID string) (Provider, error) {
+	return rt.GetProviderForPrincipal(providerID, gatewayCaller())
 }
 
 // GetProviderForPrincipal returns a provider instance bound to the caller's
 // private credential context. A caller-specific cache entry prevents API-key
 // and OAuth connections from leaking across callers.
-func GetProviderForPrincipal(
+func (rt *Runtime) GetProviderForPrincipal(
 	providerID string, caller core.Caller,
 ) (Provider, error) {
 	// Any provider can carry a personal connection, so a caller-identified
@@ -181,24 +185,25 @@ func GetProviderForPrincipal(
 	// served to another from cache. providerCacheKey adds the project dimension
 	// for service principals resolving shared credential bindings.
 	cacheKey := providerCacheKey(providerID, caller)
+	cache := &rt.instances
 	for attempt := 0; attempt < 3; attempt++ {
 		// A cached transport must not bypass a provider being taken offline.
 		if cfg := config.Get().Providers[providerID]; cfg != nil && cfg.Disabled {
 			return nil, &ConfigError{Msg: "provider is disabled"}
 		}
-		cacheMu.Lock()
-		epoch := cacheEpoch
-		if cached, ok := cache[cacheKey]; ok {
-			cacheMu.Unlock()
+		cache.mu.Lock()
+		epoch := cache.epoch
+		if cached, ok := cache.instances[cacheKey]; ok {
+			cache.mu.Unlock()
 			return cached, nil
 		}
-		cacheMu.Unlock()
+		cache.mu.Unlock()
 
 		cfg, ok := config.Get().Providers[providerID]
 		if !ok {
 			return nil, &ConfigError{Msg: fmt.Sprintf("unknown provider '%s'; add it under 'providers:'", providerID)}
 		}
-		instance, err := instantiate(providerID, cfg, caller)
+		instance, err := rt.instantiate(providerID, cfg, caller)
 		var provider Provider
 		if err == nil {
 			policy := policyFor(providerID)
@@ -208,21 +213,21 @@ func GetProviderForPrincipal(
 			}
 		}
 
-		cacheMu.Lock()
-		if epoch != cacheEpoch {
-			cacheMu.Unlock()
+		cache.mu.Lock()
+		if epoch != cache.epoch {
+			cache.mu.Unlock()
 			continue
 		}
 		if err != nil {
-			cacheMu.Unlock()
+			cache.mu.Unlock()
 			return nil, err
 		}
-		if cached, ok := cache[cacheKey]; ok {
-			cacheMu.Unlock()
+		if cached, ok := cache.instances[cacheKey]; ok {
+			cache.mu.Unlock()
 			return cached, nil
 		}
-		cache[cacheKey] = provider
-		cacheMu.Unlock()
+		cache.instances[cacheKey] = provider
+		cache.mu.Unlock()
 		return provider, nil
 	}
 	return nil, &ConfigError{Msg: fmt.Sprintf("provider '%s': configuration changed repeatedly during initialization", providerID)}
@@ -252,8 +257,8 @@ func AsSpeechSynthesizer(provider Provider) (SpeechSynthesizer, bool) {
 
 // SpeechSynthesizerForPrincipal resolves a provider and reports whether it can
 // synthesize speech natively (e.g. edge_tts) rather than via HTTP proxying.
-func SpeechSynthesizerForPrincipal(providerID string, caller core.Caller) (SpeechSynthesizer, bool) {
-	provider, err := GetProviderForPrincipal(providerID, caller)
+func (rt *Runtime) SpeechSynthesizerForPrincipal(providerID string, caller core.Caller) (SpeechSynthesizer, bool) {
+	provider, err := rt.GetProviderForPrincipal(providerID, caller)
 	if err != nil {
 		return nil, false
 	}
@@ -484,21 +489,21 @@ func AnonymousZenForPrincipal(providerID string, caller core.Caller) (bool, erro
 }
 
 // ListProviderModels returns a fresh catalog for one provider ([] on any failure).
-func ListProviderModels(providerID string) []ModelInfo {
-	return ListProviderModelsForPrincipal(providerID, gatewayCaller())
+func (rt *Runtime) ListProviderModels(providerID string) []ModelInfo {
+	return rt.ListProviderModelsForPrincipal(providerID, gatewayCaller())
 }
 
-func ListProviderModelsForPrincipal(
+func (rt *Runtime) ListProviderModelsForPrincipal(
 	providerID string, caller core.Caller,
 ) []ModelInfo {
-	models, _, _ := ListProviderModelsForPrincipalWithError(providerID, caller)
+	models, _, _ := rt.ListProviderModelsForPrincipalWithError(providerID, caller)
 	return models
 }
 
 // ListProviderModelsForPrincipalWithError preserves safe catalog failure
 // details for lifecycle checks while the public model-list APIs remain
 // backward-compatible and return an empty list on failure.
-func ListProviderModelsForPrincipalWithError(
+func (rt *Runtime) ListProviderModelsForPrincipalWithError(
 	providerID string, caller core.Caller,
 ) ([]ModelInfo, *CredentialObservation, error) {
 	if issue := ProviderConfigurationIssue(providerID); issue != "" {
@@ -506,7 +511,7 @@ func ListProviderModelsForPrincipalWithError(
 			"catalog_configuration_incomplete", issue, 0,
 		)
 	}
-	p, err := GetProviderForPrincipal(providerID, caller)
+	p, err := rt.GetProviderForPrincipal(providerID, caller)
 	if err != nil {
 		return nil, nil, catalogError(
 			"catalog_provider_unavailable",
@@ -518,26 +523,26 @@ func ListProviderModelsForPrincipalWithError(
 }
 
 // ResetProviders clears the instance cache (after a config change).
-func ResetProviders() {
-	cacheMu.Lock()
-	cacheEpoch++
-	cache = map[string]Provider{}
-	cacheMu.Unlock()
+func (rt *Runtime) ResetProviders() {
+	rt.instances.mu.Lock()
+	rt.instances.epoch++
+	rt.instances.instances = map[string]Provider{}
+	rt.instances.mu.Unlock()
 }
 
 // ForgetProvider evicts every cached instance for a provider, including
 // principal-scoped instances. Call it after a provider is removed.
-func ForgetProvider(providerID string) {
+func (rt *Runtime) ForgetProvider(providerID string) {
 	providerID = strings.TrimSpace(providerID)
 	if providerID == "" {
 		return
 	}
-	cacheMu.Lock()
-	defer cacheMu.Unlock()
-	cacheEpoch++
-	for key := range cache {
+	rt.instances.mu.Lock()
+	defer rt.instances.mu.Unlock()
+	rt.instances.epoch++
+	for key := range rt.instances.instances {
 		if key == providerID || strings.HasPrefix(key, providerID+"@") {
-			delete(cache, key)
+			delete(rt.instances.instances, key)
 		}
 	}
 }
@@ -545,14 +550,14 @@ func ForgetProvider(providerID string) {
 // ForgetProviderForPrincipal evicts only one human-owned provider instance.
 // It is used after a private credential is created, rotated, or revoked so an
 // already-instantiated transport can never retain the previous secret.
-func ForgetProviderForPrincipal(providerID, principalID string) {
+func (rt *Runtime) ForgetProviderForPrincipal(providerID, principalID string) {
 	providerID = strings.TrimSpace(providerID)
 	principalID = strings.TrimSpace(principalID)
 	if providerID == "" || principalID == "" {
 		return
 	}
-	cacheMu.Lock()
-	cacheEpoch++
-	delete(cache, providerID+"@"+principalID)
-	cacheMu.Unlock()
+	rt.instances.mu.Lock()
+	rt.instances.epoch++
+	delete(rt.instances.instances, providerID+"@"+principalID)
+	rt.instances.mu.Unlock()
 }

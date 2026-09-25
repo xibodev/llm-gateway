@@ -300,7 +300,7 @@ func TestZenChatUsesPersistedCatalogSurface(t *testing.T) {
 	t.Setenv("LLMGW_STATE_DIR", t.TempDir())
 	resetCatalogForTest(t)
 	const responsesModel = "constellation-free"
-	storeEntry("zen", []ModelInfo{
+	Current().catalogs.store("zen", []ModelInfo{
 		{ID: responsesModel, SupportedSurfaces: []string{"/responses"}},
 		{ID: "big-pickle", SupportedSurfaces: []string{"/chat/completions"}},
 	})
@@ -353,7 +353,7 @@ func TestZenChatUsesPersistedCatalogSurface(t *testing.T) {
 func TestKeyedZenNativeSurfaceUsesPersistedCatalog(t *testing.T) {
 	t.Setenv("LLMGW_STATE_DIR", t.TempDir())
 	resetCatalogForTest(t)
-	storeEntry("zen", []ModelInfo{
+	Current().catalogs.store("zen", []ModelInfo{
 		{ID: "constellation-free", SupportedSurfaces: []string{"/responses"}},
 		{ID: "muse-spark-chat", SupportedSurfaces: []string{"/chat/completions"}},
 	})

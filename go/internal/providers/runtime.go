@@ -11,7 +11,12 @@ import (
 
 // Runtime owns the provider stack's mutable state. A process builds one after
 // it loads settings and initializes IAM; each test can build its own.
+//
+// The first group is the state llmgw-core's runtime.Runtime also keeps, so
+// that value can take it over from here; the rest has no core counterpart.
 type Runtime struct {
+	instances providerCache
+	catalogs  catalogCache
 	// The refresh locks serialize the OAuth refreshes of one connection.
 	codexRefresh       refreshLocks
 	antigravityRefresh refreshLocks
@@ -37,9 +42,11 @@ type Runtime struct {
 }
 
 // NewRuntime returns a Runtime with empty caches and the built-in auth
-// adapters.
+// adapters. The catalog loads catalog.json from the state directory on first
+// use.
 func NewRuntime() *Runtime {
 	runtime := &Runtime{}
+	runtime.instances.instances = map[string]Provider{}
 	runtime.codexRefresh.entries = map[string]*refreshLock{}
 	runtime.antigravityRefresh.entries = map[string]*refreshLock{}
 	runtime.circuits.circuits = map[string]*circuitState{}

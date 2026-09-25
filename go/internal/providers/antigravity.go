@@ -199,7 +199,7 @@ func refreshAntigravityConnection(ctx context.Context, principalID, providerID, 
 	}
 	if err == nil {
 		ForgetProviderForPrincipal(providerID, principalID)
-		forgetCatalogAfterProviderPersistence(providerID, principalID)
+		Current().catalogs.forgetAfterProviderPersistence(providerID, principalID)
 	}
 	return err
 }
@@ -233,7 +233,7 @@ func persistAntigravityProject(principalID, providerID, name, accessToken, proje
 		return nil
 	}
 	if err == nil {
-		forgetCatalogAfterProviderPersistence(providerID, principalID)
+		Current().catalogs.forgetAfterProviderPersistence(providerID, principalID)
 	}
 	return err
 }

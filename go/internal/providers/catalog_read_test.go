@@ -44,10 +44,8 @@ func TestCatalogReadEmptyReplacesStaleRowsAndCachesSuccess(t *testing.T) {
 	}))
 	defer upstream.Close()
 	setupCatalogReadTest(t, upstream.URL)
-	catMu.Lock()
-	catData["catalog-read"] = catalogEntry{SchemaVersion: catalogSchemaVersion,
-		Models: []ModelInfo{{ID: "old"}}, RefreshedAt: time.Now().Add(-2 * catalogTTL)}
-	catMu.Unlock()
+	putCatalogEntry("catalog-read", catalogEntry{SchemaVersion: catalogSchemaVersion,
+		Models: []ModelInfo{{ID: "old"}}, RefreshedAt: time.Now().Add(-2 * catalogTTL)})
 	for i := 0; i < 2; i++ {
 		result := ReadCatalogForPrincipal("catalog-read", gatewayCaller())
 		if result.Err != nil || len(result.Models) != 0 || result.RefreshedAt.IsZero() ||
@@ -69,11 +67,9 @@ func TestCatalogReadStaleFailureIsScopedAndRedacted(t *testing.T) {
 	owner := core.Caller{ID: "fixture-owner", Kind: core.CallerHuman}
 	other := core.Caller{ID: "fixture-other", Kind: core.CallerHuman}
 	refreshed := time.Now().Add(-2 * catalogTTL)
-	catMu.Lock()
-	catData[catalogCacheKey("catalog-read", owner)] = catalogEntry{
+	putCatalogEntry(catalogCacheKey("catalog-read", owner), catalogEntry{
 		SchemaVersion: catalogSchemaVersion, Models: []ModelInfo{{ID: "cached-model"}}, RefreshedAt: refreshed,
-	}
-	catMu.Unlock()
+	})
 	result := ReadCatalogForPrincipal("catalog-read", owner)
 	if result.Err == nil || len(result.Models) != 1 || !result.RefreshedAt.Equal(refreshed) ||
 		!result.Diagnostics.Stale || !result.Diagnostics.FromCache || result.Diagnostics.UpstreamStatus != 403 {
@@ -121,10 +117,8 @@ func TestCatalogReadFailedRefreshCannotRestoreInvalidatedRows(t *testing.T) {
 	}))
 	defer upstream.Close()
 	setupCatalogReadTest(t, upstream.URL)
-	catMu.Lock()
-	catData["catalog-read"] = catalogEntry{SchemaVersion: catalogSchemaVersion,
-		Models: []ModelInfo{{ID: "old"}}, RefreshedAt: time.Now().Add(-2 * catalogTTL)}
-	catMu.Unlock()
+	putCatalogEntry("catalog-read", catalogEntry{SchemaVersion: catalogSchemaVersion,
+		Models: []ModelInfo{{ID: "old"}}, RefreshedAt: time.Now().Add(-2 * catalogTTL)})
 	done := make(chan CatalogReadResult, 1)
 	go func() { done <- ReadCatalogForPrincipal("catalog-read", gatewayCaller()) }()
 	<-started
@@ -151,7 +145,8 @@ func TestCatalogReadSuccessfulRefreshUsesAuthoritativeSnapshot(t *testing.T) {
 			if scenario == "empty" {
 				current.Models = []ModelInfo{}
 			}
-			result := readCatalogForPrincipal("catalog-read", principal, func(providerID string, caller core.Caller) ([]ModelInfo, *CredentialObservation, error) {
+			catalogs := &Current().catalogs
+			result := Current().readCatalogForPrincipal("catalog-read", principal, func(providerID string, caller core.Caller) ([]ModelInfo, *CredentialObservation, error) {
 				models, observation, err := RefreshCatalogForPrincipalWithError(providerID, caller)
 				if err != nil || len(models) != 1 || models[0].ID != "fetched-model" {
 					t.Fatalf("refresh: %+v %v", models, err)
@@ -159,17 +154,17 @@ func TestCatalogReadSuccessfulRefreshUsesAuthoritativeSnapshot(t *testing.T) {
 				// Interleave a write or invalidation after the successful store,
 				// before the read takes its final snapshot, without scheduler timing.
 				if scenario == "invalidated" {
-					generation := catalogGenerationFor(key)
+					generation := catalogs.generation(key)
 					ForgetCatalogForPrincipal(providerID, caller.ID)
-					if storeEntryIfGeneration(key, models, generation) {
+					if catalogs.storeIfGeneration(key, models, generation) {
 						t.Fatal("invalidation accepted a stale write")
 					}
-					storeEntry(providerID, []ModelInfo{{ID: "other-scope-model"}})
+					catalogs.store(providerID, []ModelInfo{{ID: "other-scope-model"}})
 				} else {
-					catMu.Lock()
-					current.RefreshedAt = catData[key].RefreshedAt.Add(time.Second)
-					catData[key] = current
-					catMu.Unlock()
+					catalogs.mu.Lock()
+					current.RefreshedAt = catalogs.entries[key].RefreshedAt.Add(time.Second)
+					catalogs.entries[key] = current
+					catalogs.mu.Unlock()
 				}
 				return models, observation, err
 			})
@@ -206,9 +201,7 @@ func (catalogReadErrorProvider) ListModelsWithError() ([]ModelInfo, *CredentialO
 
 func TestCatalogReadUsesDiagnosticSanitizer(t *testing.T) {
 	setupCatalogReadTest(t, "https://example.invalid")
-	cacheMu.Lock()
-	cache["catalog-read"] = catalogReadErrorProvider{}
-	cacheMu.Unlock()
+	putProvider("catalog-read", catalogReadErrorProvider{})
 	result := ReadCatalogForPrincipal("catalog-read", gatewayCaller())
 	if result.Err == nil || result.Diagnostics.FailureCode != "catalog_http_error" {
 		t.Fatalf("result: %+v", result)

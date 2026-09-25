@@ -10,17 +10,11 @@ import (
 	core "github.com/xibodev/llmgw-core"
 )
 
+// resetCatalogForTest gives the test a fresh Runtime, whose catalog loads
+// catalog.json from the test's state directory on first use.
 func resetCatalogForTest(t *testing.T) {
 	t.Helper()
-	reset := func() {
-		catMu.Lock()
-		catData = nil
-		catGeneration = nil
-		catLoaded = false
-		catMu.Unlock()
-	}
-	reset()
-	t.Cleanup(reset)
+	InstallForTests(t)
 }
 
 // A catalog.json written before the supported_endpoints -> supported_surfaces
@@ -78,15 +72,12 @@ func TestCurrentSchemaCatalogEntriesSurviveAReload(t *testing.T) {
 	resetCatalogForTest(t)
 
 	owner := core.Caller{ID: "prn_owner", Kind: core.CallerHuman}
-	storeEntry(catalogCacheKey("copilot", owner), []ModelInfo{
+	Current().catalogs.store(catalogCacheKey("copilot", owner), []ModelInfo{
 		{ID: "gpt-5.5", SupportedSurfaces: []string{"/responses"}},
 	})
 
-	catMu.Lock()
-	catData = nil
-	catGeneration = nil
-	catLoaded = false
-	catMu.Unlock()
+	// A restarted process starts from a new Runtime.
+	resetCatalogForTest(t)
 
 	models, refreshed := CatalogCachedForPrincipal("copilot", owner)
 	if len(models) != 1 {

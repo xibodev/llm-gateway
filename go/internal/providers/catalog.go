@@ -55,16 +55,18 @@ type catalogEntry struct {
 
 const catalogSchemaVersion = 6
 
-var (
-	catMu         sync.Mutex
-	catData       map[string]catalogEntry
-	catGeneration map[string]uint64
+// catalogCache holds catalog.json in memory, keyed by catalog cache key. It
+// loads the file on first use.
+type catalogCache struct {
+	mu          sync.Mutex
+	entries     map[string]catalogEntry
+	generations map[string]uint64
 	// Credential refreshes invalidate previously cached rows, but unlike a
 	// revoke, reauthorization, or config edit they do not fence the provider
 	// operation that performed the refresh.
-	catPersistenceGeneration map[string]uint64
-	catLoaded                bool
-)
+	persistenceGenerations map[string]uint64
+	loaded                 bool
+}
 
 const catalogTTL = time.Hour
 
@@ -126,62 +128,62 @@ func ProviderConfigurationIssue(providerID string) string {
 
 func catalogPath() string { return filepath.Join(config.StateDir(), "catalog.json") }
 
-func loadCatalogLocked() {
-	if catLoaded {
+func (c *catalogCache) loadLocked() {
+	if c.loaded {
 		return
 	}
-	catData = map[string]catalogEntry{}
-	catGeneration = map[string]uint64{}
-	catPersistenceGeneration = map[string]uint64{}
+	c.entries = map[string]catalogEntry{}
+	c.generations = map[string]uint64{}
+	c.persistenceGenerations = map[string]uint64{}
 	if b, err := os.ReadFile(catalogPath()); err == nil {
-		_ = json.Unmarshal(b, &catData)
+		_ = json.Unmarshal(b, &c.entries)
 	}
 	// Drop every entry this build cannot vouch for. The file is not rewritten
 	// here: a read must not have a write side-effect, and the next successful
 	// refresh persists the pruned map anyway. Until then the drop simply
 	// repeats on each process start, which costs one map walk.
-	for key, entry := range catData {
+	for key, entry := range c.entries {
 		if entry.SchemaVersion != catalogSchemaVersion {
-			delete(catData, key)
+			delete(c.entries, key)
 		}
 	}
-	catLoaded = true
+	c.loaded = true
 }
 
-func saveCatalogLocked() {
+func (c *catalogCache) saveLocked() {
 	_ = os.MkdirAll(config.StateDir(), 0o755)
-	if b, err := json.MarshalIndent(catData, "", "  "); err == nil {
+	if b, err := json.MarshalIndent(c.entries, "", "  "); err == nil {
 		_ = os.WriteFile(catalogPath(), b, 0o644)
 	}
 }
 
-func cachedEntry(providerID string) (catalogEntry, bool) {
-	catMu.Lock()
-	defer catMu.Unlock()
-	loadCatalogLocked()
-	e, ok := catData[providerID]
+func (c *catalogCache) entry(providerID string) (catalogEntry, bool) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.loadLocked()
+	e, ok := c.entries[providerID]
 	return e, ok
 }
 
-func storeEntry(providerID string, models []ModelInfo) {
-	catMu.Lock()
-	defer catMu.Unlock()
-	loadCatalogLocked()
+func (c *catalogCache) store(providerID string, models []ModelInfo) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.loadLocked()
 	refreshedAt := time.Now()
-	catData[providerID] = catalogEntry{
+	c.entries[providerID] = catalogEntry{
 		SchemaVersion: catalogSchemaVersion, Models: catalogModelsWithTypedCapabilities(models, refreshedAt), RefreshedAt: refreshedAt,
 	}
-	saveCatalogLocked()
+	c.saveLocked()
 }
 
-func catalogGenerationFor(providerID string) uint64 {
-	catMu.Lock()
-	defer catMu.Unlock()
-	loadCatalogLocked()
-	if _, exists := catGeneration[providerID]; !exists {
-		catGeneration[providerID] = 0
+func (c *catalogCache) generation(providerID string) uint64 {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.loadLocked()
+	if _, exists := c.generations[providerID]; !exists {
+		c.generations[providerID] = 0
 	}
-	return catGeneration[providerID]
+	return c.generations[providerID]
 }
 
 type catalogRevision struct {
@@ -189,52 +191,52 @@ type catalogRevision struct {
 	persistenceGeneration uint64
 }
 
-func catalogRevisionFor(providerID string) catalogRevision {
-	catMu.Lock()
-	defer catMu.Unlock()
-	loadCatalogLocked()
-	if _, exists := catGeneration[providerID]; !exists {
-		catGeneration[providerID] = 0
+func (c *catalogCache) revision(providerID string) catalogRevision {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.loadLocked()
+	if _, exists := c.generations[providerID]; !exists {
+		c.generations[providerID] = 0
 	}
-	if _, exists := catPersistenceGeneration[providerID]; !exists {
-		catPersistenceGeneration[providerID] = 0
+	if _, exists := c.persistenceGenerations[providerID]; !exists {
+		c.persistenceGenerations[providerID] = 0
 	}
 	return catalogRevision{
-		generation:            catGeneration[providerID],
-		persistenceGeneration: catPersistenceGeneration[providerID],
+		generation:            c.generations[providerID],
+		persistenceGeneration: c.persistenceGenerations[providerID],
 	}
 }
 
-func storeEntryIfGeneration(
+func (c *catalogCache) storeIfGeneration(
 	providerID string, models []ModelInfo, expected uint64,
 ) bool {
-	catMu.Lock()
-	defer catMu.Unlock()
-	loadCatalogLocked()
-	if catGeneration[providerID] != expected {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.loadLocked()
+	if c.generations[providerID] != expected {
 		return false
 	}
 	refreshedAt := time.Now()
-	catData[providerID] = catalogEntry{
+	c.entries[providerID] = catalogEntry{
 		SchemaVersion: catalogSchemaVersion, Models: catalogModelsWithTypedCapabilities(models, refreshedAt), RefreshedAt: refreshedAt,
 	}
-	saveCatalogLocked()
+	c.saveLocked()
 	return true
 }
 
-func storeEntryIfRevision(providerID string, models []ModelInfo, expected catalogRevision) bool {
-	catMu.Lock()
-	defer catMu.Unlock()
-	loadCatalogLocked()
-	if catGeneration[providerID] != expected.generation ||
-		catPersistenceGeneration[providerID] < expected.persistenceGeneration {
+func (c *catalogCache) storeIfRevision(providerID string, models []ModelInfo, expected catalogRevision) bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.loadLocked()
+	if c.generations[providerID] != expected.generation ||
+		c.persistenceGenerations[providerID] < expected.persistenceGeneration {
 		return false
 	}
 	refreshedAt := time.Now()
-	catData[providerID] = catalogEntry{
+	c.entries[providerID] = catalogEntry{
 		SchemaVersion: catalogSchemaVersion, Models: catalogModelsWithTypedCapabilities(models, refreshedAt), RefreshedAt: refreshedAt,
 	}
-	saveCatalogLocked()
+	c.saveLocked()
 	return true
 }
 
@@ -255,14 +257,14 @@ func catalogModelsWithTypedCapabilities(models []ModelInfo, discoveredAt time.Ti
 // CatalogModels returns the cached model list for a provider, refreshing lazily
 // when missing or stale. The upstream fetch runs OUTSIDE the lock; a failed
 // refresh keeps whatever was cached.
-func CatalogModels(providerID string) []ModelInfo {
-	return CatalogModelsForPrincipal(providerID, gatewayCaller())
+func (rt *Runtime) CatalogModels(providerID string) []ModelInfo {
+	return rt.CatalogModelsForPrincipal(providerID, gatewayCaller())
 }
 
-func CatalogModelsForPrincipal(
+func (rt *Runtime) CatalogModelsForPrincipal(
 	providerID string, caller core.Caller,
 ) []ModelInfo {
-	return ReadCatalogForPrincipal(providerID, caller).Models
+	return rt.ReadCatalogForPrincipal(providerID, caller).Models
 }
 
 // CatalogReadResult preserves discovery failures without discarding usable rows.
@@ -289,14 +291,14 @@ type CatalogDiagnostics struct {
 
 // ReadCatalogForPrincipal never borrows another caller's cache or runs inference.
 // A successful empty discovery replaces old rows and is cached for the same TTL.
-func ReadCatalogForPrincipal(providerID string, caller core.Caller) CatalogReadResult {
-	return readCatalogForPrincipal(providerID, caller, RefreshCatalogForPrincipalWithError)
+func (rt *Runtime) ReadCatalogForPrincipal(providerID string, caller core.Caller) CatalogReadResult {
+	return rt.readCatalogForPrincipal(providerID, caller, rt.RefreshCatalogForPrincipalWithError)
 }
 
 // ReadCachedCatalogForPrincipal returns the caller-scoped snapshot without
 // contacting the provider. Catalog synchronization is an explicit lifecycle
 // operation; read endpoints must remain safe when an upstream is slow or down.
-func ReadCachedCatalogForPrincipal(providerID string, caller core.Caller) CatalogReadResult {
+func (rt *Runtime) ReadCachedCatalogForPrincipal(providerID string, caller core.Caller) CatalogReadResult {
 	result := CatalogReadResult{Diagnostics: CatalogDiagnostics{SourceScope: "gateway", OwnerScope: "gateway", FromCache: true}}
 	principalID, kind := callerPrincipal(caller)
 	if principalID != "" {
@@ -315,7 +317,7 @@ func ReadCachedCatalogForPrincipal(providerID string, caller core.Caller) Catalo
 		result.Err = catalogError("catalog_authentication_failed", "Provider credential is unavailable for catalog access.", 0)
 	}
 	if result.Err == nil {
-		if entry, ok := cachedEntry(catalogCacheKey(providerID, caller)); ok {
+		if entry, ok := rt.catalogs.entry(catalogCacheKey(providerID, caller)); ok {
 			result.Models, result.RefreshedAt = entry.Models, entry.RefreshedAt
 		}
 	}
@@ -333,7 +335,7 @@ func ReadCachedCatalogForPrincipal(providerID string, caller core.Caller) Catalo
 	return result
 }
 
-func readCatalogForPrincipal(
+func (rt *Runtime) readCatalogForPrincipal(
 	providerID string, caller core.Caller,
 	refresh func(string, core.Caller) ([]ModelInfo, *CredentialObservation, error),
 ) CatalogReadResult {
@@ -356,7 +358,7 @@ func readCatalogForPrincipal(
 	}
 	cacheKey := catalogCacheKey(providerID, caller)
 	if result.Err == nil {
-		e, ok := cachedEntry(cacheKey)
+		e, ok := rt.catalogs.entry(cacheKey)
 		if ok && time.Since(e.RefreshedAt) <= catalogTTL {
 			result.Models, result.RefreshedAt = e.Models, e.RefreshedAt
 			result.Diagnostics.FromCache = true
@@ -364,7 +366,7 @@ func readCatalogForPrincipal(
 			_, _, result.Err = refresh(providerID, caller)
 			// Use one authoritative snapshot for both rows and timestamp: another
 			// refresh or invalidation may have superseded the discovery result.
-			if current, exists := cachedEntry(cacheKey); exists {
+			if current, exists := rt.catalogs.entry(cacheKey); exists {
 				result.Models, result.RefreshedAt = current.Models, current.RefreshedAt
 				if result.Err != nil {
 					result.Diagnostics.FromCache = true
@@ -398,19 +400,19 @@ func catalogCacheKey(providerID string, caller core.Caller) string {
 }
 
 // RefreshCatalog forces a re-fetch for one provider and returns the new list.
-func RefreshCatalog(providerID string) []ModelInfo {
-	return RefreshCatalogForPrincipal(providerID, gatewayCaller())
+func (rt *Runtime) RefreshCatalog(providerID string) []ModelInfo {
+	return rt.RefreshCatalogForPrincipal(providerID, gatewayCaller())
 }
 
-func RefreshCatalogForPrincipal(providerID string, caller core.Caller) []ModelInfo {
-	models, _, _ := RefreshCatalogForPrincipalWithError(providerID, caller)
+func (rt *Runtime) RefreshCatalogForPrincipal(providerID string, caller core.Caller) []ModelInfo {
+	models, _, _ := rt.RefreshCatalogForPrincipalWithError(providerID, caller)
 	return models
 }
 
 // RefreshCatalogForPrincipalWithError forces a refresh and preserves a safe,
 // structured failure for lifecycle diagnostics. Legitimate empty catalogs are
 // stored as successful refreshes and returned without an error.
-func RefreshCatalogForPrincipalWithError(
+func (rt *Runtime) RefreshCatalogForPrincipalWithError(
 	providerID string, caller core.Caller,
 ) ([]ModelInfo, *CredentialObservation, error) {
 	if issue := ProviderConfigurationIssue(providerID); issue != "" {
@@ -427,7 +429,7 @@ func RefreshCatalogForPrincipalWithError(
 		)
 	}
 	cacheKey := catalogCacheKey(providerID, caller)
-	revision := catalogRevisionFor(cacheKey)
+	revision := rt.catalogs.revision(cacheKey)
 	var initialObservation *CredentialObservation
 	if caller.Kind == core.CallerHuman {
 		if observed, found, err := iam.ActiveProviderAccountObservation(
@@ -436,15 +438,15 @@ func RefreshCatalogForPrincipalWithError(
 			initialObservation = credentialObservation(&observed)
 		}
 	}
-	models, observation, err := ListProviderModelsForPrincipalWithError(providerID, caller)
+	models, observation, err := rt.ListProviderModelsForPrincipalWithError(providerID, caller)
 	if err != nil {
 		return nil, observation, err
 	}
 	if models == nil {
 		models = []ModelInfo{}
 	}
-	if !storeEntryIfRevision(cacheKey, models, revision) {
-		currentRevision := catalogRevisionFor(cacheKey)
+	if !rt.catalogs.storeIfRevision(cacheKey, models, revision) {
+		currentRevision := rt.catalogs.revision(cacheKey)
 		refreshRebased := initialObservation != nil && observation != nil &&
 			initialObservation.ConnectionID == observation.ConnectionID &&
 			observation.CredentialRevision > initialObservation.CredentialRevision &&
@@ -455,7 +457,7 @@ func RefreshCatalogForPrincipalWithError(
 			)
 			refreshRebased = currentErr == nil && found &&
 				*credentialObservation(&current) == *observation &&
-				storeEntryIfRevision(cacheKey, models, currentRevision)
+				rt.catalogs.storeIfRevision(cacheKey, models, currentRevision)
 		}
 		if !refreshRebased {
 			return nil, observation, catalogError(
@@ -469,14 +471,14 @@ func RefreshCatalogForPrincipalWithError(
 }
 
 // CatalogLookup returns a single model's info from the (lazily-refreshed) catalog.
-func CatalogLookup(providerID, model string) (ModelInfo, bool) {
-	return CatalogLookupForPrincipal(providerID, model, gatewayCaller())
+func (rt *Runtime) CatalogLookup(providerID, model string) (ModelInfo, bool) {
+	return rt.CatalogLookupForPrincipal(providerID, model, gatewayCaller())
 }
 
-func CatalogLookupForPrincipal(
+func (rt *Runtime) CatalogLookupForPrincipal(
 	providerID, model string, caller core.Caller,
 ) (ModelInfo, bool) {
-	for _, m := range CatalogModelsForPrincipal(providerID, caller) {
+	for _, m := range rt.CatalogModelsForPrincipal(providerID, caller) {
 		if m.ID == model {
 			return m, true
 		}
@@ -487,8 +489,8 @@ func CatalogLookupForPrincipal(
 // CatalogCachedLookupForPrincipal returns only already-known capability data and
 // never performs provider discovery. Dispatch uses it to avoid adding a catalog
 // network call to the request path.
-func CatalogCachedLookupForPrincipal(providerID, model string, caller core.Caller) (ModelInfo, bool) {
-	models, _ := CatalogCachedForPrincipal(providerID, caller)
+func (rt *Runtime) CatalogCachedLookupForPrincipal(providerID, model string, caller core.Caller) (ModelInfo, bool) {
+	models, _ := rt.CatalogCachedForPrincipal(providerID, caller)
 	for _, current := range models {
 		if current.ID == model {
 			return current, true
@@ -499,128 +501,128 @@ func CatalogCachedLookupForPrincipal(providerID, model string, caller core.Calle
 
 // CatalogRefreshedAt reports when a provider's catalog was last refreshed (zero
 // time if never).
-func CatalogRefreshedAt(providerID string) time.Time {
-	return CatalogRefreshedAtForPrincipal(providerID, gatewayCaller())
+func (rt *Runtime) CatalogRefreshedAt(providerID string) time.Time {
+	return rt.CatalogRefreshedAtForPrincipal(providerID, gatewayCaller())
 }
 
-func CatalogRefreshedAtForPrincipal(providerID string, caller core.Caller) time.Time {
+func (rt *Runtime) CatalogRefreshedAtForPrincipal(providerID string, caller core.Caller) time.Time {
 	if ProviderConfigurationIssue(providerID) != "" {
 		return time.Time{}
 	}
 	if CatalogRequiresPrincipal(providerID) && strings.TrimSpace(callerPrincipalID(caller)) == "" {
 		return time.Time{}
 	}
-	e, _ := cachedEntry(catalogCacheKey(providerID, caller))
+	e, _ := rt.catalogs.entry(catalogCacheKey(providerID, caller))
 	return e.RefreshedAt
 }
 
 // CatalogCached returns the currently-cached models + refresh time WITHOUT
 // triggering a refresh — for fast status reads (e.g. the admin state endpoint).
-func CatalogCached(providerID string) ([]ModelInfo, time.Time) {
-	return CatalogCachedForPrincipal(providerID, gatewayCaller())
+func (rt *Runtime) CatalogCached(providerID string) ([]ModelInfo, time.Time) {
+	return rt.CatalogCachedForPrincipal(providerID, gatewayCaller())
 }
 
-func CatalogCachedForPrincipal(providerID string, caller core.Caller) ([]ModelInfo, time.Time) {
+func (rt *Runtime) CatalogCachedForPrincipal(providerID string, caller core.Caller) ([]ModelInfo, time.Time) {
 	if ProviderConfigurationIssue(providerID) != "" {
 		return nil, time.Time{}
 	}
 	if CatalogRequiresPrincipal(providerID) && strings.TrimSpace(callerPrincipalID(caller)) == "" {
 		return nil, time.Time{}
 	}
-	e, _ := cachedEntry(catalogCacheKey(providerID, caller))
+	e, _ := rt.catalogs.entry(catalogCacheKey(providerID, caller))
 	return e.Models, e.RefreshedAt
 }
 
 // ForgetCatalog drops a provider's cached catalog (used when it's deleted).
-func ForgetCatalog(providerID string) {
-	forgetCatalogMatching(func(key string) bool {
+func (rt *Runtime) ForgetCatalog(providerID string) {
+	rt.catalogs.forgetMatching(func(key string) bool {
 		return key == providerID || strings.HasPrefix(key, providerID+"@")
 	})
 }
 
-func ForgetCatalogForPrincipal(providerID, principalID string) {
+func (rt *Runtime) ForgetCatalogForPrincipal(providerID, principalID string) {
 	if providerID == "" || principalID == "" {
 		return
 	}
 	key := providerID + "@" + principalID
-	forgetCatalogMatching(func(candidate string) bool {
+	rt.catalogs.forgetMatching(func(candidate string) bool {
 		return candidate == key || strings.HasPrefix(candidate, key+"#")
 	})
 }
 
-// forgetCatalogAfterProviderPersistence invalidates rows produced before a
+// forgetAfterProviderPersistence invalidates rows produced before a
 // provider-owned token refresh or metadata write without turning the successful
 // in-flight operation that performed it into stale work. External credential
 // replacement and revocation continue to use ForgetCatalogForPrincipal and
 // advance the hard generation instead.
-func forgetCatalogAfterProviderPersistence(providerID, principalID string) {
+func (c *catalogCache) forgetAfterProviderPersistence(providerID, principalID string) {
 	if providerID == "" || principalID == "" {
 		return
 	}
 	key := providerID + "@" + principalID
-	catMu.Lock()
-	defer catMu.Unlock()
-	loadCatalogLocked()
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.loadLocked()
 	changed := false
-	for candidate := range catData {
+	for candidate := range c.entries {
 		if candidate == key || strings.HasPrefix(candidate, key+"#") {
-			delete(catData, candidate)
-			catPersistenceGeneration[candidate]++
+			delete(c.entries, candidate)
+			c.persistenceGenerations[candidate]++
 			changed = true
 		}
 	}
-	if _, exists := catPersistenceGeneration[key]; !exists {
-		catPersistenceGeneration[key] = 1
+	if _, exists := c.persistenceGenerations[key]; !exists {
+		c.persistenceGenerations[key] = 1
 	} else if !changed {
-		catPersistenceGeneration[key]++
+		c.persistenceGenerations[key]++
 	}
 	if changed {
-		saveCatalogLocked()
+		c.saveLocked()
 	}
 }
 
 // ForgetInheritedCatalogs removes only project-scoped service catalogs. Human
 // BYOC catalogs use provider@principal keys and must survive unrelated service
 // credential imports and bindings.
-func ForgetInheritedCatalogs(providerID string) {
-	forgetCatalogMatching(func(key string) bool {
+func (rt *Runtime) ForgetInheritedCatalogs(providerID string) {
+	rt.catalogs.forgetMatching(func(key string) bool {
 		return strings.HasPrefix(key, providerID+"@") && strings.Contains(key, "#")
 	})
 }
 
 // ForgetCatalogForProject removes inherited service catalogs for one project.
-func ForgetCatalogForProject(providerID, projectID string) {
+func (rt *Runtime) ForgetCatalogForProject(providerID, projectID string) {
 	if providerID == "" || projectID == "" {
 		return
 	}
-	forgetCatalogMatching(func(key string) bool {
+	rt.catalogs.forgetMatching(func(key string) bool {
 		return strings.HasPrefix(key, providerID+"@") && strings.HasSuffix(key, "#"+projectID)
 	})
 }
 
-func forgetCatalogMatching(matches func(string) bool) {
-	catMu.Lock()
-	defer catMu.Unlock()
-	loadCatalogLocked()
+func (c *catalogCache) forgetMatching(matches func(string) bool) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.loadLocked()
 	changed := false
 	invalidated := map[string]bool{}
-	for key := range catData {
+	for key := range c.entries {
 		if matches(key) {
-			delete(catData, key)
+			delete(c.entries, key)
 			invalidated[key] = true
 			changed = true
 		}
 	}
-	for key := range catGeneration {
+	for key := range c.generations {
 		if matches(key) {
 			invalidated[key] = true
 		}
 	}
 	for key := range invalidated {
-		catGeneration[key]++
+		c.generations[key]++
 	}
 	if changed {
-		saveCatalogLocked()
+		c.saveLocked()
 	}
 }
 
@@ -630,15 +632,16 @@ func forgetCatalogMatching(matches func(string) bool) {
 // view (the provider hub, the setup guide) must still be able to say whether a
 // provider has a synced catalog at all. It is a display signal only: request
 // paths keep using the caller-scoped catalog.
-func CatalogSnapshot(providerID string) ([]ModelInfo, time.Time) {
+func (rt *Runtime) CatalogSnapshot(providerID string) ([]ModelInfo, time.Time) {
 	if ProviderConfigurationIssue(providerID) != "" {
 		return nil, time.Time{}
 	}
-	catMu.Lock()
-	defer catMu.Unlock()
-	loadCatalogLocked()
+	catalogs := &rt.catalogs
+	catalogs.mu.Lock()
+	defer catalogs.mu.Unlock()
+	catalogs.loadLocked()
 	var best catalogEntry
-	for key, entry := range catData {
+	for key, entry := range catalogs.entries {
 		if key != providerID && !strings.HasPrefix(key, providerID+"@") {
 			continue
 		}

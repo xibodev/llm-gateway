@@ -106,13 +106,9 @@ func TestCatalogResponseSizeBoundaryAndCache(t *testing.T) {
 				}))
 				defer server.Close()
 				setupCatalogReadTest(t, server.URL)
-				cacheMu.Lock()
-				cache["catalog-read"] = provider.new(server.URL)
-				cacheMu.Unlock()
+				putProvider("catalog-read", provider.new(server.URL))
 				stale := time.Now().Add(-2 * catalogTTL)
-				catMu.Lock()
-				catData["catalog-read"] = catalogEntry{SchemaVersion: catalogSchemaVersion, Models: []ModelInfo{{ID: "old"}}, RefreshedAt: stale}
-				catMu.Unlock()
+				putCatalogEntry("catalog-read", catalogEntry{SchemaVersion: catalogSchemaVersion, Models: []ModelInfo{{ID: "old"}}, RefreshedAt: stale})
 				result := ReadCatalogForPrincipal("catalog-read", gatewayCaller())
 				cached, refreshed := CatalogCached("catalog-read")
 				if oversized {
@@ -146,13 +142,9 @@ func TestAzureOversizedLaterPagePreservesCache(t *testing.T) {
 	}))
 	defer server.Close()
 	setupCatalogReadTest(t, server.URL)
-	cacheMu.Lock()
-	cache["catalog-read"] = AzureOpenAIProvider{BaseURL: server.URL, APIKey: "fixture-key", Timeout: 5}
-	cacheMu.Unlock()
+	putProvider("catalog-read", AzureOpenAIProvider{BaseURL: server.URL, APIKey: "fixture-key", Timeout: 5})
 	stale := time.Now().Add(-2 * catalogTTL)
-	catMu.Lock()
-	catData["catalog-read"] = catalogEntry{SchemaVersion: catalogSchemaVersion, Models: []ModelInfo{{ID: "old"}}, RefreshedAt: stale}
-	catMu.Unlock()
+	putCatalogEntry("catalog-read", catalogEntry{SchemaVersion: catalogSchemaVersion, Models: []ModelInfo{{ID: "old"}}, RefreshedAt: stale})
 	result := ReadCatalogForPrincipal("catalog-read", gatewayCaller())
 	cached, refreshed := CatalogCached("catalog-read")
 	code, detail, status := CatalogFailure(result.Err)
