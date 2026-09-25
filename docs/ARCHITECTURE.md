@@ -62,15 +62,7 @@ The gateway integrates with `llmgw-core` and `llm-provider-auth` through clean a
    - Implemented in `internal/providers/auth_adapter.go`.
    - Maps gateway provider instances to device flows (`DeviceProviderAuthAdapter`), session refresh (`RefreshableProviderAuthAdapter`), and revocation (`RevocableProviderAuthAdapter`).
    - Connects dynamic gateway configuration (e.g. `config.Get().GithubCopilotCacheDir`) to `copilotauth` via resolver hooks.
-2. **Core Engine Adapter (`CoreProviderAdapter`)**:
-   - Implemented in `internal/providers/core_adapter.go`.
-   - Adapts internal gateway `Provider` implementations to `coreproviders.Provider`.
-   - Converts gateway endpoint definitions to `core.RouteConfig`.
-   - Adapts gateway IAM credential resolution to `core.CredentialResolver`.
-   - Adapts project/key allowlists to `core.PolicyGate`.
-   - Bridges telemetry to `core.UsageHook`.
-   - Builds live `core.Engine` instances via `BuildCoreEngine()`.
-3. **Routing Targets**:
+2. **Routing Targets**:
    - `internal/router/failover.go` aliases `core.Target` and `core.Resolution`, ensuring target and failover representation matches the core engine contract.
 
 ---

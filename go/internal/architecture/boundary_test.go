@@ -47,7 +47,7 @@ var coreBound = []boundUnit{
 	{
 		path:    "internal/providers",
 		allowed: []string{"llmgw/internal/config", "llmgw/internal/iam"},
-		budget:  map[string]int{metricIAM: 55, metricConfigGet: 16, metricConfigPrincipal: 0},
+		budget:  map[string]int{metricIAM: 55, metricConfigGet: 14, metricConfigPrincipal: 0},
 	},
 	{
 		// Telemetry and the savings ledger own the SQLite imports; they stay
