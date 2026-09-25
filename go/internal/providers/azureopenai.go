@@ -155,7 +155,7 @@ func (p AzureOpenAIProvider) Stream(model string, messages []Message, kw Kwargs)
 	if err != nil {
 		return nil, azureFailure(err, "azure_openai: streaming transport error: ", p.instance)
 	}
-	return &azureChatStream{inner: stream}, nil
+	return &relayedStream{inner: stream, prefix: "azure_openai"}, nil
 }
 
 // ---- catalog ------------------------------------------------------------- //

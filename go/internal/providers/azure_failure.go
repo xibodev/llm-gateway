@@ -3,7 +3,6 @@ package providers
 import (
 	"errors"
 	"fmt"
-	"io"
 
 	core "github.com/xibodev/llmgw-core"
 	coreproviders "github.com/xibodev/llmgw-core/providers"
@@ -65,44 +64,4 @@ func azureFailure(err error, transport, instance string) error {
 		}
 	}
 	return &ConfigError{Msg: "azure_openai: " + failure.Message}
-}
-
-// azureChatStream relays core's Azure stream as the data events the API layer
-// reads, as the transport's stream returned them; see azureStreamEnd for how
-// it ends.
-type azureChatStream struct {
-	inner core.StreamIter
-	err   error
-}
-
-func (s *azureChatStream) Next() (string, bool) {
-	data, err := nextCoreData(s.inner)
-	if err != nil {
-		s.err = azureStreamEnd(err)
-		return "", false
-	}
-	return data, true
-}
-
-func (s *azureChatStream) Err() error   { return s.err }
-func (s *azureChatStream) Close() error { return s.inner.Close() }
-
-// azureStreamEnd is how a Chat stream ends for what core's stream returned,
-// as the transport's stream ended: without an error at the stream's end, with
-// the gateway's StreamRecordTooLargeError for a record over the size limit,
-// the one upstream failure a relayed stream reports, and with the
-// transport's streaming error when the stream broke.
-func azureStreamEnd(err error) error {
-	var failure *core.ProviderError
-	switch {
-	case errors.Is(err, io.EOF):
-		return nil
-	case !errors.As(err, &failure):
-		return err
-	case failure.Class == core.ProviderErrorUpstream:
-		return &StreamRecordTooLargeError{Format: "SSE", Limit: maxStreamRecordWireSize}
-	case failure.Cause != nil:
-		return &InvocationError{Msg: "azure_openai: streaming transport error: " + failure.Cause.Error()}
-	}
-	return err
 }
