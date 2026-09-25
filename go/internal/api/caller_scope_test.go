@@ -22,10 +22,7 @@ func legacyScope(providerID string, p *config.Principal) string {
 }
 
 // scopeProducers builds each Principal the way its producer does, so the
-// Caller comes from the same path requests take. A key owned by a system
-// principal is left out on purpose: core has no system kind, so it becomes a
-// service caller whose instances are per project, where the Principal shared
-// one across projects.
+// Caller comes from the same path requests take.
 func scopeProducers() []struct {
 	name      string
 	principal *config.Principal
@@ -47,6 +44,8 @@ func scopeProducers() []struct {
 		{"IAM key of a service", key("prn_service", "service", "prj_one")},
 		{"IAM key of the same service elsewhere", key("prn_service", "service", "prj_two")},
 		{"service without a project", key("prn_service", "service", "")},
+		{"IAM key of a system principal", key("prn_system", "system", "prj_one")},
+		{"IAM key of the same system principal elsewhere", key("prn_system", "system", "prj_two")},
 		{"external key", external("prj_one")},
 		{"external key of another project", external("prj_two")},
 		{"static admin key", withCaller(sourceAdminKey, &config.Principal{Project: "admin", Key: "admin"})},

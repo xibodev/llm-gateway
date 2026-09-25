@@ -414,15 +414,15 @@ func newVertexProvider(
 
 // providerCacheKey scopes an instance to the principal whose credentials it
 // holds: the gateway-wide key for shared-only callers, the principal for a
-// human, and the principal in its project for a service, whose credential
-// bindings are per project.
+// human or system principal, and the principal in its project for a service,
+// whose credential bindings are per project.
 func providerCacheKey(providerID string, caller core.Caller) string {
-	principalID := callerPrincipalID(caller)
+	principalID, kind := callerPrincipal(caller)
 	if principalID == "" {
 		return providerID
 	}
 	key := providerID + "@" + principalID
-	if caller.Kind == core.CallerService && caller.ProjectID != "" {
+	if kind == "service" && caller.ProjectID != "" {
 		key += "#" + caller.ProjectID
 	}
 	return key

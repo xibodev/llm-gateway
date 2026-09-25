@@ -29,7 +29,7 @@ func TestRequestCallerMapsEveryProducer(t *testing.T) {
 	}{
 		{"IAM key of a human", sourcePrincipal, key("prn_h", "human"), core.Caller{ID: "prn_h", Kind: core.CallerHuman, ProjectID: "prj_one"}},
 		{"IAM key of a service", sourcePrincipal, key("prn_s", "service"), core.Caller{ID: "prn_s", Kind: core.CallerService, ProjectID: "prj_one"}},
-		{"IAM key of a system principal", sourcePrincipal, key("prn_y", "system"), core.Caller{ID: "prn_y", Kind: core.CallerService, ProjectID: "prj_one"}},
+		{"IAM key of a system principal", sourcePrincipal, key("prn_y", "system"), core.Caller{ID: "system:prn_y", Kind: core.CallerService, ProjectID: "prj_one"}},
 		{"external key", sourceExternalKey, external, core.Caller{ID: "external:prj_one/ci", Kind: core.CallerService, ProjectID: "prj_one"}},
 		{"static admin key", sourceAdminKey, &config.Principal{Project: "admin", Key: "admin"}, core.Caller{ID: "gateway:admin", Kind: core.CallerService}},
 		{"unauthenticated local", sourceLocal, &config.Principal{Project: "local", Key: "local"}, core.LocalCaller()},
@@ -47,13 +47,14 @@ func TestRequestCallerMapsEveryProducer(t *testing.T) {
 		if err := got.Validate(); err != nil {
 			t.Errorf("%s: %v", c.name, err)
 		}
-		// Only a Principal with a PrincipalID may reach private credentials.
-		wantPrivate := ""
-		if c.principal != nil {
-			wantPrivate = c.principal.PrincipalID
+		// Only a Principal with a PrincipalID may reach private credentials,
+		// and it must reach them as the same principal and kind.
+		var wantID, wantKind string
+		if c.principal != nil && c.principal.PrincipalID != "" {
+			wantID, wantKind = c.principal.PrincipalID, c.principal.PrincipalKind
 		}
-		if private := iam.CallerPrincipalID(got); private != wantPrivate {
-			t.Errorf("%s: private principal=%q, want %q", c.name, private, wantPrivate)
+		if id, kind := iam.CallerPrincipalID(got); id != wantID || kind != wantKind {
+			t.Errorf("%s: private principal=%q/%q, want %q/%q", c.name, id, kind, wantID, wantKind)
 		}
 		if c.source == sourcePrincipal && callerOf(c.principal) != c.want {
 			t.Errorf("%s: callerOf=%+v, want the mapped caller", c.name, callerOf(c.principal))
@@ -92,6 +93,19 @@ func TestRequireAPIKeyRecordsTheProducerCaller(t *testing.T) {
 	}
 	humanToken, humanID := issue("human")
 	serviceToken, serviceID := issue("service")
+	// An administrator can make the gateway's system principal a project
+	// member and issue it a key.
+	system, err := iam.EnsureSystemPrincipal()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := iam.SetMembership(project.ID, system.ID, "member"); err != nil {
+		t.Fatal(err)
+	}
+	systemKey, err := iam.IssueKey(iam.KeyCreate{ProjectID: project.ID, PrincipalID: system.ID, Name: "system"})
+	if err != nil {
+		t.Fatal(err)
+	}
 	keys := filepath.Join(t.TempDir(), "keys.json")
 	if err := os.WriteFile(keys, []byte(`{"version":1,"keys":[{"name":"build","project":"tools","key":"fixture-external"}]}`), 0o600); err != nil {
 		t.Fatal(err)
@@ -110,6 +124,7 @@ func TestRequireAPIKeyRecordsTheProducerCaller(t *testing.T) {
 		{"static admin key", "fixture-admin", core.Caller{ID: iam.AdminCallerID, Kind: core.CallerService}},
 		{"IAM key of a human", humanToken, core.Caller{ID: humanID, Kind: core.CallerHuman, ProjectID: project.ID}},
 		{"IAM key of a service", serviceToken, core.Caller{ID: serviceID, Kind: core.CallerService, ProjectID: project.ID}},
+		{"IAM key of the system principal", systemKey.Token, core.Caller{ID: iam.SystemPrincipalCallerID(system.ID), Kind: core.CallerService, ProjectID: project.ID}},
 		{"external key", "fixture-external", core.Caller{ID: iam.ExternalKeyCallerID(project.ID, "build"), Kind: core.CallerService, ProjectID: project.ID}},
 	} {
 		request := httptest.NewRequest("GET", "/v1/models", nil)

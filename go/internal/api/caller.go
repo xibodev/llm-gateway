@@ -29,12 +29,17 @@ const (
 // requestCaller maps a Principal onto the core.Caller that providers and the
 // router see. It is the only place the api layer makes that decision.
 //
-// Only human and service callers with a non-reserved ID reach personal
-// connections, project bindings and private instance scopes, so every caller
-// without a PrincipalID keeps the gateway-wide shared scope it had: the
-// reserved IDs of the admin and external keys, the local caller, and the
-// anonymous caller of gateway-internal work. An IAM principal is human only
-// when its kind says so; service and system principals are automation.
+// Only human and service callers with a non-reserved ID, and the system:
+// caller of a system principal, reach personal connections, project bindings
+// and private instance scopes, so every caller without a PrincipalID keeps the
+// gateway-wide shared scope it had: the reserved IDs of the admin and external
+// keys, the local caller, and the anonymous caller of gateway-internal work.
+// An IAM principal is human only when its kind says so. A system principal
+// that owns a key, which an administrator can arrange through a project
+// membership, becomes a service caller with the reserved ID
+// system:<principalID>, because core has no system kind; iam.CallerPrincipalID
+// turns it back into that principal and kind, so its credentials, bindings and
+// scopes stay the system principal's. Any other principal is a service.
 func requestCaller(source callerSource, p *config.Principal) core.Caller {
 	if p == nil {
 		return core.Caller{Kind: core.CallerAnonymous}
@@ -52,11 +57,13 @@ func requestCaller(source callerSource, p *config.Principal) core.Caller {
 	if p.PrincipalID == "" {
 		return core.Caller{Kind: core.CallerAnonymous, ProjectID: p.ProjectID}
 	}
-	kind := core.CallerService
-	if p.PrincipalKind == "human" {
-		kind = core.CallerHuman
+	switch p.PrincipalKind {
+	case "human":
+		return core.Caller{ID: p.PrincipalID, Kind: core.CallerHuman, ProjectID: p.ProjectID}
+	case "system":
+		return core.Caller{ID: iam.SystemPrincipalCallerID(p.PrincipalID), Kind: core.CallerService, ProjectID: p.ProjectID}
 	}
-	return core.Caller{ID: p.PrincipalID, Kind: kind, ProjectID: p.ProjectID}
+	return core.Caller{ID: p.PrincipalID, Kind: core.CallerService, ProjectID: p.ProjectID}
 }
 
 // withCaller records a Principal's Caller where the Principal is built.

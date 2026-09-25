@@ -54,13 +54,21 @@ func (c resolveCase) principal() *config.Principal {
 // credential the gateway's own resolver hands out for the same principal.
 func assertResolvesLikeGateway(t *testing.T, store *CredentialStore, c resolveCase) {
 	t.Helper()
+	assertResolvesLike(t, store, c, c.principal())
+}
+
+// assertResolvesLike compares Resolve for a caller with the gateway's resolver
+// for an explicit Principal, such as the one iam.ResolveAPIKey built before
+// providers took a Caller.
+func assertResolvesLike(t *testing.T, store *CredentialStore, c resolveCase, principal *config.Principal) {
+	t.Helper()
 	ctx := context.Background()
 	key, err := store.Resolve(ctx, c.caller, c.providerID)
 	var wantSecret, wantKind, wantKey string
 	var wantErr error
 	switch c.precedence {
 	case ConnectionPrecedence:
-		wantSecret, wantKind, wantKey, wantErr = referenceConnectionResolve(c.principal(), c.providerID)
+		wantSecret, wantKind, wantKey, wantErr = referenceConnectionResolve(principal, c.providerID)
 		if isOAuthCredentialKind(wantKind) && wantErr == nil {
 			envelope, decodeErr := decodeOAuthEnvelope(wantSecret)
 			wantSecret, wantErr = envelope.AccessToken, decodeErr
@@ -68,7 +76,7 @@ func assertResolvesLikeGateway(t *testing.T, store *CredentialStore, c resolveCa
 	case OAuthPrecedence:
 		var observation *ProviderAccountObservation
 		var ok bool
-		wantSecret, observation, ok, wantErr = ResolveProviderOAuthCredentialSecretWithObservation(c.principal(), c.providerID)
+		wantSecret, observation, ok, wantErr = ResolveProviderOAuthCredentialSecretWithObservation(principal, c.providerID)
 		wantKey = "?"
 		if observation != nil {
 			wantKey = observation.ConnectionID

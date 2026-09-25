@@ -298,11 +298,11 @@ func ReadCatalogForPrincipal(providerID string, caller core.Caller) CatalogReadR
 // operation; read endpoints must remain safe when an upstream is slow or down.
 func ReadCachedCatalogForPrincipal(providerID string, caller core.Caller) CatalogReadResult {
 	result := CatalogReadResult{Diagnostics: CatalogDiagnostics{SourceScope: "gateway", OwnerScope: "gateway", FromCache: true}}
-	principalID := callerPrincipalID(caller)
+	principalID, kind := callerPrincipal(caller)
 	if principalID != "" {
 		result.Diagnostics.SourceScope = "principal"
 		result.Diagnostics.OwnerScope = "human_owner"
-		if caller.Kind == core.CallerService && caller.ProjectID != "" {
+		if kind == "service" && caller.ProjectID != "" {
 			result.Diagnostics.SourceScope = "service_project"
 			result.Diagnostics.OwnerScope = "service_project"
 		}
@@ -338,11 +338,11 @@ func readCatalogForPrincipal(
 	refresh func(string, core.Caller) ([]ModelInfo, *iam.ProviderAccountObservation, error),
 ) CatalogReadResult {
 	result := CatalogReadResult{Diagnostics: CatalogDiagnostics{SourceScope: "gateway", OwnerScope: "gateway"}}
-	principalID := callerPrincipalID(caller)
+	principalID, kind := callerPrincipal(caller)
 	if principalID != "" {
 		result.Diagnostics.SourceScope = "principal"
 		result.Diagnostics.OwnerScope = "human_owner"
-		if caller.Kind == core.CallerService && caller.ProjectID != "" {
+		if kind == "service" && caller.ProjectID != "" {
 			result.Diagnostics.SourceScope = "service_project"
 			result.Diagnostics.OwnerScope = "service_project"
 		}
