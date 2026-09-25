@@ -12,10 +12,11 @@ import (
 // oauthStore is the credential store behind the core Runtime's instances and
 // behind the gateway's own Coordinators, which refresh outside the Runtime:
 // the gateway's connections, opened per operation, plus what the gateway's
-// paths did around a refresh that tokenstore.Coordinator does not. It pins
-// the account (oauthCall.pin), drops the caches a write invalidates, reports
-// failures as the Codex path reported them, and records the failures of a
-// refresh that follows an upstream 401 on the operation's oauthCall.
+// paths did around a refresh that tokenstore.Coordinator does not. The
+// operation's oauthCall says which vertical it serves, and so which rules
+// apply. The store pins a Codex account (oauthCall.pin), drops the caches a
+// write invalidates, reports failures as each path reported them, and
+// records the failures of a refresh that follows an upstream 401.
 type oauthStore struct {
 	runtime *Runtime
 	open    func() (core.CredentialStore, error)
@@ -31,21 +32,20 @@ type reportedError struct{ report, cause error }
 func (e *reportedError) Error() string   { return e.report.Error() }
 func (e *reportedError) Unwrap() []error { return []error{e.report, e.cause} }
 
-// Resolve implements core.CredentialStore. Codex serves only a caller's own
-// connection, so a caller without one fails here. The failure must not match
-// core.ErrNoCredential, on which the Runtime sends the request without a
-// credential.
+// Resolve implements core.CredentialStore. Codex and Antigravity serve only a
+// caller's own connection, so a caller without one fails here.
 func (s oauthStore) Resolve(ctx context.Context, caller core.Caller, instance string) (string, error) {
+	call := oauthCallFrom(ctx)
 	store, err := s.open()
 	if err != nil {
-		return "", codexLoadFailure(err)
+		return "", call.loadFailure(err)
 	}
 	key, err := store.Resolve(ctx, caller, instance)
 	if errors.Is(err, core.ErrNoCredential) {
-		return "", errNoCodexConnection()
+		return "", call.noConnection()
 	}
 	if err != nil {
-		return "", codexLoadFailure(err)
+		return "", call.loadFailure(err)
 	}
 	return key, nil
 }
@@ -62,7 +62,7 @@ func (s oauthStore) Load(ctx context.Context, key string) (tokenstore.Record, er
 		err = call.pin(record)
 	}
 	if err != nil {
-		err = codexLoadFailure(err)
+		err = call.loadFailure(err)
 		call.reject(err)
 		return tokenstore.Record{}, err
 	}
@@ -70,7 +70,7 @@ func (s oauthStore) Load(ctx context.Context, key string) (tokenstore.Record, er
 		// The Coordinator refuses to refresh such a record without saying
 		// so to the Runtime. If it does not serve the record instead, this
 		// is why the refresh failed.
-		call.reject(errNoCodexRefreshToken())
+		call.reject(call.noRefreshToken())
 	}
 	credentialCollectorFrom(ctx).observe(key, record.Revision)
 	return record, nil
@@ -98,7 +98,7 @@ func (s oauthStore) ReplaceIfCurrent(ctx context.Context, key, revision string, 
 		return tokenstore.Record{}, err
 	}
 	if err != nil {
-		err = &reportedError{report: invocation("openai_codex: store refreshed connection: " + err.Error()), cause: err}
+		err = call.storeFailure(err)
 		call.reject(err)
 		return tokenstore.Record{}, err
 	}

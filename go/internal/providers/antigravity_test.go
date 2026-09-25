@@ -1,15 +1,17 @@
 package providers
 
 import (
+	"bytes"
 	"context"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"strings"
 	"sync"
-	"sync/atomic"
 	"testing"
 	"time"
 
@@ -21,139 +23,128 @@ import (
 	coreproviders "github.com/xibodev/llmgw-core/providers"
 )
 
-func TestAntigravityChatIsNotWireNative(t *testing.T) {
-	provider := &antigravityProvider{}
-	if PreservesWireNativeSurface(provider, "model-a", core.ModelSurfaceChatCompletions) {
-		t.Fatal("Antigravity Chat adaptation was certified as wire-native")
+const antigravityFixtureCompletion = "data: {\"response\":{\"candidates\":[{\"content\":{\"parts\":[{\"text\":\"hello\"}]},\"finishReason\":\"STOP\"}]}}\n\n"
+
+type antigravityCall struct{ path, authorization, body string }
+
+// antigravityUpstream is a synthetic Cloud Code Assist that also serves
+// Google's token endpoint at /token and account discovery at /load. It
+// records every call and answers with handle, or else as a healthy upstream
+// that accepts every token; see antigravityAnswer.
+type antigravityUpstream struct {
+	mu     sync.Mutex
+	calls  []antigravityCall
+	handle func(w http.ResponseWriter, r *http.Request) bool
+}
+
+func (u *antigravityUpstream) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	body, _ := io.ReadAll(r.Body)
+	r.Body = io.NopCloser(bytes.NewReader(body))
+	u.mu.Lock()
+	u.calls = append(u.calls, antigravityCall{r.URL.Path, r.Header.Get("Authorization"), string(body)})
+	u.mu.Unlock()
+	if u.handle == nil || !u.handle(w, r) {
+		antigravityAnswer(w, r)
 	}
 }
 
-func TestAntigravityPersistsDiscoveredProjectWithoutRefresh(t *testing.T) {
-	human := setupAntigravityConnectionTest(t, "current-access", "refresh-token", 0)
-	if err := persistAntigravityProject(human.ID, "antigravity", "personal", "current-access", "discovered-project"); err != nil {
-		t.Fatal(err)
+func (u *antigravityUpstream) recorded() []antigravityCall {
+	u.mu.Lock()
+	defer u.mu.Unlock()
+	return append([]antigravityCall(nil), u.calls...)
+}
+
+// to returns the calls that reached path.
+func (u *antigravityUpstream) to(path string) []antigravityCall {
+	var calls []antigravityCall
+	for _, call := range u.recorded() {
+		if call.path == path {
+			calls = append(calls, call)
+		}
 	}
-	envelope, _, ok, err := iam.OAuthProviderConnectionSecret(human.ID, "antigravity", "personal")
-	if err != nil || !ok {
-		t.Fatalf("load persisted connection: ok=%v err=%v", ok, err)
-	}
-	if envelope.ProjectID != "discovered-project" || envelope.AccessToken != "current-access" || envelope.RefreshToken != "refresh-token" {
-		t.Fatalf("envelope=%+v", envelope)
+	return calls
+}
+
+func (u *antigravityUpstream) count(path string) int { return len(u.to(path)) }
+
+func antigravityAnswer(w http.ResponseWriter, r *http.Request) {
+	switch r.URL.Path {
+	case "/token":
+		_ = json.NewEncoder(w).Encode(map[string]any{"access_token": "refreshed-access", "expires_in": 3600})
+	case "/load", "/v1internal:loadCodeAssist":
+		_ = json.NewEncoder(w).Encode(map[string]any{"cloudaicompanionProject": "discovered-project", "paidTier": map[string]any{"id": "paid"}})
+	case "/v1internal:fetchAvailableModels":
+		_ = json.NewEncoder(w).Encode(map[string]any{"models": map[string]any{"model-a": map[string]any{"displayName": "Model A"}}})
+	case "/v1internal:streamGenerateContent":
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = io.WriteString(w, antigravityFixtureCompletion)
+	default:
+		http.NotFound(w, r)
 	}
 }
 
-func TestAntigravityProjectPersistenceDoesNotOverwriteConcurrentReauthorization(t *testing.T) {
-	human := setupAntigravityConnectionTest(t, "old-access", "old-refresh", 0)
-	if _, err := iam.PutOAuthProviderConnection(iam.OAuthConnectionCreate{
-		PrincipalID: human.ID, ProviderID: "antigravity", Name: "personal", Kind: "google_antigravity_oauth",
-		AccessToken: "reauthorized-access", RefreshToken: "reauthorized-refresh", Status: "active",
-	}); err != nil {
-		t.Fatal(err)
-	}
-	if err := persistAntigravityProject(human.ID, "antigravity", "personal", "old-access", "stale-project"); err != nil {
-		t.Fatal(err)
-	}
-	envelope, _, ok, err := iam.OAuthProviderConnectionSecret(human.ID, "antigravity", "personal")
-	if err != nil || !ok {
-		t.Fatalf("load reauthorized connection: ok=%v err=%v", ok, err)
-	}
-	if envelope.AccessToken != "reauthorized-access" || envelope.RefreshToken != "reauthorized-refresh" || envelope.ProjectID != "" {
-		t.Fatalf("concurrent reauthorization was overwritten: %+v", envelope)
-	}
+// setupAntigravityRuntimeTest configures the installed Runtime's antigravity
+// instance against upstream, for Cloud Code Assist and Google's OAuth
+// endpoints, stores the connection setupAntigravityConnectionTest describes
+// for a new human owner and returns the owner's facade.
+func setupAntigravityRuntimeTest(
+	t *testing.T, upstream http.Handler, accessToken, refreshToken, projectID string, expiresAt int64,
+) (*antigravityProvider, iam.Principal) {
+	t.Helper()
+	human := setupAntigravityConnectionTest(t, accessToken, refreshToken, projectID, expiresAt)
+	configureAntigravityInstance(t, "")
+	server := httptest.NewServer(upstream)
+	t.Cleanup(server.Close)
+	setAntigravityOAuthTestConfig(t, server)
+	setAntigravityEndpointForTests(t, antigravityEndpoint{BaseURL: server.URL, HTTPClient: server.Client()})
+	return antigravityFacade(t, human), human
 }
 
-func TestAntigravityUnauthorizedRefreshIsDeduplicated(t *testing.T) {
-	human := setupAntigravityConnectionTest(t, "rejected-access", "refresh-token", time.Now().Add(time.Hour).Unix())
-	var refreshes atomic.Int32
-	tokenServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		switch r.URL.Path {
-		case "/token":
-			refreshes.Add(1)
-			_ = json.NewEncoder(w).Encode(map[string]any{"access_token": "new-access", "expires_in": 3600})
-		case "/load":
-			_ = json.NewEncoder(w).Encode(map[string]any{"cloudaicompanionProject": "project"})
-		default:
-			http.NotFound(w, r)
-		}
-	}))
-	defer tokenServer.Close()
-	setAntigravityOAuthTestConfig(t, tokenServer)
-
-	start := make(chan struct{})
-	errs := make(chan error, 2)
-	var ready sync.WaitGroup
-	ready.Add(2)
-	for range 2 {
-		go func() {
-			ready.Done()
-			<-start
-			errs <- refreshAntigravityConnection(context.Background(), human.ID, "antigravity", "personal", "rejected-access")
-		}()
-	}
-	ready.Wait()
-	close(start)
-	for range 2 {
-		if err := <-errs; err != nil {
-			t.Fatal(err)
-		}
-	}
-	if refreshes.Load() != 1 {
-		t.Fatalf("refresh requests=%d, want 1", refreshes.Load())
-	}
-}
-
-func TestAntigravityGatewayCompletionRecoversUnauthorized(t *testing.T) {
-	human := setupAntigravityConnectionTest(t, "rejected-access", "refresh-token", time.Now().Add(time.Hour).Unix())
-	if err := persistAntigravityProject(human.ID, "antigravity", "personal", "rejected-access", "project"); err != nil {
+func antigravityFacade(t *testing.T, owner iam.Principal) *antigravityProvider {
+	t.Helper()
+	provider, err := Current().newAntigravityProvider("antigravity", core.Caller{ID: owner.ID, Kind: core.CallerHuman})
+	if err != nil {
 		t.Fatal(err)
 	}
-	tokenServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		switch r.URL.Path {
-		case "/token":
-			_ = json.NewEncoder(w).Encode(map[string]any{"access_token": "recovered-access", "expires_in": 3600})
-		case "/load":
-			_ = json.NewEncoder(w).Encode(map[string]any{"cloudaicompanionProject": "project", "paidTier": map[string]any{"id": "paid"}})
-		default:
-			http.NotFound(w, r)
-		}
-	}))
-	defer tokenServer.Close()
-	setAntigravityOAuthTestConfig(t, tokenServer)
+	return provider.(*antigravityProvider)
+}
 
-	var completions atomic.Int32
-	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		completions.Add(1)
-		switch r.Header.Get("Authorization") {
-		case "Bearer rejected-access":
-			w.WriteHeader(http.StatusUnauthorized)
-		case "Bearer recovered-access":
-			w.Header().Set("Content-Type", "text/event-stream")
-			_, _ = w.Write([]byte("data: {\"response\":{\"candidates\":[{\"content\":{\"parts\":[{\"text\":\"recovered\"}]}}]}}\n\n"))
-		default:
-			t.Fatalf("authorization=%q", r.Header.Get("Authorization"))
+// configureAntigravityInstance configures the antigravity instance, with
+// publicClientID as its public OAuth client, until the test ends.
+func configureAntigravityInstance(t *testing.T, publicClientID string) {
+	t.Helper()
+	old := config.Get().Providers
+	config.Update(func(s *config.Settings) {
+		s.Providers = map[string]*config.ProviderConfig{
+			"antigravity": {Type: "google_antigravity", PublicOAuthClientID: publicClientID},
 		}
-	}))
-	defer upstream.Close()
-
-	tokenSource := func(context.Context) (string, string, error) {
-		envelope, _, ok, err := iam.OAuthProviderConnectionSecret(human.ID, "antigravity", "personal")
-		if err != nil || !ok {
-			return "", "", err
-		}
-		return envelope.AccessToken, envelope.ProjectID, nil
-	}
-	inner := coreproviders.NewExperimentalAntigravityProvider(tokenSource, upstream.Client(), upstream.URL)
-	inner.SetUnauthorizedHandler(func(ctx context.Context, rejected string) error {
-		return refreshAntigravityConnection(ctx, human.ID, "antigravity", "personal", rejected)
 	})
-	provider := &antigravityProvider{inner: inner, principalID: human.ID, providerID: "antigravity"}
-	response, err := provider.CompleteContext(context.Background(), "model", []Message{{"role": "user", "content": "hello"}}, nil)
-	if err != nil || response == nil || completions.Load() != 2 {
-		t.Fatalf("response=%v err=%v completion requests=%d", response, err, completions.Load())
-	}
+	ResetProviders()
+	t.Cleanup(func() {
+		config.Update(func(s *config.Settings) { s.Providers = old })
+		ResetProviders()
+	})
 }
 
-func setupAntigravityConnectionTest(t *testing.T, accessToken, refreshToken string, expiresAt int64) iam.Principal {
+// setAntigravityEndpointForTests points the installed Runtime's Cloud Code
+// Assist calls at endpoint until the test ends. The core Runtime builds its
+// Antigravity once per settings generation, so both swaps publish the
+// settings again, unchanged, to have it rebuild.
+func setAntigravityEndpointForTests(t *testing.T, endpoint antigravityEndpoint) {
+	t.Helper()
+	runtime := Current()
+	previous := runtime.antigravityEndpoint.swap(endpoint)
+	config.Update(func(*config.Settings) {})
+	t.Cleanup(func() {
+		runtime.antigravityEndpoint.swap(previous)
+		config.Update(func(*config.Settings) {})
+	})
+}
+
+// setupAntigravityConnectionTest stores a personal connection of a new human
+// owner, granted to the runtime client, with the tokens, project and expiry
+// given. An expiry of zero never expires.
+func setupAntigravityConnectionTest(t *testing.T, accessToken, refreshToken, projectID string, expiresAt int64) iam.Principal {
 	t.Helper()
 	t.Setenv("LLMGW_STATE_DIR", t.TempDir())
 	iam.ResetForTests()
@@ -170,14 +161,32 @@ func setupAntigravityConnectionTest(t *testing.T, accessToken, refreshToken stri
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := iam.PutOAuthProviderConnection(iam.OAuthConnectionCreate{
-		PrincipalID: human.ID, ProviderID: "antigravity", Name: "personal", Kind: "google_antigravity_oauth",
-		AccessToken: accessToken, RefreshToken: refreshToken, ExpiresAt: expiresAt, Status: "active",
-		OAuthProfile: antigravityOAuthProfileRuntimeSecret, OAuthClientID: "client-id",
-	}); err != nil {
+	putAntigravityConnection(t, iam.OAuthConnectionCreate{
+		PrincipalID: human.ID, AccessToken: accessToken, RefreshToken: refreshToken, ExpiresAt: expiresAt,
+		ProjectID: projectID, OAuthProfile: antigravityOAuthProfileRuntimeSecret, OAuthClientID: "client-id",
+	})
+	return human
+}
+
+// putAntigravityConnection stores input as the owner's personal connection,
+// as a sign-in does.
+func putAntigravityConnection(t *testing.T, input iam.OAuthConnectionCreate) iam.ProviderConnection {
+	t.Helper()
+	input.ProviderID, input.Name, input.Kind, input.Status = "antigravity", "personal", "google_antigravity_oauth", "active"
+	connection, err := iam.PutOAuthProviderConnection(input)
+	if err != nil {
 		t.Fatal(err)
 	}
-	return human
+	return connection
+}
+
+func storedAntigravityConnection(t *testing.T, owner iam.Principal) (iam.OAuthTokenEnvelope, iam.ProviderConnection) {
+	t.Helper()
+	envelope, connection, ok, err := iam.OAuthProviderConnectionSecret(owner.ID, "antigravity", "personal")
+	if err != nil || !ok {
+		t.Fatalf("load connection: ok=%v err=%v", ok, err)
+	}
+	return envelope, connection
 }
 
 func setAntigravityOAuthTestConfig(t *testing.T, server *httptest.Server) {
@@ -191,51 +200,34 @@ func setAntigravityOAuthTestConfig(t *testing.T, server *httptest.Server) {
 }
 
 // replaceAntigravityOAuthConfig replaces the installed Runtime's settings
-// OAuth client until the test ends.
+// OAuth client until the test ends. The core Runtime builds its refresh once
+// per settings generation, so both swaps publish the settings again.
 func replaceAntigravityOAuthConfig(t *testing.T, build func(string) antigravityauth.Config) {
 	t.Helper()
 	runtime := Current()
 	previous := runtime.antigravityOAuth.swap(build)
-	t.Cleanup(func() { runtime.antigravityOAuth.swap(previous) })
+	config.Update(func(*config.Settings) {})
+	t.Cleanup(func() {
+		runtime.antigravityOAuth.swap(previous)
+		config.Update(func(*config.Settings) {})
+	})
 }
 
-func TestAntigravityGatewayAdapterDiscoversCatalogWithoutFallbackProject(t *testing.T) {
-	var paths []string
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		paths = append(paths, r.URL.Path)
-		switch r.URL.Path {
-		case "/v1internal:loadCodeAssist":
-			_ = json.NewEncoder(w).Encode(map[string]any{"cloudaicompanionProject": "discovered-project"})
-		case "/v1internal:fetchAvailableModels":
-			var body map[string]any
-			_ = json.NewDecoder(r.Body).Decode(&body)
-			if body["project"] != "discovered-project" {
-				t.Fatalf("project=%v", body["project"])
-			}
-			_ = json.NewEncoder(w).Encode(map[string]any{"models": map[string]any{"model-a": map[string]any{"displayName": "Model A"}}})
-		default:
-			http.NotFound(w, r)
-		}
-	}))
-	defer server.Close()
-	provider := &antigravityProvider{inner: coreproviders.NewExperimentalAntigravityProvider(func(context.Context) (string, string, error) {
-		return "access-token", "", nil
-	}, server.Client(), server.URL)}
-	models, _, err := provider.ListModelsWithError()
-	if err != nil {
-		t.Fatal(err)
+func antigravityBodyField(t *testing.T, body, field string) any {
+	t.Helper()
+	var decoded map[string]any
+	if err := json.Unmarshal([]byte(body), &decoded); err != nil {
+		t.Fatalf("decode %q: %v", body, err)
 	}
-	if len(models) != 1 || models[0].ID != "model-a" || models[0].TypedCapabilities == nil || models[0].TypedCapabilities.Streaming != core.SupportUnsupported {
-		t.Fatalf("models=%+v", models)
-	}
-	if len(paths) != 2 || paths[0] != "/v1internal:loadCodeAssist" {
-		t.Fatalf("paths=%v", paths)
-	}
+	return decoded[field]
 }
 
-func TestAntigravityGatewayAdvertisesAndGeneratesImagesOnlyForRosterMembers(t *testing.T) {
-	encoded := base64.StdEncoding.EncodeToString([]byte("image-bytes"))
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+// antigravityImages answers the catalog with a chat model, an image model and
+// an image roster naming a model the catalog lacks, and a generation with one
+// image of data.
+func antigravityImages(data string) func(http.ResponseWriter, *http.Request) bool {
+	encoded := base64.StdEncoding.EncodeToString([]byte(data))
+	return func(w http.ResponseWriter, r *http.Request) bool {
 		switch r.URL.Path {
 		case "/v1internal:fetchAvailableModels":
 			_ = json.NewEncoder(w).Encode(map[string]any{
@@ -245,13 +237,57 @@ func TestAntigravityGatewayAdvertisesAndGeneratesImagesOnlyForRosterMembers(t *t
 		case "/v1internal:streamGenerateContent":
 			_, _ = fmt.Fprintf(w, "data: {\"response\":{\"candidates\":[{\"content\":{\"parts\":[{\"inlineData\":{\"mimeType\":\"image/png\",\"data\":%q}}]}}]}}\n\n", encoded)
 		default:
-			http.NotFound(w, r)
+			return false
 		}
-	}))
-	defer server.Close()
-	provider := &antigravityProvider{inner: coreproviders.NewExperimentalAntigravityProvider(func(context.Context) (string, string, error) {
-		return "access-token", "project", nil
-	}, server.Client(), server.URL)}
+		return true
+	}
+}
+
+func TestAntigravityChatIsNotWireNative(t *testing.T) {
+	provider := &antigravityProvider{}
+	if PreservesWireNativeSurface(provider, "model-a", core.ModelSurfaceChatCompletions) {
+		t.Fatal("Antigravity Chat adaptation was certified as wire-native")
+	}
+}
+
+// The gateway writes the OAuth profiles it signs in with, and core's refresh
+// reads them.
+func TestAntigravityOAuthProfilesAreCores(t *testing.T) {
+	if antigravityOAuthProfileRuntimeSecret != coreproviders.AntigravityOAuthProfileRuntimeSecret ||
+		antigravityOAuthProfilePublicPKCE != coreproviders.AntigravityOAuthProfilePublicPKCE ||
+		antigravityOAuthProfileConsumerManual != coreproviders.AntigravityOAuthProfileConsumerManual {
+		t.Fatal("the gateway's Antigravity OAuth profiles differ from core's")
+	}
+}
+
+// The catalog discovers the project of a connection that names none rather
+// than inventing one, stores it, and reports the connection at the revision
+// that write left, so a probe can rebase onto it.
+func TestAntigravityGatewayAdapterDiscoversCatalogWithoutFallbackProject(t *testing.T) {
+	upstream := &antigravityUpstream{}
+	provider, owner := setupAntigravityRuntimeTest(t, upstream, "access-token", "refresh-token", "", 0)
+	models, observation, err := provider.ListModelsWithError()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(models) != 1 || models[0].ID != "model-a" || models[0].TypedCapabilities == nil || models[0].TypedCapabilities.Streaming != core.SupportUnsupported {
+		t.Fatalf("models=%+v", models)
+	}
+	calls := upstream.recorded()
+	if len(calls) != 2 || calls[0].path != "/v1internal:loadCodeAssist" || antigravityBodyField(t, calls[1].body, "project") != "discovered-project" {
+		t.Fatalf("calls=%+v", calls)
+	}
+	current, found, err := iam.ActiveProviderAccountObservation(owner.ID, "antigravity")
+	if err != nil || !found || observation == nil || *observation != *credentialObservation(&current) {
+		t.Fatalf("observation=%+v current=%+v err=%v", observation, current, err)
+	}
+	if envelope, _ := storedAntigravityConnection(t, owner); envelope.ProjectID != "discovered-project" {
+		t.Fatalf("project=%q", envelope.ProjectID)
+	}
+}
+
+func TestAntigravityGatewayAdvertisesAndGeneratesImagesOnlyForRosterMembers(t *testing.T) {
+	provider, _ := setupAntigravityRuntimeTest(t, &antigravityUpstream{handle: antigravityImages("image-bytes")}, "access-token", "refresh-token", "project", 0)
 	models, _, err := provider.ListModelsWithError()
 	if err != nil {
 		t.Fatal(err)
@@ -275,27 +311,22 @@ func TestAntigravityGatewayAdvertisesAndGeneratesImagesOnlyForRosterMembers(t *t
 	if err != nil || len(images) != 1 || string(images[0].Data) != "image-bytes" || images[0].MimeType != "image/png" {
 		t.Fatalf("images=%+v err=%v", images, err)
 	}
+	if _, _, err := contextual.GenerateImagesContext(context.Background(), "orphan-image-model", "draw", 1); UpstreamStatus(err) != http.StatusBadRequest {
+		t.Fatalf("a model outside the root roster generated: err=%v", err)
+	}
 }
 
 func TestAntigravityGatewayImageFailurePreservesOnlySafeHTTPMetadata(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		switch r.URL.Path {
-		case "/v1internal:fetchAvailableModels":
-			_ = json.NewEncoder(w).Encode(map[string]any{
-				"models": map[string]any{"image-model": map[string]any{}}, "imageGenerationModelIds": []string{"image-model"},
-			})
-		case "/v1internal:streamGenerateContent":
-			w.Header().Set("Retry-After", "17")
-			w.WriteHeader(http.StatusTooManyRequests)
-			_, _ = w.Write([]byte(`{"error":{"code":429,"status":"RESOURCE_EXHAUSTED","message":"private quota prose"}}`))
-		default:
-			http.NotFound(w, r)
+	upstream := &antigravityUpstream{handle: func(w http.ResponseWriter, r *http.Request) bool {
+		if r.URL.Path != "/v1internal:streamGenerateContent" {
+			return antigravityImages("")(w, r)
 		}
-	}))
-	defer server.Close()
-	provider := &antigravityProvider{inner: coreproviders.NewExperimentalAntigravityProvider(func(context.Context) (string, string, error) {
-		return "access-token", "project", nil
-	}, server.Client(), server.URL)}
+		w.Header().Set("Retry-After", "17")
+		w.WriteHeader(http.StatusTooManyRequests)
+		_, _ = w.Write([]byte(`{"error":{"code":429,"status":"RESOURCE_EXHAUSTED","message":"private quota prose"}}`))
+		return true
+	}}
+	provider, _ := setupAntigravityRuntimeTest(t, upstream, "access-token", "refresh-token", "project", 0)
 	_, _, err := provider.GenerateImagesContext(context.Background(), "image-model", "draw", 1)
 	if err == nil || UpstreamStatus(err) != http.StatusTooManyRequests || InvocationRetryAfter(err) != "17" || !InvocationRetryable(err) {
 		t.Fatalf("status=%d Retry-After=%q retryable=%v err=%v", UpstreamStatus(err), InvocationRetryAfter(err), InvocationRetryable(err), err)
@@ -305,38 +336,63 @@ func TestAntigravityGatewayImageFailurePreservesOnlySafeHTTPMetadata(t *testing.
 	}
 }
 
-func TestAntigravityCatalogAcceptsProjectPersistenceFromSameOperation(t *testing.T) {
-	human := setupAntigravityConnectionTest(t, "access-token", "refresh-token", time.Now().Add(time.Hour).Unix())
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		switch r.URL.Path {
-		case "/v1internal:loadCodeAssist":
-			_ = json.NewEncoder(w).Encode(map[string]any{"cloudaicompanionProject": "discovered-project"})
-		case "/v1internal:fetchAvailableModels":
-			_ = json.NewEncoder(w).Encode(map[string]any{"models": map[string]any{"model-a": map[string]any{"displayName": "Model A"}}})
-		default:
-			http.NotFound(w, r)
-		}
-	}))
-	defer server.Close()
+// Image generation, which the core Runtime does not serve, recovers from a
+// rejected token as the Runtime does: one refresh, then the same request.
+// When that refresh fails, the failed recovery is reported without a status.
+func TestAntigravityImageGenerationRefreshesARejectedToken(t *testing.T) {
+	serve := antigravityImages("image-bytes")
+	reject := rejectAntigravityTokensBut("refreshed-access")
+	upstream := &antigravityUpstream{handle: func(w http.ResponseWriter, r *http.Request) bool {
+		return reject(w, r) || serve(w, r)
+	}}
+	provider, owner := setupAntigravityRuntimeTest(t, upstream, "rejected-access", "refresh-token", "project", time.Now().Add(time.Hour).Unix())
+	images, _, err := provider.GenerateImagesContext(context.Background(), "image-model", "draw", 1)
+	if err != nil || len(images) != 1 || string(images[0].Data) != "image-bytes" {
+		t.Fatalf("images=%+v err=%v", images, err)
+	}
+	want := []antigravityCall{
+		{path: "/v1internal:fetchAvailableModels", authorization: "Bearer rejected-access"},
+		{path: "/token"},
+		{path: "/load", authorization: "Bearer refreshed-access"},
+		{path: "/v1internal:fetchAvailableModels", authorization: "Bearer refreshed-access"},
+		{path: "/v1internal:streamGenerateContent", authorization: "Bearer refreshed-access"},
+	}
+	if calls := antigravityCallsWithoutBodies(upstream.recorded()); !reflect.DeepEqual(calls, want) {
+		t.Fatalf("calls=%+v, want %+v", calls, want)
+	}
 
-	principal := core.Caller{ID: human.ID, Kind: core.CallerHuman}
-	provider, err := newAntigravityProvider("antigravity", principal)
+	// A sign-in replaces the refreshed token, and its grant is refused.
+	putAntigravityConnection(t, iam.OAuthConnectionCreate{
+		PrincipalID: owner.ID, AccessToken: "rejected-access", RefreshToken: "refused-refresh", ProjectID: "project",
+		OAuthProfile: antigravityOAuthProfileRuntimeSecret, OAuthClientID: "other-client",
+	})
+	if _, _, err := provider.GenerateImagesContext(context.Background(), "image-model", "draw", 1); !IsInvocation(err) || UpstreamStatus(err) != 0 {
+		t.Fatalf("err=%v status=%d", err, UpstreamStatus(err))
+	}
+}
+
+// An image request Antigravity cannot serve is refused with its 400 before
+// any credential is resolved or refreshed, as the Antigravity path refused
+// it, so a caller without a connection still learns what is wrong.
+func TestAntigravityImageRequestIsRefusedBeforeItsCredential(t *testing.T) {
+	upstream := &antigravityUpstream{handle: func(w http.ResponseWriter, r *http.Request) bool {
+		t.Errorf("an image request Antigravity cannot serve reached %s", r.URL.Path)
+		return false
+	}}
+	setupAntigravityRuntimeTest(t, upstream, "owner-access", "refresh-token", "project", 0)
+	stranger, err := iam.CreatePrincipal("human", "fixture:antigravity-stranger", "", "Stranger")
 	if err != nil {
 		t.Fatal(err)
 	}
-	antigravity := provider.(*antigravityProvider)
-	antigravity.inner = coreproviders.NewExperimentalAntigravityProvider(func(context.Context) (string, string, error) {
-		envelope, _, ok, loadErr := iam.OAuthProviderConnectionSecret(human.ID, "antigravity", "personal")
-		if loadErr != nil || !ok {
-			return "", "", loadErr
-		}
-		return envelope.AccessToken, envelope.ProjectID, nil
-	}, server.Client(), server.URL)
-	antigravity.inner.SetProjectObserver(func(_ context.Context, accessToken, projectID string) error {
-		return persistAntigravityProject(human.ID, "antigravity", "personal", accessToken, projectID)
-	})
-	putProvider(providerCacheKey("antigravity", principal), antigravity)
+	_, _, err = antigravityFacade(t, stranger).GenerateImagesContext(context.Background(), "image-model", "draw", 2)
+	if !IsInvocation(err) || UpstreamStatus(err) != http.StatusBadRequest {
+		t.Fatalf("err=%v status=%d", err, UpstreamStatus(err))
+	}
+}
 
+func TestAntigravityCatalogAcceptsProjectPersistenceFromSameOperation(t *testing.T) {
+	_, owner := setupAntigravityRuntimeTest(t, &antigravityUpstream{}, "access-token", "refresh-token", "", time.Now().Add(time.Hour).Unix())
+	principal := core.Caller{ID: owner.ID, Kind: core.CallerHuman}
 	models, _, err := RefreshCatalogForPrincipalWithError("antigravity", principal)
 	if err != nil || len(models) != 1 || models[0].ID != "model-a" {
 		t.Fatalf("models=%+v err=%v", models, err)
@@ -344,273 +400,55 @@ func TestAntigravityCatalogAcceptsProjectPersistenceFromSameOperation(t *testing
 	cached, refreshedAt := CatalogCachedForPrincipal("antigravity", principal)
 	if len(cached) != 1 || cached[0].ID != "model-a" || refreshedAt.IsZero() {
 		t.Fatalf("cached=%+v refreshedAt=%v", cached, refreshedAt)
+	}
+	if envelope, _ := storedAntigravityConnection(t, owner); envelope.ProjectID != "discovered-project" {
+		t.Fatalf("project=%q", envelope.ProjectID)
 	}
 }
 
 func TestAntigravityCatalogAcceptsCredentialRefreshFromSameOperation(t *testing.T) {
-	human := setupAntigravityConnectionTest(t, "expired-access", "refresh-token", time.Now().Add(-time.Hour).Unix())
-	tokenServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		switch r.URL.Path {
-		case "/token":
-			_ = json.NewEncoder(w).Encode(map[string]any{"access_token": "fresh-access", "expires_in": 3600})
-		case "/load":
-			_ = json.NewEncoder(w).Encode(map[string]any{"cloudaicompanionProject": "project"})
-		default:
-			http.NotFound(w, r)
+	upstream := &antigravityUpstream{handle: func(w http.ResponseWriter, r *http.Request) bool {
+		if strings.HasPrefix(r.URL.Path, "/v1internal:") && r.Header.Get("Authorization") != "Bearer refreshed-access" {
+			t.Errorf("authorization=%q", r.Header.Get("Authorization"))
 		}
-	}))
-	defer tokenServer.Close()
-	setAntigravityOAuthTestConfig(t, tokenServer)
-
-	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Header.Get("Authorization") != "Bearer fresh-access" {
-			t.Fatalf("authorization=%q", r.Header.Get("Authorization"))
-		}
-		_ = json.NewEncoder(w).Encode(map[string]any{"models": map[string]any{"model-a": map[string]any{"displayName": "Model A"}}})
-	}))
-	defer upstream.Close()
-
-	principal := core.Caller{ID: human.ID, Kind: core.CallerHuman}
-	provider, err := newAntigravityProvider("antigravity", principal)
-	if err != nil {
-		t.Fatal(err)
-	}
-	antigravity := provider.(*antigravityProvider)
-	tokenSource := func(ctx context.Context) (string, string, error) {
-		envelope, connection, ok, loadErr := iam.OAuthProviderConnectionSecret(human.ID, "antigravity", "personal")
-		if loadErr != nil || !ok {
-			return "", "", loadErr
-		}
-		if envelope.ExpiresAt <= time.Now().Add(time.Minute).Unix() {
-			if refreshErr := refreshAntigravityConnection(ctx, human.ID, "antigravity", connection.Name, envelope.AccessToken); refreshErr != nil {
-				return "", "", refreshErr
-			}
-			envelope, _, ok, loadErr = iam.OAuthProviderConnectionSecret(human.ID, "antigravity", connection.Name)
-			if loadErr != nil || !ok {
-				return "", "", loadErr
-			}
-		}
-		return envelope.AccessToken, envelope.ProjectID, nil
-	}
-	antigravity.inner = coreproviders.NewExperimentalAntigravityProvider(tokenSource, upstream.Client(), upstream.URL)
-	putProvider(providerCacheKey("antigravity", principal), antigravity)
-
-	models, _, err := RefreshCatalogForPrincipalWithError("antigravity", principal)
-	if err != nil || len(models) != 1 || models[0].ID != "model-a" {
-		t.Fatalf("models=%+v err=%v", models, err)
+		return false
+	}}
+	_, owner := setupAntigravityRuntimeTest(t, upstream, "expired-access", "refresh-token", "", time.Now().Add(-time.Hour).Unix())
+	principal := core.Caller{ID: owner.ID, Kind: core.CallerHuman}
+	models, observation, err := RefreshCatalogForPrincipalWithError("antigravity", principal)
+	if err != nil || len(models) != 1 || models[0].ID != "model-a" || observation == nil {
+		t.Fatalf("models=%+v observation=%+v err=%v", models, observation, err)
 	}
 	cached, refreshedAt := CatalogCachedForPrincipal("antigravity", principal)
 	if len(cached) != 1 || cached[0].ID != "model-a" || refreshedAt.IsZero() {
 		t.Fatalf("cached=%+v refreshedAt=%v", cached, refreshedAt)
 	}
-}
-
-func TestAntigravityGatewayAdapterCompletesTypedMessages(t *testing.T) {
-	var request map[string]any
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/v1internal:streamGenerateContent" {
-			http.NotFound(w, r)
-			return
-		}
-		var envelope map[string]any
-		if err := json.NewDecoder(r.Body).Decode(&envelope); err != nil {
-			t.Fatal(err)
-		}
-		request, _ = envelope["request"].(map[string]any)
-		w.Header().Set("Content-Type", "text/event-stream")
-		_, _ = w.Write([]byte("data: {\"response\":{\"candidates\":[{\"content\":{\"parts\":[{\"text\":\"hello\"}]},\"finishReason\":\"STOP\"}]}}\n\n"))
-	}))
-	defer server.Close()
-	provider := &antigravityProvider{inner: coreproviders.NewExperimentalAntigravityProvider(func(context.Context) (string, string, error) {
-		return "access-token", "project", nil
-	}, server.Client(), server.URL)}
-	response, err := provider.CompleteContext(context.Background(), "model-a", []Message{{"role": "user", "content": "hi"}}, Kwargs{
-		"max_tokens": 32, "temperature": 0.2,
-		"_fallback_timeout_ms": 1000, "_affinity_key": "private", "_force_api_support": true,
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(response["choices"].([]any)) != 1 {
-		t.Fatalf("response=%v", response)
-	}
-	if request == nil {
-		t.Fatal("upstream request was not captured")
-	}
-	encoded, _ := json.Marshal(request)
-	for _, private := range []string{"_fallback_timeout_ms", "_affinity_key", "_force_api_support", "private"} {
-		if strings.Contains(string(encoded), private) {
-			t.Fatalf("gateway-private option reached Antigravity: %s", encoded)
-		}
+	if upstream.count("/token") != 1 || upstream.count("/v1internal:loadCodeAssist") != 0 {
+		t.Fatalf("calls=%+v", upstream.recorded())
 	}
 }
 
-func TestAntigravityRefreshUsesRevisionSafeReplacement(t *testing.T) {
-	t.Setenv("LLMGW_STATE_DIR", t.TempDir())
-	iam.ResetForTests()
-	t.Cleanup(iam.ResetForTests)
-	tokenServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path == "/load" {
-			_ = json.NewEncoder(w).Encode(map[string]any{
-				"cloudaicompanionProject": "discovered-project", "paidTier": map[string]any{"id": "paid-tier"},
-			})
-			return
+// One catalog operation refreshes the expired token, whose account discovery
+// fails, and then stores the project it discovers itself: two writes to the
+// connection. Neither turns the catalog it fetched into stale work.
+func TestAntigravityCatalogAcceptsRefreshAndProjectFromSameOperation(t *testing.T) {
+	upstream := &antigravityUpstream{handle: func(w http.ResponseWriter, r *http.Request) bool {
+		if r.URL.Path != "/load" {
+			return false
 		}
-		_ = json.NewEncoder(w).Encode(map[string]any{"access_token": "new-access", "expires_in": 3600})
-	}))
-	defer tokenServer.Close()
-	replaceAntigravityOAuthConfig(t, func(string) antigravityauth.Config {
-		return antigravityauth.Config{
-			ClientID: "client-id", ClientSecret: "client-secret", ClientAuthMode: antigravityauth.ClientAuthModeClientSecretPost, HTTPClient: tokenServer.Client(),
-			Endpoints: antigravityauth.Endpoints{TokenURL: tokenServer.URL + "/token", LoadCodeAssistURL: tokenServer.URL + "/load"},
-		}
-	})
-	config.Update(func(s *config.Settings) {
-		s.CredentialEncryptionKey = base64.RawURLEncoding.EncodeToString(make([]byte, 32))
-		s.GoogleAntigravityClientID = "client-id"
-		s.GoogleAntigravityClientSecret = "client-secret"
-	})
-	if _, err := iam.Initialize(); err != nil {
-		t.Fatal(err)
+		w.WriteHeader(http.StatusServiceUnavailable)
+		return true
+	}}
+	_, owner := setupAntigravityRuntimeTest(t, upstream, "expired-access", "refresh-token", "", time.Now().Add(-time.Hour).Unix())
+	principal := core.Caller{ID: owner.ID, Kind: core.CallerHuman}
+	if models, _, err := RefreshCatalogForPrincipalWithError("antigravity", principal); err != nil || len(models) != 1 {
+		t.Fatalf("models=%+v err=%v", models, err)
 	}
-	human, err := iam.CreatePrincipal("human", "fixture:antigravity", "", "Antigravity")
-	if err != nil {
-		t.Fatal(err)
+	if cached, _ := CatalogCachedForPrincipal("antigravity", principal); len(cached) != 1 {
+		t.Fatalf("cached=%+v", cached)
 	}
-	_, err = iam.PutOAuthProviderConnection(iam.OAuthConnectionCreate{
-		PrincipalID: human.ID, ProviderID: "antigravity", Name: "personal", Kind: "google_antigravity_oauth",
-		AccessToken: "old-access", RefreshToken: "refresh-token", ExpiresAt: time.Now().Add(-time.Hour).Unix(), Status: "active",
-		OAuthProfile: antigravityOAuthProfileRuntimeSecret, OAuthClientID: "client-id",
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err != nil {
-		t.Fatal(err)
-	}
-	envelope, _, err := RefreshAntigravityOAuthConnection(context.Background(), human.ID, "antigravity", "personal")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if envelope.AccessToken != "new-access" || envelope.RefreshToken != "refresh-token" || envelope.ProjectID != "discovered-project" {
-		t.Fatalf("envelope=%+v", envelope)
-	}
-}
-
-func TestAntigravityLegacyRefreshWithoutProfileFailsClosed(t *testing.T) {
-	human := setupAntigravityConnectionTest(t, "old-access", "refresh-token", time.Now().Add(-time.Hour).Unix())
-	current, connection, ok, err := iam.OAuthProviderConnectionSecret(human.ID, "antigravity", "personal")
-	if err != nil || !ok {
-		t.Fatalf("load connection: ok=%v err=%v", ok, err)
-	}
-	if _, err := iam.ReplaceOAuthProviderConnectionIfCurrent(connection, current, iam.OAuthConnectionCreate{
-		PrincipalID: human.ID, ProviderID: "antigravity", Name: connection.Name, Kind: connection.Kind,
-		Source: connection.Source, MakeDefault: connection.IsDefault, AccessToken: current.AccessToken,
-		RefreshToken: current.RefreshToken, ExpiresAt: current.ExpiresAt, Status: "active",
-	}); err != nil {
-		t.Fatal(err)
-	}
-	err = refreshAntigravityConnection(context.Background(), human.ID, "antigravity", "personal", "old-access")
-	if err == nil || !strings.Contains(err.Error(), "reauthorize") {
-		t.Fatalf("legacy refresh error=%v", err)
-	}
-}
-
-func TestAntigravityPublicPKCERefreshUsesPersistedProfile(t *testing.T) {
-	human := setupAntigravityConnectionTest(t, "old-access", "refresh-token", time.Now().Add(-time.Hour).Unix())
-	config.Update(func(s *config.Settings) {
-		s.Providers = map[string]*config.ProviderConfig{
-			"antigravity": {Type: "google_antigravity", PublicOAuthClientID: "public-client"},
-		}
-	})
-	current, connection, ok, err := iam.OAuthProviderConnectionSecret(human.ID, "antigravity", "personal")
-	if err != nil || !ok {
-		t.Fatalf("load connection: ok=%v err=%v", ok, err)
-	}
-	if _, err := iam.ReplaceOAuthProviderConnectionIfCurrent(connection, current, iam.OAuthConnectionCreate{
-		PrincipalID: human.ID, ProviderID: "antigravity", Name: connection.Name, Kind: connection.Kind,
-		Source: connection.Source, MakeDefault: connection.IsDefault, AccessToken: current.AccessToken,
-		RefreshToken: current.RefreshToken, ExpiresAt: current.ExpiresAt, Status: "active",
-		OAuthProfile: antigravityOAuthProfilePublicPKCE, OAuthClientID: "public-client",
-	}); err != nil {
-		t.Fatal(err)
-	}
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if err := r.ParseForm(); err != nil {
-			t.Fatal(err)
-		}
-		if r.Form.Get("client_id") != "public-client" || r.Form.Has("client_secret") {
-			t.Fatalf("refresh form=%v", r.Form)
-		}
-		_, _ = w.Write([]byte(`{"access_token":"new-access","expires_in":3600}`))
-	}))
-	defer server.Close()
-	replaceAntigravityOAuthConfig(t, func(string) antigravityauth.Config {
-		return antigravityauth.Config{Endpoints: antigravityauth.Endpoints{TokenURL: server.URL}, HTTPClient: server.Client()}
-	})
-	if err := refreshAntigravityConnection(context.Background(), human.ID, "antigravity", "personal", "old-access"); err != nil {
-		t.Fatal(err)
-	}
-	refreshed, _, ok, err := iam.OAuthProviderConnectionSecret(human.ID, "antigravity", "personal")
-	if err != nil || !ok || refreshed.AccessToken != "new-access" || refreshed.OAuthProfile != antigravityOAuthProfilePublicPKCE || refreshed.OAuthClientID != "public-client" {
-		t.Fatalf("refreshed=%+v ok=%v err=%v", refreshed, ok, err)
-	}
-}
-
-func TestAntigravityConsumerManualRefreshUsesBoundClient(t *testing.T) {
-	envelope := iam.OAuthTokenEnvelope{
-		OAuthProfile:  antigravityOAuthProfileConsumerManual,
-		OAuthClientID: "fixture-client", OAuthClientSecret: "fixture-secret",
-		OAuthClientMode: "confidential", OAuthRedirectURI: "https://callback.example.test/oauth",
-	}
-	oauth, err := antigravityOAuthConfigForEnvelope("antigravity", envelope)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if oauth.ClientID != envelope.OAuthClientID || oauth.ClientSecret != envelope.OAuthClientSecret ||
-		oauth.RedirectURI != envelope.OAuthRedirectURI || oauth.ClientAuthMode != antigravityauth.ClientAuthModeClientSecretPost {
-		t.Fatalf("manual refresh config=%+v", oauth)
-	}
-
-	envelope.OAuthClientMode = "public"
-	envelope.OAuthClientSecret = ""
-	oauth, err = antigravityOAuthConfigForEnvelope("antigravity", envelope)
-	if err != nil || oauth.ClientAuthMode != antigravityauth.ClientAuthModePublicPKCE || oauth.ClientSecret != "" {
-		t.Fatalf("public manual refresh config=%+v err=%v", oauth, err)
-	}
-}
-
-func TestAntigravityRuntimeRefreshUsesClientSecretPost(t *testing.T) {
-	human := setupAntigravityConnectionTest(t, "old-access", "refresh-token", time.Now().Add(-time.Hour).Unix())
-	current, connection, ok, err := iam.OAuthProviderConnectionSecret(human.ID, "antigravity", "personal")
-	if err != nil || !ok {
-		t.Fatalf("load connection: ok=%v err=%v", ok, err)
-	}
-	if _, err := iam.ReplaceOAuthProviderConnectionIfCurrent(connection, current, iam.OAuthConnectionCreate{
-		PrincipalID: human.ID, ProviderID: "antigravity", Name: connection.Name, Kind: connection.Kind,
-		Source: connection.Source, MakeDefault: connection.IsDefault, AccessToken: current.AccessToken,
-		RefreshToken: current.RefreshToken, ExpiresAt: current.ExpiresAt, Status: "active",
-		OAuthProfile: antigravityOAuthProfileRuntimeSecret, OAuthClientID: "client-id",
-	}); err != nil {
-		t.Fatal(err)
-	}
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if err := r.ParseForm(); err != nil {
-			t.Fatal(err)
-		}
-		if r.Form.Get("client_id") != "client-id" || r.Form.Get("client_secret") != "client-secret" {
-			t.Fatalf("refresh form=%v", r.Form)
-		}
-		_, _ = w.Write([]byte(`{"access_token":"new-access","expires_in":3600}`))
-	}))
-	defer server.Close()
-	replaceAntigravityOAuthConfig(t, func(string) antigravityauth.Config {
-		return antigravityauth.Config{
-			ClientID: "client-id", ClientSecret: "client-secret", ClientAuthMode: antigravityauth.ClientAuthModeClientSecretPost,
-			Endpoints: antigravityauth.Endpoints{TokenURL: server.URL}, HTTPClient: server.Client(),
-		}
-	})
-	if err := refreshAntigravityConnection(context.Background(), human.ID, "antigravity", "personal", "old-access"); err != nil {
-		t.Fatal(err)
+	envelope, _ := storedAntigravityConnection(t, owner)
+	if envelope.AccessToken != "refreshed-access" || envelope.ProjectID != "discovered-project" || upstream.count("/v1internal:loadCodeAssist") != 1 {
+		t.Fatalf("project=%q calls=%+v", envelope.ProjectID, upstream.recorded())
 	}
 }

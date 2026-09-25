@@ -126,7 +126,7 @@ func (rt *Runtime) instantiate(
 		}
 		return AnthropicNativeProvider{BaseURL: cfg.BaseURL, Auth: auth, Timeout: cfg.TimeoutOr(0)}, nil
 	case "google_antigravity":
-		return newAntigravityProvider(providerID, caller)
+		return rt.newAntigravityProvider(providerID, caller)
 	case "bedrock":
 		apiKey, observation, err := resolveAPIKeyObserved(providerID, cfg, caller)
 		if err != nil {

@@ -18,20 +18,18 @@ import (
 //
 // The first group is the state llmgw-core's runtime.Runtime also keeps, so
 // that value can take it over from here; the rest has no core counterpart.
-// For Codex it has taken over: core holds the Codex provider and the
-// coordinators that refresh Codex credentials, so no Codex refresh lock is
+// For Codex and Antigravity it has taken over: core holds their providers
+// and the coordinators that refresh their credentials, so no refresh lock is
 // kept here.
 type Runtime struct {
 	instances providerCache
 	catalogs  catalogCache
 	core      *coreruntime.Runtime[*config.Settings]
 	// credentials is the credential store behind core and behind the
-	// gateway's own Coordinators: the Codex catalog and console refresh,
-	// which refresh outside core.
+	// gateway's own Coordinators: the Codex and Antigravity catalogs,
+	// Antigravity image generation and the console refreshes, which refresh
+	// outside core.
 	credentials oauthStore
-	// antigravityRefresh serializes the OAuth refreshes of one Antigravity
-	// connection. Codex refreshes take the credential store's lease instead.
-	antigravityRefresh refreshLocks
 
 	circuits circuitBreakers
 	// gcpTokens caches service-account access tokens for every Vertex
@@ -48,22 +46,24 @@ type Runtime struct {
 
 	// Only tests set the seams; production keeps the canonical endpoints and
 	// the OAuth client configured in settings.
-	codexEndpoints   seam[CodexEndpoints]
-	copilotEndpoints seam[copilotauth.Endpoints]
-	antigravityOAuth seam[func(redirectURI string) antigravityauth.Config]
+	codexEndpoints      seam[CodexEndpoints]
+	copilotEndpoints    seam[copilotauth.Endpoints]
+	antigravityOAuth    seam[func(redirectURI string) antigravityauth.Config]
+	antigravityEndpoint seam[antigravityEndpoint]
 }
 
 // NewRuntime returns a Runtime with empty caches and the built-in auth
 // adapters. The catalog loads catalog.json from the state directory on first
-// use, and Codex credentials are the IAM provider connections.
+// use, and Codex and Antigravity credentials are the IAM provider
+// connections.
 func NewRuntime() *Runtime { return newRuntime(iamCredentialStore) }
 
-// newRuntime returns a Runtime that opens the store of its Codex credentials
-// with credentials, once per operation. Tests pass an in-memory store.
+// newRuntime returns a Runtime that opens the store of its Codex and
+// Antigravity credentials with credentials, once per operation. Tests pass an
+// in-memory store.
 func newRuntime(credentials func() (core.CredentialStore, error)) *Runtime {
 	runtime := &Runtime{}
 	runtime.instances.instances = map[string]Provider{}
-	runtime.antigravityRefresh.entries = map[string]*refreshLock{}
 	runtime.circuits.circuits = map[string]*circuitState{}
 	runtime.authAdapters.factories = builtInAuthAdapters()
 	runtime.quotaAdapters.values = map[string]QuotaAdapter{}
@@ -111,41 +111,6 @@ func InstallForTests(t interface{ Cleanup(func()) }) *Runtime {
 	previous := Install(runtime)
 	t.Cleanup(func() { Install(previous) })
 	return runtime
-}
-
-// refreshLocks serializes the refreshes of one credential. An entry exists
-// only while a refresh holds or waits for it.
-type refreshLocks struct {
-	mu      sync.Mutex
-	entries map[string]*refreshLock
-}
-
-type refreshLock struct {
-	mu   sync.Mutex
-	refs int
-}
-
-// lock blocks until no other refresh holds key and returns the release.
-func (l *refreshLocks) lock(key string) (unlock func()) {
-	l.mu.Lock()
-	entry := l.entries[key]
-	if entry == nil {
-		entry = &refreshLock{}
-		l.entries[key] = entry
-	}
-	entry.refs++
-	l.mu.Unlock()
-
-	entry.mu.Lock()
-	return func() {
-		entry.mu.Unlock()
-		l.mu.Lock()
-		entry.refs--
-		if entry.refs == 0 {
-			delete(l.entries, key)
-		}
-		l.mu.Unlock()
-	}
 }
 
 // seam holds a replacement a test installs for a production default. The

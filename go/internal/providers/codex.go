@@ -78,7 +78,7 @@ func (rt *Runtime) refreshCodexConnection(ctx context.Context, principalID, prov
 	if !ok || strings.TrimSpace(envelope.RefreshToken) == "" {
 		return errNoCodexRefreshToken()
 	}
-	ctx, _ = withOAuthCall(ctx, principalID, providerID)
+	ctx, _ = withOAuthCall(ctx, codexVertical, principalID, providerID)
 	coordinator, err := rt.codexCoordinator()
 	var record tokenstore.Record
 	if err == nil {
@@ -164,7 +164,7 @@ func (rt *Runtime) newCodexProvider(
 
 // call returns ctx carrying the oauthCall of one operation of this facade.
 func (p CodexProvider) call(ctx context.Context) (context.Context, *oauthCall) {
-	return withOAuthCall(ctx, callerPrincipalID(p.caller), p.instance)
+	return withOAuthCall(ctx, codexVertical, callerPrincipalID(p.caller), p.instance)
 }
 
 func (p CodexProvider) IsStub() bool { return false }
