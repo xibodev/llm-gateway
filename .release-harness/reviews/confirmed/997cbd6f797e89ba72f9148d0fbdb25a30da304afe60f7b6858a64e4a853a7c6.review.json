@@ -1,0 +1,257 @@
+{
+  "schema_version": "1.0.0",
+  "mode": "change",
+  "contract": {
+    "digest": "31b393ab3e80162226619c441694573993ac618382d74642101484a0bf2e9c80"
+  },
+  "authoring_provenance": {
+    "status": "established",
+    "path": ".release-harness/drafts/llm-gateway.record.json",
+    "digest": "6732ddf3dc8236b974e2aae5f81b546d89c2a466b6fb0a368d76620955bf981e"
+  },
+  "sources": [
+    {
+      "source_id": "primary",
+      "status": "established",
+      "repository_identity": "https://github.com/xibodev/llm-gateway.git",
+      "base_ref": "origin/main",
+      "base_commit": "6d693d8892e87e3eb6c9b113c1d98ffe6229c12a",
+      "merge_base": "5341d26d8b87e3d70825a05600fc80d47caa8439",
+      "head_commit": "c89669bc49114957335624a282d099d285818adc",
+      "head_tree": "600397018db1395b05a1317cb56ba880320f6f8f",
+      "reviewed_source_digest": "a6a2c968197446f173721f1fa18f60941b4296ee2944f5aebce27fcae474659a",
+      "changed_paths": [
+        {
+          "status": "added",
+          "path": "go/internal/iam/credential_record.go",
+          "old_blob": "0000000000000000000000000000000000000000",
+          "new_blob": "f0d93655ee5fb6a4a1fa05aff57549a6675e7c36"
+        },
+        {
+          "status": "added",
+          "path": "go/internal/iam/credential_resolve_fixture_test.go",
+          "old_blob": "0000000000000000000000000000000000000000",
+          "new_blob": "06e0fbb26b57db54b21694e4575a211196dfb5f5"
+        },
+        {
+          "status": "added",
+          "path": "go/internal/iam/credential_resolve_harness_test.go",
+          "old_blob": "0000000000000000000000000000000000000000",
+          "new_blob": "cf61c4fbc0b87366cd8ddaf118068b3f420b18dc"
+        },
+        {
+          "status": "added",
+          "path": "go/internal/iam/credential_resolve_keys_test.go",
+          "old_blob": "0000000000000000000000000000000000000000",
+          "new_blob": "37e9401500f0e8de97fe130c8843046d0d728632"
+        },
+        {
+          "status": "added",
+          "path": "go/internal/iam/credential_resolve_test.go",
+          "old_blob": "0000000000000000000000000000000000000000",
+          "new_blob": "6edb99a9c552f2be4c69c48f5181cb2aa56b1b08"
+        },
+        {
+          "status": "added",
+          "path": "go/internal/iam/credential_resolve.go",
+          "old_blob": "0000000000000000000000000000000000000000",
+          "new_blob": "d350d21f7e4f33399e2de39d45539e6b41f1a743"
+        },
+        {
+          "status": "added",
+          "path": "go/internal/iam/credential_store_at_rest_test.go",
+          "old_blob": "0000000000000000000000000000000000000000",
+          "new_blob": "28441ee45e2aa52f518462f79ff33fe3075b6f91"
+        },
+        {
+          "status": "added",
+          "path": "go/internal/iam/credential_store_conformance_test.go",
+          "old_blob": "0000000000000000000000000000000000000000",
+          "new_blob": "ffc19a18b993bb154f4261390b8536e22bccccaf"
+        },
+        {
+          "status": "added",
+          "path": "go/internal/iam/credential_store_connections.go",
+          "old_blob": "0000000000000000000000000000000000000000",
+          "new_blob": "1c219a8f197deaa1b18697ea0d5bec1d823b7788"
+        },
+        {
+          "status": "added",
+          "path": "go/internal/iam/credential_store_helpers_test.go",
+          "old_blob": "0000000000000000000000000000000000000000",
+          "new_blob": "b297196c1167113afeeabde56c57a87dee92cc25"
+        },
+        {
+          "status": "added",
+          "path": "go/internal/iam/credential_store_keys.go",
+          "old_blob": "0000000000000000000000000000000000000000",
+          "new_blob": "1ac4391a40b8d471a968640bae2e14e4aa94f369"
+        },
+        {
+          "status": "added",
+          "path": "go/internal/iam/credential_store_lease_test.go",
+          "old_blob": "0000000000000000000000000000000000000000",
+          "new_blob": "7d7fd28a3bf55cdefe8e7ab27000c294acb36355"
+        },
+        {
+          "status": "added",
+          "path": "go/internal/iam/credential_store_parity_helpers_test.go",
+          "old_blob": "0000000000000000000000000000000000000000",
+          "new_blob": "40fa164803a73b1db58e5e0cf0cb5620020611a4"
+        },
+        {
+          "status": "added",
+          "path": "go/internal/iam/credential_store_parity_test.go",
+          "old_blob": "0000000000000000000000000000000000000000",
+          "new_blob": "844aabcc848d92678b24e3c86e2280182b4d013a"
+        },
+        {
+          "status": "added",
+          "path": "go/internal/iam/credential_store_parity_world_test.go",
+          "old_blob": "0000000000000000000000000000000000000000",
+          "new_blob": "84ec748c5005dceba807ae2744c3473287705bca"
+        },
+        {
+          "status": "added",
+          "path": "go/internal/iam/credential_store_race_test.go",
+          "old_blob": "0000000000000000000000000000000000000000",
+          "new_blob": "2893efb4736441bda2772345995efdb7ad99ef2f"
+        },
+        {
+          "status": "added",
+          "path": "go/internal/iam/credential_store_records_test.go",
+          "old_blob": "0000000000000000000000000000000000000000",
+          "new_blob": "b641f28f2cf75fad7c1ffc42f1ab3c957d08461c"
+        },
+        {
+          "status": "added",
+          "path": "go/internal/iam/credential_store_writes.go",
+          "old_blob": "0000000000000000000000000000000000000000",
+          "new_blob": "7b0b5cf3985408d5dffde5af8b033254e90432c8"
+        },
+        {
+          "status": "added",
+          "path": "go/internal/iam/credential_store.go",
+          "old_blob": "0000000000000000000000000000000000000000",
+          "new_blob": "c6262cdc1a5d881ab3f286b36d5ff52bd89ec777"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/iam/oauth.go",
+          "old_blob": "fef64957b15631666748063d4dce8059ff06f058",
+          "new_blob": "519f87fb58891f01f09a237cda26fc849a4ac794"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/iam/schema.go",
+          "old_blob": "97bef839690f731091b61a673fe3d7ba84fd8eba",
+          "new_blob": "c4581fdb0eeca5d92842e49ec0b1333f1d298b73"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/iam/store.go",
+          "old_blob": "d4bb7f1730da581088999e810b18c7dee42bce6c",
+          "new_blob": "08f0134f480692117e759c3dbca15789fc68af35"
+        }
+      ]
+    }
+  ],
+  "facts": [
+    {
+      "id": "additive-store",
+      "claim": "iam.CredentialStore implements the llm-provider-auth tokenstore.Store and the llmgw-core CredentialStore over the encrypted provider connections. Nothing outside package iam constructs it yet, so no request path, route or command uses it.",
+      "status": "observed",
+      "evidence": {
+        "source": "go/internal/iam/credential_store.go; no NewCredentialStore call outside go/internal/iam"
+      }
+    },
+    {
+      "id": "schema-migration-20",
+      "claim": "Migration 20 adds the credential_leases table and changes no existing table. applyMigrations applies only missing versions, so an older binary opens a migrated database unchanged.",
+      "status": "observed",
+      "evidence": {
+        "source": "go/internal/iam/schema.go migrations and applyMigrations"
+      }
+    },
+    {
+      "id": "envelope-metadata",
+      "claim": "The encrypted OAuth envelope gains an optional metadata member, omitted when empty. OAuthTokenEnvelope.Metadata is tagged json:\"-\", so it never reaches an API response, and existing envelopes decode unchanged.",
+      "status": "observed",
+      "evidence": {
+        "source": "go/internal/iam/oauth.go storedOAuthEnvelope, encodeOAuthEnvelope, decodeOAuthEnvelope"
+      }
+    },
+    {
+      "id": "db-open-unchanged",
+      "claim": "DB() keeps its caching and behavior; its open-and-migrate body moved into openDB unchanged so tests can open independent handles.",
+      "status": "observed",
+      "evidence": {
+        "source": "go/internal/iam/store.go"
+      }
+    },
+    {
+      "id": "suite",
+      "claim": "The full Go suite passes with HTTP_PROXY and HTTPS_PROXY unreachable, including the tokenstore storetest conformance suite and differential tests comparing the store writes with the existing refresh, revoke and login writes. gofmt, vet, govulncheck (known unreachable GO-2026-5024 only), check-docs and the coupling budgets pass unchanged.",
+      "status": "observed",
+      "evidence": {
+        "source": "local gate run on the reviewed head"
+      }
+    }
+  ],
+  "impact": {
+    "assertions": [
+      {
+        "id": "A1",
+        "impact": "unchanged",
+        "supported_by": [
+          "additive-store",
+          "schema-migration-20",
+          "db-open-unchanged",
+          "suite"
+        ]
+      },
+      {
+        "id": "A2",
+        "impact": "unchanged",
+        "supported_by": [
+          "additive-store",
+          "schema-migration-20",
+          "db-open-unchanged",
+          "suite"
+        ]
+      },
+      {
+        "id": "A3",
+        "impact": "unchanged",
+        "supported_by": [
+          "additive-store",
+          "schema-migration-20",
+          "db-open-unchanged",
+          "suite"
+        ]
+      },
+      {
+        "id": "A4",
+        "impact": "unchanged",
+        "supported_by": [
+          "additive-store",
+          "schema-migration-20",
+          "db-open-unchanged",
+          "suite"
+        ]
+      }
+    ],
+    "requires": [],
+    "possible_binding_changes": []
+  },
+  "questions": [],
+  "conclusion": {
+    "action": "reuse_contract",
+    "summary": "An additive iam credential store and lease table for the coming core Runtime adoption; no request path uses it yet, and the CLI, health and models behavior is unchanged."
+  },
+  "proposed": {
+    "by": "iam-credential-store",
+    "at": "2026-09-25T00:58:11.699Z"
+  },
+  "digest": "997cbd6f797e89ba72f9148d0fbdb25a30da304afe60f7b6858a64e4a853a7c6"
+}
