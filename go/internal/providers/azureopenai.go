@@ -37,8 +37,6 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
-
-	"llmgw/internal/iam"
 )
 
 // azureDeploymentsAPIVersion is pinned to the last api-version observed to
@@ -59,7 +57,7 @@ type AzureOpenAIProvider struct {
 	APIKey  string
 	Timeout float64
 
-	observation *iam.ProviderAccountObservation
+	observation *CredentialObservation
 }
 
 func (AzureOpenAIProvider) IsStub() bool { return false }
@@ -80,7 +78,7 @@ func (p AzureOpenAIProvider) Complete(model string, messages []Message, kw Kwarg
 
 func (p AzureOpenAIProvider) CompleteWithObservation(
 	model string, messages []Message, kw Kwargs,
-) (map[string]any, *iam.ProviderAccountObservation, error) {
+) (map[string]any, *CredentialObservation, error) {
 	kw = withOpenAIOutputLimit(kw)
 	// model here is the deployment name the caller asked for. It is only
 	// ever used as the outbound request id — never replaced by, or
@@ -194,7 +192,7 @@ func (p AzureOpenAIProvider) ListModels() []ModelInfo {
 // clears azureSameOriginPage anyway: the check is cheap, and it keeps the
 // api-key header from ever being redirected by upstream data even if that
 // assumption changes later.
-func (p AzureOpenAIProvider) ListModelsWithError() ([]ModelInfo, *iam.ProviderAccountObservation, error) {
+func (p AzureOpenAIProvider) ListModelsWithError() ([]ModelInfo, *CredentialObservation, error) {
 	origin, err := azureResourceOrigin(p.BaseURL)
 	if err != nil {
 		return nil, p.observation, catalogError(
@@ -496,7 +494,7 @@ func azureDeploymentIsChatCallable(baseModel, deploymentID string) bool {
 
 // catalog is the terse spelling tests reach for, matching the other providers
 // in this package.
-func (p AzureOpenAIProvider) catalog() ([]ModelInfo, *iam.ProviderAccountObservation, error) {
+func (p AzureOpenAIProvider) catalog() ([]ModelInfo, *CredentialObservation, error) {
 	return p.ListModelsWithError()
 }
 

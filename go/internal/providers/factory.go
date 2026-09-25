@@ -279,7 +279,7 @@ const (
 // resolveAPIKeyObserved resolves a credential and requires it to be an API key.
 func resolveAPIKeyObserved(
 	providerID string, cfg *config.ProviderConfig, caller core.Caller,
-) (string, *iam.ProviderAccountObservation, error) {
+) (string, *CredentialObservation, error) {
 	secret, kind, observation, err := resolveCredentialObserved(providerID, cfg, caller)
 	if err != nil {
 		return "", nil, err
@@ -296,7 +296,7 @@ func resolveAPIKeyObserved(
 // the stored kind alongside the secret.
 func resolveCredentialObserved(
 	providerID string, cfg *config.ProviderConfig, caller core.Caller,
-) (string, string, *iam.ProviderAccountObservation, error) {
+) (string, string, *CredentialObservation, error) {
 	if strings.TrimSpace(config.Get().CredentialEncryptionKey) == "" {
 		return config.ResolveProviderAPIKey(providerID, cfg), CredentialKindAPIKey, nil, nil
 	}
@@ -312,7 +312,7 @@ func resolveCredentialObserved(
 		if ok {
 			kind := strings.TrimSpace(connection.Kind)
 			if observation.CredentialRevision > 0 {
-				return secret, kind, &observation, nil
+				return secret, kind, credentialObservation(&observation), nil
 			}
 			return secret, kind, nil, nil
 		}
@@ -504,7 +504,7 @@ func ListProviderModelsForPrincipal(
 // backward-compatible and return an empty list on failure.
 func ListProviderModelsForPrincipalWithError(
 	providerID string, caller core.Caller,
-) ([]ModelInfo, *iam.ProviderAccountObservation, error) {
+) ([]ModelInfo, *CredentialObservation, error) {
 	if issue := ProviderConfigurationIssue(providerID); issue != "" {
 		return nil, nil, catalogError(
 			"catalog_configuration_incomplete", issue, 0,

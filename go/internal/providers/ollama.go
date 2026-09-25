@@ -9,8 +9,6 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
-
-	"llmgw/internal/iam"
 )
 
 // OllamaProvider talks to a local Ollama daemon over its native /api/chat,
@@ -327,7 +325,7 @@ func (p OllamaProvider) ListModels() []ModelInfo {
 	return models
 }
 
-func (p OllamaProvider) ListModelsWithError() ([]ModelInfo, *iam.ProviderAccountObservation, error) {
+func (p OllamaProvider) ListModelsWithError() ([]ModelInfo, *CredentialObservation, error) {
 	timeout := p.Timeout
 	if timeout > 10 {
 		timeout = 10

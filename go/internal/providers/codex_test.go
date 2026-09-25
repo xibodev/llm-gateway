@@ -281,7 +281,7 @@ func TestCodexProviderUsesResponsesRefreshesOnceAndCatalogsWithClientVersion(t *
 		t.Fatalf("responses=%d response=%+v", responses, response)
 	}
 	currentObservation, found, err := iam.ActiveProviderAccountObservation(human.ID, "codex")
-	if err != nil || !found || observation == nil || *observation != currentObservation {
+	if err != nil || !found || observation == nil || *observation != *credentialObservation(&currentObservation) {
 		t.Fatalf("observation=%+v current=%+v found=%v err=%v", observation, currentObservation, found, err)
 	}
 	refreshed, _, ok, err := iam.OAuthProviderConnectionSecret(human.ID, "codex", "")

@@ -30,8 +30,6 @@ import (
 	"net/url"
 	"strings"
 	"time"
-
-	"llmgw/internal/iam"
 )
 
 const (
@@ -812,7 +810,7 @@ func (p GoogleAIProvider) ListModels() []ModelInfo {
 }
 
 func (p GoogleAIProvider) ListModelsWithError() (
-	[]ModelInfo, *iam.ProviderAccountObservation, error,
+	[]ModelInfo, *CredentialObservation, error,
 ) {
 	if p.surface == SurfaceVertex {
 		if strings.TrimSpace(p.project) == "" {
@@ -960,7 +958,7 @@ func (p GoogleAIProvider) discoverModels(endpoint, field string) (map[string]any
 
 // catalog is the terse spelling tests reach for; ListModelsWithError is the
 // exported name the detailedModelLister interface requires elsewhere.
-func (p GoogleAIProvider) catalog() ([]ModelInfo, *iam.ProviderAccountObservation, error) {
+func (p GoogleAIProvider) catalog() ([]ModelInfo, *CredentialObservation, error) {
 	return p.ListModelsWithError()
 }
 

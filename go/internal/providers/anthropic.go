@@ -9,8 +9,6 @@ import (
 	"strings"
 	"time"
 
-	"llmgw/internal/iam"
-
 	anthropicauth "github.com/xibodev/llm-provider-auth/anthropic"
 	"github.com/xibodev/llm-translate"
 	core "github.com/xibodev/llmgw-core"
@@ -465,7 +463,7 @@ func (p AnthropicNativeProvider) ListModels() []ModelInfo {
 	return models
 }
 
-func (p AnthropicNativeProvider) ListModelsWithError() ([]ModelInfo, *iam.ProviderAccountObservation, error) {
+func (p AnthropicNativeProvider) ListModelsWithError() ([]ModelInfo, *CredentialObservation, error) {
 	timeout := p.timeout()
 	if timeout > 10 {
 		timeout = 10

@@ -105,7 +105,7 @@ func (p *antigravityProvider) ListModels() []ModelInfo {
 	return models
 }
 
-func (p *antigravityProvider) ListModelsWithError() ([]ModelInfo, *iam.ProviderAccountObservation, error) {
+func (p *antigravityProvider) ListModelsWithError() ([]ModelInfo, *CredentialObservation, error) {
 	models, err := p.inner.ListModels(context.Background(), nil)
 	if err != nil {
 		return nil, nil, adaptAntigravityCatalogError(err)

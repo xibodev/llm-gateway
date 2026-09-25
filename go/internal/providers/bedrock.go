@@ -4,7 +4,6 @@ import (
 	"strings"
 
 	"llmgw/internal/config"
-	"llmgw/internal/iam"
 )
 
 // bedrockBaseURL templates the OpenAI-compatible Bedrock endpoint for a region.
@@ -16,7 +15,7 @@ func bedrockBaseURL(region string) string {
 // explicit base URL wins (bedrock-mantle / VPC); otherwise it is region-templated.
 func buildBedrockProvider(
 	region, baseURL, apiKey string,
-	observation *iam.ProviderAccountObservation,
+	observation *CredentialObservation,
 	timeout float64,
 ) OpenAIProvider {
 	url := strings.TrimSpace(baseURL)

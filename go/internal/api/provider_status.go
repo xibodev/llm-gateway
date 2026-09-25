@@ -653,10 +653,10 @@ func runProviderProbe(providerID, operation string, principal *config.Principal)
 	evidence := providers.ClassifyProviderEvidence(catalogErr, len(rows), false, false)
 	if observation != nil {
 		if catalogErr == nil {
-			_, _ = iam.RecordProviderAccountSuccessIfCurrent(*observation, time.Now())
+			_, _ = iam.RecordProviderAccountSuccessIfCurrent(accountObservation(*observation), time.Now())
 		} else if catalogFailureAffectsAccount(failureCode) {
 			_, _ = iam.RecordProviderAccountFailureIfCurrent(
-				*observation, failureCode, time.Now(),
+				accountObservation(*observation), failureCode, time.Now(),
 			)
 		}
 	}
@@ -705,7 +705,7 @@ func providerCheckScope(principal *config.Principal) string {
 
 func activeProviderObservation(
 	principal *config.Principal, providerID string,
-) *iam.ProviderAccountObservation {
+) *providers.CredentialObservation {
 	if principal == nil || principal.PrincipalKind != "human" {
 		return nil
 	}
@@ -715,13 +715,13 @@ func activeProviderObservation(
 	if err != nil || !found {
 		return nil
 	}
-	return &observation
+	return credentialObservation(&observation)
 }
 
 func refreshedProviderCheckGeneration(
 	providerID, scopeKey string,
 	generation int64,
-	before, used *iam.ProviderAccountObservation,
+	before, used *providers.CredentialObservation,
 ) int64 {
 	if before == nil || used == nil ||
 		before.ConnectionID != used.ConnectionID ||
@@ -729,7 +729,7 @@ func refreshedProviderCheckGeneration(
 		return generation
 	}
 	current, found, err := iam.ActiveProviderAccountObservation(scopeKey, providerID)
-	if err != nil || !found || current != *used {
+	if err != nil || !found || current != accountObservation(*used) {
 		return generation
 	}
 	refreshed, err := iam.ProviderCheckGeneration(providerID, scopeKey)
@@ -740,13 +740,39 @@ func refreshedProviderCheckGeneration(
 }
 
 func applyProviderCheckObservation(
-	check *iam.ProviderCheck, observation *iam.ProviderAccountObservation,
+	check *iam.ProviderCheck, observation *providers.CredentialObservation,
 ) {
 	if check == nil || observation == nil || observation.CredentialRevision <= 0 {
 		return
 	}
 	check.ConnectionID = observation.ConnectionID
 	check.CredentialRevision = observation.CredentialRevision
+}
+
+// credentialObservation and accountObservation convert between iam's account
+// observation and the one providers report. Probes and verification carry the
+// providers type and convert only where they read a baseline from iam or hand
+// an observation back to it. Both copy the fields unchanged, revision 0
+// included, so the IfCurrent guards alone decide what is current.
+func credentialObservation(
+	observation *iam.ProviderAccountObservation,
+) *providers.CredentialObservation {
+	if observation == nil {
+		return nil
+	}
+	return &providers.CredentialObservation{
+		ConnectionID:       observation.ConnectionID,
+		CredentialRevision: observation.CredentialRevision,
+	}
+}
+
+func accountObservation(
+	observation providers.CredentialObservation,
+) iam.ProviderAccountObservation {
+	return iam.ProviderAccountObservation{
+		ConnectionID:       observation.ConnectionID,
+		CredentialRevision: observation.CredentialRevision,
+	}
 }
 
 func catalogFailureAffectsAccount(code string) bool {
@@ -851,7 +877,7 @@ func runProviderVerifyWithContext(
 			"latency_ms": time.Since(started).Milliseconds(),
 		}
 	}
-	var verificationObservation *iam.ProviderAccountObservation
+	var verificationObservation *providers.CredentialObservation
 	verificationObservation = activeProviderObservation(principal, providerID)
 	initialVerificationObservation := verificationObservation
 	publicationManaged, publicationManagedErr := providers.AutomationManagedAnonymousProvider(providerID)
@@ -1082,7 +1108,7 @@ func runVerificationCompletion(
 	principal *config.Principal,
 	messages []providers.Message,
 	kwargs providers.Kwargs,
-) (map[string]any, *iam.ProviderAccountObservation, error) {
+) (map[string]any, *providers.CredentialObservation, error) {
 	row, found := providers.CatalogCachedLookupForPrincipal(providerID, model, callerOf(principal))
 	return runVerificationCompletionForCatalogModel(
 		ctx, providerID, provider, model, messages, kwargs, row, found,
@@ -1098,7 +1124,7 @@ func runVerificationCompletionForCatalogModel(
 	kwargs providers.Kwargs,
 	row providers.ModelInfo,
 	found bool,
-) (map[string]any, *iam.ProviderAccountObservation, error) {
+) (map[string]any, *providers.CredentialObservation, error) {
 	if found && row.TypedCapabilities != nil &&
 		row.TypedCapabilities.Surfaces.Responses == core.SupportSupported &&
 		row.TypedCapabilities.Surfaces.ChatCompletions == core.SupportUnsupported &&

@@ -8,7 +8,6 @@ import (
 	"time"
 
 	"llmgw/internal/config"
-	"llmgw/internal/iam"
 )
 
 func TestRetryDelayHonorsLongerRetryAfter(t *testing.T) {
@@ -90,7 +89,7 @@ func (provider *retryResponsesProvider) Stream(
 }
 func (provider *retryResponsesProvider) CompleteResponses(
 	string, map[string]any,
-) (map[string]any, *iam.ProviderAccountObservation, error) {
+) (map[string]any, *CredentialObservation, error) {
 	provider.completeCalls++
 	if provider.malformed {
 		return nil, nil, circuitFailureInvocation("invalid upstream response")
@@ -102,7 +101,7 @@ func (provider *retryResponsesProvider) CompleteResponses(
 }
 func (provider *retryResponsesProvider) StreamResponses(
 	string, map[string]any,
-) (StreamIter, *iam.ProviderAccountObservation, error) {
+) (StreamIter, *CredentialObservation, error) {
 	provider.streamCalls++
 	if provider.malformed {
 		return nil, nil, circuitFailureInvocation("invalid upstream response")

@@ -10,7 +10,6 @@ import (
 	"time"
 
 	"llmgw/internal/config"
-	"llmgw/internal/iam"
 
 	"github.com/xibodev/llm-translate"
 	core "github.com/xibodev/llmgw-core"
@@ -82,13 +81,13 @@ func (p OpenAIProvider) CompleteContext(ctx context.Context, model string, messa
 
 func (p OpenAIProvider) CompleteWithObservation(
 	model string, messages []Message, kw Kwargs,
-) (map[string]any, *iam.ProviderAccountObservation, error) {
+) (map[string]any, *CredentialObservation, error) {
 	return p.CompleteContextWithObservation(context.Background(), model, messages, kw)
 }
 
 func (p OpenAIProvider) CompleteContextWithObservation(
 	ctx context.Context, model string, messages []Message, kw Kwargs,
-) (map[string]any, *iam.ProviderAccountObservation, error) {
+) (map[string]any, *CredentialObservation, error) {
 	if p.isZen() {
 		var err error
 		if ctx, err = ensureZenInvocation(ctx); err != nil {
@@ -309,7 +308,7 @@ func (p OpenAIProvider) ListModels() []ModelInfo {
 }
 
 func (p OpenAIProvider) ListModelsWithError() (
-	[]ModelInfo, *iam.ProviderAccountObservation, error,
+	[]ModelInfo, *CredentialObservation, error,
 ) {
 	if p.isAnonymousZen() {
 		models, err := p.filterAnonymousZenModels(nil)
@@ -573,13 +572,13 @@ func (p OpenAIProvider) completeViaResponses(model string, messages []Message, k
 
 func (p OpenAIProvider) completeViaResponsesWithObservation(
 	model string, messages []Message, kw Kwargs,
-) (map[string]any, *iam.ProviderAccountObservation, error) {
+) (map[string]any, *CredentialObservation, error) {
 	return p.completeViaResponsesContextWithObservation(context.Background(), model, messages, kw)
 }
 
 func (p OpenAIProvider) completeViaResponsesContextWithObservation(
 	ctx context.Context, model string, messages []Message, kw Kwargs,
-) (map[string]any, *iam.ProviderAccountObservation, error) {
+) (map[string]any, *CredentialObservation, error) {
 	if p.isAnonymousZen() && strings.HasPrefix(strings.ToLower(strings.TrimSpace(model)), "muse-spark-") && kw["reasoning_effort"] == nil {
 		kw = cloneMap(kw)
 		kw["reasoning_effort"] = "minimal"
@@ -615,7 +614,7 @@ func (p OpenAIProvider) completeViaResponsesContextWithObservation(
 
 func (p OpenAIProvider) completeViaStream(
 	ctx context.Context, model string, messages []Message, kw Kwargs,
-) (map[string]any, *iam.ProviderAccountObservation, error) {
+) (map[string]any, *CredentialObservation, error) {
 	it, err := p.StreamContext(ctx, model, messages, kw)
 	if err != nil {
 		return nil, nil, err
@@ -764,7 +763,7 @@ func (p OpenAIProvider) callResponses(model string, messages []Message, kw Kwarg
 
 func (p OpenAIProvider) callResponsesWithObservation(
 	model string, messages []Message, kw Kwargs,
-) (map[string]any, *iam.ProviderAccountObservation, error) {
+) (map[string]any, *CredentialObservation, error) {
 	conversion := chatToResponsesWithReport(model, messages, kw)
 	if err := RejectMaterialLossExceptThoughtSignatures(conversion.Report); err != nil {
 		return nil, nil, &ConfigError{Msg: err.Error()}
@@ -774,13 +773,13 @@ func (p OpenAIProvider) callResponsesWithObservation(
 
 func (p OpenAIProvider) CompleteResponses(
 	model string, payload map[string]any,
-) (map[string]any, *iam.ProviderAccountObservation, error) {
+) (map[string]any, *CredentialObservation, error) {
 	return p.CompleteResponsesContext(context.Background(), model, payload)
 }
 
 func (p OpenAIProvider) CompleteResponsesContext(
 	ctx context.Context, model string, payload map[string]any,
-) (map[string]any, *iam.ProviderAccountObservation, error) {
+) (map[string]any, *CredentialObservation, error) {
 	if !p.supportsNativeResponses(model) {
 		return nil, nil, ErrResponsesUnsupported
 	}
@@ -798,13 +797,13 @@ func (p OpenAIProvider) CompleteResponsesContext(
 
 func (p OpenAIProvider) StreamResponses(
 	model string, payload map[string]any,
-) (StreamIter, *iam.ProviderAccountObservation, error) {
+) (StreamIter, *CredentialObservation, error) {
 	return p.StreamResponsesContext(context.Background(), model, payload)
 }
 
 func (p OpenAIProvider) StreamResponsesContext(
 	ctx context.Context, model string, payload map[string]any,
-) (StreamIter, *iam.ProviderAccountObservation, error) {
+) (StreamIter, *CredentialObservation, error) {
 	if !p.supportsNativeResponses(model) {
 		return nil, nil, ErrResponsesUnsupported
 	}
@@ -907,19 +906,19 @@ func cloneMap(source map[string]any) map[string]any {
 
 func (p OpenAIProvider) callResponsesPayloadWithObservation(
 	payload map[string]any,
-) (map[string]any, *iam.ProviderAccountObservation, error) {
+) (map[string]any, *CredentialObservation, error) {
 	return p.callResponsesPayload(payload, false)
 }
 
 func (p OpenAIProvider) callResponsesPayload(
 	payload map[string]any, allowUnsupportedParameterRetry bool,
-) (map[string]any, *iam.ProviderAccountObservation, error) {
+) (map[string]any, *CredentialObservation, error) {
 	return p.callResponsesPayloadContext(context.Background(), payload, allowUnsupportedParameterRetry)
 }
 
 func (p OpenAIProvider) callResponsesPayloadContext(
 	ctx context.Context, payload map[string]any, allowUnsupportedParameterRetry bool,
-) (map[string]any, *iam.ProviderAccountObservation, error) {
+) (map[string]any, *CredentialObservation, error) {
 	if p.isZen() {
 		var err error
 		if ctx, err = ensureZenInvocation(ctx); err != nil {
@@ -1071,13 +1070,13 @@ func responsesOutputHasText(output []any) bool {
 
 func (p OpenAIProvider) streamResponsesPayload(
 	payload map[string]any,
-) (StreamIter, *iam.ProviderAccountObservation, error) {
+) (StreamIter, *CredentialObservation, error) {
 	return p.streamResponsesPayloadContext(context.Background(), payload)
 }
 
 func (p OpenAIProvider) streamResponsesPayloadContext(
 	ctx context.Context, payload map[string]any,
-) (StreamIter, *iam.ProviderAccountObservation, error) {
+) (StreamIter, *CredentialObservation, error) {
 	if p.isZen() {
 		var err error
 		if ctx, err = ensureZenInvocation(ctx); err != nil {

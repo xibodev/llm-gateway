@@ -335,7 +335,7 @@ func ReadCachedCatalogForPrincipal(providerID string, caller core.Caller) Catalo
 
 func readCatalogForPrincipal(
 	providerID string, caller core.Caller,
-	refresh func(string, core.Caller) ([]ModelInfo, *iam.ProviderAccountObservation, error),
+	refresh func(string, core.Caller) ([]ModelInfo, *CredentialObservation, error),
 ) CatalogReadResult {
 	result := CatalogReadResult{Diagnostics: CatalogDiagnostics{SourceScope: "gateway", OwnerScope: "gateway"}}
 	principalID, kind := callerPrincipal(caller)
@@ -412,7 +412,7 @@ func RefreshCatalogForPrincipal(providerID string, caller core.Caller) []ModelIn
 // stored as successful refreshes and returned without an error.
 func RefreshCatalogForPrincipalWithError(
 	providerID string, caller core.Caller,
-) ([]ModelInfo, *iam.ProviderAccountObservation, error) {
+) ([]ModelInfo, *CredentialObservation, error) {
 	if issue := ProviderConfigurationIssue(providerID); issue != "" {
 		return nil, nil, catalogError(
 			"catalog_configuration_incomplete", issue, 0,
@@ -428,12 +428,12 @@ func RefreshCatalogForPrincipalWithError(
 	}
 	cacheKey := catalogCacheKey(providerID, caller)
 	revision := catalogRevisionFor(cacheKey)
-	var initialObservation *iam.ProviderAccountObservation
+	var initialObservation *CredentialObservation
 	if caller.Kind == core.CallerHuman {
 		if observed, found, err := iam.ActiveProviderAccountObservation(
 			principalID, providerID,
 		); err == nil && found {
-			initialObservation = &observed
+			initialObservation = credentialObservation(&observed)
 		}
 	}
 	models, observation, err := ListProviderModelsForPrincipalWithError(providerID, caller)
@@ -453,7 +453,8 @@ func RefreshCatalogForPrincipalWithError(
 			current, found, currentErr := iam.ActiveProviderAccountObservation(
 				principalID, providerID,
 			)
-			refreshRebased = currentErr == nil && found && current == *observation &&
+			refreshRebased = currentErr == nil && found &&
+				*credentialObservation(&current) == *observation &&
 				storeEntryIfRevision(cacheKey, models, currentRevision)
 		}
 		if !refreshRebased {

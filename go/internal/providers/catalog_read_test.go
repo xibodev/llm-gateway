@@ -151,7 +151,7 @@ func TestCatalogReadSuccessfulRefreshUsesAuthoritativeSnapshot(t *testing.T) {
 			if scenario == "empty" {
 				current.Models = []ModelInfo{}
 			}
-			result := readCatalogForPrincipal("catalog-read", principal, func(providerID string, caller core.Caller) ([]ModelInfo, *iam.ProviderAccountObservation, error) {
+			result := readCatalogForPrincipal("catalog-read", principal, func(providerID string, caller core.Caller) ([]ModelInfo, *CredentialObservation, error) {
 				models, observation, err := RefreshCatalogForPrincipalWithError(providerID, caller)
 				if err != nil || len(models) != 1 || models[0].ID != "fetched-model" {
 					t.Fatalf("refresh: %+v %v", models, err)
@@ -199,7 +199,7 @@ func TestCatalogReadSuccessfulRefreshUsesAuthoritativeSnapshot(t *testing.T) {
 
 type catalogReadErrorProvider struct{ Provider }
 
-func (catalogReadErrorProvider) ListModelsWithError() ([]ModelInfo, *iam.ProviderAccountObservation, error) {
+func (catalogReadErrorProvider) ListModelsWithError() ([]ModelInfo, *CredentialObservation, error) {
 	return nil, nil, &CatalogError{Code: "catalog_http_error", Status: 502,
 		Detail: `Authorization: Bearer fixture-private-token api_key=fixture-private-key`}
 }

@@ -11,7 +11,6 @@ import (
 	"time"
 
 	"llmgw/internal/config"
-	"llmgw/internal/iam"
 )
 
 // ---- circuit breaker state ---------------------------------------------- //
@@ -155,13 +154,13 @@ func (r *ResilientProvider) CompleteContext(ctx context.Context, model string, m
 
 func (r *ResilientProvider) CompleteWithObservation(
 	model string, messages []Message, kw Kwargs,
-) (map[string]any, *iam.ProviderAccountObservation, error) {
+) (map[string]any, *CredentialObservation, error) {
 	return r.CompleteContextWithObservation(context.Background(), model, messages, kw)
 }
 
 func (r *ResilientProvider) CompleteContextWithObservation(
 	ctx context.Context, model string, messages []Message, kw Kwargs,
-) (map[string]any, *iam.ProviderAccountObservation, error) {
+) (map[string]any, *CredentialObservation, error) {
 	ctx, err := ensureProviderZenInvocation(ctx, r.inner)
 	if err != nil {
 		return nil, nil, err
@@ -171,7 +170,7 @@ func (r *ResilientProvider) CompleteContextWithObservation(
 	}
 	attempts := max1(r.policy.RetryMaxAttempts)
 	var lastErr error
-	var lastObservation *iam.ProviderAccountObservation
+	var lastObservation *CredentialObservation
 	for attempt := 1; attempt <= attempts; attempt++ {
 		result, observation, err := CompleteProviderContextWithObservation(
 			ctx, r.inner, model, messages, kw,
@@ -210,13 +209,13 @@ func (r *ResilientProvider) CompleteContextWithObservation(
 
 func (r *ResilientProvider) CompleteResponses(
 	model string, payload map[string]any,
-) (map[string]any, *iam.ProviderAccountObservation, error) {
+) (map[string]any, *CredentialObservation, error) {
 	return r.CompleteResponsesContext(context.Background(), model, payload)
 }
 
 func (r *ResilientProvider) CompleteResponsesContext(
 	ctx context.Context, model string, payload map[string]any,
-) (map[string]any, *iam.ProviderAccountObservation, error) {
+) (map[string]any, *CredentialObservation, error) {
 	ctx, err := ensureProviderZenInvocation(ctx, r.inner)
 	if err != nil {
 		return nil, nil, err
@@ -229,7 +228,7 @@ func (r *ResilientProvider) CompleteResponsesContext(
 		attempts = 1
 	}
 	var lastErr error
-	var lastObservation *iam.ProviderAccountObservation
+	var lastObservation *CredentialObservation
 	for attempt := 1; attempt <= attempts; attempt++ {
 		result, observation, err := CompleteResponsesContext(ctx, r.inner, model, payload)
 		lastObservation = observation
@@ -266,13 +265,13 @@ func (r *ResilientProvider) CompleteResponsesContext(
 
 func (r *ResilientProvider) StreamResponses(
 	model string, payload map[string]any,
-) (StreamIter, *iam.ProviderAccountObservation, error) {
+) (StreamIter, *CredentialObservation, error) {
 	return r.StreamResponsesContext(context.Background(), model, payload)
 }
 
 func (r *ResilientProvider) StreamResponsesContext(
 	ctx context.Context, model string, payload map[string]any,
-) (StreamIter, *iam.ProviderAccountObservation, error) {
+) (StreamIter, *CredentialObservation, error) {
 	ctx, err := ensureProviderZenInvocation(ctx, r.inner)
 	if err != nil {
 		return nil, nil, err
@@ -288,7 +287,7 @@ func (r *ResilientProvider) StreamResponsesContext(
 		attempts = 1
 	}
 	var lastErr error
-	var lastObservation *iam.ProviderAccountObservation
+	var lastObservation *CredentialObservation
 	for attempt := 1; attempt <= attempts; attempt++ {
 		stream, observation, err := StreamResponsesContext(ctx, r.inner, model, payload)
 		lastObservation = observation

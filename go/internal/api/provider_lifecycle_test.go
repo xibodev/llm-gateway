@@ -42,7 +42,7 @@ func (*responsesOnlyVerificationProvider) PreservesWireNativeSurface(_ string, s
 
 func (p *responsesOnlyVerificationProvider) CompleteResponsesContext(
 	_ context.Context, _ string, payload map[string]any,
-) (map[string]any, *iam.ProviderAccountObservation, error) {
+) (map[string]any, *providers.CredentialObservation, error) {
 	p.responsesCalls++
 	p.payload = payload
 	return map[string]any{
@@ -391,10 +391,32 @@ func TestVerificationObservationAdvancesAcrossSameConnectionRefresh(t *testing.T
 		t.Fatalf("after=%+v before=%+v", after, before)
 	}
 	refreshed := refreshedProviderCheckGeneration(
-		"codex", human.ID, generation, &before, after,
+		"codex", human.ID, generation, credentialObservation(&before), credentialObservation(after),
 	)
 	if refreshed <= generation {
 		t.Fatalf("generation did not advance: before=%d after=%d", generation, refreshed)
+	}
+}
+
+func TestAccountObservationConversionRoundTrips(t *testing.T) {
+	if got := credentialObservation(nil); got != nil {
+		t.Fatalf("nil converted to %+v", got)
+	}
+	// Revision 0 survives both ways: the IfCurrent guards refuse it, not the
+	// conversion.
+	for _, account := range []iam.ProviderAccountObservation{
+		{ConnectionID: "conn-fixture"},
+		{ConnectionID: "conn-fixture", CredentialRevision: 3},
+	} {
+		observed := credentialObservation(&account)
+		if observed == nil || accountObservation(*observed) != account {
+			t.Fatalf("round trip of %+v = %+v", account, observed)
+		}
+	}
+	reported := providers.CredentialObservation{ConnectionID: "conn-fixture", CredentialRevision: 3}
+	account := accountObservation(reported)
+	if back := credentialObservation(&account); back == nil || *back != reported {
+		t.Fatalf("round trip of %+v = %+v", reported, back)
 	}
 }
 

@@ -31,14 +31,14 @@ type observedOpenAIAuth interface {
 	PrepareObserved() (
 		baseURL string,
 		headers http.Header,
-		observation *iam.ProviderAccountObservation,
+		observation *CredentialObservation,
 		err error,
 	)
 }
 
 func prepareOpenAIAuth(
 	auth OpenAIAuth,
-) (string, http.Header, *iam.ProviderAccountObservation, error) {
+) (string, http.Header, *CredentialObservation, error) {
 	if observed, ok := auth.(observedOpenAIAuth); ok {
 		return observed.PrepareObserved()
 	}
@@ -68,7 +68,7 @@ func copilotInvocationError(err error) error {
 type bearerAuth struct {
 	base         string
 	apiKey       string
-	observation  *iam.ProviderAccountObservation
+	observation  *CredentialObservation
 	opencode     bool
 	zenAnonymous *corezen.Client
 }
@@ -90,7 +90,7 @@ func AnonymousAPIKey(value string) bool {
 }
 
 func newBearerAuth(
-	base, apiKey string, observation *iam.ProviderAccountObservation, opencode bool,
+	base, apiKey string, observation *CredentialObservation, opencode bool,
 ) (bearerAuth, error) {
 	auth := bearerAuth{
 		base: strings.TrimRight(base, "/"), apiKey: apiKey,
@@ -126,7 +126,7 @@ func (a bearerAuth) Prepare() (string, http.Header, error) {
 }
 
 func (a bearerAuth) PrepareObserved() (
-	string, http.Header, *iam.ProviderAccountObservation, error,
+	string, http.Header, *CredentialObservation, error,
 ) {
 	baseURL, headers, err := a.Prepare()
 	return baseURL, headers, a.observation, err
@@ -149,7 +149,7 @@ func (a copilotAuth) Prepare() (string, http.Header, error) {
 }
 
 func (a copilotAuth) PrepareObserved() (
-	string, http.Header, *iam.ProviderAccountObservation, error,
+	string, http.Header, *CredentialObservation, error,
 ) {
 	if err := copilotClient.AssertProxyAllowed(); err != nil {
 		return "", nil, nil, invocation("github_copilot: " + err.Error() + copilotGuidance(err))
@@ -180,14 +180,15 @@ func (a copilotAuth) Refresh() error {
 
 func (a copilotAuth) session(
 	force bool,
-) (*copilotauth.Session, *iam.ProviderAccountObservation, error) {
+) (*copilotauth.Session, *CredentialObservation, error) {
 	if callerPrincipalID(a.caller) == "" {
 		session, err := copilotClient.GetSession(force)
 		return session, nil, err
 	}
-	oauth, observation, ok, err := iam.ResolveCallerOAuthCredentialSecretWithObservation(
+	oauth, observed, ok, err := iam.ResolveCallerOAuthCredentialSecretWithObservation(
 		a.caller, a.providerID,
 	)
+	observation := credentialObservation(observed)
 	if err != nil {
 		return nil, observation, invocation("github_copilot: load BYOC credential: " + err.Error())
 	}

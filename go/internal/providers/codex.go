@@ -87,13 +87,13 @@ func (a codexAuth) Prepare() (string, http.Header, error) {
 }
 
 func (a codexAuth) PrepareObserved() (
-	string, http.Header, *iam.ProviderAccountObservation, error,
+	string, http.Header, *CredentialObservation, error,
 ) {
 	envelope, connection, observation, ok, err := iam.OAuthProviderConnectionSecretWithObservation(
 		a.principalID, a.providerID, a.connectionName,
 	)
 	if err != nil {
-		return "", nil, &observation, invocation("openai_codex: load private OAuth connection: " + err.Error())
+		return "", nil, credentialObservation(&observation), invocation("openai_codex: load private OAuth connection: " + err.Error())
 	}
 	if !ok {
 		return "", nil, nil, &ConfigError{Msg: "openai_codex: this principal has no active private Codex connection"}
@@ -101,16 +101,16 @@ func (a codexAuth) PrepareObserved() (
 	if envelope.ExpiresAt > 0 && envelope.ExpiresAt <= time.Now().Add(60*time.Second).Unix() && envelope.RefreshToken != "" {
 		expectedAccountID := strings.TrimSpace(envelope.AccountID)
 		if err := a.refreshConnection(envelope, connection); err != nil {
-			return "", nil, &observation, err
+			return "", nil, credentialObservation(&observation), err
 		}
 		envelope, _, observation, ok, err = iam.OAuthProviderConnectionSecretWithObservation(
 			a.principalID, a.providerID, a.connectionName,
 		)
 		if err != nil || !ok {
-			return "", nil, &observation, invocation("openai_codex: refresh did not yield an active connection")
+			return "", nil, credentialObservation(&observation), invocation("openai_codex: refresh did not yield an active connection")
 		}
 		if codexAccountMismatch(expectedAccountID, envelope.AccountID) {
-			return "", nil, &observation, invocation("openai_codex: account changed during refresh")
+			return "", nil, credentialObservation(&observation), invocation("openai_codex: account changed during refresh")
 		}
 	}
 	headers := http.Header{}
@@ -123,7 +123,7 @@ func (a codexAuth) PrepareObserved() (
 	if strings.TrimSpace(envelope.AccountID) != "" {
 		headers.Set("ChatGPT-Account-ID", envelope.AccountID)
 	}
-	return strings.TrimRight(codexauth.ResponsesBaseURL, "/"), headers, &observation, nil
+	return strings.TrimRight(codexauth.ResponsesBaseURL, "/"), headers, credentialObservation(&observation), nil
 }
 
 func (codexAuth) CanRefresh() bool { return true }
@@ -418,17 +418,17 @@ func (p CodexProvider) Complete(model string, messages []Message, kw Kwargs) (ma
 }
 func (p CodexProvider) CompleteWithObservation(
 	model string, messages []Message, kw Kwargs,
-) (map[string]any, *iam.ProviderAccountObservation, error) {
+) (map[string]any, *CredentialObservation, error) {
 	return p.CompleteContextWithObservation(context.Background(), model, messages, kw)
 }
 func (p CodexProvider) CompleteResponses(
 	model string, payload map[string]any,
-) (map[string]any, *iam.ProviderAccountObservation, error) {
+) (map[string]any, *CredentialObservation, error) {
 	return p.CompleteResponsesContext(context.Background(), model, payload)
 }
 func (p CodexProvider) StreamResponses(
 	model string, payload map[string]any,
-) (StreamIter, *iam.ProviderAccountObservation, error) {
+) (StreamIter, *CredentialObservation, error) {
 	return p.StreamResponsesContext(context.Background(), model, payload)
 }
 func (p CodexProvider) Stream(model string, messages []Message, kw Kwargs) (StreamIter, error) {
@@ -441,7 +441,7 @@ func (p CodexProvider) ListModels() []ModelInfo {
 }
 
 func (p CodexProvider) ListModelsWithError() (
-	[]ModelInfo, *iam.ProviderAccountObservation, error,
+	[]ModelInfo, *CredentialObservation, error,
 ) {
 	observation, err := p.observation()
 	if err != nil {
@@ -483,7 +483,7 @@ func (p CodexProvider) ListModelsWithError() (
 var _ OpenAIAuth = codexAuth{}
 var _ Provider = CodexProvider{}
 
-func (p CodexProvider) observation() (*iam.ProviderAccountObservation, error) {
+func (p CodexProvider) observation() (*CredentialObservation, error) {
 	if p.auth.providerID == "" {
 		return nil, nil
 	}
@@ -491,7 +491,7 @@ func (p CodexProvider) observation() (*iam.ProviderAccountObservation, error) {
 	return observation, err
 }
 
-func (p CodexProvider) currentObservation(fallback *iam.ProviderAccountObservation) *iam.ProviderAccountObservation {
+func (p CodexProvider) currentObservation(fallback *CredentialObservation) *CredentialObservation {
 	if p.auth.providerID == "" {
 		return fallback
 	}
@@ -499,7 +499,7 @@ func (p CodexProvider) currentObservation(fallback *iam.ProviderAccountObservati
 		p.auth.principalID, p.auth.providerID, p.auth.connectionName,
 	)
 	if err == nil && ok {
-		return &observation
+		return credentialObservation(&observation)
 	}
 	return fallback
 }
@@ -630,7 +630,7 @@ func (p CodexProvider) CompleteContext(ctx context.Context, model string, messag
 	return response, err
 }
 
-func (p CodexProvider) CompleteContextWithObservation(ctx context.Context, model string, messages []Message, kw Kwargs) (map[string]any, *iam.ProviderAccountObservation, error) {
+func (p CodexProvider) CompleteContextWithObservation(ctx context.Context, model string, messages []Message, kw Kwargs) (map[string]any, *CredentialObservation, error) {
 	observation, err := p.observation()
 	if err != nil {
 		return nil, observation, err
@@ -658,7 +658,7 @@ func (p CodexProvider) StreamContext(ctx context.Context, model string, messages
 	return &codexCoreStream{inner: stream}, nil
 }
 
-func (p CodexProvider) CompleteResponsesContext(ctx context.Context, model string, payload map[string]any) (map[string]any, *iam.ProviderAccountObservation, error) {
+func (p CodexProvider) CompleteResponsesContext(ctx context.Context, model string, payload map[string]any) (map[string]any, *CredentialObservation, error) {
 	observation, err := p.observation()
 	if err != nil {
 		return nil, observation, err
@@ -668,7 +668,7 @@ func (p CodexProvider) CompleteResponsesContext(ctx context.Context, model strin
 	return response, p.currentObservation(observation), codexInvocationError(err)
 }
 
-func (p CodexProvider) StreamResponsesContext(ctx context.Context, model string, payload map[string]any) (StreamIter, *iam.ProviderAccountObservation, error) {
+func (p CodexProvider) StreamResponsesContext(ctx context.Context, model string, payload map[string]any) (StreamIter, *CredentialObservation, error) {
 	observation, err := p.observation()
 	if err != nil {
 		return nil, observation, err

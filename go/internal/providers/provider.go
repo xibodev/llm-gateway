@@ -14,8 +14,6 @@ import (
 	"strings"
 	"time"
 
-	"llmgw/internal/iam"
-
 	core "github.com/xibodev/llmgw-core"
 )
 
@@ -123,14 +121,14 @@ type detailedCompleter interface {
 		model string,
 		messages []Message,
 		kw Kwargs,
-	) (map[string]any, *iam.ProviderAccountObservation, error)
+	) (map[string]any, *CredentialObservation, error)
 }
 
 type detailedContextCompleter interface {
-	CompleteContextWithObservation(context.Context, string, []Message, Kwargs) (map[string]any, *iam.ProviderAccountObservation, error)
+	CompleteContextWithObservation(context.Context, string, []Message, Kwargs) (map[string]any, *CredentialObservation, error)
 }
 
-func CompleteProviderContextWithObservation(ctx context.Context, provider Provider, model string, messages []Message, kw Kwargs) (map[string]any, *iam.ProviderAccountObservation, error) {
+func CompleteProviderContextWithObservation(ctx context.Context, provider Provider, model string, messages []Message, kw Kwargs) (map[string]any, *CredentialObservation, error) {
 	if detailed, ok := provider.(detailedContextCompleter); ok {
 		return detailed.CompleteContextWithObservation(ctx, model, messages, kw)
 	}
@@ -146,7 +144,7 @@ func CompleteProviderWithObservation(
 	model string,
 	messages []Message,
 	kw Kwargs,
-) (map[string]any, *iam.ProviderAccountObservation, error) {
+) (map[string]any, *CredentialObservation, error) {
 	if detailed, ok := provider.(detailedCompleter); ok {
 		return detailed.CompleteWithObservation(model, messages, kw)
 	}
@@ -158,19 +156,19 @@ type ResponsesProvider interface {
 	CompleteResponses(
 		model string,
 		payload map[string]any,
-	) (map[string]any, *iam.ProviderAccountObservation, error)
+	) (map[string]any, *CredentialObservation, error)
 	StreamResponses(
 		model string,
 		payload map[string]any,
-	) (StreamIter, *iam.ProviderAccountObservation, error)
+	) (StreamIter, *CredentialObservation, error)
 }
 
 type ContextResponsesProvider interface {
-	CompleteResponsesContext(context.Context, string, map[string]any) (map[string]any, *iam.ProviderAccountObservation, error)
+	CompleteResponsesContext(context.Context, string, map[string]any) (map[string]any, *CredentialObservation, error)
 }
 
 type ContextResponsesStreamProvider interface {
-	StreamResponsesContext(context.Context, string, map[string]any) (StreamIter, *iam.ProviderAccountObservation, error)
+	StreamResponsesContext(context.Context, string, map[string]any) (StreamIter, *CredentialObservation, error)
 }
 
 // AnthropicMessagesProvider is an optional non-streaming native Messages
@@ -352,14 +350,14 @@ func CompleteResponses(
 	provider Provider,
 	model string,
 	payload map[string]any,
-) (map[string]any, *iam.ProviderAccountObservation, error) {
+) (map[string]any, *CredentialObservation, error) {
 	if responses, ok := provider.(ResponsesProvider); ok {
 		return responses.CompleteResponses(model, payload)
 	}
 	return nil, nil, ErrResponsesUnsupported
 }
 
-func CompleteResponsesContext(ctx context.Context, provider Provider, model string, payload map[string]any) (map[string]any, *iam.ProviderAccountObservation, error) {
+func CompleteResponsesContext(ctx context.Context, provider Provider, model string, payload map[string]any) (map[string]any, *CredentialObservation, error) {
 	if responses, ok := provider.(ContextResponsesProvider); ok {
 		return responses.CompleteResponsesContext(ctx, model, payload)
 	}
@@ -370,7 +368,7 @@ func StreamResponses(
 	provider Provider,
 	model string,
 	payload map[string]any,
-) (StreamIter, *iam.ProviderAccountObservation, error) {
+) (StreamIter, *CredentialObservation, error) {
 	if responses, ok := provider.(ResponsesProvider); ok {
 		return responses.StreamResponses(model, payload)
 	}
@@ -382,7 +380,7 @@ func StreamResponsesContext(
 	provider Provider,
 	model string,
 	payload map[string]any,
-) (StreamIter, *iam.ProviderAccountObservation, error) {
+) (StreamIter, *CredentialObservation, error) {
 	if responses, ok := provider.(ContextResponsesStreamProvider); ok {
 		return responses.StreamResponsesContext(ctx, model, payload)
 	}
@@ -485,14 +483,14 @@ func CatalogFailure(err error) (code, detail string, status int) {
 type detailedModelLister interface {
 	ListModelsWithError() (
 		[]ModelInfo,
-		*iam.ProviderAccountObservation,
+		*CredentialObservation,
 		error,
 	)
 }
 
 func listModelsWithError(
 	provider Provider,
-) ([]ModelInfo, *iam.ProviderAccountObservation, error) {
+) ([]ModelInfo, *CredentialObservation, error) {
 	for provider != nil {
 		if lister, ok := provider.(detailedModelLister); ok {
 			return lister.ListModelsWithError()
