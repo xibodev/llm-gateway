@@ -1,0 +1,209 @@
+{
+  "schema_version": "1.0.0",
+  "mode": "change",
+  "contract": {
+    "digest": "31b393ab3e80162226619c441694573993ac618382d74642101484a0bf2e9c80"
+  },
+  "authoring_provenance": {
+    "status": "established",
+    "path": ".release-harness/drafts/llm-gateway.record.json",
+    "digest": "6732ddf3dc8236b974e2aae5f81b546d89c2a466b6fb0a368d76620955bf981e"
+  },
+  "sources": [
+    {
+      "source_id": "primary",
+      "status": "established",
+      "repository_identity": "https://github.com/xibodev/llm-gateway.git",
+      "base_ref": "origin/main",
+      "base_commit": "dd9da52631e345449a19f43607becf22ca6f9dae",
+      "merge_base": "b95e72c5191c93cf2e0dbadd3270ed0c549a9938",
+      "head_commit": "fdbe2c57e20fcce948d2c9019c66afeee811922e",
+      "head_tree": "9aef3dd16570c647a7ddacb55ef8a9afd28a0d8c",
+      "reviewed_source_digest": "636bc70f9064bc39d1fdb4dcb291a439a2d0b540b4b9d703b13b070fe2d59f60",
+      "changed_paths": [
+        {
+          "status": "added",
+          "path": "go/internal/api/ollama_tool_finish_test.go",
+          "old_blob": "0000000000000000000000000000000000000000",
+          "new_blob": "4c0fba6bd8a8e36209b2965011fb14d76d87fb8e"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/providers/catalog_http_test.go",
+          "old_blob": "c972d2434baaa6c5393d86b0dff7cbb1618639f7",
+          "new_blob": "e23f26806337bc39b60ee2287936d65f0a5a184e"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/providers/catalog_payload_test.go",
+          "old_blob": "a31af38f8b4f2ce31f2a18898ef4fd1961e26a2b",
+          "new_blob": "e17f2d2afa72d3e296ad51c108a6f87a38c11386"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/providers/catalog.go",
+          "old_blob": "d50501da00a44611436c110d521dec90462a88e7",
+          "new_blob": "f00fd49406a17e57d1d8f8a25447a3489669a4e5"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/providers/core_runtime_test.go",
+          "old_blob": "ca3befc87e70f2a8053b6aa8588d226c4543418e",
+          "new_blob": "95b522fbe04c1cab230bd4a1b44930a820affbd8"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/providers/core_runtime.go",
+          "old_blob": "d810ed0a19dda5fca47c522b74ac1160f0b2d92c",
+          "new_blob": "674a0ac1172d9adf3b369c1f8a85de9d7505e83a"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/providers/edgetts_test.go",
+          "old_blob": "e5de64fca2d3d317be8655efabc1b503e2794d3c",
+          "new_blob": "c8e2dc7db8da5e45dbb5feb53ec7d75d3fe0cdc3"
+        },
+        {
+          "status": "added",
+          "path": "go/internal/providers/edgetts_websocket.go",
+          "old_blob": "0000000000000000000000000000000000000000",
+          "new_blob": "1e8cf55e194255d21baa07774bff91cffa040665"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/providers/edgetts.go",
+          "old_blob": "31f3e89e0bc85267164eafea449222cab2101e8e",
+          "new_blob": "7b5c6a5741ddb4f99bb5a9a3d7ee1eaea7c2a4e7"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/providers/error_redaction_test.go",
+          "old_blob": "c9e770b220edd71bf93fc8808b6296fc7b9cca89",
+          "new_blob": "ebee1f677849b2bef4292cf321a08f25433d8bb2"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/providers/factory.go",
+          "old_blob": "36995357ea8c3b2221becfbda8bbf6fc25a4ef1e",
+          "new_blob": "943b6c873abbfd9e92c9b4b14c80f7ad8d9d2ea6"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/providers/ollama_test.go",
+          "old_blob": "0e49466529be51ae855cbc1385d5eb16a1a789ab",
+          "new_blob": "6d8a70e844e0293a0ffb613e9fe73e9cafb6b168"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/providers/ollama_v043_test.go",
+          "old_blob": "fe36900f197229b62ee608c7578dba0dcb39421a",
+          "new_blob": "ed7f4a7ed0bee787680167d90ce76b4362b4a70f"
+        },
+        {
+          "status": "added",
+          "path": "go/internal/providers/ollama_vertical.go",
+          "old_blob": "0000000000000000000000000000000000000000",
+          "new_blob": "6557d84548ab31df2a5eccd8af849a2b2d46cba6"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/providers/ollama.go",
+          "old_blob": "c3c3e8f7d8d6df7d5db55df328f3c6423e669006",
+          "new_blob": "6e52bb70a273b94f624387350ef54c2052eccfa7"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/providers/runtime.go",
+          "old_blob": "1fba9a809da0c99ca0c479e556b1c6752b94a23a",
+          "new_blob": "6fc2fba599b64bd22079d1fc1074e1eb193d18bd"
+        }
+      ]
+    }
+  ],
+  "facts": [
+    {
+      "id": "ollama",
+      "claim": "Ollama Chat and its stream go through the llmgw-core Runtime with core's Ollama vertical, registered in the per-type table with a keyless credential store; the daemon receives the same /api/chat body byte for byte; the Ollama catalog is read by core's Ollama on the gateway's path with the same error codes and wording; the chat layer's tool_calls finish-reason rewrite is kept and pinned by a test. The gateway's Ollama transport is removed.",
+      "status": "observed",
+      "evidence": {
+        "source": "go/internal/providers/ollama_vertical.go, ollama.go; go/internal/api/ollama_tool_finish_test.go"
+      }
+    },
+    {
+      "id": "edgetts",
+      "claim": "Edge TTS synthesis runs on core's EdgeTTS vertical through a gorilla/websocket adapter in the gateway; each cached Edge TTS provider holds one core instance so the learned clock skew is reused, and the providers.Runtime clock field is removed. The gateway's Edge TTS protocol code is removed; audio API behavior and bytes are unchanged.",
+      "status": "observed",
+      "evidence": {
+        "source": "go/internal/providers/edgetts.go, edgetts_websocket.go; Edge TTS tests"
+      }
+    },
+    {
+      "id": "deviations",
+      "claim": "Edge-case differences: Ollama transport failures use core's messages without the daemon address; Ollama requests honor the caller's context; a base URL that is not a daemon root fails when the provider is built; Edge TTS rejects voices, rates or tokens it cannot safely send and splits long text only between characters; the Edge TTS clock skew is kept per cached provider.",
+      "status": "observed",
+      "evidence": {
+        "source": "go/internal/providers Ollama and Edge TTS tests"
+      }
+    },
+    {
+      "id": "suite",
+      "claim": "The full Go suite passes with HTTP_PROXY and HTTPS_PROXY unreachable with unchanged characterization goldens and coupling budgets; gofmt, vet, govulncheck (0 reachable), check-docs and git diff --check pass.",
+      "status": "observed",
+      "evidence": {
+        "source": "local gate run on the reviewed head"
+      }
+    }
+  ],
+  "impact": {
+    "assertions": [
+      {
+        "id": "A1",
+        "impact": "unchanged",
+        "supported_by": [
+          "ollama",
+          "edgetts",
+          "suite"
+        ]
+      },
+      {
+        "id": "A2",
+        "impact": "unchanged",
+        "supported_by": [
+          "ollama",
+          "edgetts",
+          "suite"
+        ]
+      },
+      {
+        "id": "A3",
+        "impact": "unchanged",
+        "supported_by": [
+          "ollama",
+          "edgetts",
+          "suite"
+        ]
+      },
+      {
+        "id": "A4",
+        "impact": "unchanged",
+        "supported_by": [
+          "ollama",
+          "edgetts",
+          "suite"
+        ]
+      }
+    ],
+    "requires": [],
+    "possible_binding_changes": []
+  },
+  "questions": [],
+  "conclusion": {
+    "action": "reuse_contract",
+    "summary": "Ollama and Edge TTS move onto the llmgw-core verticals with unchanged upstream bytes; CLI, health and models behavior is unchanged."
+  },
+  "proposed": {
+    "by": "ollama-edgetts-core",
+    "at": "2026-09-25T13:08:01.361Z"
+  },
+  "digest": "a6d914bfd1f960a60aec291bcbf785846197a6a3cb6a327c57ddd634c2bdc7f1"
+}
