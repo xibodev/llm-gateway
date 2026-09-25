@@ -1,0 +1,105 @@
+{
+  "schema_version": "1.0.0",
+  "mode": "change",
+  "contract": {
+    "digest": "31b393ab3e80162226619c441694573993ac618382d74642101484a0bf2e9c80"
+  },
+  "authoring_provenance": {
+    "status": "established",
+    "path": ".release-harness/drafts/llm-gateway.record.json",
+    "digest": "6732ddf3dc8236b974e2aae5f81b546d89c2a466b6fb0a368d76620955bf981e"
+  },
+  "sources": [
+    {
+      "source_id": "primary",
+      "status": "established",
+      "repository_identity": "https://github.com/xibodev/llm-gateway.git",
+      "base_ref": "origin/main",
+      "base_commit": "cde07bc78d97146e5073c9de17a14929504df6db",
+      "merge_base": "0b82f725e0bd5a770dc5c448dc921f67b32f81d2",
+      "head_commit": "d5b84b21cd40b1693e6bd12d802866e7d2972f66",
+      "head_tree": "24e7f3d5d8863ca7c1ffb08684d4132f105767f3",
+      "reviewed_source_digest": "3bf5a05818b0a6b99eac25f6eedf107debbb0b6dfa06f61706a8076a45d88fcd",
+      "changed_paths": [
+        {
+          "status": "modified",
+          "path": "go/go.mod",
+          "old_blob": "815359c7ebe6f503caa020788efb7e32bfb6e8f2",
+          "new_blob": "265d38989ef4d9914eaed6d8dcf1f39adc46afe6"
+        },
+        {
+          "status": "modified",
+          "path": "go/go.sum",
+          "old_blob": "e8121ac04131c2a00670f4260e0cc79759772407",
+          "new_blob": "d7b018d1433bc39fba5eb812159e48a7eb6e9742"
+        }
+      ]
+    }
+  ],
+  "facts": [
+    {
+      "id": "deps",
+      "claim": "go.mod moves llmgw-core from v0.13.0 to v0.14.0, which adds the M5 transports, catalog service, transport planning helpers, per-instance resilience and anonymous orchestrator. It is additive: existing core APIs the gateway uses keep their behavior, and the gateway calls none of the new packages yet. No gateway source changes.",
+      "status": "observed",
+      "evidence": {
+        "source": "go/go.mod; llmgw-core v0.14.0 release notes"
+      }
+    },
+    {
+      "id": "suite",
+      "claim": "The full Go suite passes with HTTP_PROXY and HTTPS_PROXY unreachable with unchanged characterization goldens and coupling budgets; gofmt, vet, govulncheck (0 reachable), check-docs and git diff --check pass.",
+      "status": "observed",
+      "evidence": {
+        "source": "local gate run on the reviewed head"
+      }
+    }
+  ],
+  "impact": {
+    "assertions": [
+      {
+        "id": "A1",
+        "impact": "unchanged",
+        "supported_by": [
+          "deps",
+          "suite"
+        ]
+      },
+      {
+        "id": "A2",
+        "impact": "unchanged",
+        "supported_by": [
+          "deps",
+          "suite"
+        ]
+      },
+      {
+        "id": "A3",
+        "impact": "unchanged",
+        "supported_by": [
+          "deps",
+          "suite"
+        ]
+      },
+      {
+        "id": "A4",
+        "impact": "unchanged",
+        "supported_by": [
+          "deps",
+          "suite"
+        ]
+      }
+    ],
+    "requires": [],
+    "possible_binding_changes": []
+  },
+  "questions": [],
+  "conclusion": {
+    "action": "reuse_contract",
+    "summary": "Dependency bump to llmgw-core v0.14.0 with no gateway source change; CLI, health and models behavior is unchanged."
+  },
+  "proposed": {
+    "by": "adopt-core-v0140",
+    "at": "2026-09-25T08:49:32.067Z"
+  },
+  "digest": "2bb66490a7877f019ed2a3eacc68a5eba5248ba339a90ddf00dae96e10a18085"
+}
