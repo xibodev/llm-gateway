@@ -14,7 +14,6 @@ import (
 	"llmgw/internal/providers"
 	"llmgw/internal/router"
 
-	providerauth "github.com/xibodev/llm-provider-auth"
 	core "github.com/xibodev/llmgw-core"
 	coreproviders "github.com/xibodev/llmgw-core/providers"
 )
@@ -114,17 +113,14 @@ func TestTransparentPlansUseNativeProviderCatalogEvidence(t *testing.T) {
 		{
 			name: "Codex Responses", surface: "/v1/responses",
 			models: func(t *testing.T, server *httptest.Server) []providers.ModelInfo {
-				inner, err := coreproviders.NewCodexProvider(coreproviders.CodexProviderConfig{
-					SessionSource: coreproviders.NewCodexTokenSessionSource(
-						providerauth.NewStaticTokenSource(&providerauth.Token{AccessToken: "fixture"}), "",
-					),
+				inner, err := coreproviders.NewCodex(coreproviders.CodexConfig{
 					Instructions: "fixture", ModelsURL: server.URL, ClientVersion: "fixture-version",
 					Client: server.Client(), Now: func() time.Time { return now },
 				})
 				if err != nil {
 					t.Fatal(err)
 				}
-				rows, err := inner.ListModels(context.Background(), nil)
+				rows, err := inner.ListModels(context.Background(), &core.Credential{Token: "fixture"})
 				if err != nil {
 					t.Fatal(err)
 				}
