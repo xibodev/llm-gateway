@@ -249,8 +249,7 @@ func (e *AmbiguousCategoryError) Error() string {
 	)
 }
 
-func findCategory(name string) (string, *config.EndpointConfig, error) {
-	s := config.Get()
+func findCategory(s *config.Settings, name string) (string, *config.EndpointConfig, error) {
 	if cat, ok := s.Endpoints[name]; ok {
 		return name, cat, nil
 	}
@@ -296,7 +295,11 @@ func (rt *Runtime) ResolveForPrincipal(
 	if name == "" {
 		return Resolution{}, &ModelNotFoundError{Requested: model}
 	}
-	categoryName, cat, err := findCategory(name)
+	// The route, its members' disabled flags, an exact target's provider
+	// and the names an alias may not shadow come from one snapshot, so a
+	// change published mid-resolution cannot mix two.
+	settings := config.Get()
+	categoryName, cat, err := findCategory(settings, name)
 	if err != nil {
 		return Resolution{}, err
 	}
@@ -320,7 +323,7 @@ func (rt *Runtime) ResolveForPrincipal(
 		}
 		out := make([]Target, 0, len(cat.Failover))
 		for _, m := range cat.Failover {
-			if cfg := config.Get().Providers[m.Provider]; cfg != nil && cfg.Disabled {
+			if cfg := settings.Providers[m.Provider]; cfg != nil && cfg.Disabled {
 				continue
 			}
 			published, err := rt.routeMemberPublished(m, caller)
@@ -356,7 +359,7 @@ func (rt *Runtime) ResolveForPrincipal(
 		return Resolution{}, &ModelNotFoundError{Requested: name}
 	}
 	if head, tail, ok := strings.Cut(name, "/"); ok {
-		if _, exists := config.Get().Providers[head]; exists && tail != "" {
+		if _, exists := settings.Providers[head]; exists && tail != "" {
 			if providers.CatalogRequiresPrincipal(head) {
 				authorized, err := providers.ProviderCredentialAuthorized(head, caller)
 				if err != nil {
@@ -375,7 +378,7 @@ func (rt *Runtime) ResolveForPrincipal(
 			return Resolution{Targets: []Target{{Provider: head, Model: tail}}}, nil
 		}
 	}
-	if t, ok, err := rt.resolveNativeAlias(ctx, name, caller); err != nil {
+	if t, ok, err := rt.resolveNativeAlias(ctx, settings, name, caller); err != nil {
 		return Resolution{}, err
 	} else if ok {
 		return Resolution{Targets: []Target{t}}, nil
@@ -418,7 +421,7 @@ func nativeKey(s string) string {
 // that would otherwise 404. Ambiguous canonical names are rejected rather than
 // routed to whichever provider happens to sort first.
 func (rt *Runtime) resolveNativeAlias(
-	ctx context.Context, requested string, caller core.Caller,
+	ctx context.Context, settings *config.Settings, requested string, caller core.Caller,
 ) (Target, bool, error) {
 	base := requested
 	if i := strings.IndexByte(base, '['); i >= 0 { // drop a "[1m]"-style variant tag
@@ -429,12 +432,12 @@ func (rt *Runtime) resolveNativeAlias(
 		return Target{}, false, nil
 	}
 	key := nativeKey(base)
-	for provider := range config.Get().Providers {
+	for provider := range settings.Providers {
 		if nativeKey(provider) == key {
 			return Target{}, false, nil
 		}
 	}
-	for endpoint := range config.Get().Endpoints {
+	for endpoint := range settings.Endpoints {
 		if nativeKey(endpoint) == key {
 			return Target{}, false, nil
 		}

@@ -45,16 +45,17 @@ CREATE TABLE IF NOT EXISTS usage_ledger (
 CREATE INDEX IF NOT EXISTS idx_usage_ts ON usage_ledger(ts);
 `
 
-func savingsDBPath() string {
-	raw := config.Get().Savings.DBPath
+func savingsDBPath(settings *config.Settings) string {
+	raw := settings.Savings.DBPath
 	if raw == "" {
 		return filepath.Join(config.StateDir(), "usage.db")
 	}
 	return raw
 }
 
-func (s *savingsStore) conn() (*sql.DB, error) {
-	path := savingsDBPath()
+// conn returns the ledger handle at path. Callers pass the path of the
+// snapshot they checked Savings.Enabled in, rather than reading it again.
+func (s *savingsStore) conn(path string) (*sql.DB, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if db, ok := s.dbs[path]; ok {
@@ -130,7 +131,7 @@ func (rt *Runtime) RecordUsage(r UsageRecord) {
 	if r.IsStub {
 		stub = 1
 	}
-	db, err := rt.savings.conn()
+	db, err := rt.savings.conn(savingsDBPath(s))
 	if err != nil {
 		return
 	}
@@ -156,10 +157,11 @@ func round6(f float64) float64 {
 
 // Totals is the headline usage rollup.
 func (rt *Runtime) Totals(includeStubs bool) map[string]any {
-	if !config.Get().Savings.Enabled {
+	settings := config.Get()
+	if !settings.Savings.Enabled {
 		return zeroTotals()
 	}
-	db, err := rt.savings.conn()
+	db, err := rt.savings.conn(savingsDBPath(settings))
 	if err != nil {
 		return zeroTotals()
 	}
@@ -189,10 +191,11 @@ func zeroTotals() map[string]any {
 
 // ByProject returns per project+key rollups.
 func (rt *Runtime) ByProject(includeStubs bool) []map[string]any {
-	if !config.Get().Savings.Enabled {
+	settings := config.Get()
+	if !settings.Savings.Enabled {
 		return []map[string]any{}
 	}
-	db, err := rt.savings.conn()
+	db, err := rt.savings.conn(savingsDBPath(settings))
 	if err != nil {
 		return []map[string]any{}
 	}
@@ -225,10 +228,11 @@ func (rt *Runtime) ByProject(includeStubs bool) []map[string]any {
 
 // RecentUsage returns the most recent usage rows.
 func (rt *Runtime) RecentUsage(limit int) []map[string]any {
-	if !config.Get().Savings.Enabled {
+	settings := config.Get()
+	if !settings.Savings.Enabled {
 		return []map[string]any{}
 	}
-	db, err := rt.savings.conn()
+	db, err := rt.savings.conn(savingsDBPath(settings))
 	if err != nil {
 		return []map[string]any{}
 	}
@@ -264,16 +268,17 @@ func nullOrString(ns sql.NullString) any {
 }
 
 func (rt *Runtime) PruneSavingsBefore(cutoff int64) (int64, error) {
-	if !config.Get().Savings.Enabled {
+	settings := config.Get()
+	if !settings.Savings.Enabled {
 		return 0, nil
 	}
-	path := savingsDBPath()
+	path := savingsDBPath(settings)
 	if _, err := os.Stat(path); os.IsNotExist(err) {
 		return 0, nil
 	} else if err != nil {
 		return 0, err
 	}
-	db, err := rt.savings.conn()
+	db, err := rt.savings.conn(path)
 	if err != nil {
 		return 0, err
 	}
