@@ -79,7 +79,12 @@ func (p AnthropicNativeProvider) payload(model string, messages []Message, strea
 	payload := map[string]any{
 		"model": model, "messages": anthropicMessages, "stream": stream, "max_tokens": maxTokens,
 	}
-	if system != "" {
+	// A system string cannot hold cache breakpoints. SystemBlocks is set only
+	// when a system part carries cache_control, and holds the same text split
+	// at each breakpoint, so the prefix the client marked is the one cached.
+	if blocks := conversion.Value.SystemBlocks; len(blocks) > 0 {
+		payload["system"] = blocks
+	} else if system != "" {
 		payload["system"] = system
 	}
 	if v, ok := kw["temperature"]; ok && v != nil {

@@ -5,6 +5,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"strings"
 	"sync"
 	"testing"
@@ -188,6 +189,39 @@ func TestChatResponseWithThoughtSignaturesIsServedToTranslatedClients(t *testing
 			if w.Code != http.StatusOK || !strings.Contains(w.Body.String(), tc.want) ||
 				!strings.Contains(w.Body.String(), "call_fixture") {
 				t.Fatalf("status=%d body=%s", w.Code, w.Body.String())
+			}
+		})
+	}
+}
+
+func TestChatSystemCacheControlReachesAnthropicAsSystemBlocks(t *testing.T) {
+	handler, upstream := setupVendorFieldFixture(t)
+	breakpoint := map[string]any{"type": "ephemeral"}
+	stable := map[string]any{"type": "text", "text": "Stable instructions"}
+	volatile := map[string]any{"type": "text", "text": "Volatile note"}
+	cached := map[string]any{"type": "text", "text": "Stable instructions", "cache_control": breakpoint}
+	for _, tc := range []struct {
+		name   string
+		system []any
+		want   any
+	}{
+		{"breakpoint", []any{cached, volatile}, []any{cached, volatile}},
+		// Without a breakpoint the system stays the string it always was.
+		{"no breakpoint", []any{stable, volatile}, "Stable instructions\nVolatile note"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			w := apiSmokeRequest(handler, "/v1/chat/completions", map[string]any{
+				"model": "native/claude-fixture",
+				"messages": []any{
+					map[string]any{"role": "system", "content": tc.system},
+					map[string]any{"role": "user", "content": "hi"},
+				},
+			})
+			if w.Code != http.StatusOK {
+				t.Fatalf("status=%d body=%s", w.Code, w.Body.String())
+			}
+			if got := upstream.take("/n/v1/messages")["system"]; !reflect.DeepEqual(got, tc.want) {
+				t.Fatalf("system=%#v, want %#v", got, tc.want)
 			}
 		})
 	}
