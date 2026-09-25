@@ -2,10 +2,16 @@ package iam
 
 import (
 	"context"
+	"crypto/rand"
+	"crypto/rsa"
+	"crypto/x509"
+	"encoding/json"
+	"encoding/pem"
 	"errors"
 	"testing"
 	"time"
 
+	gcpauth "github.com/xibodev/llm-provider-auth/gcp"
 	"github.com/xibodev/llm-provider-auth/tokenstore"
 	core "github.com/xibodev/llmgw-core"
 )
@@ -168,5 +174,54 @@ func TestCredentialStoreMapsNonOAuthKinds(t *testing.T) {
 	replaced := tokenstore.Record{AccessToken: "fixture-setup-token-2", TokenType: core.TokenTypeAnthropicSetupToken}
 	if _, err := store.ReplaceIfCurrent(ctx, setup.ID, record.Revision, replaced); err != nil {
 		t.Fatal(err)
+	}
+}
+
+// serviceAccountKeyFixture is a service-account key for a throwaway RSA key,
+// so the suite needs no credential.
+func serviceAccountKeyFixture(t *testing.T) string {
+	t.Helper()
+	key, err := rsa.GenerateKey(rand.Reader, 2048)
+	if err != nil {
+		t.Fatal(err)
+	}
+	der, err := x509.MarshalPKCS8PrivateKey(key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw, err := json.Marshal(map[string]string{
+		"type": "service_account", "project_id": "fixture-project", "private_key_id": "fixture-key-id",
+		"private_key":  string(pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: der})),
+		"client_email": "svc@fixture-project.iam.example.test", "token_uri": "https://token.example.test/token",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(raw)
+}
+
+// A service-account connection loads as core's service-account kind, with
+// the key as the token core's Google exchanges, whatever case its kind was
+// stored in; writing the record back keeps the connection's kind.
+func TestCredentialStoreLoadsServiceAccountsAsCoreKind(t *testing.T) {
+	path := credentialStatePath(t)
+	ctx := context.Background()
+	store := openCredentialStore(t, path, CredentialStoreOptions{})
+	secret := serviceAccountKeyFixture(t)
+	for providerID, kind := range map[string]string{"fixture-vertex": gcpauth.CredentialKind, "fixture-vertex-cased": "GCP_Service_Account"} {
+		if _, err := PutSystemProviderConnection(providerID, kind, secret); err != nil {
+			t.Fatal(err)
+		}
+		system, _, _ := PrincipalBySubject(systemPrincipalSubject)
+		connection, _, _ := ActiveProviderConnection(system.ID, providerID)
+		record, err := store.Load(ctx, connection.ID)
+		credential := core.CredentialFromRecord(connection.ID, record)
+		if err != nil || record.TokenType != core.TokenTypeGCPServiceAccount ||
+			credential.Token != secret || credential.APIKey != "" {
+			t.Fatalf("kind %q: record type=%q err=%v, want the key under %q", kind, record.TokenType, err, core.TokenTypeGCPServiceAccount)
+		}
+		if _, err := store.ReplaceIfCurrent(ctx, connection.ID, record.Revision, record); err != nil {
+			t.Fatalf("kind %q: the loaded record was refused on write: %v", kind, err)
+		}
 	}
 }

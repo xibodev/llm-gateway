@@ -42,14 +42,19 @@ var envelopeMetadataFields = map[string]func(*OAuthTokenEnvelope) *string{
 var errCredentialKindMismatch = errors.New("record does not match the connection's credential kind")
 
 // connectionRecord maps a decrypted connection secret to a record. OAuth
-// kinds hold an envelope; API keys become core.APIKeyRecord; any other kind,
-// such as a service-account key or a setup token, keeps its raw secret with
-// the kind's token type, so the consumer can tell how to use it.
+// kinds hold an envelope; API keys become core.APIKeyRecord; a
+// service-account key keeps its JSON under core.TokenTypeGCPServiceAccount,
+// the kind core's Google exchanges for tokens, whatever case the connection
+// stored it in; a setup token keeps its raw secret under
+// core.TokenTypeAnthropicSetupToken; any other kind keeps its raw secret
+// with the kind as TokenType, so the consumer can tell how to use it.
 func connectionRecord(kind, secret string) (tokenstore.Record, error) {
 	kind = strings.TrimSpace(kind)
 	switch {
 	case strings.EqualFold(kind, core.TokenTypeAPIKey):
 		return core.APIKeyRecord(secret), nil
+	case strings.EqualFold(kind, gcpauth.CredentialKind):
+		return tokenstore.Record{AccessToken: secret, TokenType: core.TokenTypeGCPServiceAccount}, nil
 	case isOAuthCredentialKind(kind):
 		envelope, err := decodeOAuthEnvelope(secret)
 		if err != nil {
