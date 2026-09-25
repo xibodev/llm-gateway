@@ -1,0 +1,343 @@
+{
+  "schema_version": "1.0.0",
+  "mode": "change",
+  "contract": {
+    "digest": "31b393ab3e80162226619c441694573993ac618382d74642101484a0bf2e9c80"
+  },
+  "authoring_provenance": {
+    "status": "established",
+    "path": ".release-harness/drafts/llm-gateway.record.json",
+    "digest": "6732ddf3dc8236b974e2aae5f81b546d89c2a466b6fb0a368d76620955bf981e"
+  },
+  "sources": [
+    {
+      "source_id": "primary",
+      "status": "established",
+      "repository_identity": "https://github.com/xibodev/llm-gateway.git",
+      "base_ref": "origin/main",
+      "base_commit": "9564a0a72fcde2e688240d9f1ce4a6b8334f6247",
+      "merge_base": "1c10f678a9b5e8cc28a02d78fc847a548596feee",
+      "head_commit": "3f6571a6d17e9cfc9f4708a28992018b0256f43d",
+      "head_tree": "890925ade966bb9f8d2d40e4b6f7198cbb3bce50",
+      "reviewed_source_digest": "3bec4aa38cc9cf0c4bbbf5577b17beab304b76c5e12e5fa3bf609c22c7054ba4",
+      "changed_paths": [
+        {
+          "status": "modified",
+          "path": "docs/PROVIDERS.md",
+          "old_blob": "2339edf814200cc27744bc0ea149ee29957d0e1d",
+          "new_blob": "e643a84bd14044e604ca0952e93e94438aa99ccb"
+        },
+        {
+          "status": "added",
+          "path": "go/internal/api/characterization_openai_test.go",
+          "old_blob": "0000000000000000000000000000000000000000",
+          "new_blob": "a1d826e0295ac6b5a564cc53e9eb637df9247324"
+        },
+        {
+          "status": "added",
+          "path": "go/internal/api/testdata/characterization/bedrock.golden",
+          "old_blob": "0000000000000000000000000000000000000000",
+          "new_blob": "8a75c3aabd8f9a8ba5d6459ebe2fd386a1e47972"
+        },
+        {
+          "status": "added",
+          "path": "go/internal/api/testdata/characterization/openai-compatible-edges.golden",
+          "old_blob": "0000000000000000000000000000000000000000",
+          "new_blob": "5188cfa2fce8b1b547bf9b6df0f1047269449c2f"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/architecture/boundary_test.go",
+          "old_blob": "da3dd1113790f0cad7faa56304fd364909e39c8e",
+          "new_blob": "2b4889f66ad89b47aa08aa83a8541db34d5d1f1f"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/providers/anonymous_profiles_test.go",
+          "old_blob": "164cd2f7089fe6e5d5b552274a1ef2282c1402c3",
+          "new_blob": "579ce6951caf7511c923d6b3f17769124fc3085b"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/providers/anonymous_profiles.go",
+          "old_blob": "097df54ee3350700188b2c9a14068b6c7ca3738f",
+          "new_blob": "a5227b8a5fcc856d99203049a242278ead5f31c8"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/providers/azure_failure.go",
+          "old_blob": "cd712c108fd56d3841e37e4b067f955af6b023c6",
+          "new_blob": "53e3e977aa0506647c0a2e7c35c1a8ae4092d1d5"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/providers/azureopenai.go",
+          "old_blob": "7b60fdac523ed5963747a99a73fa7b24d4d92c94",
+          "new_blob": "e3e03f18bd7530b1c9b78fa71eca5207f3e579da"
+        },
+        {
+          "status": "added",
+          "path": "go/internal/providers/bedrock_vertical.go",
+          "old_blob": "0000000000000000000000000000000000000000",
+          "new_blob": "aac0b7a8a2b2054c92498c267af0ed4ce9201c10"
+        },
+        {
+          "status": "deleted",
+          "path": "go/internal/providers/bedrock.go",
+          "old_blob": "627934c2c8308419828e202729ca4423d8b93f78",
+          "new_blob": "0000000000000000000000000000000000000000"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/providers/byoc_test.go",
+          "old_blob": "487ac93b4d3151941f71c30eba4bbd40aae31497",
+          "new_blob": "8008da62308b44bd0d603999c9c10d555b6b9460"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/providers/catalog_http_test.go",
+          "old_blob": "e23f26806337bc39b60ee2287936d65f0a5a184e",
+          "new_blob": "41fc0282ab9f770ab0d38857262535a4d2dd707c"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/providers/catalog_payload_test.go",
+          "old_blob": "e17f2d2afa72d3e296ad51c108a6f87a38c11386",
+          "new_blob": "662ac7e67ddb859947f923bb843076f0ad2544a9"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/providers/copilot_provider.go",
+          "old_blob": "ffd7688bff029c5e5418abb0de781e8471a7050a",
+          "new_blob": "5927b0bbe7eea318a3487196a91d140aadc059b2"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/providers/core_runtime_test.go",
+          "old_blob": "95b522fbe04c1cab230bd4a1b44930a820affbd8",
+          "new_blob": "67dfb7c0160614c63f017d59bc05f6fa6bac3e7f"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/providers/core_runtime.go",
+          "old_blob": "674a0ac1172d9adf3b369c1f8a85de9d7505e83a",
+          "new_blob": "e69e380e38e33ca41469f6f7c1017a87d213df58"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/providers/core_stream.go",
+          "old_blob": "c0d18506feb07f63d7447f1c280afa221213316c",
+          "new_blob": "e053eb1802d952b35e1e27a141df8039c5beeb52"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/providers/error_redaction_test.go",
+          "old_blob": "ebee1f677849b2bef4292cf321a08f25433d8bb2",
+          "new_blob": "e9597e303dcf9bbae69c9cdb91293c7c42037930"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/providers/factory.go",
+          "old_blob": "943b6c873abbfd9e92c9b4b14c80f7ad8d9d2ea6",
+          "new_blob": "d9a2928667f1d52380d8853c006efce7225d3815"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/providers/httpstream_test.go",
+          "old_blob": "f2a421eced671d128e48a227c57f5e9b57dd6066",
+          "new_blob": "66fa7deac32be61f0ea0259ff7e5e9b0a4571112"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/providers/httpstream.go",
+          "old_blob": "17d3cfc57e172e0503c80bc71d923c41241f595d",
+          "new_blob": "d34257ce540aef0b3b43d3a3b29e8df84916cfcc"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/providers/openai_auth.go",
+          "old_blob": "873f5060bc8c0d63ddeaa0817955d5791864228d",
+          "new_blob": "423179db4f02d69fb75ab583496cf1ab350a1477"
+        },
+        {
+          "status": "added",
+          "path": "go/internal/providers/openai_compatible_failure_test.go",
+          "old_blob": "0000000000000000000000000000000000000000",
+          "new_blob": "79d108729d339013687b483ec82e7bd9f86b8277"
+        },
+        {
+          "status": "added",
+          "path": "go/internal/providers/openai_compatible_failure.go",
+          "old_blob": "0000000000000000000000000000000000000000",
+          "new_blob": "91fe605199e12036297beb524166e9e1529902c3"
+        },
+        {
+          "status": "added",
+          "path": "go/internal/providers/openai_compatible_provider_test.go",
+          "old_blob": "0000000000000000000000000000000000000000",
+          "new_blob": "6c663660287fb40d1bb1dccbeaab1d9455569602"
+        },
+        {
+          "status": "added",
+          "path": "go/internal/providers/openai_compatible_provider.go",
+          "old_blob": "0000000000000000000000000000000000000000",
+          "new_blob": "d071edf81a179341d71bac05fab7e50a6ae82abf"
+        },
+        {
+          "status": "added",
+          "path": "go/internal/providers/openai_compatible_runtime_test.go",
+          "old_blob": "0000000000000000000000000000000000000000",
+          "new_blob": "5bfd324fad571d2b777a1a070d4ff63d058a77e8"
+        },
+        {
+          "status": "added",
+          "path": "go/internal/providers/openai_compatible_vertical.go",
+          "old_blob": "0000000000000000000000000000000000000000",
+          "new_blob": "b646fc06fc543a676d8053a3e6e0d0890e016f85"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/providers/openai_models_test.go",
+          "old_blob": "66dcda35724c677bff911862ea3369eded7e0981",
+          "new_blob": "7bf0ff2e0fc9ad20a5225a23ea8638bf247ea487"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/providers/openai_v043_test.go",
+          "old_blob": "5972a26bc9ca0f56383a56c90287750b6e8d397c",
+          "new_blob": "fd33309a53ad1fa71f686c6492ffe56c685f1e8c"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/providers/openai.go",
+          "old_blob": "6d014e7860e8fa8c3e0151372649143c4a5d9a5f",
+          "new_blob": "40ab1fab722051c8674c621b3947eb4516cdf910"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/providers/opencode_zen_test.go",
+          "old_blob": "b311c966ff2c34bbcbdebb2b67bafba6255f2ae3",
+          "new_blob": "1f7245bab0577a0b42d13b7476ab2792da696549"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/providers/provider.go",
+          "old_blob": "81a772900230887f3171542deae100d85b8341d6",
+          "new_blob": "1fa365d202000059335571631fdd53505271ace2"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/providers/proxy.go",
+          "old_blob": "12fb97c3bbce46ba4abfdd48451adbf6b1c5693f",
+          "new_blob": "c57f8cc8b97666093c8696273ddbee5ff4fe35de"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/providers/zen_provider.go",
+          "old_blob": "d6f5bc7a0a638f41ce3ef205ad3329db54f7538e",
+          "new_blob": "b98427467be0284cf56b3fbbcd726b3aab2b7082"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/router/failover_test.go",
+          "old_blob": "562ea12f74556f8ed42a61293fc0f15d0a12c056",
+          "new_blob": "d1e4897d6b4627d3a5872dbfec6d0848c8d23e4a"
+        }
+      ]
+    }
+  ],
+  "facts": [
+    {
+      "id": "through-runtime",
+      "claim": "OpenAI-compatible (openai_compatible, openai and litellm types other than Codex and Zen) and Bedrock Chat, Responses and both streams go through the llmgw-core Runtime with core's OpenAI-compatible and Bedrock verticals, registered in the per-type table. Core performs adaptation, the reasoning rename, the Responses-400 parameter retry and the Pollinations chat path; the router still converts Responses to Chat for Chat-only models; a native Responses 404 or 405 maps to the Chat fallback. The gateway's OpenAIProvider transport, OpenAIAuth, bearerAuth and bedrock.go are removed; the OpenAI-wire catalog moved into its own type and stays on the gateway path.",
+      "status": "observed",
+      "evidence": {
+        "source": "go/internal/providers/openai_compatible_vertical.go, openai.go, catalog code"
+      }
+    },
+    {
+      "id": "goldens",
+      "claim": "New characterization goldens for Bedrock and OpenAI-compatible edges (forced adaptation, keyless Pollinations, a 429 refusal) were recorded with the previous code and pass unchanged with the new code; no existing golden changed.",
+      "status": "observed",
+      "evidence": {
+        "source": "go/internal/api/testdata/characterization/bedrock.golden, openai-compatible-edges.golden"
+      }
+    },
+    {
+      "id": "credentials",
+      "claim": "API keys resolve in the factory's order (personal connection, system connection, configured key); no key, free or none sends no Authorization for keyless servers and the anonymous kilo, llm7, OVH and Pollinations modes; public is sent as the bearer; a Bearer prefix is stripped.",
+      "status": "observed",
+      "evidence": {
+        "source": "go/internal/providers OpenAI-compatible tests"
+      }
+    },
+    {
+      "id": "deviations",
+      "claim": "Edge-case differences: soft-error messages no longer quote upstream text; a Retry-After date is passed as seconds; Bedrock refuses non-region names and non-absolute base URLs and inference times out after 300 seconds by default (documented in docs/PROVIDERS.md); Chat served over Responses drops extra fields with a warning instead of refusing; Responses for a model missing from the catalog is labelled translated, which is how it is served; numbers such as 64.0 are re-rendered as 64; keys resolve per request.",
+      "status": "observed",
+      "evidence": {
+        "source": "go/internal/providers tests; docs/PROVIDERS.md"
+      }
+    },
+    {
+      "id": "suite",
+      "claim": "The full Go suite passes with HTTP_PROXY and HTTPS_PROXY unreachable with unchanged existing characterization goldens; the providers config.Get budget moves from 21 to 20; gofmt, vet, govulncheck (0 reachable), check-docs and git diff --check pass.",
+      "status": "observed",
+      "evidence": {
+        "source": "local gate run on the reviewed head"
+      }
+    }
+  ],
+  "impact": {
+    "assertions": [
+      {
+        "id": "A1",
+        "impact": "unchanged",
+        "supported_by": [
+          "through-runtime",
+          "goldens",
+          "suite"
+        ]
+      },
+      {
+        "id": "A2",
+        "impact": "unchanged",
+        "supported_by": [
+          "through-runtime",
+          "goldens",
+          "suite"
+        ]
+      },
+      {
+        "id": "A3",
+        "impact": "unchanged",
+        "supported_by": [
+          "through-runtime",
+          "goldens",
+          "suite"
+        ]
+      },
+      {
+        "id": "A4",
+        "impact": "unchanged",
+        "supported_by": [
+          "through-runtime",
+          "goldens",
+          "suite"
+        ]
+      }
+    ],
+    "requires": [],
+    "possible_binding_changes": []
+  },
+  "questions": [],
+  "conclusion": {
+    "action": "reuse_contract",
+    "summary": "OpenAI-compatible and Bedrock move onto the llmgw-core Runtime and verticals; existing goldens are unchanged and CLI, health and models behavior is unchanged."
+  },
+  "proposed": {
+    "by": "openai-compatible-core",
+    "at": "2026-09-25T13:11:11.51Z"
+  },
+  "digest": "373fd165fa6706cf78028320a846d860e5b8b6b3cbda2f91885ade69cfcbd8cf"
+}
