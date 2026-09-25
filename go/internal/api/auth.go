@@ -66,14 +66,14 @@ func requireAPIKey(r *http.Request) (*config.Principal, int, string) {
 				return nil, http.StatusInternalServerError, "Identity store unavailable."
 			}
 			if found {
-				return p, 0, ""
+				return withCaller(apiKeySource(p), p), 0, ""
 			}
 		}
-		return &config.Principal{Project: "local", Key: "local"}, 0, ""
+		return withCaller(sourceLocal, &config.Principal{Project: "local", Key: "local"}), 0, ""
 	}
 
 	if token != "" && len(adminKeys) > 0 && matchesAnyKey(token, adminKeys) {
-		return &config.Principal{Project: "admin", Key: "admin"}, 0, ""
+		return withCaller(sourceAdminKey, &config.Principal{Project: "admin", Key: "admin"}), 0, ""
 	}
 	if token != "" {
 		p, found, err := iam.ResolveAPIKey(token)
@@ -81,7 +81,7 @@ func requireAPIKey(r *http.Request) (*config.Principal, int, string) {
 			return nil, http.StatusInternalServerError, "Identity store unavailable."
 		}
 		if found {
-			return p, 0, ""
+			return withCaller(apiKeySource(p), p), 0, ""
 		}
 	}
 	hasKeys, err := iam.HasAPIKeys()

@@ -7,6 +7,8 @@ import (
 	"os"
 	"strings"
 	"time"
+
+	core "github.com/xibodev/llmgw-core"
 )
 
 // KeyEntry is one minted project key (stored value).
@@ -62,6 +64,11 @@ type Principal struct {
 	MonthlyCostMicroUSD int64    `json:"-"`
 	DailyCreditsMilli   int64    `json:"-"`
 	MonthlyCreditsMilli int64    `json:"-"`
+	// Caller is the core identity the api layer assigns where it builds a
+	// Principal the other fields cannot identify: local mode, the static
+	// admin key and external keys all lack a PrincipalID. When it is unset,
+	// the Caller follows from PrincipalID, PrincipalKind and ProjectID.
+	Caller core.Caller `json:"-"`
 }
 
 func loadKeys() map[string]keyEntry {

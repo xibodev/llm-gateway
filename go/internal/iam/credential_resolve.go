@@ -39,9 +39,9 @@ const (
 //
 // A caller maps onto the gateway's config.Principal as follows. A human or
 // service caller is the principal with that ID and kind (PrincipalKind "human"
-// or "service") acting in ProjectID. Anonymous and local callers carry no
-// principal, like the gateway's local, static-admin and external-key
-// principals, so they skip personal credentials and project bindings.
+// or "service") acting in ProjectID. Anonymous and local callers, and the
+// reserved IDs of the static admin and external keys, carry no principal, so
+// they skip personal credentials and project bindings.
 func (s *CredentialStore) Resolve(ctx context.Context, caller core.Caller, instance string) (string, error) {
 	if err := ctx.Err(); err != nil {
 		return "", err
@@ -69,14 +69,15 @@ func (s *CredentialStore) Resolve(ctx context.Context, caller core.Caller, insta
 }
 
 func callerPrincipal(caller core.Caller) *config.Principal {
-	switch caller.Kind {
-	case core.CallerHuman:
-		return &config.Principal{PrincipalID: caller.ID, PrincipalKind: "human", ProjectID: caller.ProjectID}
-	case core.CallerService:
-		return &config.Principal{PrincipalID: caller.ID, PrincipalKind: "service", ProjectID: caller.ProjectID}
-	default:
+	id := CallerPrincipalID(caller)
+	if id == "" {
 		return nil
 	}
+	kind := "service"
+	if caller.Kind == core.CallerHuman {
+		kind = "human"
+	}
+	return &config.Principal{PrincipalID: id, PrincipalKind: kind, ProjectID: caller.ProjectID}
 }
 
 func (s *CredentialStore) resolveConnectionPrecedence(
