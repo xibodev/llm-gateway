@@ -227,15 +227,8 @@ func TestEdgeTTSDialHTTPFailuresAreClosedAndSafe(t *testing.T) {
 func TestEdgeTTSDialRetriesForbiddenOnceAndClosesResponses(t *testing.T) {
 	t.Run("success", func(t *testing.T) {
 		firstBody := &trackingReadCloser{}
-		edgeTTSClockSkewMutex.Lock()
-		originalSkew := edgeTTSClockSkewSeconds
-		edgeTTSClockSkewSeconds = 0
-		edgeTTSClockSkewMutex.Unlock()
-		t.Cleanup(func() {
-			edgeTTSClockSkewMutex.Lock()
-			edgeTTSClockSkewSeconds = originalSkew
-			edgeTTSClockSkewMutex.Unlock()
-		})
+		// A fresh Runtime starts without learned clock skew.
+		InstallForTests(t)
 		upgrader := websocket.Upgrader{
 			Subprotocols: []string{"synthesize"},
 			CheckOrigin:  func(*http.Request) bool { return true },

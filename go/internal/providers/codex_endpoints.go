@@ -29,16 +29,19 @@ type CodexEndpoints struct {
 	HTTPClient *http.Client
 }
 
-// codexEndpoints replaces the canonical endpoints. Only tests set it.
-var codexEndpoints CodexEndpoints
-
-// SetCodexEndpointsForTests points the gateway's Codex calls at test servers
-// until the test ends. It takes only the Cleanup method of a testing.TB, so
-// the gateway binary does not link the testing package.
+// SetCodexEndpointsForTests points the installed Runtime's Codex calls at
+// test servers until the test ends. It takes only the Cleanup method of a
+// testing.TB, so the gateway binary does not link the testing package.
 func SetCodexEndpointsForTests(t interface{ Cleanup(func()) }, endpoints CodexEndpoints) {
-	previous := codexEndpoints
-	codexEndpoints = endpoints
-	t.Cleanup(func() { codexEndpoints = previous })
+	runtime := Current()
+	previous := runtime.codexEndpoints.swap(endpoints)
+	t.Cleanup(func() { runtime.codexEndpoints.swap(previous) })
+}
+
+// currentCodexEndpoints returns the installed Runtime's endpoints with every
+// empty URL set to its canonical value.
+func currentCodexEndpoints() CodexEndpoints {
+	return Current().codexEndpoints.get().withDefaults()
 }
 
 // withDefaults returns the endpoints with every empty URL set to its
@@ -68,6 +71,6 @@ func (e CodexEndpoints) withDefaults() CodexEndpoints {
 // sign-in, the one that started a pending flow, or the one stored with a
 // connection.
 func codexOAuth(clientID string) codexauth.Config {
-	endpoints := codexEndpoints.withDefaults()
+	endpoints := currentCodexEndpoints()
 	return codexauth.Config{ClientID: clientID, Endpoints: endpoints.OAuth, HTTPClient: endpoints.HTTPClient}
 }

@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"strings"
-	"sync"
 	"time"
 
 	"llmgw/internal/config"
@@ -153,37 +152,6 @@ func adaptAntigravityCatalogError(err error) error {
 	return catalogError("catalog_failed", "Antigravity model discovery failed.", 0)
 }
 
-type antigravityRefreshLock struct {
-	mu   sync.Mutex
-	refs int
-}
-
-var antigravityRefreshLocks = struct {
-	sync.Mutex
-	entries map[string]*antigravityRefreshLock
-}{entries: map[string]*antigravityRefreshLock{}}
-
-func lockAntigravityRefresh(key string) func() {
-	antigravityRefreshLocks.Lock()
-	entry := antigravityRefreshLocks.entries[key]
-	if entry == nil {
-		entry = &antigravityRefreshLock{}
-		antigravityRefreshLocks.entries[key] = entry
-	}
-	entry.refs++
-	antigravityRefreshLocks.Unlock()
-	entry.mu.Lock()
-	return func() {
-		entry.mu.Unlock()
-		antigravityRefreshLocks.Lock()
-		entry.refs--
-		if entry.refs == 0 {
-			delete(antigravityRefreshLocks.entries, key)
-		}
-		antigravityRefreshLocks.Unlock()
-	}
-}
-
 func refreshAntigravityConnection(ctx context.Context, principalID, providerID, name, rejectedAccessToken string) error {
 	initial, initialConnection, ok, err := iam.OAuthProviderConnectionSecret(principalID, providerID, name)
 	if err != nil || !ok || initial.RefreshToken == "" {
@@ -192,7 +160,7 @@ func refreshAntigravityConnection(ctx context.Context, principalID, providerID, 
 	if rejectedAccessToken != "" && initial.AccessToken != rejectedAccessToken {
 		return nil
 	}
-	unlock := lockAntigravityRefresh(principalID + "|" + providerID + "|" + initialConnection.ID)
+	unlock := Current().antigravityRefresh.lock(principalID + "|" + providerID + "|" + initialConnection.ID)
 	defer unlock()
 	current, connection, ok, err := iam.OAuthProviderConnectionSecret(principalID, providerID, name)
 	if err != nil || !ok {
@@ -278,7 +246,7 @@ func antigravityOAuthConfigForEnvelope(providerID string, envelope iam.OAuthToke
 		if strings.TrimSpace(envelope.OAuthClientID) == "" {
 			return antigravityauth.Config{}, fmt.Errorf("Antigravity OAuth client profile is unavailable; reauthorize this connection")
 		}
-		oauth := newGoogleAntigravityOAuthConfig("")
+		oauth := Current().antigravityOAuthConfig("")
 		if strings.TrimSpace(oauth.ClientID) != strings.TrimSpace(envelope.OAuthClientID) {
 			return antigravityauth.Config{}, fmt.Errorf("Antigravity OAuth client profile is unavailable")
 		}
@@ -288,7 +256,7 @@ func antigravityOAuthConfigForEnvelope(providerID string, envelope iam.OAuthToke
 		if provider == nil || strings.TrimSpace(provider.PublicOAuthClientID) == "" || strings.TrimSpace(provider.PublicOAuthClientID) != strings.TrimSpace(envelope.OAuthClientID) {
 			return antigravityauth.Config{}, fmt.Errorf("Antigravity OAuth client profile is unavailable")
 		}
-		oauth := newGoogleAntigravityOAuthConfig("")
+		oauth := Current().antigravityOAuthConfig("")
 		oauth.ClientID = strings.TrimSpace(provider.PublicOAuthClientID)
 		oauth.ClientSecret = ""
 		oauth.ClientAuthMode = antigravityauth.ClientAuthModePublicPKCE

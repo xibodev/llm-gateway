@@ -31,12 +31,13 @@ type QuotaAdapter interface {
 	Fetch(context.Context, QuotaFetchRequest) (QuotaFetchResult, error)
 }
 
-var quotaAdapterRegistry = struct {
-	sync.RWMutex
+// quotaAdapterRegistry maps adapter ids to quota adapters.
+type quotaAdapterRegistry struct {
+	mu     sync.RWMutex
 	values map[string]QuotaAdapter
-}{values: map[string]QuotaAdapter{}}
+}
 
-func RegisterQuotaAdapter(adapter QuotaAdapter) error {
+func (rt *Runtime) RegisterQuotaAdapter(adapter QuotaAdapter) error {
 	if adapter == nil {
 		return fmt.Errorf("quota adapter is required")
 	}
@@ -44,25 +45,19 @@ func RegisterQuotaAdapter(adapter QuotaAdapter) error {
 	if !registryIdentifierPattern.MatchString(id) {
 		return fmt.Errorf("invalid quota adapter id %q", id)
 	}
-	quotaAdapterRegistry.Lock()
-	defer quotaAdapterRegistry.Unlock()
-	if _, exists := quotaAdapterRegistry.values[id]; exists {
+	rt.quotaAdapters.mu.Lock()
+	defer rt.quotaAdapters.mu.Unlock()
+	if _, exists := rt.quotaAdapters.values[id]; exists {
 		return fmt.Errorf("quota adapter %q is already registered", id)
 	}
-	quotaAdapterRegistry.values[id] = adapter
+	rt.quotaAdapters.values[id] = adapter
 	return nil
 }
 
-func QuotaAdapterByID(id string) (QuotaAdapter, bool) {
+func (rt *Runtime) QuotaAdapterByID(id string) (QuotaAdapter, bool) {
 	id = strings.ToLower(strings.TrimSpace(id))
-	quotaAdapterRegistry.RLock()
-	defer quotaAdapterRegistry.RUnlock()
-	adapter, ok := quotaAdapterRegistry.values[id]
+	rt.quotaAdapters.mu.RLock()
+	defer rt.quotaAdapters.mu.RUnlock()
+	adapter, ok := rt.quotaAdapters.values[id]
 	return adapter, ok
-}
-
-func resetQuotaAdaptersForTests() {
-	quotaAdapterRegistry.Lock()
-	quotaAdapterRegistry.values = map[string]QuotaAdapter{}
-	quotaAdapterRegistry.Unlock()
 }

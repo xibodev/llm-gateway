@@ -20,8 +20,8 @@ func (fixtureQuotaAdapter) Fetch(
 }
 
 func TestQuotaAdapterRegistry(t *testing.T) {
-	resetQuotaAdaptersForTests()
-	t.Cleanup(resetQuotaAdaptersForTests)
+	// The registrations live only in this test's Runtime.
+	InstallForTests(t)
 	adapter := fixtureQuotaAdapter{id: " fixture "}
 	if err := RegisterQuotaAdapter(adapter); err != nil {
 		t.Fatal(err)

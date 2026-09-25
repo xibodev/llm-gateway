@@ -151,7 +151,7 @@ func (a copilotAuth) Prepare() (string, http.Header, error) {
 func (a copilotAuth) PrepareObserved() (
 	string, http.Header, *CredentialObservation, error,
 ) {
-	if err := copilotClient.AssertProxyAllowed(); err != nil {
+	if err := Current().copilot.AssertProxyAllowed(); err != nil {
 		return "", nil, nil, invocation("github_copilot: " + err.Error() + copilotGuidance(err))
 	}
 	s, observation, err := a.session(false)
@@ -182,7 +182,7 @@ func (a copilotAuth) session(
 	force bool,
 ) (*copilotauth.Session, *CredentialObservation, error) {
 	if callerPrincipalID(a.caller) == "" {
-		session, err := copilotClient.GetSession(force)
+		session, err := Current().copilot.GetSession(force)
 		return session, nil, err
 	}
 	oauth, observed, ok, err := iam.ResolveCallerOAuthCredentialSecretWithObservation(
@@ -195,7 +195,7 @@ func (a copilotAuth) session(
 	if !ok {
 		return nil, observation, &ConfigError{Msg: "github_copilot: this principal has no active Copilot credential"}
 	}
-	session, err := copilotClient.GetSessionForOAuth(oauth, force)
+	session, err := Current().copilot.GetSessionForOAuth(oauth, force)
 	if err != nil {
 		return nil, observation, copilotInvocationError(err)
 	}

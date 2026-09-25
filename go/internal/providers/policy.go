@@ -21,30 +21,31 @@ type circuitState struct {
 	openUntil           time.Time
 }
 
-var (
-	circuitsMu sync.Mutex
-	circuits   = map[string]*circuitState{}
-)
+// circuitBreakers holds one breaker per provider name.
+type circuitBreakers struct {
+	mu       sync.Mutex
+	circuits map[string]*circuitState
+}
 
-func getCircuit(name string) *circuitState {
-	circuitsMu.Lock()
-	defer circuitsMu.Unlock()
-	c := circuits[name]
+func (b *circuitBreakers) get(name string) *circuitState {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	c := b.circuits[name]
 	if c == nil {
 		c = &circuitState{}
-		circuits[name] = c
+		b.circuits[name] = c
 	}
 	return c
 }
 
 // ResetCircuit clears breaker state (test helper).
-func ResetCircuit(name string) {
-	circuitsMu.Lock()
-	defer circuitsMu.Unlock()
+func (rt *Runtime) ResetCircuit(name string) {
+	rt.circuits.mu.Lock()
+	defer rt.circuits.mu.Unlock()
 	if name == "" {
-		circuits = map[string]*circuitState{}
+		rt.circuits.circuits = map[string]*circuitState{}
 	} else {
-		delete(circuits, name)
+		delete(rt.circuits.circuits, name)
 	}
 }
 
@@ -66,7 +67,7 @@ func (r *ResilientProvider) checkCircuit() error {
 	if !r.policy.CircuitEnabled() {
 		return nil
 	}
-	c := getCircuit(r.name)
+	c := Current().circuits.get(r.name)
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if !c.openUntil.IsZero() && time.Now().Before(c.openUntil) {
@@ -84,7 +85,7 @@ func (r *ResilientProvider) recordSuccess() {
 	if !r.policy.CircuitEnabled() {
 		return
 	}
-	c := getCircuit(r.name)
+	c := Current().circuits.get(r.name)
 	c.mu.Lock()
 	c.consecutiveFailures = 0
 	c.openUntil = time.Time{}
@@ -95,7 +96,7 @@ func (r *ResilientProvider) recordFailure() {
 	if !r.policy.CircuitEnabled() {
 		return
 	}
-	c := getCircuit(r.name)
+	c := Current().circuits.get(r.name)
 	c.mu.Lock()
 	c.consecutiveFailures++
 	if c.consecutiveFailures >= r.policy.CircuitFailureThreshold {

@@ -11,36 +11,28 @@ import (
 	copilotauth "github.com/xibodev/llm-provider-auth/copilot"
 )
 
-// copilotClient is the gateway's Copilot authentication client. It reads the
-// live settings at the start of every operation, so hot reload keeps working,
-// and it is shared so concurrent polls of one device code serialize.
-var copilotClient = copilotauth.NewDynamic(copilotSettings)
+// CopilotAuth returns the runtime's shared Copilot authentication client.
+func (rt *Runtime) CopilotAuth() *copilotauth.Client { return rt.copilot }
 
-// copilotEndpoints replaces the canonical GitHub endpoints. Only tests set it.
-var copilotEndpoints copilotauth.Endpoints
-
-// CopilotAuth returns the gateway's shared Copilot authentication client.
-func CopilotAuth() *copilotauth.Client { return copilotClient }
-
-// SetCopilotEndpointsForTests points the Copilot client at test servers and
-// returns a function that restores the previous endpoints.
+// SetCopilotEndpointsForTests points the installed Runtime's Copilot client at
+// test servers and returns a function that restores the previous endpoints.
 func SetCopilotEndpointsForTests(endpoints copilotauth.Endpoints) (restore func()) {
-	previous := copilotEndpoints
-	copilotEndpoints = endpoints
-	return func() { copilotEndpoints = previous }
+	runtime := Current()
+	previous := runtime.copilotEndpoints.swap(endpoints)
+	return func() { runtime.copilotEndpoints.swap(previous) }
 }
 
 // copilotSettings maps gateway settings onto the library's explicit
 // configuration. The library stopped reading the environment, so the fallbacks
 // it used to apply itself are applied here, in the same order.
-func copilotSettings() copilotauth.Config {
+func (rt *Runtime) copilotSettings() copilotauth.Config {
 	settings := config.Get()
 	return copilotauth.Config{
 		CacheDir:   copilotCacheDir(settings.GithubCopilotCacheDir),
 		OAuthToken: copilotOAuthToken(settings.GithubCopilotOAuthToken),
 		UseGhCLI:   settings.GithubCopilotUseGhCLI,
 		AllowProxy: copilotEnabled(settings),
-		Endpoints:  copilotEndpoints,
+		Endpoints:  rt.copilotEndpoints.get(),
 	}
 }
 

@@ -7,7 +7,6 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
-	"sync"
 	"time"
 
 	"llmgw/internal/iam"
@@ -47,38 +46,6 @@ func codexRefreshInvocationError(err error) error {
 		}
 	}
 	return invocation("openai_codex: refresh failed")
-}
-
-type codexRefreshLock struct {
-	mu   sync.Mutex
-	refs int
-}
-
-var codexRefreshLocks = struct {
-	sync.Mutex
-	entries map[string]*codexRefreshLock
-}{entries: map[string]*codexRefreshLock{}}
-
-func lockCodexRefresh(key string) func() {
-	codexRefreshLocks.Lock()
-	entry := codexRefreshLocks.entries[key]
-	if entry == nil {
-		entry = &codexRefreshLock{}
-		codexRefreshLocks.entries[key] = entry
-	}
-	entry.refs++
-	codexRefreshLocks.Unlock()
-
-	entry.mu.Lock()
-	return func() {
-		entry.mu.Unlock()
-		codexRefreshLocks.Lock()
-		entry.refs--
-		if entry.refs == 0 {
-			delete(codexRefreshLocks.entries, key)
-		}
-		codexRefreshLocks.Unlock()
-	}
 }
 
 func (a codexAuth) Prepare() (string, http.Header, error) {
@@ -123,7 +90,7 @@ func (a codexAuth) PrepareObserved() (
 	if strings.TrimSpace(envelope.AccountID) != "" {
 		headers.Set("ChatGPT-Account-ID", envelope.AccountID)
 	}
-	return strings.TrimRight(codexEndpoints.withDefaults().ResponsesBaseURL, "/"), headers, credentialObservation(&observation), nil
+	return strings.TrimRight(currentCodexEndpoints().ResponsesBaseURL, "/"), headers, credentialObservation(&observation), nil
 }
 
 func (codexAuth) CanRefresh() bool { return true }
@@ -141,7 +108,7 @@ func (a codexAuth) Refresh() error {
 
 func (a codexAuth) refreshConnection(initial iam.OAuthTokenEnvelope, initialConnection iam.ProviderConnection) error {
 	expectedAccountID := strings.TrimSpace(initial.AccountID)
-	unlock := lockCodexRefresh(a.principalID + "|" + a.providerID + "|" + initialConnection.ID)
+	unlock := Current().codexRefresh.lock(a.principalID + "|" + a.providerID + "|" + initialConnection.ID)
 	defer unlock()
 
 	envelope, connection, ok, err := iam.OAuthProviderConnectionSecret(a.principalID, a.providerID, a.connectionName)
@@ -329,7 +296,7 @@ func newCodexProvider(auth codexAuth, timeout float64, client *http.Client, clie
 		clientVersion = codexCatalogClientVersion
 	}
 	client.Transport = codexRefreshTransport{auth: auth, inner: transport}
-	endpoints := codexEndpoints.withDefaults()
+	endpoints := currentCodexEndpoints()
 	inner, err := coreproviders.NewCodexProvider(coreproviders.CodexProviderConfig{
 		SessionSource: codexSessionSource{auth: auth},
 		Instructions:  codexInstructions,

@@ -62,11 +62,11 @@ func setupVertexIAM(t *testing.T) {
 	t.Setenv("LLMGW_STATE_DIR", t.TempDir())
 	iam.ResetForTests()
 	ResetProviders()
-	gcpTokens.Reset()
+	Current().gcpTokens.Reset()
 	t.Cleanup(func() {
 		iam.ResetForTests()
 		ResetProviders()
-		gcpTokens.Reset()
+		Current().gcpTokens.Reset()
 	})
 	key := make([]byte, 32)
 	for index := range key {
@@ -222,7 +222,7 @@ func TestVertexCachedProviderRefreshesServiceAccountToken(t *testing.T) {
 	}
 	for index, want := range []string{"token-1", "token-2"} {
 		if index == 1 {
-			gcpTokens.Reset()
+			Current().gcpTokens.Reset()
 		}
 		response, err := provider.Complete("gemini-test", []Message{{"role": "user", "content": "hi"}}, nil)
 		if err != nil {

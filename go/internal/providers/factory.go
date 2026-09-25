@@ -48,7 +48,7 @@ func instantiate(
 		}
 		return NewAIStudio(cfg.BaseURL, apiKey, cfg.TimeoutOr(120)), nil
 	case "vertex_ai":
-		return newVertexProvider(providerID, cfg, caller)
+		return newVertexProvider(&Current().gcpTokens, providerID, cfg, caller)
 	case "edge_tts":
 		// The access token is optional: a baked-in public default applies.
 		// resolveAPIKey still runs so a stored override (config secret or
@@ -329,16 +329,12 @@ func resolveCredentialObserved(
 	return config.ResolveProviderAPIKey(providerID, cfg), CredentialKindAPIKey, nil, nil
 }
 
-// gcpTokens caches service-account access tokens for every Vertex provider.
-// Providers are rebuilt on each settings change and per principal, so the
-// cache lives here, where tokens outlive those rebuilds.
-var gcpTokens gcpauth.TokenCache
-
 // newVertexProvider builds the Vertex provider for whichever credential kind is
 // stored. An API key keeps the existing x-goog-api-key path untouched; a
-// service-account key is exchanged for a short-lived OAuth2 access token.
+// service-account key is exchanged for a short-lived OAuth2 access token,
+// cached in tokens.
 func newVertexProvider(
-	providerID string, cfg *config.ProviderConfig, caller core.Caller,
+	tokens *gcpauth.TokenCache, providerID string, cfg *config.ProviderConfig, caller core.Caller,
 ) (Provider, error) {
 	requestType := strings.ToLower(strings.TrimSpace(cfg.VertexRequestType))
 	switch requestType {
@@ -390,7 +386,7 @@ func newVertexProvider(
 		)}
 	}
 	tokenSource := func() (string, error) {
-		token, tokenErr := gcpTokens.AccessToken(credential, gcpauth.CloudPlatformScope)
+		token, tokenErr := tokens.AccessToken(credential, gcpauth.CloudPlatformScope)
 		if tokenErr != nil {
 			var exchangeErr *gcpauth.TokenError
 			if errors.As(tokenErr, &exchangeErr) {

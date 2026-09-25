@@ -182,14 +182,21 @@ func setupAntigravityConnectionTest(t *testing.T, accessToken, refreshToken stri
 
 func setAntigravityOAuthTestConfig(t *testing.T, server *httptest.Server) {
 	t.Helper()
-	previousConfig := newGoogleAntigravityOAuthConfig
-	newGoogleAntigravityOAuthConfig = func(string) antigravityauth.Config {
+	replaceAntigravityOAuthConfig(t, func(string) antigravityauth.Config {
 		return antigravityauth.Config{
 			ClientID: "client-id", ClientSecret: "client-secret", ClientAuthMode: antigravityauth.ClientAuthModeClientSecretPost, HTTPClient: server.Client(),
 			Endpoints: antigravityauth.Endpoints{TokenURL: server.URL + "/token", LoadCodeAssistURL: server.URL + "/load"},
 		}
-	}
-	t.Cleanup(func() { newGoogleAntigravityOAuthConfig = previousConfig })
+	})
+}
+
+// replaceAntigravityOAuthConfig replaces the installed Runtime's settings
+// OAuth client until the test ends.
+func replaceAntigravityOAuthConfig(t *testing.T, build func(string) antigravityauth.Config) {
+	t.Helper()
+	runtime := Current()
+	previous := runtime.antigravityOAuth.swap(build)
+	t.Cleanup(func() { runtime.antigravityOAuth.swap(previous) })
 }
 
 func TestAntigravityGatewayAdapterDiscoversCatalogWithoutFallbackProject(t *testing.T) {
@@ -456,14 +463,12 @@ func TestAntigravityRefreshUsesRevisionSafeReplacement(t *testing.T) {
 		_ = json.NewEncoder(w).Encode(map[string]any{"access_token": "new-access", "expires_in": 3600})
 	}))
 	defer tokenServer.Close()
-	previousConfig := newGoogleAntigravityOAuthConfig
-	newGoogleAntigravityOAuthConfig = func(string) antigravityauth.Config {
+	replaceAntigravityOAuthConfig(t, func(string) antigravityauth.Config {
 		return antigravityauth.Config{
 			ClientID: "client-id", ClientSecret: "client-secret", ClientAuthMode: antigravityauth.ClientAuthModeClientSecretPost, HTTPClient: tokenServer.Client(),
 			Endpoints: antigravityauth.Endpoints{TokenURL: tokenServer.URL + "/token", LoadCodeAssistURL: tokenServer.URL + "/load"},
 		}
-	}
-	t.Cleanup(func() { newGoogleAntigravityOAuthConfig = previousConfig })
+	})
 	config.Update(func(s *config.Settings) {
 		s.CredentialEncryptionKey = base64.RawURLEncoding.EncodeToString(make([]byte, 32))
 		s.GoogleAntigravityClientID = "client-id"
@@ -544,11 +549,9 @@ func TestAntigravityPublicPKCERefreshUsesPersistedProfile(t *testing.T) {
 		_, _ = w.Write([]byte(`{"access_token":"new-access","expires_in":3600}`))
 	}))
 	defer server.Close()
-	oldFactory := newGoogleAntigravityOAuthConfig
-	newGoogleAntigravityOAuthConfig = func(string) antigravityauth.Config {
+	replaceAntigravityOAuthConfig(t, func(string) antigravityauth.Config {
 		return antigravityauth.Config{Endpoints: antigravityauth.Endpoints{TokenURL: server.URL}, HTTPClient: server.Client()}
-	}
-	t.Cleanup(func() { newGoogleAntigravityOAuthConfig = oldFactory })
+	})
 	if err := refreshAntigravityConnection(context.Background(), human.ID, "antigravity", "personal", "old-access"); err != nil {
 		t.Fatal(err)
 	}
@@ -605,14 +608,12 @@ func TestAntigravityRuntimeRefreshUsesClientSecretPost(t *testing.T) {
 		_, _ = w.Write([]byte(`{"access_token":"new-access","expires_in":3600}`))
 	}))
 	defer server.Close()
-	oldFactory := newGoogleAntigravityOAuthConfig
-	newGoogleAntigravityOAuthConfig = func(string) antigravityauth.Config {
+	replaceAntigravityOAuthConfig(t, func(string) antigravityauth.Config {
 		return antigravityauth.Config{
 			ClientID: "client-id", ClientSecret: "client-secret", ClientAuthMode: antigravityauth.ClientAuthModeClientSecretPost,
 			Endpoints: antigravityauth.Endpoints{TokenURL: server.URL}, HTTPClient: server.Client(),
 		}
-	}
-	t.Cleanup(func() { newGoogleAntigravityOAuthConfig = oldFactory })
+	})
 	if err := refreshAntigravityConnection(context.Background(), human.ID, "antigravity", "personal", "old-access"); err != nil {
 		t.Fatal(err)
 	}

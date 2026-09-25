@@ -259,9 +259,9 @@ func (fixtureProviderAuthAdapter) Import(
 
 func TestProviderAuthAdapterRegistryAndCapabilities(t *testing.T) {
 	const id = "fixture_auth"
-	unregisterProviderAuthAdapterFactoryForTests(id)
-	t.Cleanup(func() { unregisterProviderAuthAdapterFactoryForTests(id) })
-	if err := RegisterProviderAuthAdapterFactory(id, func(string) (ProviderAuthAdapter, error) {
+	// The registration lives only in this test's Runtime.
+	runtime := InstallForTests(t)
+	if err := runtime.RegisterProviderAuthAdapterFactory(id, func(string) (ProviderAuthAdapter, error) {
 		return fixtureProviderAuthAdapter{}, nil
 	}); err != nil {
 		t.Fatal(err)

@@ -41,7 +41,7 @@ func TestCopilotSettingsPreserveLibraryEnvironmentFallbacks(t *testing.T) {
 		s.GithubCopilotCacheDir, s.GithubCopilotOAuthToken = "", ""
 		s.GithubCopilotUseGhCLI, s.AllowCopilotProxy = false, false
 	})
-	got := copilotSettings()
+	got := Current().copilotSettings()
 	if got.CacheDir != environmentCache || got.OAuthToken != "environment-token" || !got.AllowProxy || got.UseGhCLI {
 		t.Fatalf("environment fallbacks: %+v", got)
 	}
@@ -50,7 +50,7 @@ func TestCopilotSettingsPreserveLibraryEnvironmentFallbacks(t *testing.T) {
 		s.GithubCopilotCacheDir, s.GithubCopilotOAuthToken = "configured-dir", "configured-token"
 		s.GithubCopilotUseGhCLI = true
 	})
-	got = copilotSettings()
+	got = Current().copilotSettings()
 	if got.CacheDir != "configured-dir" || got.OAuthToken != "configured-token" || !got.UseGhCLI {
 		t.Fatalf("settings must win over the environment: %+v", got)
 	}
@@ -61,7 +61,7 @@ func TestCopilotSettingsPreserveLibraryEnvironmentFallbacks(t *testing.T) {
 	withCopilotSettings(t, func(s *config.Settings) {
 		s.GithubCopilotCacheDir, s.GithubCopilotOAuthToken = "", ""
 	})
-	got = copilotSettings()
+	got = Current().copilotSettings()
 	home, _ := os.UserHomeDir()
 	if got.CacheDir != filepath.Join(home, ".llmgw", "cache") || got.OAuthToken != "llmgw-environment-token" || got.AllowProxy {
 		t.Fatalf("defaults: %+v", got)

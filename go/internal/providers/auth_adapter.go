@@ -149,23 +149,28 @@ type RevocableProviderAuthAdapter interface {
 
 type ProviderAuthAdapterFactory func(providerID string) (ProviderAuthAdapter, error)
 
-var providerAuthAdapters = struct {
-	sync.RWMutex
+// authAdapterRegistry maps adapter ids to the factories that build them.
+type authAdapterRegistry struct {
+	mu        sync.RWMutex
 	factories map[string]ProviderAuthAdapterFactory
-}{factories: map[string]ProviderAuthAdapterFactory{
-	"github_copilot": func(string) (ProviderAuthAdapter, error) {
-		return githubCopilotAuthAdapter{}, nil
-	},
-	"openai_codex": func(string) (ProviderAuthAdapter, error) {
-		clientID := EffectiveCodexClientID()
-		return openAICodexAuthAdapter{clientID: clientID}, nil
-	},
-	"google_antigravity": func(providerID string) (ProviderAuthAdapter, error) {
-		return googleAntigravityAuthAdapter{providerID: providerID}, nil
-	},
-}}
+}
 
-func RegisterProviderAuthAdapterFactory(id string, factory ProviderAuthAdapterFactory) error {
+func builtInAuthAdapters() map[string]ProviderAuthAdapterFactory {
+	return map[string]ProviderAuthAdapterFactory{
+		"github_copilot": func(string) (ProviderAuthAdapter, error) {
+			return githubCopilotAuthAdapter{}, nil
+		},
+		"openai_codex": func(string) (ProviderAuthAdapter, error) {
+			clientID := EffectiveCodexClientID()
+			return openAICodexAuthAdapter{clientID: clientID}, nil
+		},
+		"google_antigravity": func(providerID string) (ProviderAuthAdapter, error) {
+			return googleAntigravityAuthAdapter{providerID: providerID}, nil
+		},
+	}
+}
+
+func (rt *Runtime) RegisterProviderAuthAdapterFactory(id string, factory ProviderAuthAdapterFactory) error {
 	id = strings.ToLower(strings.TrimSpace(id))
 	if !registryIdentifierPattern.MatchString(id) {
 		return fmt.Errorf("invalid provider auth adapter id %q", id)
@@ -173,20 +178,20 @@ func RegisterProviderAuthAdapterFactory(id string, factory ProviderAuthAdapterFa
 	if factory == nil {
 		return fmt.Errorf("provider auth adapter factory is required")
 	}
-	providerAuthAdapters.Lock()
-	defer providerAuthAdapters.Unlock()
-	if _, exists := providerAuthAdapters.factories[id]; exists {
+	rt.authAdapters.mu.Lock()
+	defer rt.authAdapters.mu.Unlock()
+	if _, exists := rt.authAdapters.factories[id]; exists {
 		return fmt.Errorf("provider auth adapter %q is already registered", id)
 	}
-	providerAuthAdapters.factories[id] = factory
+	rt.authAdapters.factories[id] = factory
 	return nil
 }
 
-func NewProviderAuthAdapter(adapterID, providerID string) (ProviderAuthAdapter, error) {
+func (rt *Runtime) NewProviderAuthAdapter(adapterID, providerID string) (ProviderAuthAdapter, error) {
 	adapterID = strings.ToLower(strings.TrimSpace(adapterID))
-	providerAuthAdapters.RLock()
-	factory, ok := providerAuthAdapters.factories[adapterID]
-	providerAuthAdapters.RUnlock()
+	rt.authAdapters.mu.RLock()
+	factory, ok := rt.authAdapters.factories[adapterID]
+	rt.authAdapters.mu.RUnlock()
 	if !ok {
 		return nil, fmt.Errorf("provider auth adapter %q is not registered", adapterID)
 	}
@@ -222,12 +227,6 @@ func validateProviderAuthAdapterCapabilities(adapter ProviderAuthAdapter) error 
 	return nil
 }
 
-func unregisterProviderAuthAdapterFactoryForTests(id string) {
-	providerAuthAdapters.Lock()
-	delete(providerAuthAdapters.factories, strings.ToLower(strings.TrimSpace(id)))
-	providerAuthAdapters.Unlock()
-}
-
 type githubCopilotAuthAdapter struct{}
 
 func (githubCopilotAuthAdapter) ID() string             { return "github_copilot" }
@@ -236,7 +235,7 @@ func (githubCopilotAuthAdapter) Capabilities() ProviderAuthCapabilities {
 	return ProviderAuthCapabilities{DeviceCode: true, Refresh: true}
 }
 func (githubCopilotAuthAdapter) StartDevice(context.Context) (ProviderAuthStart, error) {
-	device, err := copilotClient.StartDeviceFlow()
+	device, err := Current().copilot.StartDeviceFlow()
 	if err != nil {
 		return ProviderAuthStart{}, err
 	}
@@ -248,7 +247,7 @@ func (githubCopilotAuthAdapter) StartDevice(context.Context) (ProviderAuthStart,
 func (githubCopilotAuthAdapter) PollDevice(
 	_ context.Context, deviceCode, _ string,
 ) ProviderAuthPoll {
-	result := copilotClient.PollDeviceFlowTokenOnce(deviceCode)
+	result := Current().copilot.PollDeviceFlowTokenOnce(deviceCode)
 	return SafeProviderAuthPoll(ProviderAuthPoll{
 		Status: result.Status, Error: result.Error, AccessToken: result.AccessToken,
 	})
@@ -256,7 +255,7 @@ func (githubCopilotAuthAdapter) PollDevice(
 func (githubCopilotAuthAdapter) Refresh(
 	_ context.Context, envelope iam.OAuthTokenEnvelope,
 ) (ProviderAuthRefresh, error) {
-	session, err := copilotClient.GetSessionForOAuth(envelope.AccessToken, true)
+	session, err := Current().copilot.GetSessionForOAuth(envelope.AccessToken, true)
 	if err != nil {
 		return ProviderAuthRefresh{}, err
 	}
@@ -318,7 +317,7 @@ func (adapter openAICodexAuthAdapter) CompleteBrowser(ctx context.Context, code,
 }
 
 func codexBrowserConfig(clientID string) browseroauth.Config {
-	endpoints := codexEndpoints.withDefaults()
+	endpoints := currentCodexEndpoints()
 	return browseroauth.Config{
 		AuthorizeURL: endpoints.BrowserAuthorizeURL, TokenURL: endpoints.OAuth.OAuthTokenURL,
 		ClientID: strings.TrimSpace(clientID), ClientAuthMode: browseroauth.ClientAuthModePublicPKCE,
@@ -430,7 +429,12 @@ const (
 	antigravityOAuthProfileConsumerManual = "consumer_manual"
 )
 
-var newGoogleAntigravityOAuthConfig = func(redirectURI string) antigravityauth.Config {
+// antigravityOAuthConfig returns the runtime OAuth client configured in
+// settings, unless a test replaced it through the seam.
+func (rt *Runtime) antigravityOAuthConfig(redirectURI string) antigravityauth.Config {
+	if replaced := rt.antigravityOAuth.get(); replaced != nil {
+		return replaced(redirectURI)
+	}
 	settings := config.Get()
 	return antigravityauth.Config{
 		ClientID: settings.GoogleAntigravityClientID, ClientSecret: settings.GoogleAntigravityClientSecret,
@@ -560,7 +564,7 @@ func (adapter googleAntigravityAuthAdapter) config(redirectURI string) antigravi
 			RedirectURI: redirectURI,
 		}
 	}
-	return newGoogleAntigravityOAuthConfig(redirectURI)
+	return Current().antigravityOAuthConfig(redirectURI)
 }
 
 func antigravityOAuthProfile(mode antigravityauth.ClientAuthMode) string {

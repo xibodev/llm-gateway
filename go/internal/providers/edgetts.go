@@ -40,16 +40,31 @@ const (
 	edgeTTSMaxMessageSize = 4096
 )
 
-var edgeTTSUserAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36" +
+const edgeTTSUserAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36" +
 	" (KHTML, like Gecko) Chrome/" + edgeTTSChromiumMajor + ".0.0.0 Safari/537.36" +
 	" Edg/" + edgeTTSChromiumMajor + ".0.0.0"
 
-// edgeTTSClockSkew tracks the offset between the local clock and the service
+// edgeTTSClock tracks the offset between the local clock and the service
 // clock, learned from 403 responses that carry a server Date header.
-var (
-	edgeTTSClockSkewSeconds float64
-	edgeTTSClockSkewMutex   sync.RWMutex
-)
+type edgeTTSClock struct {
+	mu          sync.RWMutex
+	skewSeconds float64
+}
+
+// now returns the service's Unix time as the clock estimates it.
+func (c *edgeTTSClock) now() float64 {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	return float64(time.Now().UTC().Unix()) + c.skewSeconds
+}
+
+// learn moves the estimate onto the clock of the server that sent serverDate.
+func (c *edgeTTSClock) learn(serverDate time.Time) {
+	skew := float64(serverDate.UTC().Unix()) - c.now()
+	c.mu.Lock()
+	c.skewSeconds += skew
+	c.mu.Unlock()
+}
 
 // SpeechSynthesizer is implemented by providers that produce audio from text.
 // The audio speech endpoint and the verify operation prefer it over Complete.
@@ -156,10 +171,7 @@ func (p EdgeTTSProvider) ListModels() []ModelInfo {
 		// Learn clock skew from the server date and retry once, mirroring the
 		// websocket dial path.
 		if serverDate, parseErr := time.Parse(time.RFC1123, response.Header.Get("Date")); parseErr == nil {
-			skew := float64(serverDate.UTC().Unix()) - edgeTTSUnixNow()
-			edgeTTSClockSkewMutex.Lock()
-			edgeTTSClockSkewSeconds += skew
-			edgeTTSClockSkewMutex.Unlock()
+			Current().edgeTTSClock.learn(serverDate)
 		}
 		if response.Body != nil {
 			response.Body.Close()
@@ -328,10 +340,7 @@ func (p EdgeTTSProvider) dial() (*websocket.Conn, error) {
 		// A 403 usually means the request signature drifted from the service
 		// clock. Learn the skew from the server's Date header and retry once.
 		if serverDate, parseErr := time.Parse(time.RFC1123, response.Header.Get("Date")); parseErr == nil {
-			skew := float64(serverDate.UTC().Unix()) - edgeTTSUnixNow()
-			edgeTTSClockSkewMutex.Lock()
-			edgeTTSClockSkewSeconds += skew
-			edgeTTSClockSkewMutex.Unlock()
+			Current().edgeTTSClock.learn(serverDate)
 		}
 		if response.Body != nil {
 			response.Body.Close()
@@ -373,9 +382,7 @@ func (p EdgeTTSProvider) securityToken() string {
 }
 
 func edgeTTSUnixNow() float64 {
-	edgeTTSClockSkewMutex.RLock()
-	defer edgeTTSClockSkewMutex.RUnlock()
-	return float64(time.Now().UTC().Unix()) + edgeTTSClockSkewSeconds
+	return Current().edgeTTSClock.now()
 }
 
 func edgeTTSConnectionID() string {
