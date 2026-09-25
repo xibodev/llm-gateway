@@ -10,6 +10,7 @@ import (
 	copilotauth "github.com/xibodev/llm-provider-auth/copilot"
 	gcpauth "github.com/xibodev/llm-provider-auth/gcp"
 	core "github.com/xibodev/llmgw-core"
+	"github.com/xibodev/llmgw-core/catalog"
 	coreruntime "github.com/xibodev/llmgw-core/runtime"
 )
 
@@ -23,8 +24,12 @@ import (
 // kept here.
 type Runtime struct {
 	instances providerCache
-	catalogs  catalogCache
-	core      *coreruntime.Runtime[*config.Settings]
+	// catalogs is catalog.json, the store core's catalog service keeps the
+	// gateway's catalogs in, and catalogService reads, discovers and
+	// invalidates them there; the core Runtime holds the same service.
+	catalogs       catalogFile
+	catalogService *catalog.Service
+	core           *coreruntime.Runtime[*config.Settings]
 	// verticals is the registration table of the provider types core
 	// serves; see coreVerticals.
 	verticals map[string]coreVertical
@@ -79,6 +84,9 @@ func newRuntime(open func(oauth bool) (core.CredentialStore, error)) *Runtime {
 	runtime.copilot = copilotauth.NewDynamic(runtime.copilotSettings)
 	runtime.openCredentials = open
 	runtime.credentials = oauthStore{runtime: runtime, open: func() (core.CredentialStore, error) { return open(true) }}
+	runtime.catalogService = catalog.New(catalog.Options{
+		Store: &runtime.catalogs, TTL: catalogTTL, SchemaVersion: catalogSchemaVersion, KeepStale: true,
+	})
 	runtime.verticals = runtime.coreVerticals()
 	coreRuntime, err := newCoreRuntime(runtime)
 	if err != nil {

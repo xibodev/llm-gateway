@@ -16,11 +16,7 @@ func putProvider(key string, provider Provider) {
 
 // putCatalogEntry caches entry under key in the installed Runtime's catalog.
 func putCatalogEntry(key string, entry catalogEntry) {
-	catalogs := &Current().catalogs
-	catalogs.mu.Lock()
-	defer catalogs.mu.Unlock()
-	catalogs.loadLocked()
-	catalogs.entries[key] = entry
+	Current().catalogs.put(key, entry)
 }
 
 // streak returns how many consecutive circuit failures rt holds for name.

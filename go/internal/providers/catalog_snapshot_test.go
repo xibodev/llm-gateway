@@ -1,11 +1,14 @@
 package providers
 
 import (
+	"context"
+	"errors"
 	"testing"
 
 	"llmgw/internal/config"
 
 	core "github.com/xibodev/llmgw-core"
+	"github.com/xibodev/llmgw-core/catalog"
 )
 
 // Catalogs are cached per principal so credentials never leak between callers,
@@ -37,16 +40,28 @@ func TestCatalogSnapshotSeesPrincipalScopedEntries(t *testing.T) {
 	}
 }
 
+// refreshCatalog refreshes the catalog of key through the Runtime's catalog
+// service, running during before its discovery lists any rows.
+func refreshCatalog(runtime *Runtime, key string, during func()) error {
+	_, err := runtime.catalogService.Refresh(context.Background(), catalog.Request{
+		Key: catalogKeyOf(key),
+		Discover: func(context.Context) ([]core.ModelInfo, error) {
+			during()
+			return []core.ModelInfo{{ID: "discovered"}}, nil
+		},
+	})
+	return err
+}
+
 func TestCatalogInvalidationRejectsInFlightStaleWrite(t *testing.T) {
 	t.Setenv("LLMGW_STATE_DIR", t.TempDir())
 	// A fresh Runtime loads the catalog from this test's state directory.
-	catalogs := &InstallForTests(t).catalogs
+	runtime := InstallForTests(t)
 
-	key := "copilot@owner"
-	generation := catalogs.generation(key)
-	ForgetCatalogForPrincipal("copilot", "owner")
-	if catalogs.storeIfGeneration(key, []ModelInfo{{ID: "stale"}}, generation) {
-		t.Fatal("invalidated catalog accepted an in-flight stale write")
+	if err := refreshCatalog(runtime, "copilot@owner", func() {
+		ForgetCatalogForPrincipal("copilot", "owner")
+	}); !errors.Is(err, catalog.ErrStateChanged) {
+		t.Fatalf("invalidated catalog accepted an in-flight stale write: err=%v", err)
 	}
 	if models, _ := CatalogCachedForPrincipal(
 		"copilot", core.Caller{ID: "owner", Kind: core.CallerHuman},
@@ -58,13 +73,14 @@ func TestCatalogInvalidationRejectsInFlightStaleWrite(t *testing.T) {
 func TestCatalogProviderPersistenceRebasesWithoutWeakeningHardFence(t *testing.T) {
 	t.Setenv("LLMGW_STATE_DIR", t.TempDir())
 	// A fresh Runtime loads the catalog from this test's state directory.
-	catalogs := &InstallForTests(t).catalogs
+	runtime := InstallForTests(t)
 
-	key := "antigravity@owner"
-	revision := catalogs.revision(key)
-	catalogs.forgetAfterProviderPersistence("antigravity", "owner")
-	if !catalogs.storeIfRevision(key, []ModelInfo{{ID: "fresh"}}, revision) {
-		t.Fatal("credential refresh fenced the operation that performed it")
+	persisted := func() { runtime.forgetCatalogAfterProviderPersistence("antigravity", "owner") }
+	if err := refreshCatalog(runtime, "antigravity@owner", persisted); err != nil {
+		t.Fatalf("credential refresh fenced the operation that performed it: %v", err)
+	}
+	if entry, ok := runtime.catalogs.entry("antigravity@owner"); !ok || len(entry.Models) != 1 {
+		t.Fatalf("the operation's catalog was not stored: %+v", entry)
 	}
 
 	for _, mutation := range []struct {
@@ -76,11 +92,11 @@ func TestCatalogProviderPersistenceRebasesWithoutWeakeningHardFence(t *testing.T
 		{name: "provider config", invalidate: func() { ForgetCatalog("antigravity") }},
 	} {
 		t.Run(mutation.name, func(t *testing.T) {
-			revision := catalogs.revision(key)
-			catalogs.forgetAfterProviderPersistence("antigravity", "owner")
-			mutation.invalidate()
-			if catalogs.storeIfRevision(key, []ModelInfo{{ID: "stale"}}, revision) {
-				t.Fatal("hard invalidation was mistaken for in-operation provider persistence")
+			if err := refreshCatalog(runtime, "antigravity@owner", func() {
+				persisted()
+				mutation.invalidate()
+			}); !errors.Is(err, catalog.ErrStateChanged) {
+				t.Fatalf("hard invalidation was mistaken for in-operation provider persistence: err=%v", err)
 			}
 		})
 	}

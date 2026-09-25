@@ -143,14 +143,14 @@ func (c *oauthCall) rejected() error {
 // dropped the owner's catalog outright. Antigravity only retired the rows
 // cached before the write, because its operations store the project they
 // discover, and a catalog the writing operation fetched must still be
-// stored; see catalogCache.forgetAfterProviderPersistence.
+// stored; see Runtime.forgetCatalogAfterProviderPersistence.
 func (c *oauthCall) forget(runtime *Runtime) {
 	if c == nil {
 		return
 	}
 	runtime.ForgetProviderForPrincipal(c.providerID, c.principalID)
 	if c.antigravity() {
-		runtime.catalogs.forgetAfterProviderPersistence(c.providerID, c.principalID)
+		runtime.forgetCatalogAfterProviderPersistence(c.providerID, c.principalID)
 		return
 	}
 	runtime.ForgetCatalogForPrincipal(c.providerID, c.principalID)

@@ -133,41 +133,28 @@ func TestCatalogReadFailedRefreshCannotRestoreInvalidatedRows(t *testing.T) {
 func TestCatalogReadSuccessfulRefreshUsesAuthoritativeSnapshot(t *testing.T) {
 	for _, scenario := range []string{"replaced", "empty", "invalidated"} {
 		t.Run(scenario, func(t *testing.T) {
+			principal := core.Caller{ID: "fixture-owner", Kind: core.CallerHuman}
+			replacement := []ModelInfo{{ID: "replacement-model"}}
+			if scenario == "empty" {
+				replacement = []ModelInfo{}
+			}
+			var key string
 			upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				// Interleave a write or an invalidation with the discovery,
+				// before the read takes its final snapshot, without scheduler
+				// timing.
+				if scenario == "invalidated" {
+					ForgetCatalogForPrincipal("catalog-read", principal.ID)
+					Current().catalogs.store("catalog-read", []ModelInfo{{ID: "other-scope-model"}})
+				} else {
+					Current().catalogs.store(key, replacement)
+				}
 				_, _ = w.Write([]byte(`{"data":[{"id":"fetched-model"}]}`))
 			}))
 			defer upstream.Close()
 			setupCatalogReadTest(t, upstream.URL)
-			principal := core.Caller{ID: "fixture-owner", Kind: core.CallerHuman}
-			key := catalogCacheKey("catalog-read", principal)
-			current := catalogEntry{SchemaVersion: catalogSchemaVersion,
-				Models: []ModelInfo{{ID: "replacement-model"}}}
-			if scenario == "empty" {
-				current.Models = []ModelInfo{}
-			}
-			catalogs := &Current().catalogs
-			result := Current().readCatalogForPrincipal("catalog-read", principal, func(providerID string, caller core.Caller) ([]ModelInfo, *CredentialObservation, error) {
-				models, observation, err := RefreshCatalogForPrincipalWithError(providerID, caller)
-				if err != nil || len(models) != 1 || models[0].ID != "fetched-model" {
-					t.Fatalf("refresh: %+v %v", models, err)
-				}
-				// Interleave a write or invalidation after the successful store,
-				// before the read takes its final snapshot, without scheduler timing.
-				if scenario == "invalidated" {
-					generation := catalogs.generation(key)
-					ForgetCatalogForPrincipal(providerID, caller.ID)
-					if catalogs.storeIfGeneration(key, models, generation) {
-						t.Fatal("invalidation accepted a stale write")
-					}
-					catalogs.store(providerID, []ModelInfo{{ID: "other-scope-model"}})
-				} else {
-					catalogs.mu.Lock()
-					current.RefreshedAt = catalogs.entries[key].RefreshedAt.Add(time.Second)
-					catalogs.entries[key] = current
-					catalogs.mu.Unlock()
-				}
-				return models, observation, err
-			})
+			key = catalogCacheKey("catalog-read", principal)
+			result := ReadCatalogForPrincipal("catalog-read", principal)
 			if result.Diagnostics.SourceScope != "principal" || result.Diagnostics.FromCache || result.Diagnostics.Stale {
 				t.Fatalf("diagnostics: %+v", result)
 			}
@@ -178,14 +165,15 @@ func TestCatalogReadSuccessfulRefreshUsesAuthoritativeSnapshot(t *testing.T) {
 				}
 				return
 			}
-			if result.Err != nil || !result.RefreshedAt.Equal(current.RefreshedAt) || len(result.Models) != len(current.Models) {
+			current, _ := Current().catalogs.entry(key)
+			if result.Err != nil || !result.RefreshedAt.Equal(current.RefreshedAt) || len(result.Models) != len(replacement) {
 				t.Fatalf("snapshot: %+v, want %+v", result, current)
 			}
 			if scenario == "empty" {
 				if result.Diagnostics.Status != "empty" {
 					t.Fatalf("empty snapshot: %+v", result)
 				}
-			} else if result.Diagnostics.Status != "synced" || result.Models[0].ID != current.Models[0].ID {
+			} else if result.Diagnostics.Status != "synced" || result.Models[0].ID != replacement[0].ID {
 				t.Fatalf("mixed snapshot: %+v", result)
 			}
 		})

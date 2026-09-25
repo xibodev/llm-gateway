@@ -1,6 +1,7 @@
 package providers
 
 import (
+	"context"
 	"testing"
 	"time"
 
@@ -73,18 +74,28 @@ func TestAdaptCoreProviderEvidenceVerifiesOnlySuccessfulMatchingModel(t *testing
 	}
 }
 
-func TestCatalogModelsWithTypedCapabilitiesAddsDiscoverySnapshot(t *testing.T) {
+func TestCatalogStoreAddsDiscoverySnapshotOfTypedCapabilities(t *testing.T) {
+	t.Setenv("LLMGW_STATE_DIR", t.TempDir())
 	discovered := time.Date(2026, time.September, 20, 12, 0, 0, 0, time.UTC)
-	legacy := []ModelInfo{{
+	legacy := coreRows([]ModelInfo{{
 		ID: "speech", Capabilities: map[string]any{"audio": true, "tts": true},
 		SupportedSurfaces: []string{"/v1/audio/speech"},
-	}}
+	}})
 
-	models := catalogModelsWithTypedCapabilities(legacy, discovered)
-	if legacy[0].TypedCapabilities != nil {
+	store, key := &catalogFile{}, core.CatalogKey{Instance: "speech"}
+	if _, err := store.Save(context.Background(), key, core.CatalogEvidence{
+		Status: core.CatalogDiscovered, Models: legacy, ObservedAt: discovered, SchemaVersion: catalogSchemaVersion,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if legacy[0].Capabilities != nil {
 		t.Fatal("catalog conversion mutated provider result")
 	}
-	capabilities := models[0].TypedCapabilities
+	record, err := store.Load(context.Background(), key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	capabilities := record.Evidence.Models[0].Capabilities
 	if capabilities == nil || capabilities.Operations.AudioOut != core.SupportSupported ||
 		capabilities.Operations.AudioIn != core.SupportUnknown ||
 		capabilities.Freshness.DiscoveredAt == nil || !capabilities.Freshness.DiscoveredAt.Equal(discovered) {

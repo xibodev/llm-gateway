@@ -116,13 +116,3 @@ func (AnthropicNativeProvider) coreDeclaration() (core.Provider, *core.Credentia
 	}
 	return anthropic, nil
 }
-
-// CoreModelInfo is a catalog row as core's planning reads one: its typed
-// capabilities are core's Capabilities, and its untyped map core's
-// LegacyCapabilities.
-func CoreModelInfo(row ModelInfo) core.ModelInfo {
-	return core.ModelInfo{
-		ID: row.ID, SupportedAPIs: row.SupportedSurfaces, Capabilities: row.TypedCapabilities,
-		DisplayName: row.Label, Vendor: row.Vendor, Free: row.Free, LegacyCapabilities: row.Capabilities,
-	}
-}

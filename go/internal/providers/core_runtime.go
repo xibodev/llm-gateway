@@ -50,7 +50,8 @@ func (rt *Runtime) coreVerticals() map[string]coreVertical {
 // instances whose vertical core owns: the Runtime holds their providers and
 // the coordinators that refresh their credentials, while the gateway
 // supplies the settings, the connections, the refresh and the evidence sink,
-// each through the vertical of the instance.
+// each through the vertical of the instance, and the catalog service that
+// keeps its own catalogs.
 func newCoreRuntime(rt *Runtime) (*coreruntime.Runtime[*config.Settings], error) {
 	settings := config.Source{}
 	return coreruntime.New(coreruntime.Options[*config.Settings]{
@@ -59,9 +60,10 @@ func newCoreRuntime(rt *Runtime) (*coreruntime.Runtime[*config.Settings], error)
 		Credentials: coreCredentials{runtime: rt, settings: settings},
 		Refresh:     rt.coreRefresh,
 		Evidence:    credentialEvidence{},
-		// Catalogs stays nil. The gateway lists the models of these
-		// instances on its own catalog path and never asks the Runtime,
-		// so the Runtime's in-memory catalog stays empty.
+		// The gateway reads its catalogs through the service itself, keyed
+		// by caller scope (see catalogCacheKey), and asks the Runtime for
+		// none: the Runtime's own catalog reads key by credential.
+		CatalogService: rt.catalogService,
 	})
 }
 
