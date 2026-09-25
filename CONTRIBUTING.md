@@ -35,16 +35,18 @@ Documentation and website checks run with:
 node scripts/check-docs.mjs
 ```
 
-Two test suites guard the library extraction (llm-gateway#67):
+Two test suites guard the library boundary (llm-gateway#67):
 
 - `go/internal/api/testdata/characterization` pins the gateway's observable HTTP
   behavior and the requests it sends upstream. A golden diff is a behavior
   change. Regenerate with
   `LLMGW_UPDATE_GOLDEN=1 go test ./internal/api -run TestHTTPCharacterization`
   only when the change is intended, and review the diff.
-- `go/internal/architecture` enforces dependency direction. Code destined for the
-  shared libraries may not gain gateway storage, configuration, or HTTP
-  dependencies, and its coupling budgets can only shrink.
+- `go/internal/architecture` enforces dependency direction. `go.mod` must pin
+  each library at a release tag with no `replace` directive, no file may use
+  a deprecated `llmgw-core` API the gateway has replaced, and the product
+  adapter layer may reach only the storage and configuration layers it lists,
+  within coupling budgets that can only shrink.
 
 ## Pull requests
 

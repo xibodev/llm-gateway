@@ -19,9 +19,9 @@ const (
 	metricConfigPrincipal = "config.Principal"
 )
 
-// forbiddenImports are the product layers that shared-library code must not
-// depend on. Entries match the import path or any subpackage of it.
-var forbiddenImports = []string{
+// productLayers are the gateway's storage, configuration and HTTP layers.
+// Entries match the import path or any subpackage of it.
+var productLayers = []string{
 	"database/sql",
 	"llmgw/internal/api",
 	"llmgw/internal/config",
@@ -29,34 +29,78 @@ var forbiddenImports = []string{
 	"modernc.org/sqlite",
 }
 
-// boundUnit is a package directory or a single file, relative to the module
-// root, whose code moves to the shared libraries.
-type boundUnit struct {
+// adapterUnit is a package directory or a single file, relative to the module
+// root, of the gateway's product adapter layer, where the gateway's settings,
+// IAM and stores meet llmgw-core. What the libraries own has moved to them
+// (llm-gateway#75); a unit keeps the gateway's side of each seam, so it may
+// import the product layers it lists and no others.
+type adapterUnit struct {
 	path string
-	// allowed is today's debt: forbidden imports the unit still has. A new
-	// forbidden import fails, and so does an entry that is no longer needed,
-	// so every removal is locked in.
+	// allowed are the product layers the unit may import. A new one fails,
+	// and so does an entry the unit no longer imports, so every removal is
+	// locked in.
 	allowed []string
 	// budget caps references to product storage and configuration. Counts
 	// above budget fail; counts below budget fail until the budget is
-	// lowered, so progress cannot silently regress.
+	// lowered, so the coupling only shrinks.
 	budget map[string]int
 }
 
-var coreBound = []boundUnit{
+// productAdapters are the adapter units, each with the reason it keeps the
+// references its budget counts. None reads config.Principal: a caller
+// reaches them as a core.Caller.
+var productAdapters = []adapterUnit{
 	{
+		// The gateway's side of llmgw-core's provider stack: the vertical
+		// table and the Runtime's assembly, the facades, the stores over
+		// IAM, the catalog file store, the OAuth drivers, probes and evidence.
+		//
+		// iam.*: the credential store the core Runtime resolves and
+		// refreshes in (core_runtime.go) and the factory's resolution order
+		// and authorization check (factory.go); the console's OAuth
+		// contracts and refreshes, which hand IAM envelopes and connections
+		// to the API layer (auth_adapter.go, codex.go,
+		// antigravity_credentials.go); the catalog's credential-revision
+		// fence (catalog.go, credential_observation.go); the publication
+		// gate of anonymous models over IAM evidence
+		// (anonymous_publication.go); checks and quota snapshots in IAM's
+		// shapes (provider_contract_adapter.go, quota_adapter.go); and a
+		// caller's IAM principal (caller.go).
+		//
+		// config.Get(): one snapshot per facade build, read after the
+		// instance cache's epoch, and the disabled check ahead of that cache
+		// (factory.go, proxy.go); the exported predicates and reads the API
+		// layer and the router call without a snapshot (catalog.go,
+		// factory.go, auth_adapter.go, copilot_client.go); and the reads
+		// that must see a change at runtime: the Copilot client's settings
+		// and session headers (copilot_client.go, copilot_provider.go) and
+		// the Antigravity OAuth client of sign-in and of the gateway's own
+		// refresh (auth_adapter.go, antigravity_credentials.go).
 		path:    "internal/providers",
 		allowed: []string{"llmgw/internal/config", "llmgw/internal/iam"},
 		budget:  map[string]int{metricIAM: 55, metricConfigGet: 13, metricConfigPrincipal: 0},
 	},
 	{
-		// Telemetry and the savings ledger own the SQLite imports; they stay
-		// in the gateway when the routing primitives move.
+		// The gateway's routing policy over llmgw-core's execution
+		// primitives. Telemetry and the savings ledger own the SQLite
+		// imports.
+		//
+		// iam.*: project policy and model evidence in route and alias
+		// resolution (failover.go), and the IAM usage event each request
+		// records (savings.go).
+		//
+		// config.Get(): one snapshot per resolution, per alias table and per
+		// ledger operation, and the per-target provider lookups of
+		// capability filtering and of the Anthropic and Responses fallbacks
+		// (failover.go, savings.go).
 		path:    "internal/router",
 		allowed: []string{"database/sql", "llmgw/internal/config", "llmgw/internal/iam", "modernc.org/sqlite"},
 		budget:  map[string]int{metricIAM: 6, metricConfigGet: 10, metricConfigPrincipal: 0},
 	},
 	{
+		// Transparent-mode planning, composed from llmgw-core's transport
+		// helpers. config.Get(): the check that the exact target names a
+		// configured provider, a refusal the gateway words itself.
 		path:    "internal/api/transport_mode.go",
 		allowed: []string{"llmgw/internal/config"},
 		budget:  map[string]int{metricIAM: 0, metricConfigGet: 1, metricConfigPrincipal: 0},
@@ -68,19 +112,19 @@ type unitFacts struct {
 	counts  map[string]int
 }
 
-func TestCoreBoundImportsOnlyShrink(t *testing.T) {
-	for _, unit := range coreBound {
+func TestProductAdaptersImportOnlyTheirLayers(t *testing.T) {
+	for _, unit := range productAdapters {
 		facts := inspectUnit(t, unit.path)
 		var present []string
 		for path := range facts.imports {
-			if isForbidden(path) {
+			if isProductLayer(path) {
 				present = append(present, path)
 			}
 		}
 		sort.Strings(present)
 		for _, path := range present {
 			if !slices.Contains(unit.allowed, path) {
-				t.Errorf("%s gained forbidden import %q; shared-library code must not depend on gateway storage, configuration or HTTP layers (llm-gateway#67)", unit.path, path)
+				t.Errorf("%s gained product import %q; keep storage behind internal/iam and HTTP in internal/api, or record why the unit needs the layer in productAdapters (llm-gateway#75)", unit.path, path)
 			}
 		}
 		for _, path := range unit.allowed {
@@ -91,14 +135,14 @@ func TestCoreBoundImportsOnlyShrink(t *testing.T) {
 	}
 }
 
-func TestCoreBoundCouplingBudget(t *testing.T) {
-	for _, unit := range coreBound {
+func TestProductAdapterCouplingOnlyShrinks(t *testing.T) {
+	for _, unit := range productAdapters {
 		facts := inspectUnit(t, unit.path)
 		for _, metric := range []string{metricIAM, metricConfigGet, metricConfigPrincipal} {
 			got, budget := facts.counts[metric], unit.budget[metric]
 			switch {
 			case got > budget:
-				t.Errorf("%s has %d %s references, over its budget of %d; inject the dependency instead (llm-gateway#67)", unit.path, got, metric, budget)
+				t.Errorf("%s has %d %s references, over its budget of %d; pass the value or the operation's settings snapshot in instead (llm-gateway#75)", unit.path, got, metric, budget)
 			case got < budget:
 				t.Errorf("%s has %d %s references, under its budget of %d; lower the budget to %d to lock in the progress", unit.path, got, metric, budget, got)
 			}
@@ -112,7 +156,7 @@ func inspectUnit(t *testing.T, relative string) unitFacts {
 	target := filepath.Join(root, filepath.FromSlash(relative))
 	info, err := os.Stat(target)
 	if err != nil {
-		t.Fatalf("core-bound unit %s is missing; update the boundary list if it moved: %v", relative, err)
+		t.Fatalf("adapter unit %s is missing; update productAdapters if it moved: %v", relative, err)
 	}
 	var files []string
 	if info.IsDir() {
@@ -255,9 +299,9 @@ func copyScope(scope map[string]bool) map[string]bool {
 	return inner
 }
 
-func isForbidden(path string) bool {
-	for _, forbidden := range forbiddenImports {
-		if path == forbidden || strings.HasPrefix(path, forbidden+"/") {
+func isProductLayer(path string) bool {
+	for _, layer := range productLayers {
+		if path == layer || strings.HasPrefix(path, layer+"/") {
 			return true
 		}
 	}
