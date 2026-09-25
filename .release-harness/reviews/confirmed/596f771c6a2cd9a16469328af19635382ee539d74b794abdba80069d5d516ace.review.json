@@ -1,0 +1,227 @@
+{
+  "schema_version": "1.0.0",
+  "mode": "change",
+  "contract": {
+    "digest": "31b393ab3e80162226619c441694573993ac618382d74642101484a0bf2e9c80"
+  },
+  "authoring_provenance": {
+    "status": "established",
+    "path": ".release-harness/drafts/llm-gateway.record.json",
+    "digest": "6732ddf3dc8236b974e2aae5f81b546d89c2a466b6fb0a368d76620955bf981e"
+  },
+  "sources": [
+    {
+      "source_id": "primary",
+      "status": "established",
+      "repository_identity": "https://github.com/xibodev/llm-gateway.git",
+      "base_ref": "origin/main",
+      "base_commit": "ed0536e1379ef1bcc446f4362c914ee4011ee66f",
+      "merge_base": "ac358643fbffca583ee63f548b38defddcc20f81",
+      "head_commit": "a65b2f302f6e22fe6db7c88ed99f3068b6d93582",
+      "head_tree": "d9223da69417218c3319dbe5d159c8692cf8c599",
+      "reviewed_source_digest": "0c53e3331b4e1ca22dd61c7621d6e7b1d2a247941631feceb21ff5d270ae5df6",
+      "changed_paths": [
+        {
+          "status": "modified",
+          "path": "go/internal/providers/anonymous_profiles.go",
+          "old_blob": "da1e1b897c49d930d59872b3ba0a51bf2c32ade2",
+          "new_blob": "097df54ee3350700188b2c9a14068b6c7ca3738f"
+        },
+        {
+          "status": "added",
+          "path": "go/internal/providers/antigravity_vertical.go",
+          "old_blob": "0000000000000000000000000000000000000000",
+          "new_blob": "f3a2e3d0416e4e4cc017639d402756c80bb00038"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/providers/codex_test.go",
+          "old_blob": "96d9932b46170d8e29692b3ca9d50f0fc18c9751",
+          "new_blob": "6f0e3979dac639488c9ab4e754bb978652c7c6e5"
+        },
+        {
+          "status": "added",
+          "path": "go/internal/providers/codex_vertical.go",
+          "old_blob": "0000000000000000000000000000000000000000",
+          "new_blob": "4d5998776d103745baaf7ee7e0487a8f9908cc62"
+        },
+        {
+          "status": "added",
+          "path": "go/internal/providers/core_runtime_test.go",
+          "old_blob": "0000000000000000000000000000000000000000",
+          "new_blob": "7a6f8555aeb91810d5d20c0df8f2a0846c4bc9f0"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/providers/core_runtime.go",
+          "old_blob": "450cb674d54802a3bc0195fe0e85b80a945d92d6",
+          "new_blob": "72946336d17818e7588b15ff4c7ba00846989060"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/providers/error_classification.go",
+          "old_blob": "e00b381cf6ab6cfde8c245ce7af50f2bdf7d7396",
+          "new_blob": "04c82657462093ce44633583667606f1d113c938"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/providers/factory.go",
+          "old_blob": "a921c53336c32a96f045b137227612d328d67b42",
+          "new_blob": "c27c1d263d9641118edd231b882e1567afef319e"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/providers/openai_auth.go",
+          "old_blob": "fa1ca21f364f92a5ad3a6af64e8431c1fa7d1db4",
+          "new_blob": "6d2b90c0a13d6aa6429751fa0b6e97aa0f759143"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/providers/openai_v043_test.go",
+          "old_blob": "cf8ac3053cddff4ec71c6b54d36ce5d3b6034fc3",
+          "new_blob": "5194846b11c127fef8906abcf23da4748c980ce9"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/providers/openai.go",
+          "old_blob": "fac3d9a751309a1da681cc698cf318dd77d740d3",
+          "new_blob": "9fedd13f115d0521c069572a3159d0396940a2c1"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/providers/opencode_zen_test.go",
+          "old_blob": "8757bcd75fa2bb0a829fc5b47c3f9401f7bca764",
+          "new_blob": "b311c966ff2c34bbcbdebb2b67bafba6255f2ae3"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/providers/opencode_zen.go",
+          "old_blob": "1ac9d2f58d96dfd17b0718dc83f85a5be293cb77",
+          "new_blob": "c9a42ac442eb3a3207495ec55a7063bee3856279"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/providers/proxy.go",
+          "old_blob": "db8a1baa2ff3a81f5293aca4de9b214dfca13ac8",
+          "new_blob": "d259d52dc0fd622e6316a51362cce6796e935e69"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/providers/runtime.go",
+          "old_blob": "379e32785c3d8cf9b0eced5ba92cd70278caa200",
+          "new_blob": "e442c06874b36aee6d85b33bc4890717a21e756f"
+        },
+        {
+          "status": "added",
+          "path": "go/internal/providers/zen_failure.go",
+          "old_blob": "0000000000000000000000000000000000000000",
+          "new_blob": "d51412c3ad03fb496aed9918f619db00c1b5bb7a"
+        },
+        {
+          "status": "added",
+          "path": "go/internal/providers/zen_provider.go",
+          "old_blob": "0000000000000000000000000000000000000000",
+          "new_blob": "d6f5bc7a0a638f41ce3ef205ad3329db54f7538e"
+        },
+        {
+          "status": "added",
+          "path": "go/internal/providers/zen_runtime_test.go",
+          "old_blob": "0000000000000000000000000000000000000000",
+          "new_blob": "3431384affae91d1cba0f9d0a8d0e31952475017"
+        },
+        {
+          "status": "added",
+          "path": "go/internal/providers/zen_vertical.go",
+          "old_blob": "0000000000000000000000000000000000000000",
+          "new_blob": "9e2698e005e6e4222daa84c0c7ea790a700fca0c"
+        }
+      ]
+    }
+  ],
+  "facts": [
+    {
+      "id": "registration-table",
+      "claim": "Core-served provider types are one entry each in a per-type registration table (openai_codex, google_antigravity, opencode_zen), each in its own file; the Runtime's single credential store dispatches by instance type, and Codex and Antigravity behave as before.",
+      "status": "observed",
+      "evidence": {
+        "source": "go/internal/providers/core_runtime.go, codex_vertical.go, antigravity_vertical.go, zen_vertical.go"
+      }
+    },
+    {
+      "id": "zen-through-runtime",
+      "claim": "OpenCode Zen Chat, Responses and both streams go through the llmgw-core Runtime with core's Zen vertical. Credentials resolve with connection precedence (personal connection, system connection, configured key); when none resolves the request is sent anonymously, as before. The gateway's Zen branches in OpenAIProvider and bearerAuth and its Zen stream assembly are removed; instruction sanitizing, event re-encoding, the adapted header and the Chat fallback on a Responses 404 or 405 stay in the gateway, and client-visible stream data is unchanged.",
+      "status": "observed",
+      "evidence": {
+        "source": "go/internal/providers/zen_vertical.go, opencode_zen.go, openai.go; go/internal/api/testdata unchanged"
+      }
+    },
+    {
+      "id": "deviations",
+      "claim": "Edge-case differences: error messages come from core and no longer quote upstream bodies; an HTTP-date Retry-After reaches the client as seconds; credentials are resolved per request, so a revoked connection is never used; a stream that breaks while an anonymous completion is assembled is retried or failed over per core's classification. None affects a successful request, the CLI, health or the public models list.",
+      "status": "observed",
+      "evidence": {
+        "source": "go/internal/providers/zen_vertical.go and Zen tests"
+      }
+    },
+    {
+      "id": "suite",
+      "claim": "The full Go suite passes with HTTP_PROXY and HTTPS_PROXY unreachable with unchanged characterization goldens and coupling budgets; gofmt, vet, govulncheck (0 reachable), check-docs and git diff --check pass.",
+      "status": "observed",
+      "evidence": {
+        "source": "local gate run on the reviewed head"
+      }
+    }
+  ],
+  "impact": {
+    "assertions": [
+      {
+        "id": "A1",
+        "impact": "unchanged",
+        "supported_by": [
+          "zen-through-runtime",
+          "deviations",
+          "suite"
+        ]
+      },
+      {
+        "id": "A2",
+        "impact": "unchanged",
+        "supported_by": [
+          "zen-through-runtime",
+          "deviations",
+          "suite"
+        ]
+      },
+      {
+        "id": "A3",
+        "impact": "unchanged",
+        "supported_by": [
+          "zen-through-runtime",
+          "deviations",
+          "suite"
+        ]
+      },
+      {
+        "id": "A4",
+        "impact": "unchanged",
+        "supported_by": [
+          "zen-through-runtime",
+          "deviations",
+          "suite"
+        ]
+      }
+    ],
+    "requires": [],
+    "possible_binding_changes": []
+  },
+  "questions": [],
+  "conclusion": {
+    "action": "reuse_contract",
+    "summary": "OpenCode Zen moves onto the llmgw-core Runtime and vertical behind a per-type registration table; client-visible output, CLI, health and models behavior are unchanged."
+  },
+  "proposed": {
+    "by": "zen-core-runtime",
+    "at": "2026-09-25T09:47:38.806Z"
+  },
+  "digest": "596f771c6a2cd9a16469328af19635382ee539d74b794abdba80069d5d516ace"
+}
