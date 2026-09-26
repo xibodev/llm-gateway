@@ -1,0 +1,118 @@
+{
+  "schema_version": "1.0.0",
+  "mode": "change",
+  "contract": {
+    "digest": "31b393ab3e80162226619c441694573993ac618382d74642101484a0bf2e9c80"
+  },
+  "authoring_provenance": {
+    "status": "established",
+    "path": ".release-harness/drafts/llm-gateway.record.json",
+    "digest": "6732ddf3dc8236b974e2aae5f81b546d89c2a466b6fb0a368d76620955bf981e"
+  },
+  "sources": [
+    {
+      "source_id": "primary",
+      "status": "established",
+      "repository_identity": "https://github.com/xibodev/llm-gateway.git",
+      "base_ref": "d9234312592ff87ad203bc595cc815a808e9d112",
+      "base_commit": "d9234312592ff87ad203bc595cc815a808e9d112",
+      "merge_base": "d9234312592ff87ad203bc595cc815a808e9d112",
+      "head_commit": "7a298ea2cef7d82e4f5d449969cd2000096d7c16",
+      "head_tree": "da237c0e14687233684dbaea7144da71a0fdcf6a",
+      "reviewed_source_digest": "4af0d54cc2d54894479ec4f75eb48194058d06e5ced4f2162db664ba20d0da41",
+      "changed_paths": [
+        {
+          "status": "added",
+          "path": "go/internal/providers/factory_extension_test.go",
+          "old_blob": "0000000000000000000000000000000000000000",
+          "new_blob": "0e7154263e41c8bf3ccd13d02b7f2ce1950c5f2a"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/providers/factory.go",
+          "old_blob": "65ba64a9e97524abfcbd142d903ff68ad986bdcf",
+          "new_blob": "5c03c5338bada5721b151d90e3fe228e77806ec9"
+        }
+      ]
+    }
+  ],
+  "facts": [
+    {
+      "id": "provider-runtime-scope",
+      "claim": "The only runtime change is in provider construction and speech-capability detection; CLI version, CLI health, HTTP health, and HTTP model-list handlers are not changed.",
+      "status": "observed",
+      "evidence": {
+        "source": "git diff d9234312592ff87ad203bc595cc815a808e9d112..7a298ea2cef7d82e4f5d449969cd2000096d7c16 -- go/internal/providers"
+      }
+    },
+    {
+      "id": "codex-extension-dispatch",
+      "claim": "A provider whose registry identity is openai_codex now selects the private extension transport while retaining its OpenAI-compatible public runtime type.",
+      "status": "observed",
+      "evidence": {
+        "source": "go/internal/providers/factory.go"
+      }
+    },
+    {
+      "id": "speech-capability-guard",
+      "claim": "Extension providers other than Edge TTS are no longer exposed as speech synthesizers.",
+      "status": "observed",
+      "evidence": {
+        "source": "go/internal/providers/factory.go"
+      }
+    },
+    {
+      "id": "provider-regressions-covered",
+      "claim": "Regression tests cover Codex registry dispatch and restrict extension speech synthesis to Edge TTS.",
+      "status": "observed",
+      "evidence": {
+        "source": "go/internal/providers/factory_extension_test.go"
+      }
+    }
+  ],
+  "impact": {
+    "assertions": [
+      {
+        "id": "A1",
+        "impact": "unchanged",
+        "supported_by": [
+          "provider-runtime-scope"
+        ]
+      },
+      {
+        "id": "A2",
+        "impact": "unchanged",
+        "supported_by": [
+          "provider-runtime-scope"
+        ]
+      },
+      {
+        "id": "A3",
+        "impact": "unchanged",
+        "supported_by": [
+          "provider-runtime-scope"
+        ]
+      },
+      {
+        "id": "A4",
+        "impact": "unchanged",
+        "supported_by": [
+          "provider-runtime-scope",
+          "codex-extension-dispatch",
+          "provider-regressions-covered"
+        ]
+      }
+    ],
+    "requires": [],
+    "possible_binding_changes": []
+  },
+  "questions": [],
+  "conclusion": {
+    "action": "reuse_contract",
+    "summary": "The change corrects private provider dispatch and capability reporting without changing the accepted CLI, health, or model-list proposition. The existing contract remains appropriate."
+  },
+  "proposed": {
+    "by": "Abdul Gafar Manuel Meque <17961065+mekjr1@users.noreply.github.com>",
+    "at": "2026-09-26T14:47:00.000Z"
+  }
+}
