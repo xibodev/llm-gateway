@@ -41,6 +41,8 @@ var coreVerticalCases = map[string]struct {
 	"azure":            {&config.ProviderConfig{Type: "azure_openai", RegistryID: "azure_openai"}, azureCoreType},
 	"ollama":           {&config.ProviderConfig{Type: " Ollama "}, ollamaCoreType},
 	"edge tts":         {&config.ProviderConfig{Type: "edge_tts"}, ExtensionTypeEdgeTTS},
+	"elevenlabs":       {&config.ProviderConfig{Type: " ElevenLabs "}, elevenLabsCoreType},
+	"mimo":             {&config.ProviderConfig{Type: "MiMo"}, miMoCoreType},
 	"unknown":          {&config.ProviderConfig{Type: "unknown"}, ""},
 }
 

@@ -2,6 +2,7 @@ package api
 
 import (
 	"bytes"
+	"encoding/base64"
 	"encoding/json"
 	"io"
 	"mime/multipart"
@@ -243,6 +244,97 @@ func TestAudioBodyReadFailureRecordsEffectiveFailureAndCloses(t *testing.T) {
 	}
 	if count != 1 || status != 502 || errorCode != "upstream_body_read" {
 		t.Fatalf("usage=(count=%d status=%d code=%q)", count, status, errorCode)
+	}
+}
+
+func configureCoreAudioProvider(t *testing.T, providerID, providerType, upstreamURL string) {
+	t.Helper()
+	config.Update(func(settings *config.Settings) {
+		settings.Providers = map[string]*config.ProviderConfig{
+			providerID: {
+				Type: providerType, BaseURL: upstreamURL + "/v1", APIKey: "fixture-audio-key",
+			},
+		}
+		settings.Endpoints = map[string]*config.EndpointConfig{}
+		settings.AllowUnauthenticatedAPI = true
+	})
+	providers.ResetProviders()
+}
+
+func TestElevenLabsTranscriptionUsesCoreAudioSurface(t *testing.T) {
+	resetState(t)
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1/speech-to-text" || r.Header.Get("xi-api-key") != "fixture-audio-key" {
+			t.Fatalf("request path=%q key=%q", r.URL.Path, r.Header.Get("xi-api-key"))
+		}
+		if err := r.ParseMultipartForm(1 << 20); err != nil {
+			t.Fatal(err)
+		}
+		if got := r.FormValue("model_id"); got != "scribe_v2" {
+			t.Fatalf("model_id=%q", got)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"text":"fixture transcript","words":[]}`))
+	}))
+	defer upstream.Close()
+	configureCoreAudioProvider(t, "eleven", "elevenlabs", upstream.URL)
+
+	var body bytes.Buffer
+	writer := multipart.NewWriter(&body)
+	file, _ := writer.CreateFormFile("file", "sample.wav")
+	_, _ = file.Write([]byte("fixture wav"))
+	_ = writer.WriteField("model", "eleven/scribe_v2")
+	_ = writer.Close()
+	request := httptest.NewRequest(http.MethodPost, "/v1/audio/transcriptions", &body)
+	request.Header.Set("Content-Type", writer.FormDataContentType())
+	response := httptest.NewRecorder()
+	NewServer(Runtime{}).ServeHTTP(response, request)
+
+	if response.Code != http.StatusOK || response.Header().Get("Content-Type") != "application/json" {
+		t.Fatalf("status=%d content-type=%q body=%s", response.Code, response.Header().Get("Content-Type"), response.Body.String())
+	}
+	if got := transcriptionText(response.Body.Bytes()); got != "fixture transcript" {
+		t.Fatalf("transcript=%q", got)
+	}
+}
+
+func TestMiMoSpeechUsesCoreAudioSurface(t *testing.T) {
+	resetState(t)
+	wantAudio := []byte("fixture wav audio")
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1/chat/completions" || r.Header.Get("Api-Key") != "fixture-audio-key" {
+			t.Fatalf("request path=%q key=%q", r.URL.Path, r.Header.Get("Api-Key"))
+		}
+		if authorization := r.Header.Get("Authorization"); authorization != "" {
+			t.Fatalf("unexpected Authorization header %q", authorization)
+		}
+		var payload map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+			t.Fatal(err)
+		}
+		if payload["model"] != "mimo-v2.5-tts" {
+			t.Fatalf("model=%v", payload["model"])
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"choices": []any{map[string]any{"message": map[string]any{
+				"audio": map[string]any{"data": base64.StdEncoding.EncodeToString(wantAudio), "format": "wav"},
+			}}},
+		})
+	}))
+	defer upstream.Close()
+	configureCoreAudioProvider(t, "mimo", "mimo", upstream.URL)
+
+	request := httptest.NewRequest(http.MethodPost, "/v1/audio/speech", strings.NewReader(
+		`{"model":"mimo/mimo-v2.5-tts","input":"hello","voice":"mimo_default","response_format":"wav"}`,
+	))
+	request.Header.Set("Content-Type", "application/json")
+	response := httptest.NewRecorder()
+	NewServer(Runtime{}).ServeHTTP(response, request)
+
+	if response.Code != http.StatusOK || response.Header().Get("Content-Type") != "audio/wav" ||
+		!bytes.Equal(response.Body.Bytes(), wantAudio) {
+		t.Fatalf("status=%d content-type=%q body=%q", response.Code, response.Header().Get("Content-Type"), response.Body.Bytes())
 	}
 }
 

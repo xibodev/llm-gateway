@@ -149,6 +149,16 @@ func ProviderHTTPTarget(providerID string, caller core.Caller) (string, http.Hea
 	return Current().ProviderHTTPTarget(providerID, caller)
 }
 
+func CoreServesSurfaceForPrincipal(providerID, model string, surface core.ModelSurface, caller core.Caller) bool {
+	return Current().CoreServesSurfaceForPrincipal(providerID, model, surface, caller)
+}
+
+func InvokeCoreSurfaceForPrincipal(
+	ctx context.Context, providerID string, caller core.Caller, request core.Request,
+) (core.Response, bool, error) {
+	return Current().InvokeCoreSurfaceForPrincipal(ctx, providerID, caller, request)
+}
+
 type CodexEndpoints struct {
 	ResponsesURL     string
 	ResponsesBaseURL string
@@ -259,7 +269,7 @@ type mockAuthAdapter struct {
 }
 
 func (m mockAuthAdapter) ID() string             { return m.id }
-func (m mockAuthAdapter) AdapterID() string     { return m.id }
+func (m mockAuthAdapter) AdapterID() string      { return m.id }
 func (m mockAuthAdapter) CredentialKind() string { return "oauth" }
 func (m mockAuthAdapter) BrowserAuth(context.Context, string, any) (any, error) {
 	return nil, errors.New("OAuth is handled via oauthflow service or extension")

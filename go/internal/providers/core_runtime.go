@@ -39,6 +39,8 @@ func (rt *Runtime) coreVerticals() map[string]coreVertical {
 		ollamaCoreType:           rt.ollamaCoreVertical(),
 		openAICompatibleCoreType: rt.openAICompatibleCoreVertical(),
 		bedrockCoreType:          rt.bedrockCoreVertical(),
+		elevenLabsCoreType:       rt.audioCoreVertical(elevenLabsCoreType),
+		miMoCoreType:             rt.audioCoreVertical(miMoCoreType),
 	}
 	for _, extType := range []string{
 		ExtensionTypeCodex,

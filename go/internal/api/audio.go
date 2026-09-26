@@ -65,11 +65,27 @@ func resolveAudioTarget(principal *config.Principal, model string, operation cor
 				}
 			}
 		}
+		if surface, ok := audioSurface(operation); ok && providers.CoreServesSurfaceForPrincipal(
+			target.Provider, target.Model, surface, callerOf(principal),
+		) {
+			return target.Provider, target.Model, 0, ""
+		}
 		if _, _, ok := providers.ProviderHTTPTarget(target.Provider, callerOf(principal)); ok {
 			return target.Provider, target.Model, 0, ""
 		}
 	}
 	return "", "", http.StatusBadRequest, "no route member supports the requested operation"
+}
+
+func audioSurface(operation core.ModelOperation) (core.ModelSurface, bool) {
+	switch operation {
+	case core.ModelOperationAudioIn:
+		return core.ModelSurfaceAudioTranscriptions, true
+	case core.ModelOperationAudioOut:
+		return core.ModelSurfaceAudioSpeech, true
+	default:
+		return "", false
+	}
 }
 
 func copyAuthHeaders(dst *http.Request, headers http.Header, skipContentType bool) {
@@ -147,12 +163,6 @@ func handleTranscriptions(w http.ResponseWriter, r *http.Request) {
 		writeError(w, status, msg)
 		return
 	}
-	base, headers, okp := providers.ProviderHTTPTarget(provider, callerOf(principal))
-	if !okp {
-		recordFailureUsage("openai.transcriptions", r.FormValue("model"), principal, 400, "audio_unsupported", started)
-		writeError(w, 400, "provider '"+provider+"' does not support audio (use an OpenAI-compatible provider such as LocalAI)")
-		return
-	}
 	file, fh, err := r.FormFile("file")
 	if err != nil {
 		recordFailureUsage("openai.transcriptions", r.FormValue("model"), principal, 400, "missing_file", started)
@@ -172,10 +182,45 @@ func handleTranscriptions(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	_ = mw.Close()
+	contentType := mw.FormDataContentType()
+
+	coreResponse, handled, coreErr := providers.InvokeCoreSurfaceForPrincipal(
+		r.Context(), provider, callerOf(principal), core.Request{
+			Surface: core.ModelSurfaceAudioTranscriptions, Model: upstreamModel,
+			Body: buf.Bytes(), ContentType: contentType,
+		},
+	)
+	if handled {
+		status := http.StatusOK
+		errorCode := ""
+		if coreErr != nil {
+			status, errorCode = upstreamErrorStatus(coreErr), "upstream"
+		}
+		router.RecordUsage(router.UsageRecord{
+			Endpoint: "openai.transcriptions", RequestedModel: provider + "/" + upstreamModel, RoutedModel: upstreamModel,
+			Provider: provider, Project: principal.Project, Key: principal.Key,
+			ProjectID: principal.ProjectID, PrincipalID: principal.PrincipalID, KeyID: principal.KeyID,
+			StatusCode: status, LatencyMS: time.Since(started).Milliseconds(),
+			ErrorCode: errorCode, IsStub: isStub(provider),
+		})
+		if coreErr != nil {
+			writeUpstreamError(w, coreErr)
+			return
+		}
+		writeAPIProxySuccess(w, status, coreResponse.ContentType, coreResponse.Body)
+		return
+	}
+
+	base, headers, okp := providers.ProviderHTTPTarget(provider, callerOf(principal))
+	if !okp {
+		recordFailureUsage("openai.transcriptions", r.FormValue("model"), principal, 400, "audio_unsupported", started)
+		writeError(w, 400, "provider '"+provider+"' does not support audio (use an OpenAI-compatible provider such as LocalAI)")
+		return
+	}
 
 	req, _ := http.NewRequestWithContext(r.Context(), "POST", base+"/audio/transcriptions", &buf)
 	copyAuthHeaders(req, headers, true)
-	req.Header.Set("Content-Type", mw.FormDataContentType())
+	req.Header.Set("Content-Type", contentType)
 	resp, err := audioClient.Do(req)
 	if err != nil {
 		recordFailureUsage("openai.transcriptions", r.FormValue("model"), principal, 502, "upstream", started)
@@ -222,14 +267,40 @@ func handleSpeech(w http.ResponseWriter, r *http.Request) {
 		serveNativeSpeech(r.Context(), w, body, synthesizer, provider, upstreamModel, principal, started, reqModel)
 		return
 	}
+	body["model"] = upstreamModel
+	payload, _ := json.Marshal(body)
+	coreResponse, handled, coreErr := providers.InvokeCoreSurfaceForPrincipal(
+		r.Context(), provider, callerOf(principal), core.Request{
+			Surface: core.ModelSurfaceAudioSpeech, Model: upstreamModel,
+			Body: payload, ContentType: core.ContentTypeJSON,
+		},
+	)
+	if handled {
+		status := http.StatusOK
+		errorCode := ""
+		if coreErr != nil {
+			status, errorCode = upstreamErrorStatus(coreErr), "upstream"
+		}
+		router.RecordUsage(router.UsageRecord{
+			Endpoint: "openai.speech", RequestedModel: provider + "/" + upstreamModel, RoutedModel: upstreamModel,
+			Provider: provider, Project: principal.Project, Key: principal.Key,
+			ProjectID: principal.ProjectID, PrincipalID: principal.PrincipalID, KeyID: principal.KeyID,
+			StatusCode: status, LatencyMS: time.Since(started).Milliseconds(),
+			ErrorCode: errorCode, IsStub: isStub(provider),
+		})
+		if coreErr != nil {
+			writeUpstreamError(w, coreErr)
+			return
+		}
+		writeAPIProxySuccess(w, status, coreResponse.ContentType, coreResponse.Body)
+		return
+	}
 	base, headers, okp := providers.ProviderHTTPTarget(provider, callerOf(principal))
 	if !okp {
 		recordFailureUsage("openai.speech", reqModel, principal, 400, "audio_unsupported", started)
 		writeError(w, 400, "provider '"+provider+"' does not support audio (use an OpenAI-compatible provider such as LocalAI)")
 		return
 	}
-	body["model"] = upstreamModel
-	payload, _ := json.Marshal(body)
 	req, _ := http.NewRequestWithContext(r.Context(), "POST", base+"/audio/speech", bytes.NewReader(payload))
 	copyAuthHeaders(req, headers, false)
 	req.Header.Set("Content-Type", "application/json")

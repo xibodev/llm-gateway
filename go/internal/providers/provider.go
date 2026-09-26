@@ -11,6 +11,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"strconv"
 	"strings"
 	"time"
 
@@ -557,7 +558,7 @@ func UpstreamStatus(err error) int {
 	if asError(err, &e) {
 		return e.Status
 	}
-	return 0
+	return core.ClassifyError(err).StatusCode
 }
 
 // InvocationRetryAfter returns the upstream Retry-After value, when supplied.
@@ -565,6 +566,9 @@ func InvocationRetryAfter(err error) string {
 	var e *InvocationError
 	if asError(err, &e) {
 		return e.RetryAfter
+	}
+	if delay := core.ClassifyError(err).RetryAfter; delay > 0 {
+		return strconv.FormatInt(int64(delay/time.Second), 10)
 	}
 	return ""
 }
@@ -578,7 +582,11 @@ func IsInvocation(err error) bool {
 // IsConfig reports whether err is (or wraps) a ConfigError.
 func IsConfig(err error) bool {
 	var e *ConfigError
-	return asError(err, &e)
+	if asError(err, &e) {
+		return true
+	}
+	var providerErr *core.ProviderError
+	return errors.As(err, &providerErr) && providerErr.Class == core.ProviderErrorConfiguration
 }
 
 // IsThrottle inspects an error message for throttle/rate-limit signals.

@@ -29,6 +29,7 @@ type playgroundSpeechBody struct {
 	ProjectID   string `json:"project_id"`
 	PrincipalID string `json:"principal_id"`
 	Model       string `json:"model"`
+	Voice       string `json:"voice,omitempty"`
 	Input       string `json:"input"`
 	Speed       any    `json:"speed"`
 }
@@ -97,6 +98,11 @@ func audioPlaygroundTarget(principal *config.Principal, model string, operation 
 					return target.Provider, target.Model, 0, ""
 				}
 			}
+		}
+		if surface, ok := audioSurface(operation); ok && providers.CoreServesSurfaceForPrincipal(
+			target.Provider, target.Model, surface, callerOf(principal),
+		) {
+			return target.Provider, target.Model, 0, ""
 		}
 		if _, _, ok := providers.ProviderHTTPTarget(target.Provider, callerOf(principal)); ok {
 			return target.Provider, target.Model, 0, ""
@@ -174,7 +180,7 @@ func handleAdminPlaygroundSpeech(w http.ResponseWriter, r *http.Request) {
 
 	started := time.Now()
 	audio, format, contentType, upstreamStatus, err := playgroundSpeechAudio(
-		r.Context(), providerID, voice, body.Input, speed, principal,
+		r.Context(), providerID, voice, body.Voice, body.Input, speed, principal,
 	)
 	latency := time.Since(started).Milliseconds()
 	if err != nil {
@@ -320,7 +326,7 @@ func recordPlaygroundEmbeddingUsage(requestedModel, providerID, upstreamModel st
 
 func playgroundSpeechAudio(
 	ctx context.Context,
-	providerID, model, input string, speed float64,
+	providerID, model, voice, input string, speed float64,
 	principal *config.Principal,
 ) ([]byte, string, string, int, error) {
 	if synthesizer, native := providers.SpeechSynthesizerForPrincipal(
@@ -336,14 +342,35 @@ func playgroundSpeechAudio(
 		}
 		return audio, format, "audio/mpeg", 0, err
 	}
+	if strings.TrimSpace(voice) == "" {
+		voice = model
+	}
+	payload, err := json.Marshal(map[string]any{
+		"model": model, "voice": voice, "input": input, "speed": speed,
+	})
+	if err != nil {
+		return nil, "", "", 0, err
+	}
+	coreResponse, handled, coreErr := providers.InvokeCoreSurfaceForPrincipal(
+		ctx, providerID, callerOf(principal), core.Request{
+			Surface: core.ModelSurfaceAudioSpeech, Model: model,
+			Body: payload, ContentType: core.ContentTypeJSON,
+		},
+	)
+	if handled {
+		if coreErr != nil {
+			return nil, "", "", upstreamErrorStatus(coreErr), coreErr
+		}
+		return coreResponse.Body, audioFormat(coreResponse.ContentType), coreResponse.ContentType, http.StatusOK, nil
+	}
 	base, headers, ok := providers.ProviderHTTPTarget(providerID, callerOf(principal))
 	if !ok {
 		return nil, "", "", http.StatusBadRequest, fmt.Errorf(
 			"provider does not expose an OpenAI-compatible speech endpoint",
 		)
 	}
-	payload, err := json.Marshal(map[string]any{
-		"model": model, "voice": model, "input": input,
+	payload, err = json.Marshal(map[string]any{
+		"model": model, "voice": voice, "input": input,
 		"speed": speed, "response_format": "mp3",
 	})
 	if err != nil {
@@ -381,8 +408,21 @@ func playgroundSpeechAudio(
 	return audio, "mp3", contentType, response.StatusCode, nil
 }
 
-// POST /admin/api/playground/transcription — multipart audio in, text out,
-// proxied to the resolved OpenAI-compatible transcription provider.
+func audioFormat(contentType string) string {
+	contentType = strings.ToLower(strings.TrimSpace(strings.Split(contentType, ";")[0]))
+	switch contentType {
+	case "audio/wav", "audio/wave", "audio/x-wav":
+		return "wav"
+	case "audio/l16":
+		return "pcm16"
+	case "audio/mpeg", "audio/mp3":
+		return "mp3"
+	default:
+		return "audio"
+	}
+}
+
+// POST /admin/api/playground/transcription — multipart audio in, text out.
 func handleAdminPlaygroundTranscription(w http.ResponseWriter, r *http.Request) {
 	if !adminAuthed(w, r) {
 		return
@@ -401,11 +441,6 @@ func handleAdminPlaygroundTranscription(w http.ResponseWriter, r *http.Request) 
 		writeError(w, status, message)
 		return
 	}
-	base, headers, ok := providers.ProviderHTTPTarget(providerID, callerOf(principal))
-	if !ok {
-		writeError(w, http.StatusBadRequest, "provider '"+providerID+"' does not expose an OpenAI-compatible transcription endpoint")
-		return
-	}
 	file, header, err := r.FormFile("file")
 	if err != nil {
 		writeError(w, http.StatusBadRequest, "an audio 'file' is required")
@@ -419,7 +454,48 @@ func handleAdminPlaygroundTranscription(w http.ResponseWriter, r *http.Request) 
 		writeError(w, http.StatusInternalServerError, "could not build the upstream request")
 		return
 	}
-	request, err := http.NewRequestWithContext(r.Context(), http.MethodPost, base+"/audio/transcriptions", body)
+	coreResponse, handled, coreErr := providers.InvokeCoreSurfaceForPrincipal(
+		r.Context(), providerID, callerOf(principal), core.Request{
+			Surface: core.ModelSurfaceAudioTranscriptions, Model: upstreamModel,
+			Body: body, ContentType: contentType,
+		},
+	)
+	if handled {
+		latency := time.Since(started).Milliseconds()
+		status := http.StatusOK
+		errorCode := ""
+		if coreErr != nil {
+			status, errorCode = upstreamErrorStatus(coreErr), "upstream"
+		}
+		router.RecordUsage(router.UsageRecord{
+			Endpoint: "playground.transcription", RequestedModel: r.FormValue("model"), RoutedModel: upstreamModel,
+			Provider: providerID, Project: project.Slug, Key: "playground", ProjectID: project.ID,
+			PrincipalID: principal.PrincipalID, StatusCode: status, LatencyMS: latency, ErrorCode: errorCode,
+		})
+		result := "success"
+		if coreErr != nil {
+			result = "failure"
+		}
+		_ = iam.RecordAudit(iam.AuditEvent{ActorPrincipalID: principal.PrincipalID, Action: "playground.transcription", TargetType: "project", TargetID: project.ID, Result: result, Detail: map[string]any{"model": r.FormValue("model")}})
+		if coreErr != nil {
+			writeUpstreamError(w, coreErr)
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]any{
+			"project_id": project.ID, "principal_id": principal.PrincipalID,
+			"served":     map[string]any{"provider": providerID, "model": upstreamModel},
+			"latency_ms": latency,
+			"text":       transcriptionText(coreResponse.Body),
+			"raw":        safePlaygroundValue(decodeJSONObject(coreResponse.Body)),
+		})
+		return
+	}
+	base, headers, ok := providers.ProviderHTTPTarget(providerID, callerOf(principal))
+	if !ok {
+		writeError(w, http.StatusBadRequest, "provider '"+providerID+"' does not expose an OpenAI-compatible transcription endpoint")
+		return
+	}
+	request, err := http.NewRequestWithContext(r.Context(), http.MethodPost, base+"/audio/transcriptions", bytes.NewReader(body))
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "could not build the upstream request")
 		return
@@ -461,7 +537,7 @@ func handleAdminPlaygroundTranscription(w http.ResponseWriter, r *http.Request) 
 
 // multipartAudioRequest rebuilds the uploaded audio as an upstream multipart
 // body with the resolved model name.
-func multipartAudioRequest(file io.Reader, filename, model, language string) (io.Reader, string, error) {
+func multipartAudioRequest(file io.Reader, filename, model, language string) ([]byte, string, error) {
 	var buf bytes.Buffer
 	writer := multipart.NewWriter(&buf)
 	part, err := writer.CreateFormFile("file", filename)
@@ -482,7 +558,7 @@ func multipartAudioRequest(file io.Reader, filename, model, language string) (io
 	if err := writer.Close(); err != nil {
 		return nil, "", err
 	}
-	return &buf, writer.FormDataContentType(), nil
+	return buf.Bytes(), writer.FormDataContentType(), nil
 }
 
 func decodeJSONObject(payload []byte) map[string]any {

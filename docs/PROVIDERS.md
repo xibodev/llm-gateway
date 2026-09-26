@@ -42,6 +42,8 @@ is `endpoints`.
 | Ollama | Native Ollama | None | System | Local `/api/tags` discovery and chat/tools. |
 | LocalAI | OpenAI-compatible | Optional API key | System or personal | Audio capabilities may be inferred from model names. |
 | Edge TTS | Native speech | None by default | System | Unofficial public Edge read-aloud endpoint/token; may change. |
+| ElevenLabs | Native speech | API key | System or personal | Direct speech-to-text and text-to-speech through the OpenAI audio surfaces; voice IDs remain request parameters. |
+| Xiaomi MiMo | Chat Completions audio | API key | System or personal | Direct text-to-speech; the gateway maps OpenAI speech requests to MiMo's documented audio contract. |
 | OpenCode Zen | OpenAI-compatible | None by default | System or personal | Free anonymous multi-model European inference endpoint. |
 | Kilo Code | OpenAI-compatible | None by default | System or personal | Free anonymous multi-model inference endpoint with auto/free routing. |
 | LLM7.io | OpenAI-compatible | None by default | System or personal | Anonymous turbo-tier chat models. |

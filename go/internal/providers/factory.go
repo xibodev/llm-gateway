@@ -27,7 +27,7 @@ type providerCache struct {
 // after init: nothing writes it.
 var ProviderTypes = []string{
 	"openai_compatible", "anthropic", "bedrock", "github_copilot", "ollama", "litellm", "edge_tts",
-	"ai_studio", "vertex_ai", "azure_openai", "google_antigravity",
+	"ai_studio", "vertex_ai", "azure_openai", "google_antigravity", "elevenlabs", "mimo",
 }
 
 // instantiate builds the facade of providerID, configured as cfg, for
@@ -113,6 +113,8 @@ func (rt *Runtime) instantiate(
 		return rt.newBedrockProvider(settings, providerID, cfg, caller)
 	case "ollama":
 		return rt.newOllamaProvider(providerID, caller, ollamaBase(settings, cfg), cfg.TimeoutOr(settings.OllamaTimeoutSeconds))
+	case elevenLabsCoreType, miMoCoreType:
+		return rt.newAudioProviderFacade(settings, providerID, ptype)
 	case "echo":
 		return EchoProvider{}, nil
 	case "google_antigravity", "github_copilot", "openai_codex", "edge_tts", "opencode_zen_anonymous":
