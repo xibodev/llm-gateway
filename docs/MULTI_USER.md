@@ -134,6 +134,10 @@ Key and project policy support:
 - daily/monthly estimated micro-USD;
 - daily/monthly model credits.
 
+The key editor exposes every key quota field for both creation and later edits.
+Zero (or a blank draft saved as zero) means no additional limit at that key
+layer; project limits still apply independently.
+
 Keys additionally support `allowed_routes` and `routes_only`; these and
 `admin_managed` are not project policy fields. A non-empty `allowed_routes`
 restricts named endpoints but does not itself block direct models. `routes_only`

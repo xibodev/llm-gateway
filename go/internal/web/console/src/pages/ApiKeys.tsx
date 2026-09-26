@@ -5,6 +5,7 @@ import type { ConsoleMode } from "../lib/mode";
 import { asList, asRecord, numberValue, stringValue } from "../lib/records";
 import { EmptyState, PageHeading } from "../components/PageState";
 import { KeyScopeEditor, keyPolicySummary, keyQuotaLabels } from "../components/KeyScopeEditor";
+import { keyQuotaDraftsFor, keyQuotaFields, keyQuotaPolicyFromDrafts } from "../lib/key-policy";
 import { useDialogFocus } from "../components/useDialogFocus";
 import "../styles/keys.css";
 
@@ -71,8 +72,7 @@ export function ApiKeys({ data, mode, onChanged, initialContext }: {
   const [routeFilter, setRouteFilter] = useState(initialContext?.routeName ?? "");
   const initialScope = (): JSONRecord => ({ allowed_routes: initialContext?.routeName ? [initialContext.routeName] : [], routes_only: Boolean(initialContext?.routeName), allowed_providers: [], allowed_models: [] });
   const [scope, setScope] = useState<JSONRecord>(initialScope);
-  const [rpm, setRPM] = useState("0");
-  const [dailyRequests, setDailyRequests] = useState("0");
+  const [quotaDrafts, setQuotaDrafts] = useState<Record<string, string>>(() => keyQuotaDraftsFor({}));
   const [secret, setSecret] = useState("");
   const [revealed, setRevealed] = useState<Record<string, string>>({});
   const [revealingID, setRevealingID] = useState("");
@@ -93,12 +93,17 @@ export function ApiKeys({ data, mode, onChanged, initialContext }: {
       .map((value) => stringValue(value)).join(" ").toLowerCase().includes(search.trim().toLowerCase());
   });
   const editablePolicy = (): JSONRecord | null => {
-    if (![rpm, dailyRequests].every((value) => /^\d+$/.test(value.trim()) && Number.isSafeInteger(Number(value)))) {
-      setMessage("Requests per minute and daily requests must be nonnegative whole numbers.");
-      return null;
-    }
     // Read text drafts from the form too: Enter can submit before Preact renders input state.
     const form = editorFormRef.current ? new FormData(editorFormRef.current) : null;
+    const submittedQuotaDrafts = Object.fromEntries(keyQuotaFields.map((field) => {
+      const draft = form?.get(field);
+      return [field, typeof draft === "string" ? draft : quotaDrafts[field] ?? "0"];
+    }));
+    const quotas = keyQuotaPolicyFromDrafts(submittedQuotaDrafts);
+    if (!quotas.policy) {
+      setMessage(quotas.error);
+      return null;
+    }
     const lists = Object.fromEntries(["allowed_routes", "allowed_providers", "allowed_models"].map((field) => {
       const draft = form?.get(field);
       const values = typeof draft === "string" ? draft.split(",") : asList(scope[field]).map(String);
@@ -109,8 +114,7 @@ export function ApiKeys({ data, mode, onChanged, initialContext }: {
       setMessage("Select at least one allowed route for a routes-only key.");
       return null;
     }
-    // Only send editable fields; the server preserves all other quota limits.
-    return { rpm: Number(rpm), daily_requests: Number(dailyRequests), allowed_routes: allowedRoutes,
+    return { ...quotas.policy, allowed_routes: allowedRoutes,
       routes_only: scope.routes_only === true, allowed_providers: lists.allowed_providers, allowed_models: lists.allowed_models };
   };
   const create = async (event: Event) => {
@@ -184,8 +188,7 @@ export function ApiKeys({ data, mode, onChanged, initialContext }: {
   const edit = (key: JSONRecord) => {
     const policy = policyFor(key);
     if (stringValue(key.status) === "revoked" || (mode === "portal" && policy.admin_managed === true)) return;
-    setRPM(String(numberValue(policy.rpm)));
-    setDailyRequests(String(numberValue(policy.daily_requests)));
+    setQuotaDrafts(keyQuotaDraftsFor(policy));
     setScope(policy);
     setCreating(false);
     setEditing(key);
@@ -197,8 +200,7 @@ export function ApiKeys({ data, mode, onChanged, initialContext }: {
     setProjectID(nextProject);
     setPrincipalID(ownerFilter ? eligibleOwners(nextProject).some((owner) => owner.id === ownerFilter) ? ownerFilter : ownerDecisionRequired : "");
     setScope(initialScope());
-    setRPM("0");
-    setDailyRequests("0");
+    setQuotaDrafts(keyQuotaDraftsFor({}));
     setEditing(null);
     setCreating(true);
     setMessage("");
@@ -223,12 +225,12 @@ export function ApiKeys({ data, mode, onChanged, initialContext }: {
           <p class="form-help">Administrators can issue keys for active human and service members, including viewers. Portal self-service creation excludes viewers. Selecting the service default can reuse an identity created for the same project and key name.</p>
           {principalID === ownerDecisionRequired ? <p class="form-error" role="alert">The requested owner is unavailable in this project. Choose an owner or explicitly select the service identity option before creating a key.</p> : null}
         </> : <p class="form-help">Acts as {stringValue(self.display_name, "your signed-in identity")}.</p>}
-      </> : <p class="form-help">Owner: {stringValue(editing?.principal, stringValue(editing?.principal_id))}. Project: {stringValue(editing?.project, stringValue(editing?.project_id))}. Other quota limits are preserved.</p>}
+      </> : <p class="form-help">Owner: {stringValue(editing?.principal, stringValue(editing?.principal_id))}. Project: {stringValue(editing?.project, stringValue(editing?.project_id))}. All key quota limits can be edited below.</p>}
       <p class="form-help">{mode === "admin" ? "Keys created or updated here are admin-managed. Their owners may reveal or revoke them in the portal, but cannot change policy or status." : "Admin-managed keys can be revealed or revoked here; policy and status changes require an administrator."}</p>
       <p class="form-help">{(creating ? mode === "portal" || selectedOwner?.kind === "human" : editing?.principal_kind === "human") ? "Human keys use the owner's eligible private connections first, with provider-specific fallback to shared or legacy credentials." : "Service keys use eligible shared or legacy credentials, not a human's private subscriptions."} Copilot service access requires an active project binding; Codex OAuth is human-private. Scope does not pin a credential account, and paid fallback may occur.</p>
-      <div class="key-editor__limits"><label>Requests per minute<input inputMode="numeric" value={rpm} disabled={busy} onInput={(event) => setRPM(event.currentTarget.value)} /></label><label>Daily requests<input inputMode="numeric" value={dailyRequests} disabled={busy} onInput={(event) => setDailyRequests(event.currentTarget.value)} /></label></div>
+      <div class="key-editor__limits">{keyQuotaFields.map((field) => <label key={field}>{keyQuotaLabels[field]}<input name={field} inputMode="numeric" value={quotaDrafts[field] ?? "0"} disabled={busy} onInput={(event) => setQuotaDrafts((current) => ({ ...current, [field]: event.currentTarget.value }))} /></label>)}</div>
       <p class="form-help">Use 0 for no additional key limit. Project access rules and usage ceilings still apply; key settings cannot raise them. These are configured limits, not remaining balances.</p>
-      <KeyScopeEditor data={data} policy={{ ...scope, rpm: Number(rpm), daily_requests: Number(dailyRequests) }} onChange={setScope} />
+      <KeyScopeEditor data={data} policy={{ ...scope, ...keyQuotaPolicyFromDrafts(quotaDrafts).policy }} onChange={setScope} />
       <footer><button class="button button--secondary" type="button" disabled={busy} onClick={() => { setCreating(false); setEditing(null); }}>Cancel</button><button class="button button--primary" type="submit" disabled={busy}>{editing ? <Save size={16} /> : <Plus size={16} />}{busy ? "Saving..." : editing ? "Save policy" : "Create key"}</button></footer>
     </form> : null}
     {!filteredKeys.length ? <EmptyState title={keys.length ? "No keys match these filters" : "No API keys in this workspace"} detail={keys.length ? "Clear or change the owner, project, route or search filter." : "Create a key for an active project with key-management permission."} /> : <section class="surface table-wrap"><table><thead><tr><th>Name</th><th>Prefix</th><th>Project</th><th>Owner</th><th>Policy</th><th>Status</th><th>Actions</th></tr></thead><tbody>{filteredKeys.map((key) => {

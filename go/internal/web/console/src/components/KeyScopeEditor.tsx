@@ -1,13 +1,8 @@
 import type { JSONRecord } from "../lib/api";
 import { asList, asRecord, endpointsOf, numberValue, stringValue } from "../lib/records";
+import { keyQuotaLabels } from "../lib/key-policy";
 
-export const keyQuotaLabels: Record<string, string> = {
-  rpm: "requests/minute", daily_requests: "daily requests", monthly_requests: "monthly requests",
-  daily_input_tokens: "daily input tokens", daily_output_tokens: "daily output tokens",
-  monthly_total_tokens: "monthly total tokens", daily_cost_microusd: "daily cost (micro-USD)",
-  monthly_cost_microusd: "monthly cost (micro-USD)", daily_credits_milli: "daily milli-credits",
-  monthly_credits_milli: "monthly milli-credits",
-};
+export { keyQuotaLabels } from "../lib/key-policy";
 
 export function keyPolicySummary(policy: JSONRecord): string {
   const parts: string[] = [];
@@ -74,7 +69,7 @@ export function KeyScopeEditor({ data, policy, onChange }: {
         })}</ol> : <p class="form-help">Route members unavailable in this view. An unknown or deleted route cannot be called.</p>}</div>;
       })}
       <p class="form-help">This is a policy summary, not an inference test. Connection availability and project policy are checked on each request. Paid fallback remains possible.</p>
-      {Object.entries(keyQuotaLabels).filter(([field]) => !["rpm", "daily_requests"].includes(field) && numberValue(policy[field]) > 0).map(([field, label]) => <p class="form-help" key={field}>{label}: {String(policy[field])} (preserved)</p>)}
+      {Object.entries(keyQuotaLabels).filter(([field]) => numberValue(policy[field]) > 0).map(([field, label]) => <p class="form-help" key={field}>{label}: {String(policy[field])} (configured key limit)</p>)}
     </div>
   </section>;
 }
