@@ -1,0 +1,113 @@
+{
+  "schema_version": "1.0.0",
+  "mode": "change",
+  "contract": {
+    "digest": "31b393ab3e80162226619c441694573993ac618382d74642101484a0bf2e9c80"
+  },
+  "authoring_provenance": {
+    "status": "established",
+    "path": ".release-harness/drafts/llm-gateway.record.json",
+    "digest": "6732ddf3dc8236b974e2aae5f81b546d89c2a466b6fb0a368d76620955bf981e"
+  },
+  "sources": [
+    {
+      "source_id": "primary",
+      "status": "established",
+      "repository_identity": "https://github.com/xibodev/llm-gateway.git",
+      "base_ref": "a05516679413c377e77cc64d25397e4aec5ca7ae",
+      "base_commit": "a05516679413c377e77cc64d25397e4aec5ca7ae",
+      "merge_base": "a05516679413c377e77cc64d25397e4aec5ca7ae",
+      "head_commit": "86ae12a322913a958807df638a863d0eb4cbe1ff",
+      "head_tree": "32d2fff04e9a5b964fe7a3e4d634da5c4d183660",
+      "reviewed_source_digest": "1ddea552dbd14b4a835dbc50aa1bdf21ad522e8063afc49bde6349985f63f931",
+      "changed_paths": [
+        {
+          "status": "modified",
+          "path": "test/live-acceptance/run.mjs",
+          "old_blob": "30a1904f4d59c5e2f3250c065b9724f167f607ce",
+          "new_blob": "b51018ec976c45aaea0e971f5517d417fe1e77ee"
+        }
+      ]
+    }
+  ],
+  "facts": [
+    {
+      "id": "release-harness-only-change",
+      "claim": "The change modifies only the live release-acceptance harness; gateway runtime, CLI, HTTP handlers, and container definition are unchanged.",
+      "status": "observed",
+      "evidence": {
+        "source": "git diff a05516679413c377e77cc64d25397e4aec5ca7ae..86ae12a322913a958807df638a863d0eb4cbe1ff -- test/live-acceptance/run.mjs"
+      }
+    },
+    {
+      "id": "anonymous-roster-correction",
+      "claim": "The live harness now tests the four entries marked anonymous_automation in the reviewed public registry and no longer waits for OpenCode Zen, which is not marked for public anonymous automation.",
+      "status": "observed",
+      "evidence": {
+        "source": "test/live-acceptance/run.mjs and go/internal/providers/registry_snapshot.json"
+      }
+    },
+    {
+      "id": "anonymous-roster-drift-guard",
+      "claim": "Live and deterministic acceptance now fail immediately if their direct-probe roster diverges from the reviewed anonymous-automation registry roster.",
+      "status": "observed",
+      "evidence": {
+        "source": "test/live-acceptance/run.mjs: assertAnonymousProfileRoster"
+      }
+    },
+    {
+      "id": "acceptance-unit-suite",
+      "claim": "The live-acceptance syntax check and all 15 policy/unit tests pass after the roster correction.",
+      "status": "observed",
+      "evidence": {
+        "source": "node --check run.mjs and npm test in test/live-acceptance"
+      }
+    }
+  ],
+  "impact": {
+    "assertions": [
+      {
+        "id": "A1",
+        "impact": "unchanged",
+        "supported_by": [
+          "release-harness-only-change"
+        ]
+      },
+      {
+        "id": "A2",
+        "impact": "unchanged",
+        "supported_by": [
+          "release-harness-only-change"
+        ]
+      },
+      {
+        "id": "A3",
+        "impact": "unchanged",
+        "supported_by": [
+          "release-harness-only-change"
+        ]
+      },
+      {
+        "id": "A4",
+        "impact": "unchanged",
+        "supported_by": [
+          "release-harness-only-change",
+          "anonymous-roster-correction",
+          "anonymous-roster-drift-guard",
+          "acceptance-unit-suite"
+        ]
+      }
+    ],
+    "requires": [],
+    "possible_binding_changes": []
+  },
+  "questions": [],
+  "conclusion": {
+    "action": "reuse_contract",
+    "summary": "The change corrects and fail-closes release-test provider selection without changing the accepted CLI, health, or model-list proposition. The existing contract remains appropriate."
+  },
+  "proposed": {
+    "by": "release operator",
+    "at": "2026-09-26T15:29:00.000Z"
+  }
+}
