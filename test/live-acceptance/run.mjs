@@ -146,12 +146,25 @@ function responsesText(json) {
 }
 
 const anonymousProfiles = [
-  { provider: "opencode-zen", registry_id: "opencode_zen", catalog: "https://opencode.ai/zen/v1/models", chat: "https://opencode.ai/zen/v1/chat/completions" },
   { provider: "kilo-code", registry_id: "kilo_code", catalog: "https://api.kilo.ai/api/gateway/models", chat: "https://api.kilo.ai/api/gateway/chat/completions" },
   { provider: "llm7", registry_id: "llm7", catalog: "https://api.llm7.io/v1/models", chat: "https://api.llm7.io/v1/chat/completions" },
   { provider: "ovh-ai", registry_id: "ovh_ai_endpoints", catalog: "https://oai.endpoints.kepler.ai.cloud.ovh.net/v1/models", chat: "https://oai.endpoints.kepler.ai.cloud.ovh.net/v1/chat/completions" },
   { provider: "pollinations", registry_id: "pollinations", catalog: "https://text.pollinations.ai/models", chat: "https://text.pollinations.ai/v1/chat/completions" },
 ];
+
+async function assertAnonymousProfileRoster() {
+  const registry = JSON.parse(await readFile(resolve(repo, "go", "internal", "providers", "registry_snapshot.json"), "utf8"));
+  const expected = registry
+    .filter((entry) => entry.anonymous_automation === true)
+    .map((entry) => ({ provider: entry.default_provider_id, registry_id: entry.id }))
+    .sort((left, right) => left.registry_id.localeCompare(right.registry_id));
+  const actual = anonymousProfiles
+    .map(({ provider, registry_id }) => ({ provider, registry_id }))
+    .sort((left, right) => left.registry_id.localeCompare(right.registry_id));
+  if (JSON.stringify(actual) !== JSON.stringify(expected)) {
+    throw new Error(`live anonymous profile roster does not match the reviewed registry: expected=${JSON.stringify(expected)} actual=${JSON.stringify(actual)}`);
+  }
+}
 
 function anonymousProfile(provider) {
   return anonymousProfiles.find((profile) => profile.provider === provider);
@@ -729,6 +742,7 @@ async function runAcceptance() {
   try {
     progress(`acceptance: start mode=${mode}`);
     await writeReport();
+    await assertAnonymousProfileRoster();
     await setupDocker();
     progress("identity: creating scoped owner and project");
     const identity = await createIdentityAndKey();
