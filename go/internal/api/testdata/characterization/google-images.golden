@@ -1,0 +1,45 @@
+# Image generation, Vertex AI
+request: POST /v1/images/generations
+status: 200
+header Content-Type: application/json
+upstream: POST /vertex/v1/projects/fixture-project/locations/global/publishers/google/models/gemini-image-fixture:generateContent
+upstream body: {"contents":[{"parts":[{"text":"an origami crane"}],"role":"user"}],"generationConfig":{"responseModalities":["TEXT","IMAGE"]}}
+body:
+{
+  "created": "<time>",
+  "data": [
+    {
+      "b64_json": "iVBORw0KGgo=",
+      "mime_type": "image/png"
+    }
+  ],
+  "model": "gemini-image-fixture"
+}
+# Image generation from a text model, AI Studio
+request: POST /v1/images/generations
+status: 502
+header Content-Type: application/json
+upstream: POST /studio/v1beta/models/gemini-fixture:generateContent
+upstream body: {"contents":[{"parts":[{"text":"an origami crane"}],"role":"user"}],"generationConfig":{"responseModalities":["TEXT","IMAGE"]}}
+body:
+{
+  "error": {
+    "code": "502",
+    "message": "Upstream provider request failed.",
+    "type": "api_error"
+  }
+}
+# Image generation refused upstream, AI Studio
+request: POST /v1/images/generations
+status: 403
+header Content-Type: application/json
+upstream: POST /studio/v1beta/models/gemini-denied-fixture:generateContent
+upstream body: {"contents":[{"parts":[{"text":"an origami crane"}],"role":"user"}],"generationConfig":{"responseModalities":["TEXT","IMAGE"]}}
+body:
+{
+  "error": {
+    "code": "403",
+    "message": "Upstream provider request failed.",
+    "type": "invalid_request_error"
+  }
+}

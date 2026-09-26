@@ -1,0 +1,209 @@
+{
+  "schema_version": "1.0.0",
+  "mode": "change",
+  "contract": {
+    "digest": "31b393ab3e80162226619c441694573993ac618382d74642101484a0bf2e9c80"
+  },
+  "authoring_provenance": {
+    "status": "established",
+    "path": ".release-harness/drafts/llm-gateway.record.json",
+    "digest": "6732ddf3dc8236b974e2aae5f81b546d89c2a466b6fb0a368d76620955bf981e"
+  },
+  "sources": [
+    {
+      "source_id": "primary",
+      "status": "established",
+      "repository_identity": "https://github.com/xibodev/llm-gateway.git",
+      "base_ref": "origin/main",
+      "base_commit": "9bfa8ed0dc080dadd3906b964eda55b1e63cb93e",
+      "merge_base": "d28a993e8c50c67d4818fdc64dc823f0f8427cbb",
+      "head_commit": "c13b4e9bdd23da3e8bf291ab275fcc1bcf33a298",
+      "head_tree": "413b7ee024726e81881b57486fac0bd0dd0ca118",
+      "reviewed_source_digest": "e820aeeafbe6584850e7338d92e707a223c93cebbb075af76bf1539854910207",
+      "changed_paths": [
+        {
+          "status": "modified",
+          "path": "go/go.mod",
+          "old_blob": "7e72ea096e3e3d8b0b17dab2fd34778425c95d6b",
+          "new_blob": "20197d83416d3409c1ce7dc53e249be11b372dae"
+        },
+        {
+          "status": "modified",
+          "path": "go/go.sum",
+          "old_blob": "be9f34cf1759da30b1ea7d72ce41917ebcbebcdc",
+          "new_blob": "c0b72631c6e625b3328ac4c14d98159c1795dcfd"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/api/cancellation_test.go",
+          "old_blob": "05e8ae1e3dcfefe7f05b12d63c442eb928fcb497",
+          "new_blob": "44935becafed8d2d65821a3f0ec4a408cee37c5a"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/api/characterization_test.go",
+          "old_blob": "ef0b3893834cec4c4e9da128340bb5469b0e1208",
+          "new_blob": "e08e0dd760080d73c84a8699d185bf688a4e9b5c"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/api/oauth_api_test.go",
+          "old_blob": "f2e50bc4bc510330749189f28c6439fc3b3fe399",
+          "new_blob": "b9ce6991c1c20768bc29343c0c314ae38f1ccc1b"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/api/provider_quota_test.go",
+          "old_blob": "f6f738f842eb9541ebd3197a6c274f4417a89af9",
+          "new_blob": "404e041fd27181f14555c18308a765a40de8d587"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/api/routes_models_api_test.go",
+          "old_blob": "2095809f4cf58c11f00a71f0a5d186be84a24818",
+          "new_blob": "7cfbffa20bf01a4ea2a91f93be7a6070e5d7b002"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/api/transport_mode_test.go",
+          "old_blob": "63ed7b63628ce805286775c9c8002dbd3fffb75a",
+          "new_blob": "11d9ab909fefec2af81193455050b448bbb550f0"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/providers/auth_adapter_test.go",
+          "old_blob": "25d28cb3245582e100e7e4d175005892d56d61dd",
+          "new_blob": "87e0b015752edec90230f263a42882d31caf3836"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/providers/auth_adapter.go",
+          "old_blob": "41ea7145de02c94bcf8aca7cdc7ea126cf298fa6",
+          "new_blob": "7ef157ccc3d9c80ac6c1dbdd6ef0ceeebd3f5273"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/providers/catalog_http_test.go",
+          "old_blob": "7f038f9e0953df2bf757eb4fc052a7c35c55dbd1",
+          "new_blob": "b306c2ca87a9a379bc89ddc8509ea174fcf41a22"
+        },
+        {
+          "status": "added",
+          "path": "go/internal/providers/codex_endpoints.go",
+          "old_blob": "0000000000000000000000000000000000000000",
+          "new_blob": "f6caced82f7b01234d89b569708e17ec9b801e22"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/providers/codex_test.go",
+          "old_blob": "e8ad79185d468aee13e976a444418ad3f2e6cb9f",
+          "new_blob": "a92a0708691bc0c0c6985bb9e2d61b40e18cd5e1"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/providers/codex.go",
+          "old_blob": "7d33ef3034b49365df93576ec17dacbd4a98b791",
+          "new_blob": "ad4428bee3c0509d4bd7d7c025a86843fb419b88"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/providers/thought_signatures_test.go",
+          "old_blob": "ddf5bc744fc5ab4cbbf37cf8ffc118f4abaa39ba",
+          "new_blob": "fd44aa76e26a80853b7b9697aac43b6b582d220c"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/providers/thought_signatures.go",
+          "old_blob": "fc361c74aba02ea9cb5b79aa3698e2b1a6c532f5",
+          "new_blob": "ba5c231f965d06d48f4cd8775358d6e815bcd110"
+        }
+      ]
+    }
+  ],
+  "facts": [
+    {
+      "id": "deps",
+      "claim": "go.mod moves llm-provider-auth from v0.5.0 to v0.6.0 and llmgw-core from v0.10.0 to v0.12.0. llm-provider-auth v0.6.0 replaces the codex package variables with codex.Config and context methods without changing the wire format; llmgw-core v0.11.0 requires the Codex client version, which the gateway already passes, and v0.12.0 is additive with the legacy CodexProvider sharing a transport that sends identical requests.",
+      "status": "observed",
+      "evidence": {
+        "source": "go/go.mod; release notes of llm-provider-auth v0.6.0 and llmgw-core v0.11.0 and v0.12.0"
+      }
+    },
+    {
+      "id": "codex-config",
+      "claim": "Every codexauth call builds a codex.Config from the same client ID as before and the gateway's Codex endpoints. Production endpoints are the canonical OpenAI URLs; tests override them through SetCodexEndpointsForTests instead of reassigning library variables.",
+      "status": "observed",
+      "evidence": {
+        "source": "go/internal/providers/codex_endpoints.go; go/internal/providers/auth_adapter.go; go/internal/providers/codex.go"
+      }
+    },
+    {
+      "id": "strip-removed",
+      "claim": "The gateway no longer strips thought signatures before the shared Codex provider, because llmgw-core v0.11.0 and later ignore dropped thought signatures themselves; a test shows a Gemini history is still served by Codex and that no signature reaches it.",
+      "status": "observed",
+      "evidence": {
+        "source": "go/internal/providers/thought_signatures.go; go/internal/providers/codex_test.go"
+      }
+    },
+    {
+      "id": "suite",
+      "claim": "The full Go suite passes with HTTP_PROXY and HTTPS_PROXY unreachable with unchanged characterization goldens and coupling budgets; gofmt, vet, govulncheck (0 reachable), check-docs and git diff --check pass.",
+      "status": "observed",
+      "evidence": {
+        "source": "local gate run on the reviewed head"
+      }
+    }
+  ],
+  "impact": {
+    "assertions": [
+      {
+        "id": "A1",
+        "impact": "unchanged",
+        "supported_by": [
+          "deps",
+          "codex-config",
+          "suite"
+        ]
+      },
+      {
+        "id": "A2",
+        "impact": "unchanged",
+        "supported_by": [
+          "deps",
+          "codex-config",
+          "suite"
+        ]
+      },
+      {
+        "id": "A3",
+        "impact": "unchanged",
+        "supported_by": [
+          "deps",
+          "codex-config",
+          "suite"
+        ]
+      },
+      {
+        "id": "A4",
+        "impact": "unchanged",
+        "supported_by": [
+          "deps",
+          "codex-config",
+          "suite"
+        ]
+      }
+    ],
+    "requires": [],
+    "possible_binding_changes": []
+  },
+  "questions": [],
+  "conclusion": {
+    "action": "reuse_contract",
+    "summary": "Adopts llm-provider-auth v0.6.0 and llmgw-core v0.12.0 with explicit Codex configuration; upstream requests, CLI, health and models behavior are unchanged."
+  },
+  "proposed": {
+    "by": "adopt-auth-v060",
+    "at": "2026-09-25T04:52:47.856Z"
+  },
+  "digest": "23f5320b4c94bebffca52d1e2caea673f073273cbfc61ff30294fa03b2d7d926"
+}

@@ -1,0 +1,259 @@
+package providers
+
+import (
+	"crypto/rand"
+	"crypto/rsa"
+	"crypto/x509"
+	"encoding/base64"
+	"encoding/json"
+	"encoding/pem"
+	"fmt"
+	"net/http"
+	"net/http/httptest"
+	"strings"
+	"sync/atomic"
+	"testing"
+
+	"llmgw/internal/config"
+	"llmgw/internal/iam"
+
+	gcpauth "github.com/xibodev/llm-provider-auth/gcp"
+	core "github.com/xibodev/llmgw-core"
+)
+
+// serviceAccountFixture builds a service-account key whose token endpoint is a
+// local stub, so the whole stored-credential path can run without a real key.
+func serviceAccountFixture(t *testing.T, tokenURI string) string {
+	t.Helper()
+	key, err := rsa.GenerateKey(rand.Reader, 2048)
+	if err != nil {
+		t.Fatalf("generate key: %v", err)
+	}
+	der, err := x509.MarshalPKCS8PrivateKey(key)
+	if err != nil {
+		t.Fatalf("marshal key: %v", err)
+	}
+	raw, err := json.Marshal(map[string]string{
+		"type":           "service_account",
+		"project_id":     "fixture-project",
+		"private_key_id": "key-1",
+		"private_key":    string(pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: der})),
+		"client_email":   "svc@fixture-project.iam.gserviceaccount.com",
+		"token_uri":      tokenURI,
+	})
+	if err != nil {
+		t.Fatalf("marshal fixture: %v", err)
+	}
+	return string(raw)
+}
+
+func stubTokenEndpoint(t *testing.T) *httptest.Server {
+	t.Helper()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"access_token":"ya29.stored-path","expires_in":3600}`))
+	}))
+	t.Cleanup(server.Close)
+	return server
+}
+
+func setupVertexIAM(t *testing.T) {
+	t.Helper()
+	t.Setenv("LLMGW_STATE_DIR", t.TempDir())
+	iam.ResetForTests()
+	InstallForTests(t)
+	t.Cleanup(iam.ResetForTests)
+	key := make([]byte, 32)
+	for index := range key {
+		key[index] = byte(index + 7)
+	}
+	config.Update(func(s *config.Settings) {
+		s.CredentialEncryptionKey = base64.RawURLEncoding.EncodeToString(key)
+		s.Providers = map[string]*config.ProviderConfig{
+			"vertex_ai": {Type: "vertex_ai", Location: "global"},
+		}
+		s.Policies.Defaults = config.ProviderPolicy{}
+		s.Policies.Overrides = map[string]config.ProviderPolicy{}
+	})
+}
+
+// vertexModelServer serves the Vertex AI instance until the test ends and
+// records each request it answers.
+func vertexModelServer(t *testing.T) *googleUpstream {
+	t.Helper()
+	upstream := &googleUpstream{}
+	server := httptest.NewServer(upstream)
+	t.Cleanup(server.Close)
+	config.Update(func(s *config.Settings) { s.Providers["vertex_ai"].BaseURL = server.URL + "/v1" })
+	return upstream
+}
+
+// expectVertexServiceAccount sends a completion through provider and checks
+// that it authenticated as the minted token in the project the key names,
+// and that the transport serving video and the catalog holds the same
+// credential, never as an API key.
+func expectVertexServiceAccount(t *testing.T, provider Provider, upstream *googleUpstream) {
+	t.Helper()
+	vertex, ok := provider.(*googleProvider)
+	if !ok {
+		t.Fatalf("provider type=%T", provider)
+	}
+	if _, err := vertex.Complete("gemini-test", []Message{{"role": "user", "content": "hi"}}, nil); err != nil {
+		t.Fatal(err)
+	}
+	want := googleCall{
+		credential: "Bearer ya29.stored-path",
+		path:       "/v1/projects/fixture-project/locations/global/publishers/google/models/gemini-test:generateContent",
+	}
+	if got := upstream.last(); got != want {
+		t.Fatalf("upstream call=%+v, want %+v", got, want)
+	}
+	if vertex.legacy.bearerTokenFor == nil {
+		t.Fatal("stored service account did not retain a refreshable token source")
+	}
+	if token, err := vertex.legacy.currentBearerToken(); err != nil || token != "ya29.stored-path" {
+		t.Fatalf("bearer token=%q error=%v", token, err)
+	}
+	if vertex.legacy.apiKey != "" {
+		t.Fatalf("apiKey=%q, want empty so no x-goog-api-key is sent", vertex.legacy.apiKey)
+	}
+	// The project must come from the key when none is configured.
+	if vertex.legacy.project != "fixture-project" {
+		t.Fatalf("project=%q, want it taken from the key", vertex.legacy.project)
+	}
+}
+
+// TestVertexUsesStoredServiceAccountConnection covers the seam between storage
+// and the provider: a key that was uploaded, encrypted and read back must end
+// up authenticating as a Bearer token. Unit tests exercise minting and the
+// header separately; only this test proves they meet.
+func TestVertexUsesStoredServiceAccountConnection(t *testing.T) {
+	setupVertexIAM(t)
+	server := stubTokenEndpoint(t)
+	upstream := vertexModelServer(t)
+
+	human, err := iam.CreatePrincipal("human", "authentik:vertex-owner", "", "Owner")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := iam.PutProviderConnection(iam.ProviderConnectionCreate{
+		PrincipalID: human.ID, ProviderID: "vertex_ai", Name: "personal",
+		Kind: gcpauth.CredentialKind, Secret: serviceAccountFixture(t, server.URL),
+		Source: iam.ConnectionSourceUser, MakeDefault: true,
+	}); err != nil {
+		t.Fatalf("store service account connection: %v", err)
+	}
+
+	provider, err := GetProviderForPrincipal(
+		"vertex_ai", core.Caller{ID: human.ID, Kind: core.CallerHuman},
+	)
+	if err != nil {
+		t.Fatalf("build provider from stored connection: %v", err)
+	}
+	expectVertexServiceAccount(t, provider, upstream)
+}
+
+// TestVertexWithoutAnyCredentialFailsClearly is the regression test for the
+// confusing failure this reproduces: with a project and location configured but
+// no credential stored, the gateway used to build an unauthenticated provider
+// and call Vertex anyway. Google answered 401, which surfaced as
+// "credential rejected" -- language that points at a bad key rather than at a
+// missing one, and sends you looking in the wrong place.
+func TestVertexWithoutAnyCredentialFailsClearly(t *testing.T) {
+	setupVertexIAM(t)
+	config.Update(func(s *config.Settings) {
+		s.Providers["vertex_ai"].Project = "fixture-project"
+	})
+
+	human, err := iam.CreatePrincipal("human", "authentik:vertex-none", "", "Owner")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = GetProviderForPrincipal(
+		"vertex_ai", core.Caller{ID: human.ID, Kind: core.CallerHuman},
+	)
+	if err == nil {
+		t.Fatal("expected an error when no credential is configured")
+	}
+	for _, want := range []string{"no credential", "vertex_ai"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Fatalf("error %q should mention %q", err.Error(), want)
+		}
+	}
+}
+
+// TestVertexSystemConnectionServesAPIKeyCallers covers the path an LLMGW_API_KEY
+// request takes. That auth mode builds a principal with no id, so the personal
+// connection lookup is skipped entirely and only the system connection is
+// consulted -- a key stored against a human principal cannot serve these calls.
+func TestVertexSystemConnectionServesAPIKeyCallers(t *testing.T) {
+	setupVertexIAM(t)
+	server := stubTokenEndpoint(t)
+	upstream := vertexModelServer(t)
+
+	if _, err := iam.PutSystemProviderConnection(
+		"vertex_ai", gcpauth.CredentialKind, serviceAccountFixture(t, server.URL),
+	); err != nil {
+		t.Fatalf("store system service account connection: %v", err)
+	}
+
+	// An admin-key request: project and key set, principal id deliberately empty.
+	provider, err := GetProviderForPrincipal(
+		"vertex_ai", core.Caller{ID: iam.AdminCallerID, Kind: core.CallerService},
+	)
+	if err != nil {
+		t.Fatalf("build provider for an API-key caller: %v", err)
+	}
+	expectVertexServiceAccount(t, provider, upstream)
+}
+
+// A cached provider keeps no token past its time: core's Google mints a new
+// one when the one it holds is about to expire, and reuses one that is not.
+func TestVertexCachedProviderRefreshesServiceAccountToken(t *testing.T) {
+	setupVertexIAM(t)
+	var exchanges atomic.Int32
+	tokenServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		index := exchanges.Add(1)
+		// The first token expires inside the cache's refresh margin.
+		lifetime := 30
+		if index > 1 {
+			lifetime = 3600
+		}
+		_, _ = fmt.Fprintf(w, `{"access_token":"token-%d","expires_in":%d}`, index, lifetime)
+	}))
+	defer tokenServer.Close()
+	modelServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		token := strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ")
+		_, _ = w.Write([]byte(`{"candidates":[{"content":{"parts":[{"text":"` + token + `"}]}}]}`))
+	}))
+	defer modelServer.Close()
+	config.Update(func(s *config.Settings) {
+		s.Providers["vertex_ai"].BaseURL = modelServer.URL + "/v1"
+	})
+	human, _ := iam.CreatePrincipal("human", "authentik:vertex-refresh", "", "Owner")
+	if _, err := iam.PutProviderConnection(iam.ProviderConnectionCreate{
+		PrincipalID: human.ID, ProviderID: "vertex_ai", Name: "personal",
+		Kind: gcpauth.CredentialKind, Secret: serviceAccountFixture(t, tokenServer.URL),
+		Source: iam.ConnectionSourceUser, MakeDefault: true,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	provider, err := GetProviderForPrincipal("vertex_ai", core.Caller{ID: human.ID, Kind: core.CallerHuman})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for index, want := range []string{"token-1", "token-2", "token-2"} {
+		response, err := provider.Complete("gemini-test", []Message{{"role": "user", "content": "hi"}}, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		choices := response["choices"].([]any)
+		message := choices[0].(map[string]any)["message"].(map[string]any)
+		if message["content"] != want {
+			t.Fatalf("request %d token=%q want=%q", index+1, message["content"], want)
+		}
+	}
+	if exchanges.Load() != 2 {
+		t.Fatalf("token exchanges=%d want=2", exchanges.Load())
+	}
+}

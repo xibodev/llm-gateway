@@ -1,0 +1,74 @@
+{
+  "mappings": [
+    {
+      "name": "primary: GET /models",
+      "request": {
+        "method": "GET",
+        "urlPattern": "/primary/v1/models"
+      },
+      "response": {
+        "status": 200,
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "jsonBody": {
+          "object": "list",
+          "data": [
+            {
+              "id": "gpt-4o",
+              "object": "model",
+              "owned_by": "uat-primary"
+            },
+            {
+              "id": "gpt-4o-mini",
+              "object": "model",
+              "owned_by": "uat-primary"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "primary: POST /chat/completions → 429",
+      "request": {
+        "method": "POST",
+        "urlPattern": "/primary/v1/chat/completions"
+      },
+      "response": {
+        "status": 429,
+        "headers": {
+          "Content-Type": "application/json",
+          "Retry-After": "1"
+        },
+        "jsonBody": {
+          "error": {
+            "message": "Rate limit exceeded (UAT stub)",
+            "type": "requests",
+            "code": "rate_limit_exceeded"
+          }
+        }
+      }
+    },
+    {
+      "name": "primary: POST /responses → 429",
+      "request": {
+        "method": "POST",
+        "urlPattern": "/primary/v1/responses"
+      },
+      "response": {
+        "status": 429,
+        "headers": {
+          "Content-Type": "application/json",
+          "Retry-After": "1"
+        },
+        "jsonBody": {
+          "error": {
+            "message": "Rate limit exceeded (UAT stub)",
+            "type": "requests",
+            "code": "rate_limit_exceeded"
+          }
+        }
+      }
+    }
+  ]
+}

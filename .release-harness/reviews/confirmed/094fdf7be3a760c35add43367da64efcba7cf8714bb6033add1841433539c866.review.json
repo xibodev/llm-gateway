@@ -1,0 +1,114 @@
+{
+  "schema_version": "1.0.0",
+  "mode": "change",
+  "contract": {
+    "digest": "31b393ab3e80162226619c441694573993ac618382d74642101484a0bf2e9c80"
+  },
+  "authoring_provenance": {
+    "status": "established",
+    "path": ".release-harness/drafts/llm-gateway.record.json",
+    "digest": "6732ddf3dc8236b974e2aae5f81b546d89c2a466b6fb0a368d76620955bf981e"
+  },
+  "sources": [
+    {
+      "source_id": "primary",
+      "status": "established",
+      "repository_identity": "https://github.com/xibodev/llm-gateway.git",
+      "base_ref": "origin/main",
+      "base_commit": "61a0a87193ec765ee31d4289c2c548b730062641",
+      "merge_base": "61a0a87193ec765ee31d4289c2c548b730062641",
+      "head_commit": "9adafd8b3516f260c68c55708ff2a427c5511f08",
+      "head_tree": "a1dafefd90d0d90f003d0bc421d8ce3bafcddb79",
+      "reviewed_source_digest": "c347c29091ab0b5191a5157c59d4797e03bd9966ae48f54b3c4efbaf10344cbf",
+      "changed_paths": [
+        {
+          "status": "modified",
+          "path": "test/live-acceptance/core.test.mjs",
+          "old_blob": "ba07c70db5dbc13e56040e7255907287ff3d05ce",
+          "new_blob": "54222e78fe87606274589443d1a54ad4ba3ddaae"
+        },
+        {
+          "status": "modified",
+          "path": "test/live-acceptance/run.mjs",
+          "old_blob": "1790791caa523e9b8866aa730d4ec724b83a2a62",
+          "new_blob": "b69a7fe56c25385c019dbc9dbd0e8d7c35107785"
+        }
+      ]
+    }
+  ],
+  "facts": [
+    {
+      "id": "live-policy-attribution",
+      "claim": "The v0.7.0 release attempt remained unpublished because live acceptance swept administrative diagnostic rows marked disabled or unpublished, then treated their intentional routing rejection as candidate-only regressions and selected an unavailable row for Playground evidence.",
+      "status": "observed",
+      "evidence": {
+        "source": "GitHub Actions release run 35900839941; live-acceptance artifact 10769887180"
+      }
+    },
+    {
+      "id": "published-sweep-fix",
+      "claim": "Live acceptance now limits sweep and completeness accounting to free catalog rows that are not disabled and not explicitly unpublished; runtime routing and product behavior are unchanged.",
+      "status": "observed",
+      "evidence": {
+        "source": "test/live-acceptance/run.mjs; test/live-acceptance/core.test.mjs"
+      }
+    },
+    {
+      "id": "acceptance-gates-pass",
+      "claim": "The live-acceptance policy tests, JavaScript syntax check, documentation checks, and deterministic Docker acceptance pass after the correction.",
+      "status": "observed",
+      "evidence": {
+        "source": "npm test; node --check test/live-acceptance/run.mjs; scripts/check-docs.mjs; deterministic acceptance PASS 3/3"
+      }
+    }
+  ],
+  "impact": {
+    "assertions": [
+      {
+        "id": "A1",
+        "impact": "unchanged",
+        "supported_by": [
+          "published-sweep-fix",
+          "acceptance-gates-pass"
+        ]
+      },
+      {
+        "id": "A2",
+        "impact": "unchanged",
+        "supported_by": [
+          "published-sweep-fix",
+          "acceptance-gates-pass"
+        ]
+      },
+      {
+        "id": "A3",
+        "impact": "unchanged",
+        "supported_by": [
+          "published-sweep-fix",
+          "acceptance-gates-pass"
+        ]
+      },
+      {
+        "id": "A4",
+        "impact": "unchanged",
+        "supported_by": [
+          "live-policy-attribution",
+          "published-sweep-fix",
+          "acceptance-gates-pass"
+        ]
+      }
+    ],
+    "requires": [],
+    "possible_binding_changes": []
+  },
+  "questions": [],
+  "conclusion": {
+    "action": "reuse_contract",
+    "summary": "The correction aligns release evidence with the gateway's existing publication boundary and does not change the accepted CLI, health, or public model-list proposition."
+  },
+  "proposed": {
+    "by": "opencode-session",
+    "at": "2026-09-23T18:31:05.741Z"
+  },
+  "digest": "094fdf7be3a760c35add43367da64efcba7cf8714bb6033add1841433539c866"
+}

@@ -1,0 +1,38 @@
+name: Provider roster incident
+description: Report a problem with a known discovery roster entry
+title: '[Roster report] '
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Search for an existing report first. Confirm it with a thumbs-up on the
+        root report or a comment containing only `Roster confirmation: endpoint-…`.
+        Thumbs-up reactions on those structured confirmation comments also count.
+        One vote per human GitHub account; ten accounts quarantine discovery only.
+        Never include credentials, private endpoints, or personal information.
+  - type: input
+    id: roster-entry-id
+    attributes:
+      label: Roster entry ID
+      description: Copy the canonical endpoint ID from the roster, not a provider URL.
+      placeholder: endpoint-0123456789abcdef
+    validations:
+      required: true
+  - type: dropdown
+    id: reason
+    attributes:
+      label: Problem
+      options:
+        - Endpoint unavailable
+        - Offer or requirements changed
+        - Incorrect metadata
+        - Other reproducible issue
+    validations:
+      required: true
+  - type: textarea
+    id: evidence
+    attributes:
+      label: Public evidence and reproduction
+      description: Describe what you observed. Report URLs are never used as probe targets.
+    validations:
+      required: true

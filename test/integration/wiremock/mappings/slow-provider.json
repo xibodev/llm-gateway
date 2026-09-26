@@ -1,0 +1,98 @@
+{
+  "mappings": [
+    {
+      "name": "slow: GET /models",
+      "request": {
+        "method": "GET",
+        "urlPattern": "/slow/v1/models"
+      },
+      "response": {
+        "status": 200,
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "jsonBody": {
+          "object": "list",
+          "data": [
+            {
+              "id": "gpt-4o",
+              "object": "model",
+              "owned_by": "uat-slow"
+            },
+            {
+              "id": "gpt-4o-mini",
+              "object": "model",
+              "owned_by": "uat-slow"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "slow: POST /chat/completions → delay 5000ms then 200",
+      "request": {
+        "method": "POST",
+        "urlPattern": "/slow/v1/chat/completions"
+      },
+      "response": {
+        "status": 200,
+        "fixedDelayMilliseconds": 5000,
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "jsonBody": {
+          "id": "chatcmpl-slow-never-returned",
+          "object": "chat.completion",
+          "choices": [
+            {
+              "index": 0,
+              "message": {
+                "role": "assistant",
+                "content": "I am delayed"
+              },
+              "finish_reason": "stop"
+            }
+          ],
+          "usage": {
+            "prompt_tokens": 5,
+            "completion_tokens": 4,
+            "total_tokens": 9
+          }
+        }
+      }
+    },
+    {
+      "name": "slow: POST /responses → delay 5000ms then 200",
+      "request": {
+        "method": "POST",
+        "urlPattern": "/slow/v1/responses"
+      },
+      "response": {
+        "status": 200,
+        "fixedDelayMilliseconds": 5000,
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "jsonBody": {
+          "id": "resp-slow-never-returned",
+          "object": "response",
+          "output": [
+            {
+              "type": "message",
+              "content": [
+                {
+                  "type": "output_text",
+                  "text": "I am delayed"
+                }
+              ]
+            }
+          ],
+          "usage": {
+            "input_tokens": 5,
+            "output_tokens": 4
+          }
+        }
+      }
+    }
+  ]
+}

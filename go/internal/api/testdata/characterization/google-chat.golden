@@ -1,0 +1,255 @@
+# Chat Completions, AI Studio
+request: POST /v1/chat/completions
+status: 200
+header Content-Type: application/json
+header X-Llmgw-Attempts: 1
+header X-Llmgw-Duration-Ms: <ms>
+header X-Llmgw-Fallback-Ms: <ms>
+header X-Llmgw-Prompt-Bytes: 111
+header X-Llmgw-Tool-Schema-Bytes: 0
+header X-Llmgw-Transport-Mode: translated
+header X-Llmgw-Ttfb-Ms: <ms>
+upstream: POST /studio/v1beta/models/gemini-fixture:generateContent
+upstream body: {"contents":[{"parts":[{"text":"Say hello"}],"role":"user"}],"generationConfig":{"maxOutputTokens":64,"temperature":0.2},"systemInstruction":{"parts":[{"text":"Answer <briefly> & kindly."}]}}
+body:
+{
+  "choices": [
+    {
+      "finish_reason": "stop",
+      "index": 0,
+      "message": {
+        "content": "Hello from Gemini",
+        "role": "assistant"
+      }
+    }
+  ],
+  "id": "<generated chatcmpl->",
+  "model": "gemini-fixture",
+  "object": "chat.completion",
+  "usage": {
+    "completion_tokens": 4,
+    "prompt_tokens": 3,
+    "total_tokens": 7
+  }
+}
+# Chat Completions stream, AI Studio
+request: POST /v1/chat/completions
+status: 502
+header Content-Type: application/json
+body:
+{
+  "error": {
+    "code": "502",
+    "message": "ai_studio: streaming is not implemented for this provider yet; use a non-streaming request",
+    "type": "api_error"
+  }
+}
+# Chat Completions, Vertex AI
+request: POST /v1/chat/completions
+status: 200
+header Content-Type: application/json
+header X-Llmgw-Attempts: 1
+header X-Llmgw-Duration-Ms: <ms>
+header X-Llmgw-Fallback-Ms: <ms>
+header X-Llmgw-Prompt-Bytes: 111
+header X-Llmgw-Tool-Schema-Bytes: 0
+header X-Llmgw-Transport-Mode: translated
+header X-Llmgw-Ttfb-Ms: <ms>
+upstream: POST /vertex/v1/projects/fixture-project/locations/global/publishers/google/models/gemini-fixture:generateContent
+upstream body: {"contents":[{"parts":[{"text":"Say hello"}],"role":"user"}],"generationConfig":{"maxOutputTokens":64,"temperature":0.2},"systemInstruction":{"parts":[{"text":"Answer <briefly> & kindly."}]}}
+body:
+{
+  "choices": [
+    {
+      "finish_reason": "stop",
+      "index": 0,
+      "message": {
+        "content": "Hello from Gemini",
+        "role": "assistant"
+      }
+    }
+  ],
+  "id": "<generated chatcmpl->",
+  "model": "gemini-fixture",
+  "object": "chat.completion",
+  "usage": {
+    "completion_tokens": 4,
+    "prompt_tokens": 3,
+    "total_tokens": 7
+  }
+}
+# Messages translated to Chat, AI Studio
+request: POST /v1/messages
+status: 200
+header Content-Type: application/json
+header X-Llmgw-Transport-Mode: translated
+upstream: POST /studio/v1beta/models/gemini-fixture:generateContent
+upstream body: {"contents":[{"parts":[{"text":"Say hello"}],"role":"user"}],"generationConfig":{"maxOutputTokens":64},"systemInstruction":{"parts":[{"text":"Answer briefly."}]}}
+body:
+{
+  "content": [
+    {
+      "text": "Hello from Gemini",
+      "type": "text"
+    }
+  ],
+  "id": "<generated chatcmpl->",
+  "model": "gemini-fixture",
+  "role": "assistant",
+  "stop_reason": "end_turn",
+  "stop_sequence": null,
+  "type": "message",
+  "usage": {
+    "input_tokens": 3,
+    "output_tokens": 4
+  }
+}
+# Responses translated to Chat, Vertex AI
+request: POST /v1/responses
+status: 200
+header Content-Type: application/json
+header X-Llmgw-Transport-Mode: translated
+upstream: POST /vertex/v1/projects/fixture-project/locations/global/publishers/google/models/gemini-fixture:generateContent
+upstream body: {"contents":[{"parts":[{"text":"Say hello"}],"role":"user"}]}
+body:
+{
+  "background": false,
+  "created_at": "<time>",
+  "error": null,
+  "id": "<generated resp_>",
+  "incomplete_details": null,
+  "instructions": null,
+  "max_output_tokens": null,
+  "max_tool_calls": null,
+  "metadata": {},
+  "model": "gemini-fixture",
+  "object": "response",
+  "output": [
+    {
+      "content": [
+        {
+          "annotations": [],
+          "text": "Hello from Gemini",
+          "type": "output_text"
+        }
+      ],
+      "id": "<generated msg_>",
+      "role": "assistant",
+      "status": "completed",
+      "type": "message"
+    }
+  ],
+  "output_text": "Hello from Gemini",
+  "parallel_tool_calls": true,
+  "previous_response_id": null,
+  "reasoning": {
+    "effort": null,
+    "summary": null
+  },
+  "service_tier": "default",
+  "status": "completed",
+  "store": false,
+  "temperature": null,
+  "text": {
+    "format": {
+      "type": "text"
+    }
+  },
+  "tool_choice": "auto",
+  "tools": [],
+  "top_logprobs": 0,
+  "top_p": null,
+  "truncation": "disabled",
+  "usage": {
+    "input_tokens": 3,
+    "input_tokens_details": {
+      "cached_tokens": 0
+    },
+    "output_tokens": 4,
+    "output_tokens_details": {
+      "reasoning_tokens": 0
+    },
+    "total_tokens": 7
+  },
+  "user": null
+}
+# Billing exhausted, Vertex AI
+request: POST /v1/chat/completions
+status: 429
+header Content-Type: application/json
+header X-Llmgw-Attempts: 1
+header X-Llmgw-Duration-Ms: <ms>
+header X-Llmgw-Fallback-Ms: <ms>
+header X-Llmgw-Prompt-Bytes: 111
+header X-Llmgw-Tool-Schema-Bytes: 0
+header X-Llmgw-Ttfb-Ms: <ms>
+upstream: POST /vertex/v1/projects/fixture-project/locations/global/publishers/google/models/gemini-billing-fixture:generateContent
+upstream body: {"contents":[{"parts":[{"text":"Say hello"}],"role":"user"}],"generationConfig":{"maxOutputTokens":64,"temperature":0.2},"systemInstruction":{"parts":[{"text":"Answer <briefly> & kindly."}]}}
+body:
+{
+  "error": {
+    "code": "429",
+    "message": "vertex_ai: provider billing exhausted — Your prepayment credits are depleted.",
+    "type": "invalid_request_error"
+  }
+}
+# Model not available, Vertex AI
+request: POST /v1/chat/completions
+status: 404
+header Content-Type: application/json
+header X-Llmgw-Attempts: 1
+header X-Llmgw-Duration-Ms: <ms>
+header X-Llmgw-Fallback-Ms: <ms>
+header X-Llmgw-Prompt-Bytes: 111
+header X-Llmgw-Tool-Schema-Bytes: 0
+header X-Llmgw-Ttfb-Ms: <ms>
+upstream: POST /vertex/v1/projects/fixture-project/locations/global/publishers/google/models/missing-model-fixture:generateContent
+upstream body: {"contents":[{"parts":[{"text":"Say hello"}],"role":"user"}],"generationConfig":{"maxOutputTokens":64,"temperature":0.2},"systemInstruction":{"parts":[{"text":"Answer <briefly> & kindly."}]}}
+body:
+{
+  "error": {
+    "code": "404",
+    "message": "vertex_ai: model not available to this project or location — Publisher model was not found.",
+    "type": "invalid_request_error"
+  }
+}
+# Credential rejected, AI Studio
+request: POST /v1/chat/completions
+status: 403
+header Content-Type: application/json
+header X-Llmgw-Attempts: 1
+header X-Llmgw-Duration-Ms: <ms>
+header X-Llmgw-Fallback-Ms: <ms>
+header X-Llmgw-Prompt-Bytes: 111
+header X-Llmgw-Tool-Schema-Bytes: 0
+header X-Llmgw-Ttfb-Ms: <ms>
+upstream: POST /studio/v1beta/models/gemini-denied-fixture:generateContent
+upstream body: {"contents":[{"parts":[{"text":"Say hello"}],"role":"user"}],"generationConfig":{"maxOutputTokens":64,"temperature":0.2},"systemInstruction":{"parts":[{"text":"Answer <briefly> & kindly."}]}}
+body:
+{
+  "error": {
+    "code": "403",
+    "message": "ai_studio: credential rejected — denied",
+    "type": "invalid_request_error"
+  }
+}
+# Budget spent on reasoning, AI Studio
+request: POST /v1/chat/completions
+status: 502
+header Content-Type: application/json
+header X-Llmgw-Attempts: 1
+header X-Llmgw-Duration-Ms: <ms>
+header X-Llmgw-Fallback-Ms: <ms>
+header X-Llmgw-Prompt-Bytes: 111
+header X-Llmgw-Tool-Schema-Bytes: 0
+header X-Llmgw-Ttfb-Ms: <ms>
+upstream: POST /studio/v1beta/models/gemini-thinking-fixture:generateContent
+upstream body: {"contents":[{"parts":[{"text":"Say hello"}],"role":"user"}],"generationConfig":{"maxOutputTokens":64,"temperature":0.2},"systemInstruction":{"parts":[{"text":"Answer <briefly> & kindly."}]}}
+body:
+{
+  "error": {
+    "code": "502",
+    "message": "ai_studio: the model spent its entire output budget on reasoning (32 thinking tokens) and returned no text — raise max_tokens or omit it",
+    "type": "api_error"
+  }
+}

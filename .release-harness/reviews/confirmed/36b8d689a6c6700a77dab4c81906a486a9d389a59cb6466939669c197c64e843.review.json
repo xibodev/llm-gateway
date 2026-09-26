@@ -1,0 +1,134 @@
+{
+  "schema_version": "1.0.0",
+  "mode": "change",
+  "contract": {
+    "digest": "31b393ab3e80162226619c441694573993ac618382d74642101484a0bf2e9c80"
+  },
+  "authoring_provenance": {
+    "status": "established",
+    "path": ".release-harness/drafts/llm-gateway.record.json",
+    "digest": "6732ddf3dc8236b974e2aae5f81b546d89c2a466b6fb0a368d76620955bf981e"
+  },
+  "sources": [
+    {
+      "source_id": "primary",
+      "status": "established",
+      "repository_identity": "https://github.com/xibodev/llm-gateway.git",
+      "base_ref": "origin/main",
+      "base_commit": "f08113f938ad1a627a1844dba21efe491d7c0914",
+      "merge_base": "8345adc7b0ff301a8ef0dc83723f9c8e27212038",
+      "head_commit": "c6661c00bdb916f49f02b2e6adf62333e0b5617b",
+      "head_tree": "3a8b00551a068ec0b87ef907e893479d2944be9e",
+      "reviewed_source_digest": "cf99fcdbae29465fcd0c89f0b94fa8ec4c311a8aed494b7a7437958041fb117a",
+      "changed_paths": [
+        {
+          "status": "modified",
+          "path": "go/go.mod",
+          "old_blob": "7a68bab6b1d5c181791e593069d1a994f19ee428",
+          "new_blob": "e3f8e10f45c3b2112ed6f054b2ea5cc8bf5baf9a"
+        },
+        {
+          "status": "modified",
+          "path": "go/go.sum",
+          "old_blob": "f9b7f5324b39035458856863e57f498381b4160a",
+          "new_blob": "994eea289e4680062688a1579a02e15e3e860a8c"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/providers/anonymous_profiles_test.go",
+          "old_blob": "591ae7b9e53015bb54791b379d0c98d0bf53f6e2",
+          "new_blob": "164cd2f7089fe6e5d5b552274a1ef2282c1402c3"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/providers/anonymous_profiles.go",
+          "old_blob": "1543d987405be5715199561c10f4fb1788c08a60",
+          "new_blob": "da1e1b897c49d930d59872b3ba0a51bf2c32ade2"
+        }
+      ]
+    }
+  ],
+  "facts": [
+    {
+      "id": "anonymous-from-core",
+      "claim": "Anonymous profiles derive from the gateway registry, free-model admission for Kilo Code, llm7, OVH AI Endpoints and Pollinations uses llmgw-core AdmitAnonymousModel, and probe selection uses SelectVerificationModel; the gateway keeps its catalog row shaping and enrollment policy.",
+      "status": "observed",
+      "evidence": {
+        "source": "go/internal/providers/anonymous_profiles.go; internal/api/anonymous_provider_automation.go unchanged"
+      }
+    },
+    {
+      "id": "admission-rules-identical",
+      "claim": "The core admission rules are the gateway rules moved verbatim; the gateway catalog-filter, Pollinations, probe-selection and registry-profile tests pass unchanged, and the malformed-price cases moved to core with the helper.",
+      "status": "observed",
+      "evidence": {
+        "source": "go/internal/providers/anonymous_profiles_test.go; llmgw-core providers/anonymous_test.go"
+      }
+    },
+    {
+      "id": "core-dependency-v080",
+      "claim": "go.mod pins github.com/xibodev/llmgw-core v0.8.0 instead of v0.7.0.",
+      "status": "observed",
+      "evidence": {
+        "source": "go/go.mod; go/go.sum"
+      }
+    },
+    {
+      "id": "anonymous-gates-pass",
+      "claim": "gofmt, go build, go vet, the full Go test suite, govulncheck and documentation checks pass with the workspace disabled; coupling budgets are unchanged.",
+      "status": "observed",
+      "evidence": {
+        "source": "local release gates with GOWORK=off"
+      }
+    }
+  ],
+  "impact": {
+    "assertions": [
+      {
+        "id": "A1",
+        "impact": "unchanged",
+        "supported_by": [
+          "admission-rules-identical",
+          "anonymous-gates-pass"
+        ]
+      },
+      {
+        "id": "A2",
+        "impact": "unchanged",
+        "supported_by": [
+          "admission-rules-identical",
+          "anonymous-gates-pass"
+        ]
+      },
+      {
+        "id": "A3",
+        "impact": "unchanged",
+        "supported_by": [
+          "admission-rules-identical",
+          "anonymous-gates-pass"
+        ]
+      },
+      {
+        "id": "A4",
+        "impact": "unchanged",
+        "supported_by": [
+          "admission-rules-identical",
+          "anonymous-gates-pass",
+          "anonymous-from-core"
+        ]
+      }
+    ],
+    "requires": [],
+    "possible_binding_changes": []
+  },
+  "questions": [],
+  "conclusion": {
+    "action": "reuse_contract",
+    "summary": "The gateway uses the core anonymous-provider mechanism with the same admission rules and probe selection it enforced itself; release identity, health and model-list behavior are unchanged."
+  },
+  "proposed": {
+    "by": "modularization-m1-anonymous",
+    "at": "2026-09-24T19:36:12.748Z"
+  },
+  "digest": "36b8d689a6c6700a77dab4c81906a486a9d389a59cb6466939669c197c64e843"
+}

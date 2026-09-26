@@ -1,0 +1,157 @@
+{
+  "schema_version": "1.0.0",
+  "mode": "change",
+  "contract": {
+    "digest": "31b393ab3e80162226619c441694573993ac618382d74642101484a0bf2e9c80"
+  },
+  "authoring_provenance": {
+    "status": "established",
+    "path": ".release-harness/drafts/llm-gateway.record.json",
+    "digest": "6732ddf3dc8236b974e2aae5f81b546d89c2a466b6fb0a368d76620955bf981e"
+  },
+  "sources": [
+    {
+      "source_id": "primary",
+      "status": "established",
+      "repository_identity": "https://github.com/xibodev/llm-gateway.git",
+      "base_ref": "origin/main",
+      "base_commit": "b291fea0f0fed663137e80b31cd3825b7b5483fd",
+      "merge_base": "87aff7a35ddbf2857637adeb2791e54a2c0ee9cf",
+      "head_commit": "07f177bec073ae260eb70c45849156458710ff17",
+      "head_tree": "686bf0fa61a63907772fbbaee6c30a48b5cbcdc2",
+      "reviewed_source_digest": "83109947b79232a3d24606d7e00ebb8fb24261a432dfc7ca615794a8d60b1c32",
+      "changed_paths": [
+        {
+          "status": "modified",
+          "path": ".github/workflows/ci.yml",
+          "old_blob": "4f5b961cba57950564f4e98449a28e91b6c17e6f",
+          "new_blob": "bdc70f1bb3657cfa532ae66c72a62dae2bcaf1a3"
+        },
+        {
+          "status": "added",
+          "path": "go/internal/architecture/settings_writes_test.go",
+          "old_blob": "0000000000000000000000000000000000000000",
+          "new_blob": "ee8ae59774622b30e3b1b1becd813903aac17696"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/config/config_test.go",
+          "old_blob": "a627908042b445583d360244c0f60a18ec578d3a",
+          "new_blob": "3e618aa65697d17d4a6e6be2ff2547a56f6091f4"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/config/config.go",
+          "old_blob": "543c0b131baa7cb092c141b0c0bb77ba3819de1d",
+          "new_blob": "d1b4dda4fc36902d7c0ad5e269ce679c5e8bd9ff"
+        },
+        {
+          "status": "added",
+          "path": "go/internal/config/publish_test.go",
+          "old_blob": "0000000000000000000000000000000000000000",
+          "new_blob": "eccf6ea82f357f352b2383ce356acadb3b9c5e4b"
+        },
+        {
+          "status": "added",
+          "path": "go/internal/config/source_test.go",
+          "old_blob": "0000000000000000000000000000000000000000",
+          "new_blob": "28d87b301476c1532670dd238b3237ffdab20b8a"
+        }
+      ]
+    }
+  ],
+  "facts": [
+    {
+      "id": "copy-on-write",
+      "claim": "config publishes settings immutably through an atomic pointer paired with a generation. Update, UpdateAndSave, AddProviderIfMissing and Load edit a private deep copy and publish it; readers never lock. Get, Update, UpdateAndSave, AddProviderIfMissing, Load, Save and Provider keep their signatures, and no call site outside internal/config changed.",
+      "status": "observed",
+      "evidence": {
+        "source": "go/internal/config/config.go; git diff between the merge base and HEAD"
+      }
+    },
+    {
+      "id": "crash-fixed",
+      "claim": "A concurrency test ranging over Get().Providers while writers insert and delete providers crashed with a concurrent map iteration and map write fault on the previous code and passes on this change, including under -count=20.",
+      "status": "observed",
+      "evidence": {
+        "source": "go/internal/config/publish_test.go"
+      }
+    },
+    {
+      "id": "restore-cas",
+      "claim": "The UpdateAndSave restore returns ErrRestoreSuperseded instead of discarding a change published after the one it would undo; callers already report a failed restore as an incomplete rollback. Every other writer behaves as before for a single writer.",
+      "status": "observed",
+      "evidence": {
+        "source": "go/internal/config/config.go UpdateAndSave; go/internal/api/admin.go delete handler"
+      }
+    },
+    {
+      "id": "ci-race",
+      "claim": "CI adds a cgo-enabled go test -race step scoped to internal/config. Release builds and the release workflow are unchanged.",
+      "status": "observed",
+      "evidence": {
+        "source": ".github/workflows/ci.yml"
+      }
+    },
+    {
+      "id": "suite",
+      "claim": "The full Go suite passes with HTTP_PROXY and HTTPS_PROXY unreachable, with unchanged characterization goldens and coupling budgets. The new architecture guard finds no write through a published settings value. gofmt, vet, govulncheck, check-docs and git diff --check pass.",
+      "status": "observed",
+      "evidence": {
+        "source": "local gate run on the reviewed head"
+      }
+    }
+  ],
+  "impact": {
+    "assertions": [
+      {
+        "id": "A1",
+        "impact": "unchanged",
+        "supported_by": [
+          "copy-on-write",
+          "restore-cas",
+          "suite"
+        ]
+      },
+      {
+        "id": "A2",
+        "impact": "unchanged",
+        "supported_by": [
+          "copy-on-write",
+          "restore-cas",
+          "suite"
+        ]
+      },
+      {
+        "id": "A3",
+        "impact": "unchanged",
+        "supported_by": [
+          "copy-on-write",
+          "restore-cas",
+          "suite"
+        ]
+      },
+      {
+        "id": "A4",
+        "impact": "unchanged",
+        "supported_by": [
+          "copy-on-write",
+          "restore-cas",
+          "suite"
+        ]
+      }
+    ],
+    "requires": [],
+    "possible_binding_changes": []
+  },
+  "questions": [],
+  "conclusion": {
+    "action": "reuse_contract",
+    "summary": "Settings publication becomes copy-on-write with a generation, removing a concurrent map fault; the CLI, health and models behavior is unchanged."
+  },
+  "proposed": {
+    "by": "settings-source",
+    "at": "2026-09-25T01:16:18.924Z"
+  },
+  "digest": "953c0dff71605833e27fd4c4fad5e45a0131302511c8f1a41bba3dddbfe25a64"
+}

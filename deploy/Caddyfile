@@ -1,0 +1,14 @@
+# TLS/static-admin starting point. This is not a complete SSO configuration.
+{$LLMGW_DOMAIN} {
+	encode zstd gzip
+
+	reverse_proxy gateway:8787 {
+		# Stream Server-Sent Events immediately (no response buffering).
+		flush_interval -1
+	}
+
+	log {
+		output stdout
+		format console
+	}
+}

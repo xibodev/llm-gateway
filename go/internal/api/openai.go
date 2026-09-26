@@ -1,0 +1,743 @@
+package api
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"io"
+	"math"
+	"net/http"
+	"strconv"
+	"strings"
+	"time"
+
+	"llmgw/internal/config"
+	"llmgw/internal/providers"
+	"llmgw/internal/router"
+
+	core "github.com/xibodev/llmgw-core"
+)
+
+type chatRequest struct {
+	Model               string           `json:"model"`
+	Messages            []map[string]any `json:"messages"`
+	Stream              bool             `json:"stream"`
+	Temperature         any              `json:"temperature"`
+	MaxTokens           any              `json:"max_tokens"`
+	MaxCompletionTokens any              `json:"max_completion_tokens"`
+	Tools               any              `json:"tools"`
+	ToolChoice          any              `json:"tool_choice"`
+	Metadata            any              `json:"metadata"`
+	TopP                any              `json:"top_p"`
+	Stop                any              `json:"stop"`
+	ReasoningEffort     any              `json:"reasoning_effort"`
+	FallbackTimeoutMS   any              `json:"fallback_timeout_ms"`
+	AffinityKey         string           `json:"affinity_key"`
+	// ForceApiSupport opts this request into experimental API adaptation
+	// (e.g. reaching a Responses-only model over /chat/completions). A present
+	// value overrides the provider's config-level setting.
+	ForceApiSupport *bool `json:"force_api_support"`
+}
+
+type responsesRequest struct {
+	Model             string         `json:"model"`
+	Input             any            `json:"input"`
+	Instructions      any            `json:"instructions"`
+	Stream            bool           `json:"stream"`
+	MaxOutputTokens   any            `json:"max_output_tokens"`
+	Reasoning         map[string]any `json:"reasoning"`
+	Temperature       any            `json:"temperature"`
+	TopP              any            `json:"top_p"`
+	Tools             any            `json:"tools"`
+	ToolChoice        any            `json:"tool_choice"`
+	Metadata          any            `json:"metadata"`
+	FallbackTimeoutMS any            `json:"fallback_timeout_ms"`
+	AffinityKey       string         `json:"affinity_key"`
+	ForceApiSupport   *bool          `json:"force_api_support"`
+}
+
+func chatKwargs(req *chatRequest) providers.Kwargs {
+	kw := providers.Kwargs{}
+	put := func(k string, v any) {
+		if v != nil {
+			kw[k] = v
+		}
+	}
+	put("temperature", req.Temperature)
+	put("max_tokens", req.MaxTokens)
+	put("max_completion_tokens", req.MaxCompletionTokens)
+	put("tools", req.Tools)
+	put("tool_choice", req.ToolChoice)
+	put("metadata", req.Metadata)
+	put("top_p", req.TopP)
+	put("stop", req.Stop)
+	put("reasoning_effort", req.ReasoningEffort)
+	put("_fallback_timeout_ms", req.FallbackTimeoutMS)
+	if strings.TrimSpace(req.AffinityKey) != "" {
+		kw["_affinity_key"] = strings.TrimSpace(req.AffinityKey)
+	}
+	if req.ForceApiSupport != nil {
+		kw["_force_api_support"] = *req.ForceApiSupport
+	}
+	return kw
+}
+
+func fallbackContext(r *http.Request, timeout any, affinity string) context.Context {
+	if header := strings.TrimSpace(r.Header.Get("X-LLMGW-Fallback-Timeout-Ms")); header != "" {
+		timeout = header
+	}
+	if header := strings.TrimSpace(r.Header.Get("X-LLMGW-Affinity-Key")); header != "" {
+		affinity = header
+	}
+	milliseconds, _ := strconv.ParseInt(fmt.Sprint(timeout), 10, 64)
+	return router.WithFallbackOptions(r.Context(), time.Duration(milliseconds)*time.Millisecond, affinity)
+}
+
+func providerMessages(messages []map[string]any) []providers.Message {
+	out := make([]providers.Message, 0, len(messages)+1)
+	if pre := config.Get().GatewayPreamble; pre != "" {
+		out = append(out, providers.Message{"role": "system", "content": pre})
+	}
+	for _, m := range messages {
+		out = append(out, providers.Message(m))
+	}
+	return out
+}
+
+func requestHasTools(value any) bool {
+	switch tools := value.(type) {
+	case []any:
+		return len(tools) > 0
+	case []map[string]any:
+		return len(tools) > 0
+	default:
+		return false
+	}
+}
+
+func payloadBytes(value any) int {
+	if value == nil {
+		return 0
+	}
+	encoded, err := json.Marshal(value)
+	if err != nil {
+		return 0
+	}
+	return len(encoded)
+}
+
+func setChatDiagnostics(w http.ResponseWriter, started time.Time, messages []providers.Message, tools any, trace []router.AttemptTrace) {
+	duration := time.Since(started).Milliseconds()
+	fallbackMS := int64(0)
+	for _, attempt := range trace {
+		if attempt.Status != "served" {
+			fallbackMS += attempt.DurationMS
+		}
+	}
+	w.Header().Set("X-LLMGW-TTFB-Ms", strconv.FormatInt(duration, 10))
+	w.Header().Set("X-LLMGW-Duration-Ms", strconv.FormatInt(duration, 10))
+	w.Header().Set("X-LLMGW-Attempts", strconv.Itoa(len(trace)))
+	w.Header().Set("X-LLMGW-Fallback-Ms", strconv.FormatInt(fallbackMS, 10))
+	w.Header().Set("X-LLMGW-Prompt-Bytes", strconv.Itoa(payloadBytes(messages)))
+	w.Header().Set("X-LLMGW-Tool-Schema-Bytes", strconv.Itoa(payloadBytes(tools)))
+}
+
+func handleChat(w http.ResponseWriter, r *http.Request) {
+	principal, ok := authed(w, r)
+	if !ok {
+		return
+	}
+	var req chatRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, 422, "invalid request body")
+		return
+	}
+	if _, err := requestedTransportMode(r); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	chatDispatch(w, r, &req, principal, "openai.chat")
+}
+
+func handleResponses(w http.ResponseWriter, r *http.Request) {
+	handleResponsesAPI(w, r)
+}
+
+func responsesToChatRequest(rr *responsesRequest) *chatRequest {
+	inputValue := ""
+	if s, ok := rr.Input.(string); ok {
+		inputValue = s
+	} else {
+		b, _ := json.Marshal(rr.Input)
+		inputValue = string(b)
+	}
+	messages := make([]map[string]any, 0, 2)
+	if rr.Instructions != nil {
+		instructions := ""
+		if s, ok := rr.Instructions.(string); ok {
+			instructions = s
+		} else {
+			b, _ := json.Marshal(rr.Instructions)
+			instructions = string(b)
+		}
+		if instructions != "" {
+			messages = append(messages, map[string]any{"role": "system", "content": instructions})
+		}
+	}
+	messages = append(messages, map[string]any{"role": "user", "content": inputValue})
+
+	var reasoningEffort any
+	if rr.Reasoning != nil {
+		reasoningEffort = rr.Reasoning["effort"]
+	}
+	return &chatRequest{
+		Model:               rr.Model,
+		Messages:            messages,
+		Stream:              rr.Stream,
+		MaxCompletionTokens: rr.MaxOutputTokens,
+		ReasoningEffort:     reasoningEffort,
+		Temperature:         rr.Temperature,
+		TopP:                rr.TopP,
+		Tools:               rr.Tools,
+		ToolChoice:          rr.ToolChoice,
+		Metadata:            rr.Metadata,
+		FallbackTimeoutMS:   rr.FallbackTimeoutMS,
+		AffinityKey:         rr.AffinityKey,
+		ForceApiSupport:     rr.ForceApiSupport,
+	}
+}
+
+func chatDispatch(w http.ResponseWriter, r *http.Request, req *chatRequest, principal *config.Principal, endpoint string) {
+	started := time.Now()
+	resolution, err := resolveModel(r.Context(), req.Model, principal)
+	if err != nil {
+		if _, ok := err.(*router.ModelNotFoundError); ok {
+			recordFailureUsage(endpoint, req.Model, principal, 404, "model_not_found", started)
+			writeError(w, 404, err.Error())
+			return
+		}
+		recordFailureUsage(endpoint, req.Model, principal, 500, "route_config", started)
+		writeError(w, 500, "Gateway is not configured for the requested model.")
+		return
+	}
+	targets := resolution.Targets
+	msgs := providerMessages(req.Messages)
+	kw := chatKwargs(req)
+	transportMode, _ := requestedTransportMode(r)
+	if transportMode == "transparent" {
+		msgs = make([]providers.Message, len(req.Messages))
+		for index := range req.Messages {
+			msgs[index] = providers.Message(req.Messages[index])
+		}
+	}
+
+	targets, polStatus, polMsg := enforceKeyPolicy(principal, req.Model, resolution.Category, targets)
+	if polStatus != 0 {
+		recordFailureUsage(endpoint, req.Model, principal, polStatus, "policy", started)
+		writeError(w, polStatus, polMsg)
+		return
+	}
+	targets, err = router.FilterCompatibleTargets(targets, callerOf(principal), router.CompatibilityRequest{
+		Surface: core.ModelSurfaceChatCompletions, Tools: requestHasTools(req.Tools),
+		Vision: requestIsMultimodal(req.Messages), Streaming: req.Stream,
+	})
+	if err != nil {
+		recordFailureUsage(endpoint, req.Model, principal, 400, "compatibility", started)
+		writeError(w, 400, err.Error())
+		return
+	}
+	if transportMode == "transparent" {
+		target, transparentErr := exactNativeTransparentTarget(req.Model, "/v1/chat/completions", resolution, callerOf(principal))
+		if transparentErr != nil {
+			recordFailureUsage(endpoint, req.Model, principal, 400, "transparent_contract", started)
+			writeError(w, http.StatusBadRequest, transparentErr.Error())
+			return
+		}
+		if rejectTransparentStream(w, req.Stream) {
+			recordFailureUsage(endpoint, req.Model, principal, 400, "transparent_stream", started)
+			return
+		}
+		provider, providerErr := providers.GetProviderForPrincipal(target.Provider, callerOf(principal))
+		if providerErr != nil {
+			writeUpstreamError(w, providerErr)
+			return
+		}
+		kw["_force_api_support"] = false
+		ctx := fallbackContext(r, req.FallbackTimeoutMS, req.AffinityKey)
+		response, providerErr := providers.CompleteProviderContext(ctx, provider, target.Model, msgs, kw)
+		if providerErr != nil {
+			recordFailureUsage(endpoint, req.Model, principal, upstreamErrorStatus(providerErr), "upstream", started)
+			writeUpstreamError(w, providerErr)
+			return
+		}
+		served := target
+		w.Header().Set(transportModeHeader, "transparent")
+		recordFromResponse(endpoint, req.Model, &served, principal, response, time.Since(started).Milliseconds())
+		writeJSON(w, http.StatusOK, response)
+		return
+	}
+
+	ctx := fallbackContext(r, req.FallbackTimeoutMS, req.AffinityKey)
+
+	if req.Stream {
+		streamChatSSE(w, ctx, targets, msgs, req.Model, principal, kw, endpoint, started)
+		return
+	}
+
+	response, served, trace, err := router.ExecuteCompleteWithTraceContext(governed(ctx, principal), targets, msgs, req.Model, callerOf(principal), kw)
+	setChatDiagnostics(w, started, msgs, req.Tools, trace)
+	if err != nil {
+		recordFailureUsage(
+			endpoint, req.Model, principal, upstreamErrorStatus(err), "upstream",
+			started,
+		)
+		writeUpstreamError(w, err)
+		return
+	}
+	if _, adapted := response["forced_support"]; adapted {
+		w.Header().Set("X-LLMGW-Adapted", "chat->responses")
+		// Echo the no-op provenance in the body only when the caller explicitly
+		// asked; a config/global-triggered adaptation stays header-only so we
+		// never surprise a strict client with an unknown field.
+		if req.ForceApiSupport == nil || !*req.ForceApiSupport {
+			delete(response, "forced_support")
+		}
+	}
+	response["model"] = served.Model
+	normalizeChatResponseEnvelope(response)
+	recordFromResponse(endpoint, req.Model, served, principal, response, time.Since(started).Milliseconds())
+	w.Header().Set(transportModeHeader, targetTransportMode(*served, callerOf(principal), "/v1/chat/completions"))
+	writeJSON(w, 200, response)
+}
+
+func normalizeChatResponseEnvelope(response map[string]any) {
+	if object, ok := response["object"]; !ok || object == nil || object == "" {
+		response["object"] = "chat.completion"
+	}
+	choices, _ := response["choices"].([]any)
+	for index, raw := range choices {
+		choice, ok := raw.(map[string]any)
+		if !ok {
+			continue
+		}
+		if _, exists := choice["index"]; !exists {
+			choice["index"] = index
+		}
+		if choice["finish_reason"] != "stop" {
+			continue
+		}
+		message, _ := choice["message"].(map[string]any)
+		tools, _ := message["tool_calls"].([]any)
+		valid := len(tools) > 0
+		ids := map[string]bool{}
+		for _, raw := range tools {
+			tool, _ := raw.(map[string]any)
+			function, _ := tool["function"].(map[string]any)
+			id, _ := tool["id"].(string)
+			name, _ := function["name"].(string)
+			arguments, _ := function["arguments"].(string)
+			if tool["type"] != "function" || ids[id] || !completeChatTool(id, name, arguments) {
+				valid = false
+				break
+			}
+			ids[id] = true
+		}
+		if valid {
+			choice["finish_reason"] = "tool_calls"
+		}
+	}
+}
+
+func completeChatTool(id, name, arguments string) bool {
+	// A tool-bearing stop is only repaired when every call is usable. Never
+	// promote truncated JSON, missing arguments, or non-object arguments.
+	arguments = strings.TrimSpace(arguments)
+	return strings.TrimSpace(id) != "" && strings.TrimSpace(name) != "" &&
+		strings.HasPrefix(arguments, "{") && json.Valid([]byte(arguments))
+}
+
+// writeUpstreamError surfaces the real upstream status + (redacted) detail when
+// available, instead of masking every failure as a generic 502.
+func writeUpstreamError(w http.ResponseWriter, err error) {
+	status := upstreamErrorStatus(err)
+	if retryAfter := safeRetryAfter(providers.InvocationRetryAfter(err)); retryAfter != "" {
+		w.Header().Set("Retry-After", retryAfter)
+	}
+	var atf *router.AllTargetsFailed
+	if errors.As(err, &atf) && status >= 400 {
+		writeError(w, status, atf.Error())
+		return
+	}
+	if providers.IsConfig(err) {
+		writeError(w, 500, "Upstream provider is misconfigured.")
+		return
+	}
+	writeError(w, status, "Upstream provider request failed.")
+}
+
+func safeRetryAfter(value string) string {
+	value = strings.TrimSpace(value)
+	if seconds, err := strconv.ParseUint(value, 10, 63); err == nil {
+		return strconv.FormatUint(seconds, 10)
+	}
+	if retryAt, err := http.ParseTime(value); err == nil {
+		return retryAt.UTC().Format(http.TimeFormat)
+	}
+	return ""
+}
+
+func upstreamErrorStatus(err error) int {
+	var atf *router.AllTargetsFailed
+	if errors.As(err, &atf) && atf.Status >= 400 {
+		return atf.Status
+	}
+	if providers.IsConfig(err) {
+		return 500
+	}
+	if status := providers.UpstreamStatus(err); status >= 300 && status <= 599 {
+		return status
+	}
+	return 502
+}
+
+func streamChatSSE(w http.ResponseWriter, ctx context.Context, targets []router.Target, msgs []providers.Message, requested string, principal *config.Principal, kw providers.Kwargs, endpoint string, started time.Time) {
+	it, served, err := router.ExecuteStreamContext(governed(ctx, principal), targets, msgs, requested, callerOf(principal), kw)
+	if err != nil {
+		if ctx.Err() != nil {
+			recordClientCancelled(endpoint, requested, principal, started)
+			return
+		}
+		// Pre-first-byte failure: no SSE headers sent yet, so surface a real
+		// HTTP error (with the upstream status) rather than a 200 error chunk.
+		recordFailureUsage(
+			endpoint, requested, principal, upstreamErrorStatus(err), "upstream",
+			started,
+		)
+		writeUpstreamError(w, err)
+		return
+	}
+	defer it.Close()
+
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("Connection", "keep-alive")
+	w.Header().Set("X-LLMGW-TTFB-Ms", strconv.FormatInt(time.Since(started).Milliseconds(), 10))
+	w.Header().Set("X-LLMGW-Prompt-Bytes", strconv.Itoa(payloadBytes(msgs)))
+	w.Header().Set("X-LLMGW-Tool-Schema-Bytes", strconv.Itoa(payloadBytes(kw["tools"])))
+	w.WriteHeader(200)
+
+	usageAcc := map[string]int{"prompt_tokens": 0, "completion_tokens": 0}
+	toolState := chatToolStream{choices: map[int]*chatToolChoice{}}
+	for {
+		chunk, more := it.Next()
+		if !more {
+			break
+		}
+		accumulateStreamUsage(chunk, usageAcc)
+		if ctx.Err() != nil {
+			recordClientCancelled(endpoint, requested, principal, started)
+			return
+		}
+		if err := writeChatSSE(w, toolState.normalize(chunk)); err != nil {
+			recordClientCancelled(endpoint, requested, principal, started)
+			return
+		}
+	}
+	if it.Err() != nil {
+		if ctx.Err() != nil {
+			recordClientCancelled(endpoint, requested, principal, started)
+			return
+		}
+		if err := writeSSE(w, jsonStr(providerErrorPayloadOpenAI())); err != nil {
+			recordClientCancelled(endpoint, requested, principal, started)
+			return
+		}
+	}
+	if ctx.Err() != nil {
+		recordClientCancelled(endpoint, requested, principal, started)
+		return
+	}
+	if err := writeSSE(w, "[DONE]"); err != nil {
+		recordClientCancelled(endpoint, requested, principal, started)
+		return
+	}
+	router.RecordUsage(router.UsageRecord{
+		Endpoint: endpoint, RequestedModel: requested, RoutedModel: served.Model,
+		Provider: served.Provider, Project: principal.Project, Key: principal.Key,
+		ProjectID: principal.ProjectID, PrincipalID: principal.PrincipalID, KeyID: principal.KeyID,
+		InputTokens: usageAcc["prompt_tokens"], OutputTokens: usageAcc["completion_tokens"],
+		LatencyMS: time.Since(started).Milliseconds(), IsStub: isStub(served.Provider),
+	})
+}
+
+func writeAndFlush(w http.ResponseWriter, payload []byte) error {
+	for len(payload) > 0 {
+		n, err := w.Write(payload)
+		if n > len(payload) {
+			return io.ErrShortWrite
+		}
+		payload = payload[n:]
+		if err != nil {
+			return err
+		}
+		if n == 0 {
+			return io.ErrShortWrite
+		}
+	}
+	if err := http.NewResponseController(w).Flush(); err != nil && !errors.Is(err, http.ErrNotSupported) {
+		return err
+	}
+	return nil
+}
+
+func writeSSE(w http.ResponseWriter, data string) error {
+	return writeAndFlush(w, []byte("data: "+data+"\n\n"))
+}
+
+func writeChatSSE(w http.ResponseWriter, data string) error {
+	var chunk map[string]json.RawMessage
+	if err := json.Unmarshal([]byte(data), &chunk); err == nil && chunk != nil {
+		rawObject, exists := chunk["object"]
+		normalize := !exists
+		if exists {
+			var object *string
+			normalize = json.Unmarshal(rawObject, &object) == nil && (object == nil || *object == "")
+		}
+		if normalize {
+			chunk["object"] = json.RawMessage(`"chat.completion.chunk"`)
+			if normalized, err := json.Marshal(chunk); err == nil {
+				data = string(normalized)
+			}
+		}
+	}
+	return writeSSE(w, data)
+}
+
+type chatToolDelta struct {
+	id, kind, name, arguments string
+}
+
+type chatToolChoice struct {
+	tools   map[int]*chatToolDelta
+	invalid bool
+}
+
+type chatToolStream struct {
+	choices  map[int]*chatToolChoice
+	bytes    int
+	disabled bool
+}
+
+func (s *chatToolStream) normalize(data string) string {
+	if s.disabled {
+		return data
+	}
+	var chunk map[string]json.RawMessage
+	var choices []map[string]json.RawMessage
+	if json.Unmarshal([]byte(data), &chunk) != nil || chunk == nil {
+		// Lost events cannot be attributed to a choice; prior completeness
+		// no longer proves that a later stop safely represents a tool call.
+		s.disabled = true
+		return data
+	}
+	if raw, exists := chunk["choices"]; !exists {
+		return data
+	} else if json.Unmarshal(raw, &choices) != nil || choices == nil {
+		s.disabled = true
+		return data
+	}
+	changed := false
+	for _, choice := range choices {
+		var index *int
+		if json.Unmarshal(choice["index"], &index) != nil || index == nil || *index < 0 {
+			// Without a reliable index, subsequent deltas cannot be attributed.
+			s.disabled = true
+			return data
+		}
+		state := s.choices[*index]
+		if state == nil {
+			if len(s.choices) >= 128 {
+				s.disabled = true
+				return data
+			}
+			state = &chatToolChoice{tools: map[int]*chatToolDelta{}}
+			s.choices[*index] = state
+		}
+		if state.invalid {
+			continue
+		}
+		var delta map[string]json.RawMessage
+		if raw, exists := choice["delta"]; exists && (json.Unmarshal(raw, &delta) != nil || delta == nil) {
+			state.invalid = true
+		}
+		if raw, exists := delta["tool_calls"]; exists {
+			var tools []map[string]json.RawMessage
+			if json.Unmarshal(raw, &tools) != nil || tools == nil {
+				state.invalid = true
+			}
+			for _, tool := range tools {
+				var toolIndex *int
+				if json.Unmarshal(tool["index"], &toolIndex) != nil || toolIndex == nil || *toolIndex < 0 {
+					state.invalid = true
+					continue
+				}
+				call := state.tools[*toolIndex]
+				if call == nil {
+					if len(state.tools) >= 128 {
+						state.invalid = true
+						continue
+					}
+					call = &chatToolDelta{}
+					state.tools[*toolIndex] = call
+				}
+				var function map[string]json.RawMessage
+				if raw, exists := tool["function"]; exists && (json.Unmarshal(raw, &function) != nil || function == nil) {
+					state.invalid = true
+				}
+				for _, field := range []struct {
+					raw json.RawMessage
+					dst *string
+				}{{tool["id"], &call.id}, {tool["type"], &call.kind}, {function["name"], &call.name}, {function["arguments"], &call.arguments}} {
+					if field.raw == nil {
+						continue
+					}
+					var fragment *string
+					if json.Unmarshal(field.raw, &fragment) != nil || fragment == nil {
+						state.invalid = true
+						continue
+					}
+					s.bytes += len(*fragment)
+					// Bound retained state independently of upstream stream length.
+					// Above the limit, preserve the provider's reason unchanged.
+					if s.bytes > 1<<20 {
+						s.choices = nil
+						s.disabled = true
+						return data
+					}
+					*field.dst += *fragment
+				}
+			}
+		}
+		var reason string
+		if json.Unmarshal(choice["finish_reason"], &reason) != nil || reason == "" {
+			continue
+		}
+		valid := !state.invalid && len(state.tools) > 0
+		ids := map[string]bool{}
+		for _, call := range state.tools {
+			if call.kind != "function" || ids[call.id] || !completeChatTool(call.id, call.name, call.arguments) {
+				valid = false
+			}
+			ids[call.id] = true
+		}
+		if reason == "stop" && valid {
+			choice["finish_reason"] = json.RawMessage(`"tool_calls"`)
+			changed = true
+		}
+		// A second terminal cannot reuse previously completed tool deltas.
+		state.tools = nil
+		state.invalid = true
+	}
+	if changed {
+		chunk["choices"], _ = json.Marshal(choices)
+		if normalized, err := json.Marshal(chunk); err == nil {
+			return string(normalized)
+		}
+	}
+	return data
+}
+
+func recordClientCancelled(endpoint, requested string, principal *config.Principal, started time.Time) {
+	recordFailureUsage(endpoint, requested, principal, 499, "client_cancelled", started)
+}
+
+func providerErrorPayloadOpenAI() map[string]any {
+	return map[string]any{"error": map[string]any{
+		"message": "Upstream provider request failed.", "type": "provider_error",
+		"code": "provider_invocation_failed",
+	}}
+}
+
+func jsonStr(v any) string {
+	b, _ := json.Marshal(v)
+	return string(b)
+}
+
+func accumulateStreamUsage(chunk string, acc map[string]int) {
+	var obj map[string]any
+	if json.Unmarshal([]byte(chunk), &obj) != nil {
+		return
+	}
+	usage, ok := obj["usage"].(map[string]any)
+	if !ok {
+		return
+	}
+	if v := firstInt(usage, "prompt_tokens", "input_tokens"); v != 0 {
+		acc["prompt_tokens"] = v
+	}
+	if v := firstInt(usage, "completion_tokens", "output_tokens"); v != 0 {
+		acc["completion_tokens"] = v
+	}
+}
+
+func firstInt(m map[string]any, keys ...string) int {
+	limit := math.Ldexp(1, strconv.IntSize-1)
+	fromFloat := func(n float64) int {
+		if math.IsNaN(n) || math.IsInf(n, 0) || math.Trunc(n) != n || n < -limit || n >= limit {
+			return 0
+		}
+		return int(n)
+	}
+	for _, k := range keys {
+		if v, ok := m[k]; ok {
+			switch n := v.(type) {
+			case float64:
+				return fromFloat(n)
+			case int:
+				return n
+			case int64:
+				if strconv.IntSize == 32 && (n > math.MaxInt32 || n < math.MinInt32) {
+					return 0
+				}
+				return int(n)
+			case json.Number:
+				value, err := n.Int64()
+				if err == nil {
+					if strconv.IntSize == 32 && (value > math.MaxInt32 || value < math.MinInt32) {
+						return 0
+					}
+					return int(value)
+				}
+				valueFloat, err := strconv.ParseFloat(string(n), 64)
+				if err == nil {
+					return fromFloat(valueFloat)
+				}
+				return 0
+			}
+		}
+	}
+	return 0
+}
+
+func recordFromResponse(endpoint, requested string, served *router.Target, principal *config.Principal, response map[string]any, latencyMS int64) {
+	in, out := 0, 0
+	if usage, ok := response["usage"].(map[string]any); ok {
+		in = firstInt(usage, "prompt_tokens", "input_tokens")
+		out = firstInt(usage, "completion_tokens", "output_tokens")
+	}
+	router.RecordUsage(router.UsageRecord{
+		Endpoint: endpoint, RequestedModel: requested, RoutedModel: served.Model,
+		Provider: served.Provider, Project: principal.Project, Key: principal.Key,
+		ProjectID: principal.ProjectID, PrincipalID: principal.PrincipalID, KeyID: principal.KeyID,
+		InputTokens: in, OutputTokens: out, LatencyMS: latencyMS, IsStub: isStub(served.Provider),
+	})
+}
+
+func isStub(providerID string) bool {
+	p, err := providers.GetProvider(providerID)
+	if err != nil {
+		return false
+	}
+	return p.IsStub()
+}

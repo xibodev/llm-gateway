@@ -1,0 +1,77 @@
+{
+  "schema_version": "1.0.0",
+  "mode": "baseline",
+  "contract": {
+    "digest": "31b393ab3e80162226619c441694573993ac618382d74642101484a0bf2e9c80"
+  },
+  "authoring_provenance": {
+    "status": "established",
+    "path": ".release-harness/drafts/llm-gateway.record.json",
+    "digest": "6732ddf3dc8236b974e2aae5f81b546d89c2a466b6fb0a368d76620955bf981e"
+  },
+  "sources": [
+    {
+      "source_id": "primary",
+      "status": "established",
+      "repository_identity": "https://github.com/xibodev/llm-gateway.git",
+      "head_commit": "e9590c61c28736559e955b9a05bbd3e8261033ad",
+      "head_tree": "f29cb89d1d23c243660ca9b6826583334ddfc65f",
+      "reviewed_source_digest": "f3f1e62799f025775103c37f20f627377fcfa7501d37230fce3ca9e7313bfdb3",
+      "changed_paths": []
+    }
+  ],
+  "facts": [
+    {
+      "id": "cancellation-test-bound",
+      "claim": "The cancellation regression test retains its one-second upstream cancellation assertion and no-retry assertion while allowing up to five seconds for package-wide handler cleanup under CI contention.",
+      "status": "observed",
+      "evidence": {
+        "source": "go/internal/api/openai_test.go; repeated focused tests and full API package test"
+      }
+    }
+  ],
+  "impact": {
+    "assertions": [
+      {
+        "id": "A1",
+        "impact": "unchanged",
+        "supported_by": [
+          "cancellation-test-bound"
+        ]
+      },
+      {
+        "id": "A2",
+        "impact": "unchanged",
+        "supported_by": [
+          "cancellation-test-bound"
+        ]
+      },
+      {
+        "id": "A3",
+        "impact": "unchanged",
+        "supported_by": [
+          "cancellation-test-bound"
+        ]
+      },
+      {
+        "id": "A4",
+        "impact": "unchanged",
+        "supported_by": [
+          "cancellation-test-bound"
+        ]
+      }
+    ],
+    "requires": [],
+    "possible_binding_changes": []
+  },
+  "questions": [],
+  "conclusion": {
+    "action": "reuse_contract",
+    "summary": "This test-only timing bound does not change runtime behavior or accepted release assertions."
+  },
+  "proposed": {
+    "by": "agent-session",
+    "at": "2026-09-21T14:53:17.339Z"
+  },
+  "digest": "0b60ac4c62c5c5cdf38b56f43a69402d773b7d40213e18704672f55fb4ceccf7"
+}

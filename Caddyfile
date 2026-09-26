@@ -1,0 +1,17 @@
+# Caddy reverse proxy for the LLM gateway (TLS + HTTP/2; auth stays in the app).
+#
+#   LLMGW_DOMAIN=llm.example.com caddy run --config ./Caddyfile
+#
+# Or run Caddy as a sibling container and proxy to the compose `gateway` service.
+# The gateway enforces its own bearer auth (LLMGW_API_KEY), so Caddy only does
+# TLS termination + reverse proxy — do NOT expose the gateway port publicly
+# without this (or an equivalent) in front.
+
+{$LLMGW_DOMAIN:llm.example.com} {
+	encode zstd gzip
+
+	# Streaming (SSE) must not be buffered.
+	reverse_proxy {$LLMGW_UPSTREAM:gateway:8787} {
+		flush_interval -1
+	}
+}

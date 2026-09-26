@@ -1,0 +1,22 @@
+{
+  "mappings": [
+    {
+      "name": "catch-all: any unmapped request → 503 sealed-uat",
+      "request": {
+        "method": "ANY",
+        "urlPattern": ".*"
+      },
+      "response": {
+        "status": 503,
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "jsonBody": {
+          "error": "sealed-uat: no internet, no stub",
+          "hint": "Add a WireMock mapping for this path or replace with an in-network service."
+        }
+      },
+      "priority": 100
+    }
+  ]
+}

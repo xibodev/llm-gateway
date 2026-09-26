@@ -1,0 +1,52 @@
+# llm-gateway config (providers + endpoints). Point LLMGW_CONFIG at this file.
+#
+# Do not commit real provider credentials. Prefer ${ENV:NAME} references or the
+# console's encrypted connection flow. The compatibility path may retain a
+# plaintext owner-only secrets.json seed; protect state and backups accordingly.
+
+providers:
+  copilot:
+    type: github_copilot            # sign in as a human owner via the console
+  openrouter:
+    type: openai_compatible
+    base_url: https://openrouter.ai/api/v1
+    # api_key: ${ENV:OPENROUTER_API_KEY}   # or enter it in the /admin panel
+  anthropic-direct:
+    type: anthropic
+    base_url: https://api.anthropic.com
+  ollama:
+    type: ollama                    # uses LLMGW_OLLAMA_BASE_URL (default :11434)
+
+# Endpoints = named, ordered failover chains of real, pinned models. Request an
+# endpoint name and it cascades on 429/5xx/timeout. You can also address any real
+# model directly as "<provider>/<model>" (e.g. copilot/gpt-4o-mini).
+#
+# "endpoints:" is the canonical key. The pre-rename "categories:" key remains
+# a compatibility alias for older config files; no removal release is scheduled.
+endpoints:
+  smart:
+    failover:
+      - { provider: copilot, model: <copilot-model-id> }
+      - { provider: openrouter, model: <openrouter-model-id> }
+  cheap:
+    failover:
+      - { provider: copilot, model: <small-model-id> }
+
+policies:
+  defaults:
+    retry_max_attempts: 2
+    circuit_failure_threshold: 4
+    circuit_cooldown_seconds: 30
+  overrides:
+    copilot:
+      circuit_failure_threshold: 3
+      circuit_cooldown_seconds: 60
+
+# gateway.db is the authoritative usage store. The legacy compatibility savings
+# ledger is off by default because its synchronous usage.db write adds request
+# latency. Existing configurations with enabled: true retain their current
+# db_path, baseline, project/key labels, and savings read APIs.
+savings:
+  enabled: false
+  # db_path: /path/to/usage.db
+  # baseline_model: provider/model

@@ -1,0 +1,1057 @@
+// Package config is the single source of truth for the gateway's runtime state:
+// providers, endpoints, minted keys, provider secrets, and scalar settings.
+//
+// Mirrors the Python llmgw.config module. Keys never live in the committed
+// config file â€” they live in a 0600 secrets.json / keys.json under the state
+// dir (~/.llmgw by default, override with LLMGW_STATE_DIR).
+package config
+
+import (
+	"encoding/json"
+	"errors"
+	"fmt"
+	"os"
+	"path/filepath"
+	"regexp"
+	"strconv"
+	"strings"
+	"sync"
+	"sync/atomic"
+
+	"gopkg.in/yaml.v3"
+)
+
+// ProviderConfig is one connected upstream.
+type ProviderConfig struct {
+	Type                string   `yaml:"type" json:"type"`
+	RegistryID          string   `yaml:"registry_id,omitempty" json:"registry_id,omitempty"`
+	BaseURL             string   `yaml:"base_url,omitempty" json:"base_url,omitempty"`
+	APIKey              string   `yaml:"api_key,omitempty" json:"-"`
+	Region              string   `yaml:"region,omitempty" json:"region,omitempty"`
+	Timeout             *float64 `yaml:"timeout,omitempty" json:"timeout,omitempty"`
+	PublicOAuthClientID string   `yaml:"public_oauth_client_id,omitempty" json:"public_oauth_client_id,omitempty"`
+	// DefaultVoice selects the voice used by speech-synthesis providers when
+	// a request names the provider without a specific voice.
+	DefaultVoice string `yaml:"default_voice,omitempty" json:"default_voice,omitempty"`
+	// Project and Location scope a Vertex AI provider. Location defaults to the
+	// multi-region "global" endpoint, which carries the widest model selection;
+	// individual models may require a specific region instead.
+	Project  string `yaml:"project,omitempty" json:"project,omitempty"`
+	Location string `yaml:"location,omitempty" json:"location,omitempty"`
+	// VertexRequestType optionally selects Google's request accounting path.
+	// Empty preserves the provider default; dedicated requires provisioned throughput.
+	VertexRequestType string `yaml:"vertex_request_type,omitempty" json:"vertex_request_type,omitempty"`
+	// Disabled keeps the provider configured but takes it out of service:
+	// requests 404, catalogs are not refreshed, and the console shows it as
+	// disabled until it is re-enabled.
+	Disabled bool `yaml:"disabled,omitempty" json:"disabled,omitempty"`
+	// ForceApiSupport opts this provider into experimental API adaptation:
+	// when a requested model is reachable only via a different OpenAI-family
+	// endpoint (e.g. Responses-only gpt-5.5), translate the request instead of
+	// letting it fail. Off by default; adaptation is never native to the provider.
+	ForceApiSupport bool `yaml:"force_api_support,omitempty" json:"force_api_support,omitempty"`
+}
+
+// EndpointMember is one pinned provider/model target in a failover chain.
+type EndpointMember struct {
+	Provider        string `yaml:"provider" json:"provider"`
+	Model           string `yaml:"model" json:"model"`
+	AllowUnverified bool   `yaml:"allow_unverified,omitempty" json:"allow_unverified,omitempty"`
+}
+
+// EndpointConfig is an ordered failover chain of pinned real models. A client
+// requests the endpoint name (e.g. "smart") and the gateway cascades through
+// this chain until one pinned provider/model succeeds.
+type EndpointConfig struct {
+	Failover []EndpointMember `yaml:"failover" json:"failover"`
+}
+
+// Deprecated: use EndpointConfig. Retained until client evidence and a
+// documented release boundary make removal safe.
+type CategoryConfig = EndpointConfig
+
+// Deprecated: use EndpointMember. See CategoryConfig.
+type CategoryMember = EndpointMember
+
+// ProviderPolicy is the per-provider retry + circuit-breaker policy.
+type ProviderPolicy struct {
+	RetryMaxAttempts           int     `yaml:"retry_max_attempts" json:"retry_max_attempts"`
+	RetryInitialBackoffSeconds float64 `yaml:"retry_initial_backoff_seconds" json:"retry_initial_backoff_seconds"`
+	RetryMaxBackoffSeconds     float64 `yaml:"retry_max_backoff_seconds" json:"retry_max_backoff_seconds"`
+	RetryBackoffMultiplier     float64 `yaml:"retry_backoff_multiplier" json:"retry_backoff_multiplier"`
+	CircuitFailureThreshold    int     `yaml:"circuit_failure_threshold" json:"circuit_failure_threshold"`
+	CircuitCooldownSeconds     float64 `yaml:"circuit_cooldown_seconds" json:"circuit_cooldown_seconds"`
+}
+
+func defaultPolicy() ProviderPolicy {
+	return ProviderPolicy{
+		RetryMaxAttempts: 1, RetryInitialBackoffSeconds: 0.5, RetryMaxBackoffSeconds: 8.0,
+		RetryBackoffMultiplier: 2.0, CircuitFailureThreshold: 0, CircuitCooldownSeconds: 30.0,
+	}
+}
+
+// RetryEnabled reports whether retry is configured (>1 attempt).
+func (p ProviderPolicy) RetryEnabled() bool { return p.RetryMaxAttempts > 1 }
+
+// CircuitEnabled reports whether the circuit breaker is configured.
+func (p ProviderPolicy) CircuitEnabled() bool { return p.CircuitFailureThreshold > 0 }
+
+// TimeoutOr returns the provider's configured timeout, or fallback when unset.
+func (c *ProviderConfig) timeoutOr(fallback float64) float64 {
+	if c.Timeout != nil {
+		return *c.Timeout
+	}
+	return fallback
+}
+
+// TimeoutOr is the exported accessor for the per-provider timeout.
+func (c *ProviderConfig) TimeoutOr(fallback float64) float64 { return c.timeoutOr(fallback) }
+
+// BackendPolicies is shared defaults + per-provider overrides.
+type BackendPolicies struct {
+	Defaults       ProviderPolicy            `yaml:"defaults" json:"defaults"`
+	Overrides      map[string]ProviderPolicy `yaml:"overrides" json:"overrides"`
+	OverrideFields map[string]map[string]any `yaml:"-" json:"-"`
+}
+
+func (p BackendPolicies) ConfiguredOverrides() map[string]any {
+	configured := map[string]any{}
+	for providerID, policy := range p.Overrides {
+		if fields, ok := p.OverrideFields[providerID]; ok {
+			configured[providerID] = cloneStringAnyMap(fields)
+		} else {
+			configured[providerID] = policy
+		}
+	}
+	return configured
+}
+
+// SavingsConfig controls the usage/cost ledger.
+type SavingsConfig struct {
+	Enabled       bool                          `yaml:"enabled" json:"enabled"`
+	BaselineModel string                        `yaml:"baseline_model" json:"baseline_model"`
+	DBPath        string                        `yaml:"db_path" json:"db_path"`
+	PriceCatalog  map[string]map[string]float64 `yaml:"price_catalog" json:"price_catalog"`
+}
+
+// Settings is the whole runtime configuration.
+type Settings struct {
+	// auth / server
+	APIKey                  string   `yaml:"api_key"`
+	APIKeys                 []string `yaml:"api_keys"`
+	AllowUnauthenticatedAPI bool     `yaml:"allow_unauthenticated_api"`
+	RateLimitPerMinute      int      `yaml:"rate_limit_per_minute"`
+	GatewayPreamble         string   `yaml:"gateway_preamble"`
+	// AnthropicDiscoveryAliases makes GET /v1/models also list Claude-family
+	// models under their bare id (claude-â€¦ / anthropic-â€¦) so Claude Code's
+	// gateway model discovery â€” which ignores ids not beginning with "claude" or
+	// "anthropic" â€” surfaces them in the /model picker. On by default.
+	AnthropicDiscoveryAliases bool `yaml:"anthropic_discovery_aliases"`
+	// AnthropicDiscoveryAllModels extends discovery aliases to NON-Claude models
+	// (gpt, gemini, â€¦) by prefixing them "claude-<id>" so they pass Claude Code's
+	// filter too. The resolver strips the prefix to route. Off by default â€”
+	// non-Claude models go through Anthropicâ†’OpenAI translation.
+	AnthropicDiscoveryAllModels bool   `yaml:"anthropic_discovery_all_models"`
+	SSOEnabled                  bool   `yaml:"sso_enabled"`
+	SSOSharedSecret             string `yaml:"-"`
+	SSOAdminGroup               string `yaml:"sso_admin_group"`
+	SSOAutoProvision            bool   `yaml:"sso_auto_provision"`
+	CredentialEncryptionKey     string `yaml:"-"`
+
+	// core
+	Providers map[string]*ProviderConfig `yaml:"providers"`
+	Endpoints map[string]*EndpointConfig `yaml:"endpoints"`
+	Policies  BackendPolicies            `yaml:"policies"`
+	Savings   SavingsConfig              `yaml:"savings"`
+
+	// provider-type defaults
+	OpenAICompatibleBaseURL        string  `yaml:"openai_compatible_base_url"`
+	OpenAICompatibleAPIKey         string  `yaml:"openai_compatible_api_key"`
+	OpenAICompatibleTimeoutSeconds float64 `yaml:"openai_compatible_timeout_seconds"`
+	OllamaBaseURL                  string  `yaml:"ollama_base_url"`
+	OllamaTimeoutSeconds           float64 `yaml:"ollama_timeout_seconds"`
+	LiteLLMTimeoutSeconds          float64 `yaml:"litellm_timeout_seconds"`
+
+	// github copilot
+	GithubCopilotOAuthToken       string  `yaml:"github_copilot_oauth_token"`
+	GithubCopilotUseGhCLI         bool    `yaml:"github_copilot_use_gh_cli"`
+	GithubCopilotCacheDir         string  `yaml:"github_copilot_cache_dir"`
+	GithubCopilotTimeoutSeconds   float64 `yaml:"github_copilot_timeout_seconds"`
+	GithubCopilotEditorVersion    string  `yaml:"github_copilot_editor_version"`
+	GithubCopilotIntegrationID    string  `yaml:"github_copilot_integration_id"`
+	OpenAICodexClientID           string  `yaml:"openai_codex_client_id"`
+	GoogleAntigravityClientID     string  `yaml:"-"`
+	GoogleAntigravityClientSecret string  `yaml:"-"`
+	GoogleAntigravityOAuthProfile string  `yaml:"-"`
+	GoogleAntigravityClientMode   string  `yaml:"-"`
+	GoogleAntigravityRedirectURI  string  `yaml:"-"`
+	OAuthPublicBaseURL            string  `yaml:"-"`
+	AllowCopilotProxy             bool    `yaml:"allow_copilot_proxy"`
+}
+
+// Defaults returns a Settings with the same defaults as the Python model.
+func Defaults() *Settings {
+	return &Settings{
+		Providers: map[string]*ProviderConfig{},
+		Endpoints: map[string]*EndpointConfig{},
+		Policies: BackendPolicies{
+			Defaults: ProviderPolicy{
+				RetryMaxAttempts: 2, RetryInitialBackoffSeconds: 0.5, RetryMaxBackoffSeconds: 8.0,
+				RetryBackoffMultiplier: 2.0, CircuitFailureThreshold: 4, CircuitCooldownSeconds: 30.0,
+			},
+			Overrides:      map[string]ProviderPolicy{},
+			OverrideFields: map[string]map[string]any{},
+		},
+		Savings:                        SavingsConfig{Enabled: false, PriceCatalog: map[string]map[string]float64{}},
+		OpenAICompatibleBaseURL:        "https://api.openai.com/v1",
+		OpenAICompatibleTimeoutSeconds: 300.0,
+		OllamaBaseURL:                  "http://127.0.0.1:11434",
+		OllamaTimeoutSeconds:           30.0,
+		LiteLLMTimeoutSeconds:          300.0,
+		GithubCopilotUseGhCLI:          true,
+		GithubCopilotTimeoutSeconds:    300.0,
+		GithubCopilotEditorVersion:     "vscode/1.95.3",
+		GithubCopilotIntegrationID:     "vscode-chat",
+		AnthropicDiscoveryAliases:      true,
+		SSOAdminGroup:                  "llmgw-admin",
+		SSOAutoProvision:               true,
+	}
+}
+
+// ---- published settings ------------------------------------------------- //
+
+// published pairs one settings value with the generation it was published
+// under. It is replaced as a whole, so a single atomic load always yields a
+// settings value and the generation that belongs to it.
+type published struct {
+	settings   *Settings
+	generation uint64
+}
+
+var (
+	// writerMu serializes writers. Each writer deep-copies the published
+	// settings, edits its private copy and publishes that under the next
+	// generation, so a published value is never written again. Readers
+	// never take the mutex: request paths range over Providers and other
+	// maps without a lock, and an in-place write would race them into
+	// Go's unrecoverable concurrent map access fault.
+	writerMu sync.Mutex
+	state    atomic.Pointer[published]
+)
+
+// ErrRestoreSuperseded is returned by the restore function of UpdateAndSave
+// when another change was published after the one it would undo.
+var ErrRestoreSuperseded = errors.New("configuration changed after this update; restore skipped")
+
+func init() {
+	// Generation 1 matches llmgw-core's reference settings source; any
+	// increase after it tells a consumer the settings changed.
+	state.Store(&published{settings: Defaults(), generation: 1})
+}
+
+// publishLocked installs next under the generation after the current one.
+// The caller holds writerMu and must not write to next afterwards.
+func publishLocked(next *Settings) uint64 {
+	generation := state.Load().generation + 1
+	state.Store(&published{settings: next, generation: generation})
+	return generation
+}
+
+// Get returns the current settings without locking. The value is immutable
+// once published: writers publish a new value instead of editing this one,
+// so a caller may keep and range over it while settings change, and a kept
+// value does not see later changes. Callers must treat it as read-only and
+// change settings through Update or UpdateAndSave.
+func Get() *Settings {
+	return state.Load().settings
+}
+
+// Snapshot returns the current settings and the generation they were
+// published under. Both come from one atomic load, so they always belong
+// together. The generation increases with every published change.
+func Snapshot() (*Settings, uint64) {
+	current := state.Load()
+	return current.settings, current.generation
+}
+
+// Generation returns the generation of the current settings.
+func Generation() uint64 {
+	return state.Load().generation
+}
+
+// Source exposes the process-wide settings as a snapshot source, such as
+// llmgw-core's runtime.SettingsSource, without this package depending on
+// the consumer.
+type Source struct{}
+
+// Snapshot returns the current settings and their generation.
+func (Source) Snapshot() (*Settings, uint64) { return Snapshot() }
+
+// Provider returns an isolated copy of one provider's configuration for
+// background workers that must not retain the published settings.
+func Provider(id string) (*ProviderConfig, bool) {
+	provider := Get().Providers[id]
+	if provider == nil {
+		return nil, false
+	}
+	return cloneProvider(provider), true
+}
+
+// Update applies fn to a private deep copy of the current settings and
+// publishes the copy under a new generation. fn edits the copy, never a
+// value a reader may hold, and must not keep it: once Update returns, the
+// copy is published and must not change.
+func Update(fn func(*Settings)) {
+	writerMu.Lock()
+	defer writerMu.Unlock()
+	next := cloneSettings(state.Load().settings)
+	fn(next)
+	publishLocked(next)
+}
+
+// UpdateAndSave applies fn to a private deep copy of the current settings,
+// persists the copy, and only then publishes it under a new generation. A
+// failed fn or save publishes nothing, so the live configuration is intact.
+//
+// The returned restore function republishes the previous settings under
+// another new generation and persists them. It is a compare-and-swap: if
+// any change was published after this one, restore leaves memory and disk
+// untouched and returns ErrRestoreSuperseded, because rolling back would
+// silently discard that newer change. Callers already report a failed
+// restore as a rollback that did not complete.
+func UpdateAndSave(fn func(*Settings) error) (func() error, error) {
+	writerMu.Lock()
+	defer writerMu.Unlock()
+	previous := state.Load().settings
+	next := cloneSettings(previous)
+	if err := fn(next); err != nil {
+		return nil, err
+	}
+	if err := writeConfigPayload(configPayload(next)); err != nil {
+		return nil, err
+	}
+	generation := publishLocked(next)
+	return func() error {
+		writerMu.Lock()
+		defer writerMu.Unlock()
+		if state.Load().generation != generation {
+			return ErrRestoreSuperseded
+		}
+		// Memory is restored even when the write fails, so the running
+		// gateway holds the settings the caller meant to keep; the error
+		// tells the caller the file may still hold the change.
+		err := writeConfigPayload(configPayload(previous))
+		publishLocked(cloneSettings(previous))
+		return err
+	}, nil
+}
+
+// cloneSettings deep-copies every reference a writer could reach, so edits
+// to the copy never show through a published value.
+func cloneSettings(source *Settings) *Settings {
+	next := *source
+	next.APIKeys = append([]string(nil), source.APIKeys...)
+	next.Providers = make(map[string]*ProviderConfig, len(source.Providers))
+	for id, provider := range source.Providers {
+		next.Providers[id] = cloneProvider(provider)
+	}
+	next.Endpoints = make(map[string]*EndpointConfig, len(source.Endpoints))
+	for name, endpoint := range source.Endpoints {
+		if endpoint == nil {
+			next.Endpoints[name] = nil
+			continue
+		}
+		copy := *endpoint
+		copy.Failover = append([]EndpointMember(nil), endpoint.Failover...)
+		next.Endpoints[name] = &copy
+	}
+	next.Policies.Overrides = make(map[string]ProviderPolicy, len(source.Policies.Overrides))
+	for id, policy := range source.Policies.Overrides {
+		next.Policies.Overrides[id] = policy
+	}
+	next.Policies.OverrideFields = make(map[string]map[string]any, len(source.Policies.OverrideFields))
+	for id, fields := range source.Policies.OverrideFields {
+		next.Policies.OverrideFields[id] = cloneStringAnyMap(fields)
+	}
+	next.Savings.PriceCatalog = make(map[string]map[string]float64, len(source.Savings.PriceCatalog))
+	for model, prices := range source.Savings.PriceCatalog {
+		copy := make(map[string]float64, len(prices))
+		for unit, price := range prices {
+			copy[unit] = price
+		}
+		next.Savings.PriceCatalog[model] = copy
+	}
+	return &next
+}
+
+// cloneProvider copies one provider, including the timeout it points to.
+func cloneProvider(provider *ProviderConfig) *ProviderConfig {
+	if provider == nil {
+		return nil
+	}
+	copy := *provider
+	if provider.Timeout != nil {
+		timeout := *provider.Timeout
+		copy.Timeout = &timeout
+	}
+	return &copy
+}
+
+// AddProviderIfMissing persists one provider without overwriting an instance
+// another administrator or automation run created concurrently.
+func AddProviderIfMissing(id string, provider *ProviderConfig) (bool, error) {
+	writerMu.Lock()
+	defer writerMu.Unlock()
+	if provider == nil {
+		return false, fmt.Errorf("provider is required")
+	}
+	current := state.Load().settings
+	if current.Providers[id] != nil {
+		return false, nil
+	}
+	payload := readYAML(ConfigFilePath())
+	if payload == nil {
+		if _, err := os.Stat(ConfigFilePath()); err == nil {
+			return false, fmt.Errorf("existing configuration could not be parsed")
+		} else if !os.IsNotExist(err) {
+			return false, err
+		}
+		payload = map[string]any{}
+	}
+	providersPayload, providersPresent := payload["providers"].(map[string]any)
+	if payload["providers"] != nil && !providersPresent {
+		return false, fmt.Errorf("existing providers configuration has an invalid shape")
+	}
+	if providersPayload == nil {
+		providersPayload = map[string]any{}
+	}
+	if _, exists := providersPayload[id]; exists {
+		return false, nil
+	}
+	nextProviders := make(map[string]any, len(providersPayload)+1)
+	for key, value := range providersPayload {
+		nextProviders[key] = value
+	}
+	nextProviders[id] = providerConfigPayload(provider)
+	payload["providers"] = nextProviders
+	if err := writeConfigPayload(payload); err != nil {
+		return false, err
+	}
+	next := cloneSettings(current)
+	next.Providers[id] = cloneProvider(provider)
+	publishLocked(next)
+	return true, nil
+}
+
+// ---- paths -------------------------------------------------------------- //
+
+func StateDir() string {
+	if v := os.Getenv("LLMGW_STATE_DIR"); v != "" {
+		return expandUser(v)
+	}
+	home, _ := os.UserHomeDir()
+	return filepath.Join(home, ".llmgw")
+}
+
+func ConfigFilePath() string {
+	if v := os.Getenv("LLMGW_CONFIG"); v != "" {
+		return expandUser(v)
+	}
+	return filepath.Join(StateDir(), "config.yaml")
+}
+
+func secretsFilePath() string { return filepath.Join(StateDir(), "secrets.json") }
+func keysFilePath() string    { return filepath.Join(StateDir(), "keys.json") }
+
+func expandUser(p string) string {
+	if strings.HasPrefix(p, "~") {
+		home, _ := os.UserHomeDir()
+		return filepath.Join(home, p[1:])
+	}
+	return p
+}
+
+// ---- secrets store ------------------------------------------------------ //
+
+func LoadSecrets() map[string]string {
+	out := map[string]string{}
+	b, err := os.ReadFile(secretsFilePath())
+	if err != nil {
+		return out
+	}
+	var raw map[string]any
+	if json.Unmarshal(b, &raw) != nil {
+		return out
+	}
+	for k, v := range raw {
+		if s, ok := v.(string); ok {
+			out[k] = s
+		}
+	}
+	return out
+}
+
+func writeSecrets(data map[string]string) {
+	_ = os.MkdirAll(StateDir(), 0o755)
+	b, _ := json.MarshalIndent(data, "", "  ")
+	_ = os.WriteFile(secretsFilePath(), b, 0o600)
+}
+
+func SaveSecret(providerID, apiKey string) {
+	data := LoadSecrets()
+	if apiKey != "" {
+		data[providerID] = apiKey
+	} else {
+		delete(data, providerID)
+	}
+	writeSecrets(data)
+}
+
+func DeleteSecret(providerID string) {
+	data := LoadSecrets()
+	if _, ok := data[providerID]; ok {
+		delete(data, providerID)
+		writeSecrets(data)
+	}
+}
+
+var envRef = regexp.MustCompile(`^\$\{ENV:([A-Z][A-Z0-9_]*)\}$`)
+
+func resolveEnv(v string) string {
+	if m := envRef.FindStringSubmatch(strings.TrimSpace(v)); m != nil {
+		return os.Getenv(m[1])
+	}
+	return v
+}
+
+// ResolveProviderAPIKey: inline ${ENV:} / literal wins, else the secrets store.
+func ResolveProviderAPIKey(providerID string, cfg *ProviderConfig) string {
+	if cfg != nil && cfg.APIKey != "" {
+		if r := resolveEnv(cfg.APIKey); r != "" {
+			return r
+		}
+	}
+	return LoadSecrets()[providerID]
+}
+
+// ---- YAML load / save --------------------------------------------------- //
+
+func readYAML(path string) map[string]any {
+	b, err := os.ReadFile(path)
+	if err != nil {
+		return nil
+	}
+	var payload map[string]any
+	if yaml.Unmarshal(b, &payload) != nil {
+		return nil
+	}
+	return payload
+}
+
+// Load reads config.yaml over the defaults, applies ${ENV:} resolution to
+// provider base_url/api_key, layers LLMGW_* env overrides on top, and
+// publishes the result under a new generation. It holds the writer mutex
+// while it reads, so a concurrent UpdateAndSave cannot land between the read
+// and the publish and be lost. The returned value is the published one and
+// is as read-only as Get's.
+func Load() *Settings {
+	writerMu.Lock()
+	defer writerMu.Unlock()
+	s := Defaults()
+	seedConfigIfMissing()
+	payload := readYAML(ConfigFilePath())
+	applyConfig(s, payload)
+	applyEnv(s)
+	publishLocked(s)
+	return s
+}
+
+func seedConfigIfMissing() {
+	seed := strings.TrimSpace(os.Getenv("LLMGW_CONFIG_SEED"))
+	target := ConfigFilePath()
+	if seed == "" || filepath.Clean(expandUser(seed)) == filepath.Clean(target) {
+		return
+	}
+	if _, err := os.Stat(target); err == nil || !os.IsNotExist(err) {
+		return
+	}
+	raw, err := os.ReadFile(expandUser(seed))
+	if err != nil {
+		return
+	}
+	if err := os.MkdirAll(filepath.Dir(target), 0o700); err != nil {
+		return
+	}
+	temp, err := os.CreateTemp(filepath.Dir(target), ".config-seed-*.tmp")
+	if err != nil {
+		return
+	}
+	tempPath := temp.Name()
+	defer os.Remove(tempPath)
+	if _, err := temp.Write(raw); err != nil {
+		_ = temp.Close()
+		return
+	}
+	if err := temp.Sync(); err != nil {
+		_ = temp.Close()
+		return
+	}
+	if err := temp.Close(); err != nil {
+		return
+	}
+	_ = os.Rename(tempPath, target)
+}
+
+// ReadFile parses one configuration file without changing the process-wide
+// settings or applying environment overrides. Maintenance uses it to derive
+// destinations from the configuration stored inside a backup archive.
+func ReadFile(path string) *Settings {
+	s := Defaults()
+	applyConfig(s, readYAML(path))
+	return s
+}
+
+func envBool(key string, dst *bool) {
+	if v, ok := os.LookupEnv(key); ok {
+		switch strings.ToLower(strings.TrimSpace(v)) {
+		case "1", "true", "yes", "on":
+			*dst = true
+		case "0", "false", "no", "off", "":
+			*dst = false
+		}
+	}
+}
+
+func envStr(key string, dst *string) {
+	if v, ok := os.LookupEnv(key); ok {
+		*dst = v
+	}
+}
+
+func envFloat(key string, dst *float64) {
+	if v, ok := os.LookupEnv(key); ok {
+		if f, err := strconv.ParseFloat(strings.TrimSpace(v), 64); err == nil {
+			*dst = f
+		}
+	}
+}
+
+// applyEnv layers LLMGW_* environment overrides onto settings, mirroring the
+// Python pydantic BaseSettings(env_prefix="LLMGW_").
+func applyEnv(s *Settings) {
+	envStr("LLMGW_API_KEY", &s.APIKey)
+	if v, ok := os.LookupEnv("LLMGW_API_KEYS"); ok && v != "" {
+		s.APIKeys = strings.Split(v, ",")
+	}
+	envBool("LLMGW_ALLOW_UNAUTHENTICATED_API", &s.AllowUnauthenticatedAPI)
+	if v, ok := os.LookupEnv("LLMGW_RATE_LIMIT_PER_MINUTE"); ok {
+		if n, err := strconv.Atoi(strings.TrimSpace(v)); err == nil {
+			s.RateLimitPerMinute = n
+		}
+	}
+	envStr("LLMGW_GATEWAY_PREAMBLE", &s.GatewayPreamble)
+	envBool("LLMGW_ANTHROPIC_DISCOVERY_ALIASES", &s.AnthropicDiscoveryAliases)
+	envBool("LLMGW_ANTHROPIC_DISCOVERY_ALL_MODELS", &s.AnthropicDiscoveryAllModels)
+	envBool("LLMGW_SSO_ENABLED", &s.SSOEnabled)
+	envStr("LLMGW_SSO_SHARED_SECRET", &s.SSOSharedSecret)
+	envStr("LLMGW_SSO_ADMIN_GROUP", &s.SSOAdminGroup)
+	envBool("LLMGW_SSO_AUTO_PROVISION", &s.SSOAutoProvision)
+	envStr("LLMGW_CREDENTIAL_ENCRYPTION_KEY", &s.CredentialEncryptionKey)
+	envStr("LLMGW_OPENAI_COMPATIBLE_BASE_URL", &s.OpenAICompatibleBaseURL)
+	envStr("LLMGW_OPENAI_COMPATIBLE_API_KEY", &s.OpenAICompatibleAPIKey)
+	envFloat("LLMGW_OPENAI_COMPATIBLE_TIMEOUT_SECONDS", &s.OpenAICompatibleTimeoutSeconds)
+	envStr("LLMGW_OLLAMA_BASE_URL", &s.OllamaBaseURL)
+	envFloat("LLMGW_OLLAMA_TIMEOUT_SECONDS", &s.OllamaTimeoutSeconds)
+	envStr("LLMGW_GITHUB_COPILOT_OAUTH_TOKEN", &s.GithubCopilotOAuthToken)
+	envBool("LLMGW_GITHUB_COPILOT_USE_GH_CLI", &s.GithubCopilotUseGhCLI)
+	envStr("LLMGW_GITHUB_COPILOT_CACHE_DIR", &s.GithubCopilotCacheDir)
+	envFloat("LLMGW_GITHUB_COPILOT_TIMEOUT_SECONDS", &s.GithubCopilotTimeoutSeconds)
+	envStr("LLMGW_GITHUB_COPILOT_EDITOR_VERSION", &s.GithubCopilotEditorVersion)
+	envStr("LLMGW_GITHUB_COPILOT_INTEGRATION_ID", &s.GithubCopilotIntegrationID)
+	envStr("LLMGW_OPENAI_CODEX_CLIENT_ID", &s.OpenAICodexClientID)
+	envStr("LLMGW_GOOGLE_ANTIGRAVITY_CLIENT_ID", &s.GoogleAntigravityClientID)
+	envStr("LLMGW_GOOGLE_ANTIGRAVITY_CLIENT_SECRET", &s.GoogleAntigravityClientSecret)
+	envStr("LLMGW_GOOGLE_ANTIGRAVITY_OAUTH_PROFILE", &s.GoogleAntigravityOAuthProfile)
+	envStr("LLMGW_GOOGLE_ANTIGRAVITY_CLIENT_MODE", &s.GoogleAntigravityClientMode)
+	envStr("LLMGW_GOOGLE_ANTIGRAVITY_REDIRECT_URI", &s.GoogleAntigravityRedirectURI)
+	envStr("LLMGW_OAUTH_PUBLIC_BASE_URL", &s.OAuthPublicBaseURL)
+	envBool("LLMGW_ALLOW_COPILOT_PROXY", &s.AllowCopilotProxy)
+}
+
+func applyConfig(s *Settings, payload map[string]any) {
+	if payload == nil {
+		return
+	}
+	// Re-marshal the payload sections into typed structs via yaml round-trip.
+	if raw, ok := payload["providers"].(map[string]any); ok {
+		s.Providers = map[string]*ProviderConfig{}
+		for pid, pc := range raw {
+			m, ok := pc.(map[string]any)
+			if !ok {
+				continue
+			}
+			cfg := &ProviderConfig{}
+			if v, ok := m["type"].(string); ok {
+				cfg.Type = v
+			}
+			if v, ok := m["registry_id"].(string); ok {
+				cfg.RegistryID = v
+			}
+			if v, ok := m["public_oauth_client_id"].(string); ok {
+				cfg.PublicOAuthClientID = v
+			}
+			if v, ok := m["base_url"].(string); ok {
+				cfg.BaseURL = resolveEnv(v)
+			}
+			if v, ok := m["api_key"].(string); ok {
+				cfg.APIKey = resolveEnv(v)
+			}
+			if v, ok := m["region"].(string); ok {
+				cfg.Region = v
+			}
+			if v, ok := m["default_voice"].(string); ok {
+				cfg.DefaultVoice = v
+			}
+			if v, ok := m["project"].(string); ok {
+				cfg.Project = v
+			}
+			if v, ok := m["location"].(string); ok {
+				cfg.Location = v
+			}
+			if v, ok := m["vertex_request_type"].(string); ok {
+				cfg.VertexRequestType = v
+			}
+			if v, ok := m["disabled"].(bool); ok {
+				cfg.Disabled = v
+			}
+			if v, ok := toFloat(m["timeout"]); ok {
+				cfg.Timeout = &v
+			}
+			if v, ok := m["force_api_support"].(bool); ok {
+				cfg.ForceApiSupport = v
+			}
+			s.Providers[pid] = cfg
+		}
+	}
+	// endpoints: is canonical. categories: is the pre-rename key; it is read
+	// only as a fallback so config files written before the rename keep
+	// loading. When both are present endpoints: wins outright rather than
+	// merging, so a mid-migration operator gets a predictable result instead
+	// of one that depends on map iteration order.
+	if raw, ok := payload["endpoints"].(map[string]any); ok {
+		s.Endpoints = parseEndpoints(raw)
+	} else if raw, ok := payload["categories"].(map[string]any); ok {
+		s.Endpoints = parseEndpoints(raw)
+	}
+	if raw, ok := payload["policies"].(map[string]any); ok {
+		defaults := s.Policies.Defaults
+		if values, ok := raw["defaults"].(map[string]any); ok {
+			defaults = mergeProviderPolicy(defaults, values)
+		}
+		overrides := map[string]ProviderPolicy{}
+		overrideFields := map[string]map[string]any{}
+		if values, ok := raw["overrides"].(map[string]any); ok {
+			for providerID, value := range values {
+				if fields, ok := value.(map[string]any); ok {
+					overrides[providerID] = mergeProviderPolicy(defaults, fields)
+					overrideFields[providerID] = cloneStringAnyMap(fields)
+				}
+			}
+		}
+		s.Policies = BackendPolicies{Defaults: defaults, Overrides: overrides, OverrideFields: overrideFields}
+	}
+	applyScalars(s, payload)
+}
+
+// cloneStringAnyMap deep-copies decoded YAML. The policy fields the gateway
+// reads are scalars, but a nested mapping or sequence would otherwise be
+// shared between a published value and a writer's copy.
+func cloneStringAnyMap(source map[string]any) map[string]any {
+	cloned := make(map[string]any, len(source))
+	for key, value := range source {
+		cloned[key] = cloneAny(value)
+	}
+	return cloned
+}
+
+// cloneAny copies the containers a YAML decode produces and returns every
+// other value as is: decoded scalars carry no shared mutable state.
+func cloneAny(value any) any {
+	switch typed := value.(type) {
+	case map[string]any:
+		if typed == nil {
+			return typed
+		}
+		return cloneStringAnyMap(typed)
+	case map[any]any:
+		if typed == nil {
+			return typed
+		}
+		cloned := make(map[any]any, len(typed))
+		for key, item := range typed {
+			cloned[key] = cloneAny(item)
+		}
+		return cloned
+	case []any:
+		if typed == nil {
+			return typed
+		}
+		cloned := make([]any, len(typed))
+		for index, item := range typed {
+			cloned[index] = cloneAny(item)
+		}
+		return cloned
+	default:
+		return value
+	}
+}
+
+func mergeProviderPolicy(base ProviderPolicy, fields map[string]any) ProviderPolicy {
+	if value, ok := toFloat(fields["retry_max_attempts"]); ok {
+		base.RetryMaxAttempts = int(value)
+	}
+	if value, ok := toFloat(fields["retry_initial_backoff_seconds"]); ok {
+		base.RetryInitialBackoffSeconds = value
+	}
+	if value, ok := toFloat(fields["retry_max_backoff_seconds"]); ok {
+		base.RetryMaxBackoffSeconds = value
+	}
+	if value, ok := toFloat(fields["retry_backoff_multiplier"]); ok {
+		base.RetryBackoffMultiplier = value
+	}
+	if value, ok := toFloat(fields["circuit_failure_threshold"]); ok {
+		base.CircuitFailureThreshold = int(value)
+	}
+	if value, ok := toFloat(fields["circuit_cooldown_seconds"]); ok {
+		base.CircuitCooldownSeconds = value
+	}
+	return base
+}
+
+func parseEndpoints(raw map[string]any) map[string]*EndpointConfig {
+	out := map[string]*EndpointConfig{}
+	for name, cc := range raw {
+		ep := &EndpointConfig{}
+		switch v := cc.(type) {
+		case map[string]any:
+			if fo, ok := v["failover"].([]any); ok {
+				ep.Failover = parseMembers(fo)
+			}
+		case []any:
+			ep.Failover = parseMembers(v)
+		}
+		out[name] = ep
+	}
+	return out
+}
+
+func parseMembers(items []any) []EndpointMember {
+	var out []EndpointMember
+	for _, it := range items {
+		m, ok := it.(map[string]any)
+		if !ok {
+			continue
+		}
+		prov, _ := m["provider"].(string)
+		model, _ := m["model"].(string)
+		allowUnverified, _ := m["allow_unverified"].(bool)
+		if prov != "" && model != "" {
+			out = append(out, EndpointMember{Provider: prov, Model: model, AllowUnverified: allowUnverified})
+		}
+	}
+	return out
+}
+
+func applyScalars(s *Settings, p map[string]any) {
+	str := func(k string, dst *string) {
+		if v, ok := p[k].(string); ok {
+			*dst = v
+		}
+	}
+	b := func(k string, dst *bool) {
+		if v, ok := p[k].(bool); ok {
+			*dst = v
+		}
+	}
+	f := func(k string, dst *float64) {
+		if v, ok := toFloat(p[k]); ok {
+			*dst = v
+		}
+	}
+	str("api_key", &s.APIKey)
+	if v, ok := p["api_keys"].([]any); ok {
+		s.APIKeys = nil
+		for _, it := range v {
+			if str, ok := it.(string); ok {
+				s.APIKeys = append(s.APIKeys, str)
+			}
+		}
+	}
+	b("allow_unauthenticated_api", &s.AllowUnauthenticatedAPI)
+	if v, ok := toFloat(p["rate_limit_per_minute"]); ok {
+		s.RateLimitPerMinute = int(v)
+	}
+	str("gateway_preamble", &s.GatewayPreamble)
+	b("anthropic_discovery_aliases", &s.AnthropicDiscoveryAliases)
+	b("anthropic_discovery_all_models", &s.AnthropicDiscoveryAllModels)
+	b("sso_enabled", &s.SSOEnabled)
+	str("sso_admin_group", &s.SSOAdminGroup)
+	b("sso_auto_provision", &s.SSOAutoProvision)
+	str("openai_compatible_base_url", &s.OpenAICompatibleBaseURL)
+	str("openai_compatible_api_key", &s.OpenAICompatibleAPIKey)
+	f("openai_compatible_timeout_seconds", &s.OpenAICompatibleTimeoutSeconds)
+	str("ollama_base_url", &s.OllamaBaseURL)
+	f("ollama_timeout_seconds", &s.OllamaTimeoutSeconds)
+	f("litellm_timeout_seconds", &s.LiteLLMTimeoutSeconds)
+	b("github_copilot_use_gh_cli", &s.GithubCopilotUseGhCLI)
+	str("github_copilot_cache_dir", &s.GithubCopilotCacheDir)
+	f("github_copilot_timeout_seconds", &s.GithubCopilotTimeoutSeconds)
+	str("github_copilot_editor_version", &s.GithubCopilotEditorVersion)
+	str("github_copilot_integration_id", &s.GithubCopilotIntegrationID)
+	str("openai_codex_client_id", &s.OpenAICodexClientID)
+	b("allow_copilot_proxy", &s.AllowCopilotProxy)
+	// savings block
+	if raw, ok := p["savings"].(map[string]any); ok {
+		if v, ok := raw["enabled"].(bool); ok {
+			s.Savings.Enabled = v
+		}
+		if v, ok := raw["baseline_model"].(string); ok {
+			s.Savings.BaselineModel = v
+		}
+		if v, ok := raw["db_path"].(string); ok {
+			s.Savings.DBPath = v
+		}
+	}
+}
+
+func toFloat(v any) (float64, bool) {
+	switch n := v.(type) {
+	case float64:
+		return n, true
+	case int:
+		return float64(n), true
+	case int64:
+		return float64(n), true
+	case string:
+		if f, err := strconv.ParseFloat(n, 64); err == nil {
+			return f, true
+		}
+	}
+	return 0, false
+}
+
+// configPayload builds the on-disk YAML (providers WITHOUT api keys).
+func configPayload(s *Settings) map[string]any {
+	providers := map[string]any{}
+	for pid, pc := range s.Providers {
+		providers[pid] = providerConfigPayload(pc)
+	}
+	// Always write the canonical endpoints: key so a save quietly migrates a
+	// config file that was still on the pre-rename categories: key.
+	endpoints := map[string]any{}
+	for name, ep := range s.Endpoints {
+		fo := []any{}
+		for _, m := range ep.Failover {
+			member := map[string]any{"provider": m.Provider, "model": m.Model}
+			if m.AllowUnverified {
+				member["allow_unverified"] = true
+			}
+			fo = append(fo, member)
+		}
+		endpoints[name] = map[string]any{"failover": fo}
+	}
+	payload := map[string]any{
+		"providers": providers,
+		"endpoints": endpoints,
+		"policies": map[string]any{
+			"defaults":  s.Policies.Defaults,
+			"overrides": s.Policies.ConfiguredOverrides(),
+		},
+		"savings": s.Savings,
+	}
+	if s.OpenAICodexClientID != "" {
+		payload["openai_codex_client_id"] = s.OpenAICodexClientID
+	}
+	return payload
+}
+
+// Save persists providers + endpoints + policies + savings (never keys) from
+// the current settings. It holds the writer mutex so the file cannot be
+// written between another writer's save and publish.
+func Save() error {
+	writerMu.Lock()
+	defer writerMu.Unlock()
+	payload := configPayload(state.Load().settings)
+	return writeConfigPayload(payload)
+}
+
+func providerConfigPayload(pc *ProviderConfig) map[string]any {
+	entry := map[string]any{"type": pc.Type}
+	if pc.RegistryID != "" {
+		entry["registry_id"] = pc.RegistryID
+	}
+	if pc.PublicOAuthClientID != "" {
+		entry["public_oauth_client_id"] = pc.PublicOAuthClientID
+	}
+	if pc.BaseURL != "" {
+		entry["base_url"] = pc.BaseURL
+	}
+	if pc.Region != "" {
+		entry["region"] = pc.Region
+	}
+	if pc.DefaultVoice != "" {
+		entry["default_voice"] = pc.DefaultVoice
+	}
+	if pc.Project != "" {
+		entry["project"] = pc.Project
+	}
+	if pc.Location != "" {
+		entry["location"] = pc.Location
+	}
+	if pc.VertexRequestType != "" {
+		entry["vertex_request_type"] = pc.VertexRequestType
+	}
+	if pc.Disabled {
+		entry["disabled"] = true
+	}
+	if pc.Timeout != nil {
+		entry["timeout"] = *pc.Timeout
+	}
+	if pc.ForceApiSupport {
+		entry["force_api_support"] = true
+	}
+	return entry
+}
+
+func writeConfigPayload(payload map[string]any) error {
+	if err := os.MkdirAll(StateDir(), 0o700); err != nil {
+		return err
+	}
+	b, err := yaml.Marshal(payload)
+	if err != nil {
+		return err
+	}
+	path := ConfigFilePath()
+	tmp, err := os.CreateTemp(filepath.Dir(path), ".config-*.tmp")
+	if err != nil {
+		return err
+	}
+	tmpPath := tmp.Name()
+	defer os.Remove(tmpPath)
+	if err := tmp.Chmod(0o600); err != nil {
+		_ = tmp.Close()
+		return err
+	}
+	if _, err := tmp.Write(b); err != nil {
+		_ = tmp.Close()
+		return err
+	}
+	if err := tmp.Sync(); err != nil {
+		_ = tmp.Close()
+		return err
+	}
+	if err := tmp.Close(); err != nil {
+		return err
+	}
+	return os.Rename(tmpPath, path)
+}

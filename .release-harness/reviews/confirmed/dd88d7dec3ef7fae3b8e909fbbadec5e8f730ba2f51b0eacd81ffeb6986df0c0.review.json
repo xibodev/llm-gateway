@@ -1,0 +1,272 @@
+{
+  "schema_version": "1.0.0",
+  "mode": "change",
+  "contract": {
+    "digest": "31b393ab3e80162226619c441694573993ac618382d74642101484a0bf2e9c80"
+  },
+  "authoring_provenance": {
+    "status": "established",
+    "path": ".release-harness/drafts/llm-gateway.record.json",
+    "digest": "6732ddf3dc8236b974e2aae5f81b546d89c2a466b6fb0a368d76620955bf981e"
+  },
+  "sources": [
+    {
+      "source_id": "primary",
+      "status": "established",
+      "repository_identity": "https://github.com/xibodev/llm-gateway.git",
+      "base_ref": "origin/main",
+      "base_commit": "c3109faa02c7e27fa29cf2a32a85613b822f3082",
+      "merge_base": "c3109faa02c7e27fa29cf2a32a85613b822f3082",
+      "head_commit": "fb558c145da842bea2a32fab50846973b5550547",
+      "head_tree": "51e67879d55cf21be06c0b2f3851437074342094",
+      "reviewed_source_digest": "06bf3f08090ca5b6da51a513ac74c2c83ad5ec7c0ae45d07b22121cb23eb1806",
+      "changed_paths": [
+        {
+          "status": "modified",
+          "path": "CONTRIBUTING.md",
+          "old_blob": "3a48177ddfcab4920cb42908c9bc61dae7693807",
+          "new_blob": "32126dc41476179350d4e8b190789bc75987b761"
+        },
+        {
+          "status": "modified",
+          "path": "docs/PROVIDERS.md",
+          "old_blob": "202496ab96d1200c37c6732e2a6451c09e8537fc",
+          "new_blob": "af8b1913882550209091e71ddd6dc39601fbc025"
+        },
+        {
+          "status": "added",
+          "path": "go/internal/api/characterization_test.go",
+          "old_blob": "0000000000000000000000000000000000000000",
+          "new_blob": "920a4fdcc8842b67df2cddb056a6d44068a6b0db"
+        },
+        {
+          "status": "added",
+          "path": "go/internal/api/testdata/characterization/anthropic-messages-native-stream.golden",
+          "old_blob": "0000000000000000000000000000000000000000",
+          "new_blob": "3d84d03c78c5825404deb7fda3c1395e967aff5e"
+        },
+        {
+          "status": "added",
+          "path": "go/internal/api/testdata/characterization/anthropic-messages-native.golden",
+          "old_blob": "0000000000000000000000000000000000000000",
+          "new_blob": "cba2c3b03ec7d432577634ceef1def52649a4bc8"
+        },
+        {
+          "status": "added",
+          "path": "go/internal/api/testdata/characterization/codex-chat-completions.golden",
+          "old_blob": "0000000000000000000000000000000000000000",
+          "new_blob": "f2641171d984afff9bbf5b2c63d756a0c40c61ea"
+        },
+        {
+          "status": "added",
+          "path": "go/internal/api/testdata/characterization/codex-messages.golden",
+          "old_blob": "0000000000000000000000000000000000000000",
+          "new_blob": "a97b974688a8ef3095e7ef3f6d2e7eb4140ce1a7"
+        },
+        {
+          "status": "added",
+          "path": "go/internal/api/testdata/characterization/codex-models.golden",
+          "old_blob": "0000000000000000000000000000000000000000",
+          "new_blob": "1865acd4fb5a3ece8ec423d105ed920c7b304a56"
+        },
+        {
+          "status": "added",
+          "path": "go/internal/api/testdata/characterization/codex-responses-native.golden",
+          "old_blob": "0000000000000000000000000000000000000000",
+          "new_blob": "a7ba87a629c3c98788dd28522799f33d84a4c4a2"
+        },
+        {
+          "status": "added",
+          "path": "go/internal/api/testdata/characterization/codex-responses-refresh-replay.golden",
+          "old_blob": "0000000000000000000000000000000000000000",
+          "new_blob": "52655d7febfa9253e139723972969ef43cf12e8d"
+        },
+        {
+          "status": "added",
+          "path": "go/internal/api/testdata/characterization/failover-after-output-stream.golden",
+          "old_blob": "0000000000000000000000000000000000000000",
+          "new_blob": "37a40eeea5a90e7f066b2ff8d41e0c3a6c95e795"
+        },
+        {
+          "status": "added",
+          "path": "go/internal/api/testdata/characterization/failover-before-output-stream.golden",
+          "old_blob": "0000000000000000000000000000000000000000",
+          "new_blob": "6d6d2263cc5cee87ea1106bc199932e01395bfc0"
+        },
+        {
+          "status": "added",
+          "path": "go/internal/api/testdata/characterization/openai-chat-native-stream.golden",
+          "old_blob": "0000000000000000000000000000000000000000",
+          "new_blob": "9d7c851127d2f855cebb8f0765750c7a24d8a172"
+        },
+        {
+          "status": "added",
+          "path": "go/internal/api/testdata/characterization/openai-chat-native.golden",
+          "old_blob": "0000000000000000000000000000000000000000",
+          "new_blob": "61be83fb01b1ec104290d76607a8b7d5c608f323"
+        },
+        {
+          "status": "added",
+          "path": "go/internal/api/testdata/characterization/openai-messages-via-chat-stream.golden",
+          "old_blob": "0000000000000000000000000000000000000000",
+          "new_blob": "0dd34c84540612eed829d6ae0e0b805aa3924ad0"
+        },
+        {
+          "status": "added",
+          "path": "go/internal/api/testdata/characterization/openai-messages-via-chat.golden",
+          "old_blob": "0000000000000000000000000000000000000000",
+          "new_blob": "1f32fc3cee4868dceac43124a384b1f770a7c21a"
+        },
+        {
+          "status": "added",
+          "path": "go/internal/api/testdata/characterization/openai-responses-native-stream.golden",
+          "old_blob": "0000000000000000000000000000000000000000",
+          "new_blob": "b2294561c118b5ba845e22d5b75181b6f0db55f2"
+        },
+        {
+          "status": "added",
+          "path": "go/internal/api/testdata/characterization/openai-responses-native.golden",
+          "old_blob": "0000000000000000000000000000000000000000",
+          "new_blob": "e0c79e970525125a43e9ca59670fa4d5d379dcf8"
+        },
+        {
+          "status": "added",
+          "path": "go/internal/api/testdata/characterization/openai-responses-via-chat-stream.golden",
+          "old_blob": "0000000000000000000000000000000000000000",
+          "new_blob": "2669923700f5432cf851403535641956a8587fcd"
+        },
+        {
+          "status": "added",
+          "path": "go/internal/api/testdata/characterization/openai-responses-via-chat.golden",
+          "old_blob": "0000000000000000000000000000000000000000",
+          "new_blob": "158d16bedd7ef50f9d9f309532f669abf9606d67"
+        },
+        {
+          "status": "added",
+          "path": "go/internal/architecture/boundary_test.go",
+          "old_blob": "0000000000000000000000000000000000000000",
+          "new_blob": "95e4966bf416c386249491ef3b989a4f496944d2"
+        },
+        {
+          "status": "added",
+          "path": "go/internal/architecture/doc.go",
+          "old_blob": "0000000000000000000000000000000000000000",
+          "new_blob": "f72a5e28a9637e656d077b0c88f2a1ff7a9e6ad5"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/providers/anthropic_test.go",
+          "old_blob": "7782e4708ef711eeb68cbc6722e1e89c47861a23",
+          "new_blob": "760af8e592e09ee1f637d931c98c7c6208533ca4"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/providers/codex_test.go",
+          "old_blob": "6472cbd484ff2d40e42dcf944021c81b027f6759",
+          "new_blob": "b85d0e2cf85a50f7c2ad9dc76bfe47dcabf21f0f"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/providers/codex.go",
+          "old_blob": "a6bd49a3d37be5c981a072c44f34e8980b03a051",
+          "new_blob": "965771341ac67287099ebc150a7dd1474f8dd829"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/providers/factory.go",
+          "old_blob": "bf9d09bf3855af862a21648502cabc49c1f39e90",
+          "new_blob": "9adc5a761b39e150dc0c96964b776286cf77f7f4"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/providers/ollama.go",
+          "old_blob": "29b64ccaf2cdc18d31f3534fea8a5ed82cb9ce3f",
+          "new_blob": "bddb21d36a76bc5a429317485a1604ab93253cc5"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/router/failover_test.go",
+          "old_blob": "e289a42065aa45d6e039a60f4df2ddf1c5909b39",
+          "new_blob": "8f0c9d35869f77317ac602c9456fbd974faa329d"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/router/failover.go",
+          "old_blob": "af3376b0313184178be98c915ba50f42bddc6746",
+          "new_blob": "33cb800f02fccba0f02b47b3009cb6753a8f1685"
+        }
+      ]
+    }
+  ],
+  "facts": [
+    {
+      "id": "codex-chat-facade-routed",
+      "claim": "Routing admits Chat Completions to Codex models through the Codex Responses facade, matching the emulated surfaces the model list already advertises; structural Chat fields the transport cannot honour are rejected with a configuration error.",
+      "status": "observed",
+      "evidence": {
+        "source": "go/internal/providers/factory.go AdaptsChatToNativeResponses; go/internal/router/failover.go; go/internal/providers/codex.go; characterization goldens codex-chat-completions and codex-messages"
+      }
+    },
+    {
+      "id": "anthropic-stream-max-tokens",
+      "claim": "Numeric options decoded as json.Number are honoured, so native Anthropic streams forward the caller max_tokens instead of the 4096 default.",
+      "status": "observed",
+      "evidence": {
+        "source": "go/internal/providers/ollama.go intOf; anthropic-messages-native-stream golden diff"
+      }
+    },
+    {
+      "id": "fix-gates-pass",
+      "claim": "gofmt, go vet, the full Go test suite, govulncheck and documentation checks pass; the coupling ratchet is unchanged.",
+      "status": "observed",
+      "evidence": {
+        "source": "local release gates"
+      }
+    }
+  ],
+  "impact": {
+    "assertions": [
+      {
+        "id": "A1",
+        "impact": "unchanged",
+        "supported_by": [
+          "fix-gates-pass"
+        ]
+      },
+      {
+        "id": "A2",
+        "impact": "unchanged",
+        "supported_by": [
+          "fix-gates-pass"
+        ]
+      },
+      {
+        "id": "A3",
+        "impact": "unchanged",
+        "supported_by": [
+          "fix-gates-pass"
+        ]
+      },
+      {
+        "id": "A4",
+        "impact": "unchanged",
+        "supported_by": [
+          "codex-chat-facade-routed",
+          "fix-gates-pass"
+        ]
+      }
+    ],
+    "requires": [],
+    "possible_binding_changes": []
+  },
+  "questions": [],
+  "conclusion": {
+    "action": "reuse_contract",
+    "summary": "Two request-path defect fixes make advertised Codex surfaces routable and forward the caller max_tokens without changing release identity, health, or model-list availability."
+  },
+  "proposed": {
+    "by": "modularization-fixes",
+    "at": "2026-09-24T17:49:10.848Z"
+  },
+  "digest": "dd88d7dec3ef7fae3b8e909fbbadec5e8f730ba2f51b0eacd81ffeb6986df0c0"
+}

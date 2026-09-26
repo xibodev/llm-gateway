@@ -1,0 +1,15 @@
+{
+  "_comment": "The authoring record for the example draft. Never read at run time.",
+  "schema_version": "1.0.0",
+  "authored_by": "you",
+  "claims": [
+    {
+      "id": "health-endpoint",
+      "claim": "the service exposes GET /health returning 200",
+      "status": "observed",
+      "evidence": {
+        "source": "src/server.js:41"
+      }
+    }
+  ]
+}

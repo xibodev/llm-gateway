@@ -1,0 +1,203 @@
+{
+  "schema_version": "1.0.0",
+  "mode": "change",
+  "contract": {
+    "digest": "31b393ab3e80162226619c441694573993ac618382d74642101484a0bf2e9c80"
+  },
+  "authoring_provenance": {
+    "status": "established",
+    "path": ".release-harness/drafts/llm-gateway.record.json",
+    "digest": "6732ddf3dc8236b974e2aae5f81b546d89c2a466b6fb0a368d76620955bf981e"
+  },
+  "sources": [
+    {
+      "source_id": "primary",
+      "status": "established",
+      "repository_identity": "https://github.com/xibodev/llm-gateway.git",
+      "base_ref": "origin/main",
+      "base_commit": "38ffcb2200a6e089b65ec8ea3fb74c6fc487f815",
+      "merge_base": "9a8ca98a0a34949c51594b468dd6b13780aa0ad1",
+      "head_commit": "bf3abd8c5e94089b2414cf218065219f02e34035",
+      "head_tree": "ba38b55fbb8a96362c6e1eae8b8419967c3d0543",
+      "reviewed_source_digest": "32afaf21e860db4d233164e4adc0f86d738afc2934b45d1a4111dd02526c92ca",
+      "changed_paths": [
+        {
+          "status": "modified",
+          "path": "go/internal/api/transport_mode_test.go",
+          "old_blob": "ccd82a702acd2cad1b7e398663a55ad8ef562ca2",
+          "new_blob": "89a71c18399f739ea6c1d1b07054f3aa3c6ea0c1"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/api/transport_mode.go",
+          "old_blob": "22851e80df347ce62fb458e1c22766e26c1386a2",
+          "new_blob": "f47139fef4ceabadd2244e9003b8ec17f9e0efe1"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/providers/catalog_read_test.go",
+          "old_blob": "3418ea806743fdff1d142ad56c104fa0c0b962e8",
+          "new_blob": "4a4f6f3ff7e66bd00cb8322e0f07a4bfacc51b15"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/providers/catalog_snapshot_test.go",
+          "old_blob": "235f5a715c7d65cdccacb48c0d670753d25386e6",
+          "new_blob": "96fba43edfd776f254bc9482e85daa357614eb7e"
+        },
+        {
+          "status": "added",
+          "path": "go/internal/providers/catalog_store_test.go",
+          "old_blob": "0000000000000000000000000000000000000000",
+          "new_blob": "4b27207a3e6de40a3333abff0ce5fcdbd19eb63e"
+        },
+        {
+          "status": "added",
+          "path": "go/internal/providers/catalog_store.go",
+          "old_blob": "0000000000000000000000000000000000000000",
+          "new_blob": "5ab402372c84accf8aafe75f51156cbbacfed865"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/providers/catalog.go",
+          "old_blob": "f00fd49406a17e57d1d8f8a25447a3489669a4e5",
+          "new_blob": "703be71db72f618cf8e05abc6a2dbefb8f77b96b"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/providers/copilot_provider.go",
+          "old_blob": "5927b0bbe7eea318a3487196a91d140aadc059b2",
+          "new_blob": "4ed753ac0f0e04c4be00beee3b103265c0273c6b"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/providers/core_runtime.go",
+          "old_blob": "e69e380e38e33ca41469f6f7c1017a87d213df58",
+          "new_blob": "244c0e738084c3b2925271f0a174ce25e3438e51"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/providers/model_capabilities_test.go",
+          "old_blob": "67c624c3b26798925f901214791022d1c4c658a2",
+          "new_blob": "dc6f54934338e1233e8661d336fa9e84c7767443"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/providers/oauth_call.go",
+          "old_blob": "0d83520f18b52f29ee67938c8822621af8b4fd85",
+          "new_blob": "fc35b119a9bd0756e860922f10a893a4c5c4ec02"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/providers/runtime_test.go",
+          "old_blob": "a97c2bec29886dd081d8c6f3c6b959a650bf9fea",
+          "new_blob": "340d02c9455f91a8a0be6bf8bd38c58604b1f71e"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/providers/runtime.go",
+          "old_blob": "6fc2fba599b64bd22079d1fc1074e1eb193d18bd",
+          "new_blob": "911cebcc772f4b4ed944a3dfb0de25b4df2d15a3"
+        },
+        {
+          "status": "added",
+          "path": "go/internal/providers/wire_declaration_test.go",
+          "old_blob": "0000000000000000000000000000000000000000",
+          "new_blob": "8ff86928ac7cf437530fd4022e839e36068633c4"
+        },
+        {
+          "status": "added",
+          "path": "go/internal/providers/wire_declaration.go",
+          "old_blob": "0000000000000000000000000000000000000000",
+          "new_blob": "456a3fb1bef37037b9fa05e63fd431ee512f1940"
+        }
+      ]
+    }
+  ],
+  "facts": [
+    {
+      "id": "planning",
+      "claim": "Transport planning in internal/api/transport_mode.go uses llmgw-core's helpers: ParseTransportRequirement and ParseSurfacePath for header and surface parsing (keeping the gateway's 400 text), TransportEvidence with a one-hour freshness window, TransportInterfaces, ListingSurfaces for /v1/models surface lists, and ResponseTransportMode for the X-LLMGW-Transport-Mode label and the playground transport_mode. providers.WireDeclaration supplies each facade's core provider; a test checks every facade's labels come out as before. The gateway's planning functions are removed; transparent pass-through stays on the facades because core's Transparent keys catalogs by credential while the gateway keys them by caller.",
+      "status": "observed",
+      "evidence": {
+        "source": "go/internal/api/transport_mode.go; go/internal/providers/wire_declaration.go and test"
+      }
+    },
+    {
+      "id": "catalog",
+      "claim": "catalog.json is wrapped as a core ConditionalCatalogStore with the same file format, schema stamp and instance@scope keys, and the gateway's catalogs run in llmgw-core's catalog service with a one-hour TTL, KeepStale and the gateway's rebase rule; catalogCache and its generation fences are removed. core's catalogtest conformance suite passes against the store. /v1/models output and the codex-models golden are unchanged.",
+      "status": "observed",
+      "evidence": {
+        "source": "go/internal/providers catalog store and service; go/internal/api/testdata unchanged"
+      }
+    },
+    {
+      "id": "difference",
+      "claim": "One behavior change comes from core: concurrent discoveries of the same catalog now run one at a time, so a second reader of a stale catalog waits for and receives the first reader's result instead of fetching again.",
+      "status": "observed",
+      "evidence": {
+        "source": "llmgw-core catalog service"
+      }
+    },
+    {
+      "id": "suite",
+      "claim": "The full Go suite passes with HTTP_PROXY and HTTPS_PROXY unreachable with unchanged characterization goldens and coupling budgets; gofmt, vet, govulncheck (0 reachable), check-docs and git diff --check pass.",
+      "status": "observed",
+      "evidence": {
+        "source": "local gate run on the reviewed head"
+      }
+    }
+  ],
+  "impact": {
+    "assertions": [
+      {
+        "id": "A1",
+        "impact": "unchanged",
+        "supported_by": [
+          "planning",
+          "catalog",
+          "suite"
+        ]
+      },
+      {
+        "id": "A2",
+        "impact": "unchanged",
+        "supported_by": [
+          "planning",
+          "catalog",
+          "suite"
+        ]
+      },
+      {
+        "id": "A3",
+        "impact": "unchanged",
+        "supported_by": [
+          "planning",
+          "catalog",
+          "suite"
+        ]
+      },
+      {
+        "id": "A4",
+        "impact": "unchanged",
+        "supported_by": [
+          "planning",
+          "catalog",
+          "suite"
+        ]
+      }
+    ],
+    "requires": [],
+    "possible_binding_changes": []
+  },
+  "questions": [],
+  "conclusion": {
+    "action": "reuse_contract",
+    "summary": "Transport planning uses llmgw-core helpers and catalogs run in the core catalog service over the gateway's catalog file; labels, /v1/models, CLI and health are unchanged."
+  },
+  "proposed": {
+    "by": "catalog-transport-core",
+    "at": "2026-09-25T14:10:59.287Z"
+  },
+  "digest": "bed887e9b88e7846cf660ae16f7275c158922b983708d152acf95afc2aa5d0ed"
+}

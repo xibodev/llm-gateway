@@ -1,0 +1,51 @@
+# Test-only Docker Compose for provider roster integration testing.
+#
+# Usage:
+#   cd test/docker-roster
+#   SCENARIO=valid docker compose -f docker-compose.test.yml up -d --build
+#   docker compose -f docker-compose.test.yml logs -f gateway
+#   docker compose -f docker-compose.test.yml down -v
+#
+# Scenarios: valid, new_revision, invalid_json, oversized, empty, unavailable
+
+services:
+  feed:
+    image: node:22-alpine
+    working_dir: /app
+    volumes:
+      - ./feed-server.mjs:/app/feed-server.mjs:ro
+    environment:
+      FEED_PORT: "9090"
+      SCENARIO: ${SCENARIO:-valid}
+    command: ["node", "/app/feed-server.mjs"]
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:9090/health"]
+      interval: 5s
+      timeout: 3s
+      retries: 3
+
+  gateway:
+    build:
+      context: ./build-context/go
+      dockerfile: Dockerfile
+      args:
+        VERSION: 0.0.0-test
+        COMMIT: test
+    restart: unless-stopped
+    depends_on:
+      feed:
+        condition: service_healthy
+    environment:
+      LLMGW_HOST: "0.0.0.0"
+      LLMGW_PORT: "8787"
+      LLMGW_STATE_DIR: /state
+      LLMGW_ALLOW_UNAUTHENTICATED_API: "1"
+      LLMGW_PROVIDER_ROSTER_AUTO_REFRESH: "false"
+      LLMGW_PROVIDER_ROSTER_URL: "http://feed:9090/feed"
+    volumes:
+      - test-state:/state
+    ports:
+      - "127.0.0.1:18787:8787"
+
+volumes:
+  test-state:

@@ -1,0 +1,174 @@
+# Build, vet and test the Go gateway and its embedded console.
+#
+# Also callable from release.yml, so a version tag cannot publish artifacts
+# without these jobs passing first.
+name: ci
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+  workflow_call: {}
+
+permissions:
+  contents: read
+
+jobs:
+  go:
+    name: go build / vet / test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
+        with:
+          go-version: 1.26.6
+          cache-dependency-path: go/go.sum
+
+      - name: Build
+        working-directory: go
+        run: go build ./...
+
+      - name: Vet
+        working-directory: go
+        run: go vet ./...
+
+      - name: Test
+        working-directory: go
+        # The suite is hermetic: an unreachable proxy fails any test that
+        # reaches the internet, while loopback test servers are never proxied.
+        env:
+          HTTP_PROXY: http://127.0.0.1:9
+          HTTPS_PROXY: http://127.0.0.1:9
+          NO_PROXY: ""
+        run: go test ./...
+
+      - name: Race-test settings publication
+        working-directory: go
+        # Requests read settings without a lock while writers publish new
+        # copies. The race detector needs cgo, which the release builds
+        # leave off, so it covers the package that owns that invariant.
+        env:
+          CGO_ENABLED: "1"
+          HTTP_PROXY: http://127.0.0.1:9
+          HTTPS_PROXY: http://127.0.0.1:9
+          NO_PROXY: ""
+        run: go test -race ./internal/config/...
+
+      - name: Vulnerability scan
+        working-directory: go
+        run: |
+          go install golang.org/x/vuln/cmd/govulncheck@v1.5.0
+          govulncheck ./...
+
+  console:
+    name: console lint / test / dist
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: "22.23.2"
+          cache: npm
+          cache-dependency-path: go/internal/web/console/package-lock.json
+
+      - name: Install
+        working-directory: go/internal/web/console
+        run: npm ci
+
+      - name: Typecheck
+        working-directory: go/internal/web/console
+        run: npm run lint
+
+      - name: Test
+        working-directory: go/internal/web/console
+        run: npm test
+
+      - name: Dependency audit
+        working-directory: go/internal/web/console
+        run: npm audit --audit-level=high
+
+      # dist/ is committed because the Go binary embeds it. This rebuilds and
+      # fails if the committed bundle has drifted from source — otherwise a
+      # `go build` can ship a console nobody can trace back to a commit.
+      - name: Verify committed dist matches source
+        working-directory: go/internal/web/console
+        run: npm run check:dist
+
+  workflow:
+    name: workflow / container validation
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
+        with:
+          go-version: 1.26.6
+          cache: false
+
+      - name: Validate workflows
+        run: go run github.com/rhysd/actionlint/cmd/actionlint@v1.7.7
+
+      - name: Validate container definition
+        run: docker buildx build --check --file go/Dockerfile go
+
+      - name: Validate documentation and website
+        run: node scripts/check-docs.mjs
+
+      - name: Validate live-acceptance policy core
+        working-directory: test/live-acceptance
+        run: npm test
+
+      - name: Validate release-harness contracts and lifecycle
+        run: |
+          npx --yes @xibodev/release-harness@3.0.0-beta.1 validate --all
+          npx --yes @xibodev/release-harness@3.0.0-beta.1 lifecycle check
+
+  deterministic-acceptance:
+    name: deterministic Docker acceptance
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: "22.23.2"
+          cache: npm
+          cache-dependency-path: test/live-acceptance/package-lock.json
+
+      - name: Initialize failure report
+        env:
+          LLMGW_ACCEPTANCE_MODE: deterministic
+          LLMGW_ACCEPTANCE_REPORT: ${{ github.workspace }}/test/live-acceptance/report.deterministic.json
+        run: node test/live-acceptance/bootstrap-report.mjs
+
+      - name: Install pinned harness and browser
+        working-directory: test/live-acceptance
+        run: |
+          npm ci --ignore-scripts --no-audit --no-fund
+          npx playwright install --with-deps chromium
+
+      - name: Run clean-state deterministic acceptance
+        env:
+          LLMGW_ACCEPTANCE_MODE: deterministic
+          LLMGW_ACCEPTANCE_REPORT: ${{ github.workspace }}/test/live-acceptance/report.deterministic.json
+          LLMGW_ACCEPTANCE_PORT: "18810"
+        run: node test/live-acceptance/run.mjs
+
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: always()
+        with:
+          name: deterministic-acceptance-${{ github.sha }}
+          path: test/live-acceptance/report.deterministic.json
+          if-no-files-found: error
+          retention-days: 14

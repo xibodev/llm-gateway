@@ -1,0 +1,961 @@
+import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
+import test from "node:test";
+
+const root = resolve(import.meta.dirname, "..");
+
+test("console source keeps its local asset base", () => {
+  const vite = readFileSync(resolve(root, "vite.config.ts"), "utf8");
+  assert.match(vite, /base: "\/console\/"/);
+});
+
+test("console styles retain the approved neutral enterprise direction", () => {
+  const styles = readFileSync(resolve(root, "src/styles/base.css"), "utf8").toLowerCase();
+  for (const forbidden of ["linear-gradient", "radial-gradient", "neon", "glow"]) {
+    assert.equal(styles.includes(forbidden), false, `unexpected ${forbidden}`);
+  }
+});
+
+test("console provides local light and dark themes without changing the professional direction", () => {
+  const index = readFileSync(resolve(root, "index.html"), "utf8");
+  const shell = readFileSync(resolve(root, "src/components/AppShell.tsx"), "utf8");
+  const styles = readFileSync(resolve(root, "src/styles/base.css"), "utf8");
+  assert.match(index, /color-scheme" content="light dark"/);
+  assert.match(index, /llmgw\.console\.theme/);
+  assert.match(shell, /Moon/);
+  assert.match(shell, /Sun/);
+  assert.match(shell, /Use light theme/);
+  assert.match(shell, /Use dark theme/);
+  assert.match(styles, /:root\[data-theme="dark"\]/);
+});
+
+test("playground chat isolates completed turns from request-state rerenders", () => {
+  const playground = readFileSync(resolve(root, "src/pages/Playground.tsx"), "utf8");
+  assert.match(playground, /const ChatTurnView = memo/);
+  assert.match(playground, /<ChatTurnView turn=\{turn\} key=\{index\} \/>/);
+  assert.doesNotMatch(playground, /stream:\s*true/);
+});
+
+test("mode-aware API client names only local API roots", () => {
+  const mode = readFileSync(resolve(root, "src/lib/mode.ts"), "utf8");
+  assert.match(mode, /"\/user\/api"/);
+  assert.match(mode, /"\/admin\/api"/);
+});
+
+
+test("revoked keys have no console enable action", () => {
+  const keys = readFileSync(resolve(root, "src/pages/ApiKeys.tsx"), "utf8");
+  assert.match(keys, /const revoked = stringValue\(key.status\) === "revoked"/);
+  assert.match(keys, /Permanently revoked/);
+  assert.match(keys, /!revoked \? <button class="button button--secondary"/);
+});
+
+test("recoverable keys have an accessible inline reveal control", () => {
+  const keys = readFileSync(resolve(root, "src/pages/ApiKeys.tsx"), "utf8");
+  assert.match(keys, /key\.revealable === true/);
+  assert.match(keys, /`\/keys\/\$\{encodeURIComponent\(id\)\}\/reveal`/);
+  assert.match(keys, /visible \? "Hide" : "Reveal"/);
+  assert.match(keys, /<EyeOff size=\{15\} \/> : <Eye size=\{15\} \/>/);
+});
+
+
+test("static admin console authentication is session-only and admin-scoped", () => {
+  const api = readFileSync(resolve(root, "src/lib/api.ts"), "utf8");
+  const app = readFileSync(resolve(root, "src/App.tsx"), "utf8");
+  const shell = readFileSync(resolve(root, "src/components/AppShell.tsx"), "utf8");
+  assert.match(api, /sessionStorage/);
+  assert.doesNotMatch(api, /localStorage/);
+  assert.match(api, /mode === "admin"/);
+  assert.match(api, /Authorization/);
+  assert.match(app, /Administrator sign-in required/);
+  assert.match(app, /cause.status === 401/);
+  assert.match(app, /Invalid administrator key/);
+  assert.match(app, /clearStaticAdminKey\(\)/);
+  assert.match(shell, /Sign out/);
+});
+
+test("console redirects browser-auth failures to the correct protected entrypoint", () => {
+  const api = readFileSync(resolve(root, "src/lib/api.ts"), "utf8");
+  const app = readFileSync(resolve(root, "src/App.tsx"), "utf8");
+  assert.match(api, /authentication_redirect/);
+  assert.match(api, /response\.type === "opaqueredirect"/);
+  assert.match(api, /redirect: init\.redirect \?\? "manual"/);
+  assert.match(api, /startBrowserAuthentication\(mode\)/);
+  assert.match(api, /finalURL\.origin !== window\.location\.origin/);
+  assert.match(api, /unexpected non-JSON response/);
+  assert.match(app, /cause\.code === authenticationRedirectCode/);
+  assert.match(app, /mode === "portal" \? "\/portal" : "\/admin"/);
+});
+
+test("portal shell shows the signed-in human without exposing identity controls to admin mode", () => {
+  const app = readFileSync(resolve(root, "src/App.tsx"), "utf8");
+  const shell = readFileSync(resolve(root, "src/components/AppShell.tsx"), "utf8");
+  assert.match(app, /data\?\.principal/);
+  assert.match(app, /identityName=\{identityName\}/);
+  assert.match(shell, /Signed in as \$\{identityName\}/);
+  assert.match(shell, /mode === "portal" && identityName/);
+});
+
+test("all modal dialogs share focus trapping, Escape close, and focus return", () => {
+  const focus = readFileSync(resolve(root, "src/components/useDialogFocus.ts"), "utf8");
+  const oauth = readFileSync(resolve(root, "src/components/providers/OAuthConnectDialog.tsx"), "utf8");
+  const hub = readFileSync(resolve(root, "src/components/providers/ProviderHub.tsx"), "utf8");
+  const keys = readFileSync(resolve(root, "src/pages/ApiKeys.tsx"), "utf8");
+  assert.match(focus, /event.key === "Escape"/);
+  assert.match(focus, /event.key !== "Tab"/);
+  assert.match(focus, /previousFocus\.focus\(\)/);
+  assert.match(oauth, /useDialogFocus\(closeDialog\)/);
+  assert.equal((hub.match(/useDialogFocus\(onClose\)/g) ?? []).length, 2);
+  assert.match(keys, /useDialogFocus\(onDismiss, returnFocus\)/);
+  assert.match(keys, /returnFocus=\{createButtonRef\.current\}/);
+});
+
+test("admin console exposes complete alert-rule management", () => {
+  const navigation = readFileSync(resolve(root, "src/lib/navigation.ts"), "utf8");
+  const app = readFileSync(resolve(root, "src/App.tsx"), "utf8");
+  const alerts = readFileSync(resolve(root, "src/pages/Alerts.tsx"), "utf8");
+  assert.match(navigation, /id: "alerts"/);
+  assert.doesNotMatch(navigation, /\["overview", "providers", "models", "playground", "keys", "usage", "alerts"/);
+  assert.match(app, /case "alerts": content = <Alerts/);
+  assert.match(alerts, /"\/alerts\/status"/);
+  assert.match(alerts, /"\/alerts\/evaluate"/);
+  assert.match(alerts, /`\/alerts\/\$\{encodeURIComponent\(id\)\}`/);
+  assert.match(alerts, /Create rule/);
+});
+
+
+test("portal provider actions use the current principal private connections", () => {
+  const hub = readFileSync(resolve(root, "src/components/providers/ProviderHub.tsx"), "utf8");
+  assert.match(hub, /data\.provider_connections/);
+  assert.match(hub, /hasPrivateConnection/);
+  assert.match(hub, /Add or replace account/);
+  assert.match(hub, /Administrator setup required/);
+  assert.match(hub, /supportsOAuth/);
+});
+
+test("provider hub includes configured advanced providers outside the curated registry", () => {
+  const hub = readFileSync(resolve(root, "src/components/providers/ProviderHub.tsx"), "utf8");
+  assert.match(hub, /const registryIDs = new Set/);
+  assert.match(hub, /statuses\.filter\(\(status\) => \{/);
+  assert.match(hub, /if \(registryIDs\.has\(claimed\) \|\| taken\.has\(id\)\) return false/);
+  assert.match(hub, /return \[\.\.\.curated, \.\.\.custom\]/);
+});
+
+test("configured instances are not orphaned into custom tiles by their id", () => {
+  const hub = readFileSync(resolve(root, "src/components/providers/ProviderHub.tsx"), "utf8");
+  // Custom tiles are those with no registry entry of their own — not merely
+  // those whose provider id differs from the registry id.
+  assert.doesNotMatch(hub, /statuses\.filter\(\(status\) => !registryIDs\.has\(stringValue\(status\.id\)\)\)/);
+  assert.match(hub, /registry_id/);
+});
+
+test("overview next step is state-aware and navigates to the recommended workflow", () => {
+  const app = readFileSync(resolve(root, "src/App.tsx"), "utf8");
+  const overview = readFileSync(resolve(root, "src/pages/Overview.tsx"), "utf8");
+  assert.match(app, /<Overview data=\{data\} mode=\{mode\} onNavigate=\{navigate\}/);
+  assert.match(overview, /function nextStepFor/);
+  assert.match(overview, /title: "Review provider readiness"/);
+  assert.match(overview, /title: "Create a fallback route"/);
+  assert.match(overview, /title: "Create an API key"/);
+  assert.match(overview, /title: "Run a gateway request"/);
+  assert.match(overview, /onClick=\{\(\) => onNavigate\(nextStep\.page\)\}/);
+  assert.match(overview, /Review providers/);
+});
+
+test("official OAuth onboarding auto-opens, polls, tests, and reports the result", () => {
+  const oauth = readFileSync(
+    resolve(root, "src/components/providers/OAuthConnectDialog.tsx"),
+    "utf8",
+  );
+  const app = readFileSync(resolve(root, "src/App.tsx"), "utf8");
+  assert.match(oauth, /window\.open\("about:blank"/);
+  assert.match(oauth, /window\.setTimeout/);
+  assert.match(oauth, /Automatic check/);
+  assert.match(oauth, /testConnection/);
+  assert.match(oauth, /Connected and tested/);
+  assert.match(oauth, /Try in playground/);
+  assert.match(oauth, /numberValue\(result\.model_count\) > 0/);
+  assert.match(oauth, /Failure code/);
+  assert.match(oauth, /probe\.failure_code/);
+  assert.match(oauth, /stage !== "error" \|\| !probe/);
+  assert.match(oauth, /const closePopup = useCallback/);
+  assert.match(oauth, /useEffect\(\(\) => closePopup/);
+  assert.match(oauth, /closePopup\(\);\s+setStage\("error"\)/);
+  assert.match(oauth, /let refreshed = true/);
+  assert.match(oauth, /Reload the console to refresh the provider card/);
+  assert.doesNotMatch(oauth, /> Check authorization</);
+  assert.match(app, /const refresh = \(\) => load\(false\)/);
+  assert.match(app, /<Providers data=\{data\} mode=\{mode\} detail=\{route.detail\} onChanged=\{refresh\} onNavigate=\{navigate\}/);
+  const hub = readFileSync(resolve(root, "src/components/providers/ProviderHub.tsx"), "utf8");
+  assert.match(hub, /Add account/);
+  assert.match(hub, /Add or replace account/);
+});
+
+test("Anthropic setup tokens and Antigravity browser OAuth are explicit choices", () => {
+  const hub = readFileSync(resolve(root, "src/components/providers/ProviderHub.tsx"), "utf8");
+  const oauth = readFileSync(resolve(root, "src/components/providers/OAuthConnectDialog.tsx"), "utf8");
+  const roster = readFileSync(resolve(root, "src/components/providers/ProviderRoster.tsx"), "utf8");
+  assert.match(hub, /const SETUP_TOKEN_KIND = "setup_token"/);
+  assert.match(hub, /Setup token/);
+  assert.match(oauth, /authorization_url/);
+  assert.match(oauth, /flow_id/);
+  assert.match(roster, /"Experimental"/);
+  assert.doesNotMatch(hub, /client_secret/);
+  assert.match(oauth, /client_secret: clientSecret/);
+  assert.match(oauth, /type="password"/);
+});
+
+test("Antigravity manual-code OAuth opens the browser and completes from pasted input", () => {
+  const oauth = readFileSync(resolve(root, "src/components/providers/OAuthConnectDialog.tsx"), "utf8");
+  assert.match(oauth, /value="consumer_manual"/);
+  assert.match(oauth, /Authorization code or full redirect URL/);
+  assert.match(oauth, /endpoint\("complete"\)/);
+  assert.match(oauth, /authorization_response: authorizationResponse\.trim\(\)/);
+  assert.match(oauth, /client_mode: clientMode/);
+  assert.match(oauth, /type="password"/);
+});
+
+
+test("admin catalog actions select an owner principal", () => {
+  const routes = readFileSync(resolve(root, "src/pages/Routes.tsx"), "utf8");
+  const hub = readFileSync(resolve(root, "src/components/providers/ProviderHub.tsx"), "utf8");
+  const shared = readFileSync(resolve(root, "src/components/providers/shared.tsx"), "utf8");
+  assert.match(routes, /principal_id/);
+  assert.match(routes, /Catalog owner/);
+  assert.match(shared, /principal_id/);
+  assert.match(hub, /useProviderLifecycle\(ownerID, onChanged\)/);
+  assert.match(hub, /Catalog owner/);
+  assert.match(hub, /supportsOAuth && !ownerID/);
+});
+
+test("anonymous model diagnostics stay admin-visible but runnable pickers exclude disabled rows", () => {
+  const models = readFileSync(resolve(root, "src/pages/ModelsEndpoints.tsx"), "utf8");
+  const picker = readFileSync(resolve(root, "src/components/ModelPicker.tsx"), "utf8");
+  assert.match(models, /diagnostics=1/);
+  assert.match(models, /Disabled for public routing/);
+  assert.match(models, /publication_state/);
+  assert.match(picker, /filter\(\(model\) => !model\.disabled\)/);
+});
+
+test("route creation requires a visible admin opt-in for unverified anonymous targets", () => {
+  const routes = readFileSync(resolve(root, "src/pages/Routes.tsx"), "utf8");
+  assert.match(routes, /diagnostics=1/);
+  assert.match(routes, /unverified, admin opt-in/);
+  assert.match(routes, /allow_unverified/);
+  assert.match(routes, /without successful verification/);
+  assert.match(routes, /Failed and stale targets cannot be selected/);
+});
+
+test("provider onboarding renders required setup fields and editable configuration", () => {
+  const hub = readFileSync(resolve(root, "src/components/providers/ProviderHub.tsx"), "utf8");
+  const detail = readFileSync(resolve(root, "src/pages/ProviderDetail.tsx"), "utf8");
+  const oauth = readFileSync(resolve(root, "src/components/providers/OAuthConnectDialog.tsx"), "utf8");
+  const styles = readFileSync(resolve(root, "src/styles/base.css"), "utf8");
+  assert.match(hub, /Google Cloud project ID/);
+  assert.match(hub, /fields\.has\("location"\)/);
+  assert.match(hub, /fields\.has\("vertex_request_type"\)/);
+  assert.match(hub, /Provisioned throughput only/);
+  assert.match(hub, /form\.set\("vertex_request_type", vertexRequestType\)/);
+  assert.match(hub, /leave blank to keep the current key/);
+  assert.match(detail, /Edit configuration/);
+  assert.match(oauth, /OAuth client ID/);
+  assert.match(oauth, /client_id: clientID\.trim\(\)/);
+  assert.match(styles, /\.playground-settings \{ position: relative; z-index: 10; padding: 0; overflow: visible; \}/);
+  assert.match(styles, /\.playground-settings select, \.playground-settings input, \.model-filters select, \.model-filters input, \.model-combo input \{ min-height: 44px; \}/);
+});
+
+test("admin model catalogs stay scoped to the selected principal", () => {
+  const app = readFileSync(resolve(root, "src/App.tsx"), "utf8");
+  const playground = readFileSync(resolve(root, "src/pages/Playground.tsx"), "utf8");
+  const models = readFileSync(resolve(root, "src/pages/ModelsEndpoints.tsx"), "utf8");
+  assert.match(models, /principal_id=\$\{encodeURIComponent\(principalID\)\}/);
+  assert.match(playground, /query\.set\("principal_id", scopedPrincipalID\)/);
+  assert.match(playground, /project_id: projectID/);
+  assert.match(playground, /eligibleProjects/);
+  assert.match(playground, /\[catalogPath\]/);
+  assert.match(models, /Catalog owner/);
+  assert.match(app, /catalogPrincipalID/);
+  assert.match(app, /<ModelsEndpoints.*principalID=\{catalogPrincipalID\}/);
+  assert.match(app, /<Playground.*principalID=\{initialOwner\}/);
+});
+
+test("playground uses typed capabilities and does not expose portal media routes", () => {
+  const picker = readFileSync(resolve(root, "src/components/ModelPicker.tsx"), "utf8");
+  const playground = readFileSync(resolve(root, "src/pages/Playground.tsx"), "utf8");
+  assert.match(picker, /typed_capabilities/);
+  assert.match(picker, /native_surfaces/);
+  assert.match(picker, /emulated_surfaces/);
+  assert.match(picker, /export function transportForSurface/);
+  assert.match(playground, /transportForSurface\(selected, selectedSurface\)/);
+  assert.match(playground, /mode === "portal"/);
+  assert.match(playground, /row\.capabilities\.includes\("chat"\)/);
+  assert.match(playground, /selected\?\.capabilities\.includes\("chat"\) \? \["chat" as PlaygroundMode\]/);
+  assert.match(playground, /Catalog freshness/);
+  assert.match(playground, /Verification freshness/);
+  assert.match(playground, /Transport mode/);
+  assert.match(playground, /Tool definitions \(JSON array\)/);
+  assert.match(playground, /toolsUnsupported/);
+  assert.match(playground, /query\.set\("diagnostics", "1"\)/);
+  assert.match(playground, /Capabilities unknown/);
+  assert.match(playground, /Published by administrator opt-in/);
+});
+
+test("access page manages principals, projects, and memberships over the IAM API", () => {
+  const access = readFileSync(resolve(root, "src/pages/Access.tsx"), "utf8");
+  const navigation = readFileSync(resolve(root, "src/lib/navigation.ts"), "utf8");
+  const app = readFileSync(resolve(root, "src/App.tsx"), "utf8");
+  assert.match(navigation, /id: "access"/);
+  assert.match(app, /case "access": content = <Access/);
+  assert.match(access, /"\/principals"/);
+  assert.match(access, /"\/memberships"/);
+  assert.match(access, /\/\$\{target\}\/status/);
+  assert.match(access, /option value="human"/);
+  assert.match(access, /option value="owner"/);
+  assert.match(access, /useDialogFocus\(onClose\)/);
+});
+
+test("access page is admin-only and excluded from the portal shell", () => {
+  const navigation = readFileSync(resolve(root, "src/lib/navigation.ts"), "utf8");
+  const access = readFileSync(resolve(root, "src/pages/Access.tsx"), "utf8");
+  assert.doesNotMatch(navigation, /\["overview", "providers", "models", "playground", "keys", "access"/);
+  assert.match(access, /mode !== "admin"/);
+  assert.match(access, /Administrator area/);
+});
+
+test("access page protects the built-in system principal from status changes", () => {
+  const access = readFileSync(resolve(root, "src/pages/Access.tsx"), "utf8");
+  assert.match(access, /stringValue\(principal.kind\) === "system"/);
+  assert.match(access, /Built-in/);
+});
+
+test("console routes support a detail segment and provider detail pages", () => {
+  const app = readFileSync(resolve(root, "src/App.tsx"), "utf8");
+  const providers = readFileSync(resolve(root, "src/pages/Providers.tsx"), "utf8");
+  const detail = readFileSync(resolve(root, "src/pages/ProviderDetail.tsx"), "utf8");
+  assert.match(app, /function routeFromHash/);
+  assert.match(app, /decodeURIComponent\(rest.join\("\/"\)\)/);
+  assert.match(app, /const navigate = \(next: PageID, detail\?: string\)/);
+  assert.match(providers, /<ProviderDetail entryID=\{detail\}/);
+  assert.match(detail, /Back to providers|Providers<\/button>/);
+  assert.match(detail, /Models from this provider/);
+  assert.match(detail, /Private connections/);
+});
+
+test("retired credential routes fall back to models or provider details", () => {
+  const app = readFileSync(resolve(root, "src/App.tsx"), "utf8");
+  const navigation = readFileSync(resolve(root, "src/lib/navigation.ts"), "utf8");
+  assert.doesNotMatch(navigation, /id: "credentials"/);
+  assert.match(app, /candidate === "credentials"/);
+  assert.match(app, /provider \? \{ page: "providers", detail: provider \} : \{ page: "models", detail: "" \}/);
+});
+
+test("provider cards and overview metrics navigate to their destinations", () => {
+  const hub = readFileSync(resolve(root, "src/components/providers/ProviderHub.tsx"), "utf8");
+  const overview = readFileSync(resolve(root, "src/pages/Overview.tsx"), "utf8");
+  assert.match(hub, /provider-hub__detail-link/);
+  assert.match(hub, /onClick=\{\(\) => onOpenDetail\(id\)\}/);
+  assert.match(hub, /class="provider-hub__details"/);
+  assert.match(overview, /metric-card--clickable/);
+  assert.match(overview, /onOpen=\{\(\) => onNavigate\("providers"\)\}/);
+  assert.match(overview, /onOpen=\{\(\) => onNavigate\("keys"\)\}/);
+});
+
+test("provider detail scopes its catalog to the selected owner and explains empty states", () => {
+  const detail = readFileSync(resolve(root, "src/pages/ProviderDetail.tsx"), "utf8");
+  assert.match(detail, /principal_id=\$\{encodeURIComponent\(ownerID\)\}/);
+  assert.match(detail, /Select a catalog owner/);
+  assert.match(detail, /create one on the Access page/);
+  assert.match(detail, /No models synced yet/);
+});
+
+test("OAuth onboarding carries the selected owner into catalog verification and playground", () => {
+  const oauth = readFileSync(resolve(root, "src/components/providers/OAuthConnectDialog.tsx"), "utf8");
+  const providers = readFileSync(resolve(root, "src/pages/Providers.tsx"), "utf8");
+  assert.match(oauth, /test\?principal_id=\$\{encodeURIComponent\(ownerID\)\}/);
+  assert.match(oauth, /onOpenPlayground\?\.\(model\.includes\("\/"\)/);
+  assert.match(oauth, /disabled=\{!onOpenPlayground \|\| !stringValue\(asList\(probe\?\.sample\)\[0\]\)\}/);
+  assert.match(providers, /new URLSearchParams\(\{ model: modelID, provider: providerID, owner: ownerID \}\)/);
+});
+
+test("provider status vocabulary distinguishes configured, synced, and verified", () => {
+  const shared = readFileSync(resolve(root, "src/components/providers/shared.tsx"), "utf8");
+  assert.match(shared, /configured: "Configured · unverified"/);
+  assert.match(shared, /catalog_synced: "Catalog synced"/);
+  assert.match(shared, /verified: "Verified"/);
+  assert.match(shared, /check_failed: "Check failed"/);
+  assert.doesNotMatch(shared, /ready: "Ready"/);
+});
+
+test("lifecycle verbs say what they do and verify runs a real completion", () => {
+  const shared = readFileSync(resolve(root, "src/components/providers/shared.tsx"), "utf8");
+  const hub = readFileSync(resolve(root, "src/components/providers/ProviderHub.tsx"), "utf8");
+  const detail = readFileSync(resolve(root, "src/pages/ProviderDetail.tsx"), "utf8");
+  assert.match(shared, /test: "reachability check"/);
+  assert.match(shared, /repair: "cache reset"/);
+  assert.match(shared, /verify: "test completion"/);
+  assert.match(hub, /Check reachability/);
+  assert.match(hub, /Sync catalog/);
+  assert.doesNotMatch(hub, />\s*Repair</);
+  assert.match(detail, /Test inference/);
+  assert.match(detail, /Clear cache &amp; retry/);
+  assert.match(detail, /cannot fix a wrong credential or endpoint|cannot repair credentials or endpoints/);
+  assert.match(detail, /Never — run a test completion/);
+});
+
+test("provider details own connection choices, evidence, playground, and disconnect", () => {
+  const shared = readFileSync(resolve(root, "src/components/providers/shared.tsx"), "utf8");
+  const detail = readFileSync(resolve(root, "src/pages/ProviderDetail.tsx"), "utf8");
+  assert.match(shared, /Personal subscription · device OAuth/);
+  assert.match(shared, /Anonymous access · no key/);
+  assert.match(shared, /Optional personal API key/);
+  assert.match(detail, /Human owner/);
+  assert.match(detail, /Connected account/);
+  assert.match(detail, /authentication_state/);
+  assert.match(detail, /catalog_evidence/);
+  assert.match(detail, /completion_evidence/);
+  assert.match(detail, /Try in Playground/);
+  assert.match(detail, /Disconnect/);
+  assert.match(detail, /Native Ollama root/);
+  assert.match(detail, /Connect anonymously/);
+  assert.match(detail, /Connect with API key/);
+  assert.doesNotMatch(detail, /credential reference/i);
+});
+
+test("routes render as clickable tiles with a detail page and end-to-end test runner", () => {
+  const routes = readFileSync(resolve(root, "src/pages/Routes.tsx"), "utf8");
+  const detail = readFileSync(resolve(root, "src/pages/RouteDetail.tsx"), "utf8");
+  const app = readFileSync(resolve(root, "src/App.tsx"), "utf8");
+  assert.match(app, /<Routes data=\{data\} mode=\{mode\} detail=\{route.detail\}/);
+  assert.match(routes, /route-list--grid/);
+  assert.match(routes, /<RouteDetail routeName=\{detail\}/);
+  assert.match(routes, /closest\("button, a, select, input, label"\)/);
+  assert.match(detail, /"\/playground"/);
+  assert.match(detail, /model: routeName/);
+  assert.match(detail, /Fallback trace/);
+  assert.match(detail, /Create them on the Access page first/);
+});
+
+test("routes vocabulary matches the API's endpoint terminology and writes to the canonical route", () => {
+  const routes = readFileSync(resolve(root, "src/pages/Routes.tsx"), "utf8");
+  const detail = readFileSync(resolve(root, "src/pages/RouteDetail.tsx"), "utf8");
+  const picker = readFileSync(resolve(root, "src/components/ModelPicker.tsx"), "utf8");
+  assert.match(routes, /Endpoint route/);
+  assert.match(detail, /Endpoint route/);
+  assert.doesNotMatch(routes, /Category route/);
+  assert.doesNotMatch(detail, /Category route/);
+  assert.match(routes, /`\/endpoints\$\{principalQuery\}`/);
+  assert.match(routes, /`\/endpoints\/\$\{encodeURIComponent\(routeName\)\}`/);
+  assert.match(detail, /`\/endpoints\/\$\{encodeURIComponent\(routeName\)\}`/);
+  assert.doesNotMatch(routes, /"admin", `\/categories/);
+  assert.doesNotMatch(detail, /"admin", `\/categories/);
+  // owned_by is "endpoint" on the wire now, not "category" — a stale check here
+  // would silently let routing-chain rows leak back into model pickers.
+  assert.match(routes, /stringValue\(row\.owned_by\) === "endpoint"/);
+  assert.match(picker, /owner === "endpoint"/);
+});
+
+test("setup snippets use the console's own origin, not a hardcoded localhost", () => {
+  const page = readFileSync(resolve(root, "src/pages/ModelsEndpoints.tsx"), "utf8");
+  assert.doesNotMatch(page, /http:\/\/localhost:8787/);
+  assert.match(page, /window\.location\.origin/);
+  assert.match(page, /model_provider = "llmgw"/);
+  assert.match(page, /wire_api = "responses"/);
+  assert.match(page, /COPILOT_PROVIDER_BASE_URL/);
+  assert.match(page, /COPILOT_PROVIDER_WIRE_MODEL/);
+  assert.match(page, /\/v1\/embeddings/);
+  assert.match(page, /\/v1\/videos\/generations/);
+});
+
+test("settings editor covers every writable project policy field", () => {
+  const settings = readFileSync(resolve(root, "src/pages/Settings.tsx"), "utf8");
+  const models = readFileSync(resolve(root, "../../iam/models.go"), "utf8");
+  const keyPolicy = models.match(/type KeyPolicy struct \{([\s\S]*?)\n\}/);
+  assert.ok(keyPolicy, "iam.KeyPolicy struct not found");
+  const writable = [...keyPolicy[1].matchAll(/^\s*\w+\s+(\S+)\s+`json:"([^",]+)(?:,[^"]*)?"`/gm)]
+    .filter(([, , field]) => !["-", "allowed_routes", "routes_only", "admin_managed"].includes(field))
+    .map(([, type, field]) => ({ type, field }));
+  const allowlists = writable.filter(({ type }) => type === "[]string").map(({ field }) => field);
+  const numeric = writable.filter(({ type }) => /^(?:u?int(?:8|16|32|64)?|float(?:32|64))$/.test(type)).map(({ field }) => field);
+  const sorted = (values) => [...values].sort();
+  assert.deepEqual(sorted([...allowlists, ...numeric]), sorted(writable.map(({ field }) => field)), "KeyPolicy has an unsupported writable field type");
+
+  const definitions = settings.match(/const policyFields[^=]*=\s*\[([\s\S]*?)\n\];/);
+  assert.ok(definitions, "policyFields definition not found");
+  const numericBindings = [...definitions[1].matchAll(/\bkey:\s*"([^"]+)"/g)].map((match) => match[1]);
+  assert.deepEqual(sorted(numericBindings), sorted(numeric), "policyFields must cover every numeric KeyPolicy field");
+  assert.match(settings, /numberValue\(payload\[field\.key\]\)/);
+  assert.match(settings, /policyFields\.map\(\(field\) => <label/);
+  assert.match(settings, /body\[field\.key\] = value/);
+
+  const loadBindings = Object.fromEntries([...settings.matchAll(/set([A-Z]\w*)\(asList\(payload\.([a-z0-9_]+)\)/g)]
+    .map(([, state, field]) => [field, state[0].toLowerCase() + state.slice(1)]));
+  const saveBindings = Object.fromEntries([...settings.matchAll(/^\s*([a-z0-9_]+):\s*([a-z]\w*)\.split\(","\)/gm)]
+    .map(([, field, state]) => [field, state]));
+  assert.deepEqual(sorted(Object.keys(loadBindings)), sorted(allowlists), "every KeyPolicy allowlist needs an explicit load binding");
+  assert.deepEqual(sorted(Object.keys(saveBindings)), sorted(allowlists), "every KeyPolicy allowlist needs an explicit save binding");
+  for (const field of allowlists) assert.equal(loadBindings[field], saveBindings[field], `${field} must load and save through the same editor state`);
+
+  assert.match(settings, /ProjectPolicyEditor/);
+  assert.match(settings, /\/policy`/);
+  assert.match(settings, /Save project policy/);
+  assert.match(settings, /managed on the Access page/);
+  assert.match(settings, /onNavigate\("access"\)/);
+  assert.doesNotMatch(settings, /grouped here rather than mixed into provider and routing workflows/);
+});
+
+test("provider automation is admin-only, inherited, explicit, and non-destructive", () => {
+  const settings = readFileSync(resolve(root, "src/pages/Settings.tsx"), "utf8");
+  assert.match(settings, /mode === "admin" \? <AnonymousProviderAutomation/);
+  assert.match(settings, /\/settings\/anonymous-provider-automation/);
+  assert.match(settings, /Use deployment default/);
+  assert.match(settings, /value="on">On/);
+  assert.match(settings, /value="off">Off/);
+  assert.match(settings, /Existing provider configuration was not removed/);
+  assert.match(settings, /never creates credentials, changes routes, or replaces an existing provider/);
+});
+
+test("audit history copy reflects bounded retention", () => {
+  const settings = readFileSync(resolve(root, "src/pages/Settings.tsx"), "utf8");
+  assert.match(settings, /retained audit history/);
+  assert.doesNotMatch(settings, /immutable audit history/);
+});
+
+test("overview shows an evidence-driven first-run guide for admins", () => {
+  const guide = readFileSync(resolve(root, "src/components/GetStartedGuide.tsx"), "utf8");
+  const overview = readFileSync(resolve(root, "src/pages/Overview.tsx"), "utf8");
+  assert.match(overview, /<GetStartedGuide data=\{data\} onNavigate=\{onNavigate\}/);
+  assert.match(overview, /\{!isPortal \? <GetStartedGuide/);
+  assert.match(guide, /Create a human owner/);
+  assert.match(guide, /hasProjectOwner/);
+  assert.match(guide, /role === "owner" \|\| role === "admin"/);
+  assert.match(guide, /activeHumanIDs\.has/);
+  assert.match(guide, /activeProjectIDs\.has/);
+  assert.match(guide, /Verify inference with a test completion/);
+  assert.match(guide, /Mint a project API key/);
+  assert.match(guide, /last_verified_at/);
+  assert.match(guide, /localStorage/);
+  assert.match(guide, /llmgw\.console\.setup-guide-dismissed/);
+});
+
+test("providers can be disabled and re-enabled without losing configuration", () => {
+  const detail = readFileSync(resolve(root, "src/pages/ProviderDetail.tsx"), "utf8");
+  const shared = readFileSync(resolve(root, "src/components/providers/shared.tsx"), "utf8");
+  assert.match(detail, /\/enabled`/);
+  assert.match(detail, /disabled_provider_ids/);
+  assert.match(detail, /\{disabledProviderIDs.has\(providerID\) \? "Enable" : "Disable"\}/);
+  assert.match(detail, /without deleting its configuration or credentials/);
+  assert.match(shared, /disabled: "Disabled"/);
+});
+
+test("key creation exposes the acting principal so OAuth-backed keys work", () => {
+  const keys = readFileSync(resolve(root, "src/pages/ApiKeys.tsx"), "utf8");
+  assert.match(keys, /Acts as/);
+  assert.match(keys, /payload.principal_id = principalID/);
+  assert.match(keys, /Create or reuse a service identity/);
+  assert.match(keys, /owner's eligible private connections/);
+  assert.match(keys, /Copilot service access requires an active project binding; Codex OAuth is human-private/);
+});
+
+test("compact providers preserve the complete discovery and onboarding surface", () => {
+  const hub = readFileSync(resolve(root, "src/components/providers/ProviderHub.tsx"), "utf8");
+  const roster = readFileSync(resolve(root, "src/components/providers/ProviderRoster.tsx"), "utf8");
+  assert.match(roster, /All providers/);
+  assert.match(hub, /Detect local/);
+  assert.match(hub, /\[\.\.\.curated, \.\.\.custom\]/);
+  assert.match(hub, /<ConnectDialog/);
+  assert.match(hub, /<PrivateAPIKeyDialog/);
+  assert.match(hub, /<OAuthConnectDialog/);
+  assert.match(hub, /provider-hub__details/);
+  assert.match(hub, /const requiresKey = boolValue\(entry\.requires_api_key\)/);
+  assert.match(hub, /if \(requiresKey && !apiKey\.trim\(\)/);
+});
+
+test("keys expose scopes, owner filters and admin management without unrestricted claims", () => {
+  const keys = readFileSync(resolve(root, "src/pages/ApiKeys.tsx"), "utf8");
+  const scope = readFileSync(resolve(root, "src/components/KeyScopeEditor.tsx"), "utf8");
+  assert.match(keys, /key\.principal_id !== ownerFilter/);
+  assert.match(keys, /key\.project_id !== projectFilter/);
+  assert.match(keys, /eligibleOwners/);
+  assert.match(keys, /routes_only: scope\.routes_only === true/);
+  assert.match(keys, /mode === "portal" && managed/);
+  assert.match(scope, /Block direct model calls, including aliases/);
+  assert.match(scope, /Inherits project access and limits/);
+  assert.doesNotMatch(keys, /"Unrestricted"/);
+});
+
+test("key editor bounds intrinsic controls on narrow screens", () => {
+  const styles = readFileSync(resolve(root, "src/styles/keys.css"), "utf8");
+  assert.match(styles, /\.key-editor \{ grid-template-columns: minmax\(0, 1fr\); min-width: 0;/);
+  assert.match(styles, /\.key-editor select \{ width: 100%; min-width: 0; max-width: 100%;/);
+});
+
+test("model pickers cascade provider then capability before the model list", () => {
+  const picker = readFileSync(resolve(root, "src/components/ModelPicker.tsx"), "utf8");
+  const models = readFileSync(resolve(root, "src/pages/ModelsEndpoints.tsx"), "utf8");
+  const routes = readFileSync(resolve(root, "src/pages/Routes.tsx"), "utf8");
+  assert.match(picker, /export function ModelFilters/);
+  assert.match(picker, /All providers/);
+  assert.match(picker, /All capabilities/);
+  assert.match(picker, /capability: "all"/);
+  assert.match(models, /<ModelFilters models=\{models\}/);
+  assert.match(routes, /<ModelFilters models=\{memberModels\}/);
+  assert.match(routes, /includeCategories=\{false\}/);
+});
+
+test("capability detection reads catalog metadata and refuses to fake chat", () => {
+  const picker = readFileSync(resolve(root, "src/components/ModelPicker.tsx"), "utf8");
+  assert.match(picker, /export function capabilitiesFor/);
+  assert.match(picker, /\/audio\/speech/);
+  assert.match(picker, /\/audio\/transcriptions/);
+  assert.match(picker, /out.delete\("chat"\)/);
+});
+
+test("playground is a chat surface with multi-turn history", () => {
+  const playground = readFileSync(resolve(root, "src/pages/Playground.tsx"), "utf8");
+  assert.match(playground, /function ChatThread/);
+  assert.match(playground, /chat-composer/);
+  assert.match(playground, /Enter to send, Shift\+Enter/);
+  assert.match(playground, /event.key !== "Enter" \|\| event.shiftKey/);
+  assert.match(playground, /event\.preventDefault\(\);\s*if \(executionPending\.current\) return;/);
+  assert.match(playground, /sendChat\(event, \(event.currentTarget as HTMLTextAreaElement\).value\)/);
+  assert.match(playground, /requestHistory\(textSurface, history\)/);
+  assert.match(playground, /Clear conversation/);
+  assert.match(playground, /Raw gateway response/);
+});
+
+test("playground keeps failed requests out of conversation history", () => {
+  const playground = readFileSync(resolve(root, "src/pages/Playground.tsx"), "utf8");
+  assert.doesNotMatch(playground, /isError\?: boolean/);
+  assert.doesNotMatch(playground, /setTurns\(\[\.\.\.history, \{\s*role: "assistant",\s*content: msg/s);
+  assert.match(playground, /setTurns\(turns\);\s*setDraft\(\(current\) => current \|\| text\);\s*reportError\(cause\)/);
+  assert.match(playground, /const executionRequest = useRef\(0\)/);
+  assert.match(playground, /const executionPending = useRef\(false\)/);
+  assert.match(playground, /const executionAbort = useRef<AbortController \| null>\(null\)/);
+  assert.match(playground, /\[model, projectID, scopedPrincipalID, textSurface, surface\]/);
+  assert.match(playground, /onClear=\{\(\) => \{ executionAbort\.current\?\.abort\(\); executionAbort\.current = null; executionRequest\.current \+= 1;/);
+  assert.match(playground, /setResult\(null\);\s*reportError\(cause/);
+  assert.match(playground, /Catalog discovery does not guarantee current inference availability/);
+});
+
+test("playground invalidates stale presets and video polls", () => {
+  const playground = readFileSync(resolve(root, "src/pages/Playground.tsx"), "utf8");
+  assert.match(playground, /const appliedPreset = useRef\(""\)/);
+  assert.match(playground, /catalogSource === catalogPath \? catalogModels\(catalog\) : \[\]/);
+  assert.match(playground, /if \(!preset\) \{\s*appliedPreset\.current = "";/);
+  assert.match(playground, /const presetScope = `\$\{scopedPrincipalID\}\|\$\{projectID\}\|\$\{preset\}`/);
+  assert.match(playground, /if \(appliedPreset\.current === presetScope \|\| !models\.length\) return;/);
+  assert.match(playground, /if \(models\.some\(\(row\) => row\.id === preset && !row\.disabled\)\) \{\s*appliedPreset\.current = presetScope;/);
+  assert.match(playground, /if \(preset && appliedPreset\.current !== presetScope\) return;/);
+  assert.ok((playground.match(/if \(executionPending\.current\) return;/g) ?? []).length >= 5);
+  assert.match(playground, /const payload = await sendJSON<JSONRecord>\(mode, "\/playground\/video", "POST", pollBody, controller\.signal\);\s*if \(attempt !== videoPoll\.current\) return;/);
+  assert.match(playground, /useEffect\(\(\) => \(\) => \{\s*executionAbort\.current\?\.abort\(\);\s*executionAbort\.current = null;\s*executionRequest\.current \+= 1;\s*executionPending\.current = false;\s*videoPoll\.current \+= 1;/);
+});
+
+test("playground switches surface by model capability", () => {
+  const playground = readFileSync(resolve(root, "src/pages/Playground.tsx"), "utf8");
+  assert.match(playground, /function modeFor/);
+  assert.match(playground, /"\/playground\/speech"/);
+  assert.match(playground, /"\/playground\/transcription"/);
+  assert.match(playground, /surface === "tts"/);
+  assert.match(playground, /surface === "transcription"/);
+  assert.match(playground, /<audio controls src=\{audioURL\}/);
+  assert.match(playground, /playground-settings__toggle/);
+  assert.match(playground, /accept="audio\/\*"/);
+});
+
+test("playground selects and builds each supported text surface", () => {
+  const playground = readFileSync(resolve(root, "src/pages/Playground.tsx"), "utf8");
+  assert.match(playground, /defaultTextSurface/);
+  assert.match(playground, /transportForSurface\(model, surface\) === "native"/);
+  assert.match(playground, /transportForSurface\(model, surface\) === "translated"/);
+  assert.match(playground, /`\/playground\$\{textSurface\}`/);
+  assert.match(playground, /body\.input = statefulResponses \? text : requestHistory/);
+  assert.match(playground, /body\.previous_response_id = previousResponseID/);
+  assert.match(playground, /body\.max_tokens = 1024/);
+  assert.match(playground, /function parseTextResponse/);
+  assert.match(playground, /Reasoning/);
+  assert.match(playground, /Tool calls/);
+});
+
+test("form data uploads keep their own multipart boundary", () => {
+  const api = readFileSync(resolve(root, "src/lib/api.ts"), "utf8");
+  assert.match(api, /!\(init.body instanceof FormData\)/);
+});
+
+test("long catalogs paginate instead of dumping every row", () => {
+  const picker = readFileSync(resolve(root, "src/components/ModelPicker.tsx"), "utf8");
+  const detail = readFileSync(resolve(root, "src/pages/ProviderDetail.tsx"), "utf8");
+  assert.match(picker, /export function Pager/);
+  assert.match(picker, /export const defaultPageSize = 20/);
+  assert.match(detail, /<Pager total=\{matchedModels.length\}/);
+  assert.match(detail, /pagedModels.map/);
+});
+
+test("model selection is a type-ahead, not a list of hundreds", () => {
+  const picker = readFileSync(resolve(root, "src/components/ModelPicker.tsx"), "utf8");
+  const playground = readFileSync(resolve(root, "src/pages/Playground.tsx"), "utf8");
+  assert.match(picker, /export function ModelCombo/);
+  assert.match(picker, /Type to search models/);
+  assert.match(picker, /event.key === "ArrowDown"/);
+  assert.match(playground, /<ModelCombo models=\{voiceModels\}/);
+	assert.match(picker, /free: row\.free === true/);
+	assert.match(picker, /const isFree = model\.free/);
+});
+
+test("provider models hand off to the playground and back", () => {
+  const detail = readFileSync(resolve(root, "src/pages/ProviderDetail.tsx"), "utf8");
+  const providers = readFileSync(resolve(root, "src/pages/Providers.tsx"), "utf8");
+  const playground = readFileSync(resolve(root, "src/pages/Playground.tsx"), "utf8");
+  const app = readFileSync(resolve(root, "src/App.tsx"), "utf8");
+  assert.match(detail, /onOpenPlayground\(stringValue\(row.id\), ownerID\)/);
+  assert.match(providers, /new URLSearchParams\(\{ model: modelID, provider: detail, owner: ownerID \}\)/);
+  assert.match(app, /const playgroundRoute = useMemo/);
+  assert.match(app, /model: structured \? params\.get\("model"\)/);
+  assert.match(app, /const initialOwner = playgroundRoute\.owner && appliedPlaygroundOwner !== route\.detail \? playgroundRoute\.owner : catalogPrincipalID/);
+  assert.match(app, /principalID=\{initialOwner\}/);
+  assert.match(app, /navigate\("providers", playgroundRoute\.provider\)/);
+  assert.match(playground, /Back to provider/);
+});
+
+test("speech surface offers a language filter over locale-keyed voices", () => {
+  const playground = readFileSync(resolve(root, "src/pages/Playground.tsx"), "utf8");
+  assert.match(playground, /function localeOf/);
+  assert.match(playground, /All languages/);
+  assert.match(playground, /voiceModels/);
+});
+
+test("setup guide points each step at the provider that still needs it", () => {
+  const guide = readFileSync(resolve(root, "src/components/GetStartedGuide.tsx"), "utf8");
+  assert.match(guide, /needsCatalog/);
+  assert.match(guide, /needsVerify/);
+  assert.doesNotMatch(guide, /firstConfigured/);
+});
+
+test("playground exercises image and video as their own surfaces", () => {
+  const playground = readFileSync(resolve(root, "src/pages/Playground.tsx"), "utf8");
+  const picker = readFileSync(resolve(root, "src/components/ModelPicker.tsx"), "utf8");
+  assert.match(picker, /image: "Image generation"/);
+  assert.match(picker, /video: "Video generation"/);
+  assert.match(picker, /\/images\/generations/);
+  assert.match(picker, /\/videos\/generations/);
+  assert.match(playground, /surface === "image"/);
+  assert.match(playground, /surface === "video"/);
+  assert.match(playground, /"\/playground\/image"/);
+  assert.match(playground, /"\/playground\/video"/);
+  assert.match(playground, /<img src=\{imageURL\}/);
+  assert.match(playground, /<video controls src=\{videoURL\}/);
+});
+
+test("playground surfaces safe image rate-limit metadata", () => {
+  const api = readFileSync(resolve(root, "src/lib/api.ts"), "utf8");
+  const playground = readFileSync(resolve(root, "src/pages/Playground.tsx"), "utf8");
+  assert.match(api, /readonly retryAfter: string/);
+  assert.match(api, /response\.headers\.get\("Retry-After"\)/);
+  assert.match(playground, /playgroundFailure/);
+  assert.match(playground, /<dt>Status<\/dt>/);
+  assert.match(playground, /<dt>Code<\/dt>/);
+  assert.match(playground, /<dt>Retry<\/dt>/);
+  assert.match(playground, /<dt>Action<\/dt>/);
+  assert.match(playground, /void refreshEvidence\(\)/);
+});
+
+test("video polling is cancellable and does not block the request", () => {
+  const playground = readFileSync(resolve(root, "src/pages/Playground.tsx"), "utf8");
+  assert.match(playground, /const attempt = \+\+videoPoll.current/);
+  assert.match(playground, /if \(attempt !== videoPoll.current\) return/);
+  assert.match(playground, /operation/);
+  assert.match(playground, /navigating away stops the polling but not the job/);
+});
+
+test("generation-only models never offer a chat composer", () => {
+  const picker = readFileSync(resolve(root, "src/components/ModelPicker.tsx"), "utf8");
+  assert.match(picker, /out.has\("image"\) \|\| out.has\("video"\)/);
+  assert.match(picker, /out.delete\("chat"\)/);
+});
+
+test("provider detail rows render each instance's own catalog data", () => {
+  const detail = readFileSync(resolve(root, "src/pages/ProviderDetail.tsx"), "utf8");
+  // Rows must iterate instance records, not bare ids paired with aggregate fields.
+  assert.match(detail, /asList\(entry\.instances\)/);
+  assert.doesNotMatch(detail, /<td>\{numberValue\(entry\.model_count\)\}/);
+});
+
+test("provider tiles show instance composition rather than one rolled-up status", () => {
+  const hub = readFileSync(resolve(root, "src/components/providers/ProviderHub.tsx"), "utf8");
+  assert.match(hub, /instance_status_counts/);
+  assert.match(hub, /instanceCount === 1 \? "" : "s"/);
+});
+
+test("credential and lifecycle actions name an explicit instance", () => {
+  const shared = readFileSync(resolve(root, "src/components/providers/shared.tsx"), "utf8");
+  const hub = readFileSync(resolve(root, "src/components/providers/ProviderHub.tsx"), "utf8");
+  // The dialog must be TOLD its target. A caller that has already established
+  // the tile has exactly one instance may still index [0] at the call site —
+  // what must not survive is the dialog silently choosing for itself.
+  assert.match(hub, /function PrivateAPIKeyDialog\(\{ entry, providerID/);
+  assert.doesNotMatch(hub, /const providerID = configuredProviderIDs\(entry\)\[0\]/);
+  assert.doesNotMatch(shared, /providerIDs\[0\] \?\? stringValue\(entry\.id\)/);
+});
+
+test("official OAuth account binding also names an explicit instance", () => {
+  const oauth = readFileSync(resolve(root, "src/components/providers/OAuthConnectDialog.tsx"), "utf8");
+  const hub = readFileSync(resolve(root, "src/components/providers/ProviderHub.tsx"), "utf8");
+  const detail = readFileSync(resolve(root, "src/pages/ProviderDetail.tsx"), "utf8");
+  // Same rule as the private-key dialog: OAuthConnectDialog must be TOLD its
+  // target. It has no legitimate reason to resolve configuredProviderIDs
+  // itself — every caller passes a resolved providerID prop instead.
+  assert.match(oauth, /function OAuthConnectDialog\(\{\s*entry,\s*providerID,/);
+  assert.doesNotMatch(oauth, /configuredProviderIDs/);
+  assert.match(hub, /<OAuthConnectDialog entry=\{oauthEntry\.entry\} providerID=\{oauthEntry\.providerID\}/);
+  assert.match(detail, /<OAuthConnectDialog entry=\{entry\} providerID=\{oauthProviderID\} ownerID=\{ownerID\}/);
+  assert.match(hub, /<OAuthConnectDialog entry=\{oauthEntry\.entry\} providerID=\{oauthEntry\.providerID\} ownerID=\{ownerID\}/);
+  assert.doesNotMatch(oauth, /useState\(stringValue\(owners\[0\]\?\.id\)\)/);
+});
+
+test("connect dialog allows creating an additional instance of a configured type", () => {
+  const hub = readFileSync(resolve(root, "src/components/providers/ProviderHub.tsx"), "utf8");
+  // The ID field must lock only when editing an existing instance, never merely
+  // because the type already has one.
+  assert.doesNotMatch(hub, /disabled=\{configured\}/);
+  assert.match(hub, /mode === "edit"/);
+  assert.match(hub, /Add instance/);
+});
+
+test("instance identity is never inferred from a bare configured flag", () => {
+  const shared = readFileSync(resolve(root, "src/components/providers/shared.tsx"), "utf8");
+  // Every configured row — curated tile or custom provider — carries the ids of
+  // its instances. The fallback that invented the tile id as an instance made
+  // configuredProviderIDs and entry.instances disagree, so the lifecycle table
+  // rendered no rows at all for a custom provider.
+  assert.doesNotMatch(shared, /boolValue\(entry\.configured\)/);
+  assert.match(shared, /return asList\(entry\.configured_provider_ids\)/);
+});
+
+test("a suggested instance id never names a provider configured elsewhere", () => {
+  const hub = readFileSync(resolve(root, "src/components/providers/ProviderHub.tsx"), "utf8");
+  const detail = readFileSync(resolve(root, "src/pages/ProviderDetail.tsx"), "utf8");
+  // The create route is an upsert keyed on the id alone, so a default that is
+  // merely free under this tile can still overwrite another tile's provider.
+  assert.match(hub, /takenIDs = \[\]/);
+  assert.match(hub, /const taken = new Set\(\[\.\.\.configuredProviderIDs\(entry\), \.\.\.takenIDs\]/);
+  assert.match(hub, /takenIDs=\{allProviderIDs\}/);
+  assert.match(detail, /takenIDs=\{allProviderIDs\}/);
+  assert.doesNotMatch(hub, /existingIDs/);
+});
+
+test("add instance appears only where a credential-based create can succeed", () => {
+  const hub = readFileSync(resolve(root, "src/components/providers/ProviderHub.tsx"), "utf8");
+  // Gate on capability, not on a hardcoded list of ids: an OAuth-only tile fell
+  // through to the account flow and a custom tile posts its provider id as a
+  // registry id, which the server answers with a 400.
+  assert.match(hub, /const CREDENTIAL_AUTH_METHODS = new Set/);
+  assert.match(hub, /const canAddInstance = registryIDs\.has\(id\) && methods\.some/);
+  assert.match(hub, /\{canAddInstance \? \([\s\S]*?<button[^>]*title="Configure another instance/);
+});
+
+test("the create dialog never claims a key from another instance", () => {
+  const hub = readFileSync(resolve(root, "src/components/providers/ProviderHub.tsx"), "utf8");
+  // provider_config carries the first configured instance's record. A new
+  // instance has no stored key, so the "keep the current key" affordance and
+  // the guard it disables belong to edit mode only.
+  assert.match(hub, /const apiKeySet = mode === "edit" && boolValue\(providerConfig\.api_key_set\)/);
+});
+
+test("per-instance status is rendered and the tile pill follows the composition", () => {
+  const shared = readFileSync(resolve(root, "src/components/providers/shared.tsx"), "utf8");
+  const hub = readFileSync(resolve(root, "src/components/providers/ProviderHub.tsx"), "utf8");
+  const detail = readFileSync(resolve(root, "src/pages/ProviderDetail.tsx"), "utf8");
+  // The server emits every instance's own status; nothing read it, so a tile
+  // whose instance had failed its check wore the same grey pill as a verified
+  // one and the operator had no way to find out which instance failed.
+  assert.match(detail, /<th>Status<\/th>/);
+  assert.match(detail, /<StatusBadge status=\{stringValue\(instance\.status/);
+  assert.match(shared, /export function tileStatus/);
+  assert.match(shared, /instances_attention/);
+  assert.match(hub, /const status = tileStatus\(entry\)/);
+  assert.doesNotMatch(hub, /const status = stringValue\(entry\.status/);
+});
+
+test("configuration issues are read per instance, not as one joined sentence", () => {
+  const hub = readFileSync(resolve(root, "src/components/providers/ProviderHub.tsx"), "utf8");
+  const detail = readFileSync(resolve(root, "src/pages/ProviderDetail.tsx"), "utf8");
+  // The server made configuration_issue per-instance; both surfaces still
+  // rendered only the tile's space-joined string, so two misconfigured
+  // instances produced exactly the concatenation the change set out to remove.
+  assert.match(detail, /stringValue\(instance\.configuration_issue\)/);
+  assert.match(detail, /const tileConfigurationIssue = instances\.length > 1 \? ""/);
+  assert.match(hub, /const tileConfigurationIssue = instanceCount > 1 \? ""/);
+});
+
+test("one tile per id, and a custom row never dresses a curated tile", () => {
+  const hub = readFileSync(resolve(root, "src/components/providers/ProviderHub.tsx"), "utf8");
+  const detail = readFileSync(resolve(root, "src/pages/ProviderDetail.tsx"), "utf8");
+  // A configured provider may be named after a registry id it does not
+  // implement. Keyed on id alone that row overwrote the curated tile's status
+  // and added a second <article> under the same React key.
+  assert.match(hub, /statuses\.filter\(\(status\) => !boolValue\(status\.custom\)\)\.map/);
+  assert.match(hub, /if \(!boolValue\(status\.custom\)\) return false/);
+  assert.match(hub, /const taken = new Set\(registryIDs\)/);
+  assert.match(detail, /!\(registryEntry && boolValue\(candidate\.custom\)\)/);
+});
+
+test("console can submit a credential as a multipart upload", () => {
+  const api = readFileSync(resolve(root, "src/lib/api.ts"), "utf8");
+  assert.match(api, /export function sendForm</);
+  assert.match(api, /FormData/);
+});
+
+test("a file-shaped credential is chosen with a file picker, not pasted", () => {
+  const hub = readFileSync(resolve(root, "src/components/providers/ProviderHub.tsx"), "utf8");
+  assert.match(hub, /type="file"/);
+  assert.match(hub, /accept="application\/json,\.json"/);
+});
+
+test("guided onboarding asks which credential type rather than sniffing the paste", () => {
+  const hub = readFileSync(resolve(root, "src/components/providers/ProviderHub.tsx"), "utf8");
+  assert.doesNotMatch(hub, /API key or service account JSON/);
+  assert.match(hub, /Credential type/);
+});
+
+test("an undiscoverable catalog is labelled, not shown as zero models", () => {
+  const detail = readFileSync(resolve(root, "src/pages/ProviderDetail.tsx"), "utf8");
+  const hub = readFileSync(resolve(root, "src/components/providers/ProviderHub.tsx"), "utf8");
+  assert.match(detail + hub, /not discoverable/i);
+});
+
+test("console views read the canonical endpoints key, with the deprecated alias only as a fallback", () => {
+  // The server emits "endpoints" and still mirrors it under the deprecated
+  // "categories" alias this branch documents for removal. Every view that read
+  // the alias directly would have shown zero routes — and Overview the wrong
+  // onboarding step — the release the alias goes.
+  const records = readFileSync(resolve(root, "src/lib/records.ts"), "utf8");
+  assert.match(records, /export function endpointsOf/);
+  assert.match(records, /asRecord\(data\.endpoints\)/);
+  assert.match(records, /asRecord\(data\.categories\)/);
+  for (const file of ["src/pages/Routes.tsx", "src/pages/RouteDetail.tsx", "src/pages/Overview.tsx", "src/components/GetStartedGuide.tsx"]) {
+    const source = readFileSync(resolve(root, file), "utf8");
+    assert.match(source, /endpointsOf\(data\)/, `${file} does not read endpoints canonically`);
+    assert.doesNotMatch(source, /data\.categories/, `${file} still reads the deprecated alias`);
+  }
+  // nextStepFor is a second, earlier reader in Overview; both must migrate.
+  const overview = readFileSync(resolve(root, "src/pages/Overview.tsx"), "utf8");
+  assert.equal(overview.match(/endpointsOf\(data\)/g).length, 2);
+});
+
+test("a superseded credential file read cannot repopulate the field it no longer belongs to", () => {
+  // file.text() is not bound to the file or the credential kind that started
+  // the read. Switching back to "API key" cleared the field and the stale
+  // completion refilled it, so a submit stored the service-account document
+  // under credential_kind "api_key" — a connection that cannot work, not a
+  // retryable error. Both dialogs must use the same guard.
+  const hub = readFileSync(resolve(root, "src/components/providers/ProviderHub.tsx"), "utf8");
+  assert.match(hub, /function useCredentialFileRead/);
+  assert.match(hub, /if \(started === token\.current\) apply\(text\)/);
+  assert.doesNotMatch(hub, /void file\.text\(\)\.then\(\(text\) => \{ set/);
+  // One call site per dialog, each reading through the guard and invalidating
+  // whenever the kind changes, the picker is cleared, or a submit resets state.
+  assert.equal(hub.match(/credentialFile\.read\(file\)/g).length, 2);
+  assert.equal(hub.match(/useCredentialFileRead\(\(text\) =>/g).length, 2);
+  assert.equal(hub.match(/credentialFile\.invalidate\(\)/g).length, 8);
+});

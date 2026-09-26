@@ -1,0 +1,215 @@
+{
+  "schema_version": "1.0.0",
+  "mode": "change",
+  "contract": {
+    "digest": "31b393ab3e80162226619c441694573993ac618382d74642101484a0bf2e9c80"
+  },
+  "authoring_provenance": {
+    "status": "established",
+    "path": ".release-harness/drafts/llm-gateway.record.json",
+    "digest": "6732ddf3dc8236b974e2aae5f81b546d89c2a466b6fb0a368d76620955bf981e"
+  },
+  "sources": [
+    {
+      "source_id": "primary",
+      "status": "established",
+      "repository_identity": "https://github.com/xibodev/llm-gateway.git",
+      "base_ref": "origin/main",
+      "base_commit": "784c3fd6ad86c06a0dd7290655b70ddb91f12a13",
+      "merge_base": "dcf41c7f337f3b9f43db7f1c42ab714f8ae304f0",
+      "head_commit": "e318745a48eba9a4f1ef1b4b128ceef4fc005885",
+      "head_tree": "07c7585466e45283c32694d0ce7342a0197d138a",
+      "reviewed_source_digest": "064ee9ed368466c0d5b2d1616468de297b7e022e312f587d91130af0c8dafa08",
+      "changed_paths": [
+        {
+          "status": "modified",
+          "path": "go/internal/architecture/boundary_test.go",
+          "old_blob": "76c28893fcee1a05b1aba0ee2f0357b617242cea",
+          "new_blob": "742a5c2b04af744d1b9a45bd9758c0f017d246e3"
+        },
+        {
+          "status": "added",
+          "path": "go/internal/providers/antigravity_credentials_test.go",
+          "old_blob": "0000000000000000000000000000000000000000",
+          "new_blob": "ca1e54a88475d6d24b0fd61b62d0d979dd6431d4"
+        },
+        {
+          "status": "added",
+          "path": "go/internal/providers/antigravity_credentials.go",
+          "old_blob": "0000000000000000000000000000000000000000",
+          "new_blob": "b8898fe25d489c8417aec5f9bb179772f344ffb5"
+        },
+        {
+          "status": "added",
+          "path": "go/internal/providers/antigravity_runtime_test.go",
+          "old_blob": "0000000000000000000000000000000000000000",
+          "new_blob": "b31f9dcb534ef249cccf323c0ed4922ea30b47e0"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/providers/antigravity_test.go",
+          "old_blob": "1a21f01a3e02a9c980bef27ffa72a93d99d8b117",
+          "new_blob": "abb156ed1e67bebdffcedf2ccc3e2b6fd6b8c585"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/providers/antigravity.go",
+          "old_blob": "81e96e634f2b7f9a710371515ac0a3a68eb8ea08",
+          "new_blob": "7acc79dbdcf4e08d6e93a502724e488e1f93e00f"
+        },
+        {
+          "status": "deleted",
+          "path": "go/internal/providers/codex_call.go",
+          "old_blob": "8ee9a06578abd01306de17e6d192cef6505c5750",
+          "new_blob": "0000000000000000000000000000000000000000"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/providers/codex_credentials.go",
+          "old_blob": "bc3efb99f0f7d4de49cdf5ba5c6ef44bc37d8754",
+          "new_blob": "3dfc8ed86e248eed7adbe56a7e71746dbbd71762"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/providers/codex_runtime_test.go",
+          "old_blob": "d54261d87bff1d729cc9e3c6244de24053afa5a2",
+          "new_blob": "dacd720b5f57efcc63d9827ceabb093c6d80c688"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/providers/codex_test.go",
+          "old_blob": "6f2eafb7e5f6a8ac66a3d88c1c65202ab139b492",
+          "new_blob": "96d9932b46170d8e29692b3ca9d50f0fc18c9751"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/providers/codex.go",
+          "old_blob": "4c85c55024feaabb1abe1b3e13b2271af4720028",
+          "new_blob": "2c6c4d8feabb38fee6607e211e07ee6f947a9be3"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/providers/core_runtime.go",
+          "old_blob": "d83b63f5a307596854ce828e87a2bf3615b79400",
+          "new_blob": "450cb674d54802a3bc0195fe0e85b80a945d92d6"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/providers/credential_observation.go",
+          "old_blob": "4a88419564a530e2bd1e01eb6279666b55815046",
+          "new_blob": "78537753cf2698470212f28dcba94299af32f9f8"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/providers/factory.go",
+          "old_blob": "23b8a46146ebc74ef693a727c0948a8537f2f046",
+          "new_blob": "a921c53336c32a96f045b137227612d328d67b42"
+        },
+        {
+          "status": "added",
+          "path": "go/internal/providers/oauth_call.go",
+          "old_blob": "0000000000000000000000000000000000000000",
+          "new_blob": "0d83520f18b52f29ee67938c8822621af8b4fd85"
+        },
+        {
+          "status": "added",
+          "path": "go/internal/providers/oauth_store.go",
+          "old_blob": "0000000000000000000000000000000000000000",
+          "new_blob": "f55939e5697296a51cde82bd70a97af439d463a7"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/providers/runtime.go",
+          "old_blob": "ad3afec65ac116dfd98419c53142e95f226981d7",
+          "new_blob": "379e32785c3d8cf9b0eced5ba92cd70278caa200"
+        }
+      ]
+    }
+  ],
+  "facts": [
+    {
+      "id": "antigravity-through-runtime",
+      "claim": "Antigravity chat is served through the llmgw-core Runtime with core's Antigravity vertical, the generalized OAuth credential store (renamed from the Codex store, Codex behavior unchanged) and core's NewAntigravityRefresh behind the gateway's refusal rules; image generation resolves the credential through the same store and coordinator and refreshes and replays once after a 401. The Antigravity refresh-lock table, refresh and project-persist code, token source, 401 handler and project observer are removed. Characterization goldens pass unchanged.",
+      "status": "observed",
+      "evidence": {
+        "source": "go/internal/providers/antigravity.go, core_runtime.go, oauth_store.go; go/internal/api/testdata unchanged"
+      }
+    },
+    {
+      "id": "parity-rules",
+      "claim": "adaptAntigravityError is unchanged; a record without a stored profile is refused with the existing reauthorization error; a 401 whose refresh fails is reported as the existing status-less completion failure; the discovered project is persisted through ReplaceIfCurrent only while the stored token is unchanged; the catalog keeps the soft cache clear; mutation checks make the matching tests fail.",
+      "status": "observed",
+      "evidence": {
+        "source": "go/internal/providers/antigravity_test.go and related tests"
+      }
+    },
+    {
+      "id": "deviations",
+      "claim": "Core runs the project hook only after a successful operation and the hook cannot fail the request, so a failed project write no longer fails the request; a refresh keeps the stored connection status, which every writer sets to active.",
+      "status": "observed",
+      "evidence": {
+        "source": "llmgw-core v0.13.0 providers.AntigravityConfig.ProjectResolved; go/internal/providers/antigravity.go"
+      }
+    },
+    {
+      "id": "suite",
+      "claim": "The full Go suite passes with HTTP_PROXY and HTTPS_PROXY unreachable with unchanged characterization goldens; the providers iam.* budget moves from 75 to 59; gofmt, vet, govulncheck (0 reachable), check-docs and git diff --check pass.",
+      "status": "observed",
+      "evidence": {
+        "source": "local gate run on the reviewed head"
+      }
+    }
+  ],
+  "impact": {
+    "assertions": [
+      {
+        "id": "A1",
+        "impact": "unchanged",
+        "supported_by": [
+          "antigravity-through-runtime",
+          "deviations",
+          "suite"
+        ]
+      },
+      {
+        "id": "A2",
+        "impact": "unchanged",
+        "supported_by": [
+          "antigravity-through-runtime",
+          "deviations",
+          "suite"
+        ]
+      },
+      {
+        "id": "A3",
+        "impact": "unchanged",
+        "supported_by": [
+          "antigravity-through-runtime",
+          "deviations",
+          "suite"
+        ]
+      },
+      {
+        "id": "A4",
+        "impact": "unchanged",
+        "supported_by": [
+          "antigravity-through-runtime",
+          "deviations",
+          "suite"
+        ]
+      }
+    ],
+    "requires": [],
+    "possible_binding_changes": []
+  },
+  "questions": [],
+  "conclusion": {
+    "action": "reuse_contract",
+    "summary": "Antigravity moves onto the llmgw-core Runtime and vertical with unchanged upstream bytes; CLI, health and models behavior is unchanged."
+  },
+  "proposed": {
+    "by": "antigravity-core-runtime",
+    "at": "2026-09-25T08:31:57.984Z"
+  },
+  "digest": "90b0ebd2e8656c74983fd98cac29427ce5a7d99db7dd2ac030e6f77e1957b393"
+}

@@ -1,0 +1,59 @@
+# Local / single-box deployment for the LLM gateway (Go).
+#
+#   LLMGW_API_KEY=... LLMGW_HOST_PORT=8787 docker compose up -d --build
+#
+# The gateway handles bearer auth itself (LLMGW_API_KEY). Put a real config at
+# ./config.local.yaml (see llmgw.config.example.yaml) — it is mounted read-only.
+# The named volume persists gateway state (IAM db, encrypted connections,
+# hashed and encrypted keys, usage, catalog, Copilot OAuth token cache).
+#
+# The image is distroless/nonroot (uid 65532); state lives at /state rather
+# than a home directory so the container can own it.
+#
+# For TLS + a real box, use deploy/docker-compose.prod.yml instead.
+#
+# NOTE: the published host port is env-driven so it does not squat a fixed port.
+
+services:
+  gateway:
+    build:
+      context: ./go
+    image: llm-gateway-go:local
+    environment:
+      LLMGW_HOST: 0.0.0.0
+      LLMGW_PORT: "8787"
+      LLMGW_STATE_DIR: /state
+      LLMGW_CONFIG: /state/config.yaml
+      LLMGW_CONFIG_SEED: /config/llmgw.config.yaml
+      LLMGW_API_KEY: ${LLMGW_API_KEY:-}
+      LLMGW_ALLOW_UNAUTHENTICATED_API: ${LLMGW_ALLOW_UNAUTHENTICATED_API:-0}
+      LLMGW_ALLOW_COPILOT_PROXY: ${LLMGW_ALLOW_COPILOT_PROXY:-0}
+      LLMGW_EXPERIMENTAL_COPILOT_PROVIDER: ${LLMGW_EXPERIMENTAL_COPILOT_PROVIDER:-0}
+      LLMGW_GOOGLE_ANTIGRAVITY_CLIENT_ID: ${LLMGW_GOOGLE_ANTIGRAVITY_CLIENT_ID:-}
+      LLMGW_GOOGLE_ANTIGRAVITY_CLIENT_SECRET: ${LLMGW_GOOGLE_ANTIGRAVITY_CLIENT_SECRET:-}
+      LLMGW_GOOGLE_ANTIGRAVITY_OAUTH_PROFILE: ${LLMGW_GOOGLE_ANTIGRAVITY_OAUTH_PROFILE:-}
+      LLMGW_GOOGLE_ANTIGRAVITY_CLIENT_MODE: ${LLMGW_GOOGLE_ANTIGRAVITY_CLIENT_MODE:-}
+      LLMGW_GOOGLE_ANTIGRAVITY_REDIRECT_URI: ${LLMGW_GOOGLE_ANTIGRAVITY_REDIRECT_URI:-}
+      LLMGW_OAUTH_PUBLIC_BASE_URL: ${LLMGW_OAUTH_PUBLIC_BASE_URL:-}
+      LLMGW_CREDENTIAL_ENCRYPTION_KEY: ${LLMGW_CREDENTIAL_ENCRYPTION_KEY:-}
+      LLMGW_GITHUB_COPILOT_CACHE_DIR: /state/cache
+      LLMGW_RETENTION_USAGE_DAYS: ${LLMGW_RETENTION_USAGE_DAYS:-90}
+      LLMGW_RETENTION_AUDIT_DAYS: ${LLMGW_RETENTION_AUDIT_DAYS:-365}
+      LLMGW_RETENTION_DELIVERED_OUTBOX_DAYS: ${LLMGW_RETENTION_DELIVERED_OUTBOX_DAYS:-400}
+      LLMGW_BACKUP_KEEP: ${LLMGW_BACKUP_KEEP:-7}
+      LLMGW_PROVIDER_ROSTER_URL: ${LLMGW_PROVIDER_ROSTER_URL:-https://xibodev.github.io/llm-gateway/roster/payload.json}
+      LLMGW_PROVIDER_ROSTER_AUTO_REFRESH: ${LLMGW_PROVIDER_ROSTER_AUTO_REFRESH:-true}
+      LLMGW_ANONYMOUS_PROVIDER_AUTOMATION: ${LLMGW_ANONYMOUS_PROVIDER_AUTOMATION:-false}
+    volumes:
+      - ./config.local.yaml:/config/llmgw.config.yaml:ro
+      - llmgw-state:/state
+    ports:
+      - "${LLMGW_HOST_PORT:-8787}:8787"
+    # Lets the gateway reach a host-side Ollama (auto-detected at startup) at
+    # http://host.docker.internal:11434. Harmless when no host Ollama is running.
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    restart: unless-stopped
+
+volumes:
+  llmgw-state:

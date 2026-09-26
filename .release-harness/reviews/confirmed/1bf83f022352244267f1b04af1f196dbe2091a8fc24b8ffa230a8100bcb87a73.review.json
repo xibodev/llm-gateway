@@ -1,0 +1,245 @@
+{
+  "schema_version": "1.0.0",
+  "mode": "change",
+  "contract": {
+    "digest": "31b393ab3e80162226619c441694573993ac618382d74642101484a0bf2e9c80"
+  },
+  "authoring_provenance": {
+    "status": "established",
+    "path": ".release-harness/drafts/llm-gateway.record.json",
+    "digest": "6732ddf3dc8236b974e2aae5f81b546d89c2a466b6fb0a368d76620955bf981e"
+  },
+  "sources": [
+    {
+      "source_id": "primary",
+      "status": "established",
+      "repository_identity": "https://github.com/xibodev/llm-gateway.git",
+      "base_ref": "origin/main",
+      "base_commit": "e37e2ee204d4f664b1f4dddedf207cd24bcd364e",
+      "merge_base": "fe0bc10084eaf3412946e5a560e88acb118079ff",
+      "head_commit": "1a2f0ad3aa699f83f8796da2805c28a80ed88bac",
+      "head_tree": "38c363b4178479b8b64f3e7f158a27ae6969a50b",
+      "reviewed_source_digest": "5f1a9c4f264c7aa9e163e3cc7dd7aba78a9204ca0c43250c3911b4a4530e9c55",
+      "changed_paths": [
+        {
+          "status": "modified",
+          "path": "go/internal/iam/credential_record.go",
+          "old_blob": "f0d93655ee5fb6a4a1fa05aff57549a6675e7c36",
+          "new_blob": "bfd89362ae5275faf4c2bd1337ee5109a74a4bb6"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/iam/credential_resolve_harness_test.go",
+          "old_blob": "dde0118aba6892fd98c8342dbf8679ccea3e6223",
+          "new_blob": "c22fb7cb6e2dfca695ec608a5a2efda64dce7e33"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/iam/credential_store_records_test.go",
+          "old_blob": "30392916650b32bf414b9715b77dd4b3662780a1",
+          "new_blob": "9381240c906005453188fa3d0f0bc064f3a3ebde"
+        },
+        {
+          "status": "added",
+          "path": "go/internal/providers/anthropic_failure.go",
+          "old_blob": "0000000000000000000000000000000000000000",
+          "new_blob": "c3448e36cdf90568305d17cf037ece4834c1ff0b"
+        },
+        {
+          "status": "added",
+          "path": "go/internal/providers/anthropic_runtime_test.go",
+          "old_blob": "0000000000000000000000000000000000000000",
+          "new_blob": "011aa3affe0953eb1108f3120bf97676baa5c494"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/providers/anthropic_test.go",
+          "old_blob": "760af8e592e09ee1f637d931c98c7c6208533ca4",
+          "new_blob": "60f4ecc1abdbd33ccc53e81cd17e6f321c7c6906"
+        },
+        {
+          "status": "added",
+          "path": "go/internal/providers/anthropic_vertical.go",
+          "old_blob": "0000000000000000000000000000000000000000",
+          "new_blob": "3b3d17a4240c0d56882747953c2d2eff286ece55"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/providers/anthropic.go",
+          "old_blob": "f14cb525f3e1fae9014e9f1d32dc3087be03c4ed",
+          "new_blob": "22eaa1d9cd31495c1e2ced8c8098cebba0227c32"
+        },
+        {
+          "status": "added",
+          "path": "go/internal/providers/azure_failure.go",
+          "old_blob": "0000000000000000000000000000000000000000",
+          "new_blob": "cd712c108fd56d3841e37e4b067f955af6b023c6"
+        },
+        {
+          "status": "added",
+          "path": "go/internal/providers/azure_runtime_test.go",
+          "old_blob": "0000000000000000000000000000000000000000",
+          "new_blob": "81c2a6d49f955ae5868179f95701b0522911010e"
+        },
+        {
+          "status": "added",
+          "path": "go/internal/providers/azure_vertical.go",
+          "old_blob": "0000000000000000000000000000000000000000",
+          "new_blob": "59ce867fbfcc40e9e9872cfae9b8aff1a2f14017"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/providers/azureopenai_test.go",
+          "old_blob": "3e11b7e873c08c2cc767f8b5f6ae492735af5816",
+          "new_blob": "4418eddf02a94c2ab42a97889ae0ad3645d9a740"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/providers/azureopenai.go",
+          "old_blob": "7cbed9f66af6117f72c77f84a8c3f11277fb5544",
+          "new_blob": "7b60fdac523ed5963747a99a73fa7b24d4d92c94"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/providers/catalog_http_test.go",
+          "old_blob": "82087a203695b5d82ed27b4dae49176b45ceafc1",
+          "new_blob": "c972d2434baaa6c5393d86b0dff7cbb1618639f7"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/providers/catalog_payload_test.go",
+          "old_blob": "3a00018a24c6c09578a18dbb176090b99986c861",
+          "new_blob": "77dfddb508e19b8d026749a40800cb5e332bd1a2"
+        },
+        {
+          "status": "added",
+          "path": "go/internal/providers/connection_store.go",
+          "old_blob": "0000000000000000000000000000000000000000",
+          "new_blob": "f6586af07bade297bc99b96ef8969089d27be0e2"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/providers/core_runtime_test.go",
+          "old_blob": "c59e1098afc4f63c675cd4ab92c252ae49f024d9",
+          "new_blob": "74a39ea1164ad9d8b4e058c3c9fac61cc8aea6df"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/providers/core_runtime.go",
+          "old_blob": "b715d046b08a16d39f078c5292dda1d22a6cc558",
+          "new_blob": "2c6f2a4a6ef2ef5264eff2355d938e04add94b86"
+        },
+        {
+          "status": "added",
+          "path": "go/internal/providers/core_stream.go",
+          "old_blob": "0000000000000000000000000000000000000000",
+          "new_blob": "c0d18506feb07f63d7447f1c280afa221213316c"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/providers/error_redaction_test.go",
+          "old_blob": "6be4fc2a4c0403258988177ef91ee21cad2c5aa7",
+          "new_blob": "5ff6bb747590d9fa1441eefb4d853746cd2349d5"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/providers/factory.go",
+          "old_blob": "7ead520f569294b9651e6cf04b965f940c1c50fe",
+          "new_blob": "eb75a8c196bdcbcd4b2d78679fb2ae118bf1bb0c"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/providers/zen_vertical.go",
+          "old_blob": "9e2698e005e6e4222daa84c0c7ea790a700fca0c",
+          "new_blob": "dc9d91de668796f8fc063bc2340552cf14fedee4"
+        }
+      ]
+    }
+  ],
+  "facts": [
+    {
+      "id": "through-runtime",
+      "claim": "Anthropic Messages and Azure OpenAI Chat and streams go through the llmgw-core Runtime with core's Anthropic and Azure OpenAI verticals, registered in the per-type table. Anthropic Chat keeps the gateway's llm-translate conversion and then invokes the vertical on Messages, re-encoding its events into the Chat chunks the gateway produced before; token counts go through core.CountTokens. Azure Chat stays labelled translated. The gateway's Anthropic Messages, streamed-completion, count and stream transports and Azure's Chat and stream transports are removed; Zen's store is generalized as connectionStore with Zen unchanged.",
+      "status": "observed",
+      "evidence": {
+        "source": "go/internal/providers/anthropic_vertical.go, azure_vertical.go, anthropic.go, azureopenai.go; go/internal/api/testdata unchanged"
+      }
+    },
+    {
+      "id": "credentials",
+      "claim": "Credentials resolve in the same order as before (caller connection, system connection, configured key), keyless Anthropic still allowed; setup-token connections load as core.TokenTypeAnthropicSetupToken and a configured key with the setup-token prefix is still sent as one; Azure accepts API keys only.",
+      "status": "observed",
+      "evidence": {
+        "source": "go/internal/iam/credential_record.go; go/internal/providers anthropic and azure tests"
+      }
+    },
+    {
+      "id": "deviations",
+      "claim": "Edge-case differences: an Azure request with no key is refused before sending (500 misconfigured instead of Azure's 401, and a Messages chain may move past it); a trailing slash in an Anthropic base URL no longer produces a double slash and an invalid URL is refused instead of panicking; an Anthropic Chat answer followed by stray bytes is accepted; a token count above int64 is invalid; credentials resolve per request; Azure refuses redirects off the resource; closing an Anthropic Chat stream now ends its upstream read.",
+      "status": "observed",
+      "evidence": {
+        "source": "go/internal/providers anthropic and azure tests"
+      }
+    },
+    {
+      "id": "suite",
+      "claim": "The full Go suite passes with HTTP_PROXY and HTTPS_PROXY unreachable with unchanged characterization goldens and coupling budgets; gofmt, vet, govulncheck (0 reachable), check-docs and git diff --check pass.",
+      "status": "observed",
+      "evidence": {
+        "source": "local gate run on the reviewed head"
+      }
+    }
+  ],
+  "impact": {
+    "assertions": [
+      {
+        "id": "A1",
+        "impact": "unchanged",
+        "supported_by": [
+          "through-runtime",
+          "deviations",
+          "suite"
+        ]
+      },
+      {
+        "id": "A2",
+        "impact": "unchanged",
+        "supported_by": [
+          "through-runtime",
+          "deviations",
+          "suite"
+        ]
+      },
+      {
+        "id": "A3",
+        "impact": "unchanged",
+        "supported_by": [
+          "through-runtime",
+          "deviations",
+          "suite"
+        ]
+      },
+      {
+        "id": "A4",
+        "impact": "unchanged",
+        "supported_by": [
+          "through-runtime",
+          "deviations",
+          "suite"
+        ]
+      }
+    ],
+    "requires": [],
+    "possible_binding_changes": []
+  },
+  "questions": [],
+  "conclusion": {
+    "action": "reuse_contract",
+    "summary": "Anthropic and Azure OpenAI move onto the llmgw-core Runtime and verticals with unchanged upstream bytes; CLI, health and models behavior is unchanged."
+  },
+  "proposed": {
+    "by": "anthropic-azure-core",
+    "at": "2026-09-25T12:16:05.233Z"
+  },
+  "digest": "1bf83f022352244267f1b04af1f196dbe2091a8fc24b8ffa230a8100bcb87a73"
+}

@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+  <url><loc>https://xibodev.github.io/llm-gateway/</loc></url>
+  <url><loc>https://xibodev.github.io/llm-gateway/docs.html</loc></url>
+  <url><loc>https://xibodev.github.io/llm-gateway/quickstart.html</loc></url>
+  <url><loc>https://xibodev.github.io/llm-gateway/concepts.html</loc></url>
+  <url><loc>https://xibodev.github.io/llm-gateway/configuration.html</loc></url>
+  <url><loc>https://xibodev.github.io/llm-gateway/clients.html</loc></url>
+  <url><loc>https://xibodev.github.io/llm-gateway/providers.html</loc></url>
+  <url><loc>https://xibodev.github.io/llm-gateway/api.html</loc></url>
+  <url><loc>https://xibodev.github.io/llm-gateway/governance.html</loc></url>
+  <url><loc>https://xibodev.github.io/llm-gateway/operations.html</loc></url>
+  <url><loc>https://xibodev.github.io/llm-gateway/security.html</loc></url>
+  <url><loc>https://xibodev.github.io/llm-gateway/upgrading.html</loc></url>
+  <url><loc>https://xibodev.github.io/llm-gateway/limitations.html</loc></url>
+</urlset>

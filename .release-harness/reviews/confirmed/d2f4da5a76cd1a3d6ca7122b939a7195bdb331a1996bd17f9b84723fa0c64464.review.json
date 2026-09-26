@@ -1,0 +1,113 @@
+{
+  "schema_version": "1.0.0",
+  "mode": "change",
+  "contract": {
+    "digest": "31b393ab3e80162226619c441694573993ac618382d74642101484a0bf2e9c80"
+  },
+  "authoring_provenance": {
+    "status": "established",
+    "path": ".release-harness/drafts/llm-gateway.record.json",
+    "digest": "6732ddf3dc8236b974e2aae5f81b546d89c2a466b6fb0a368d76620955bf981e"
+  },
+  "sources": [
+    {
+      "source_id": "primary",
+      "status": "established",
+      "repository_identity": "https://github.com/xibodev/llm-gateway.git",
+      "base_ref": "origin/main",
+      "base_commit": "0dc3cb585ebfff432aefd3d2ec642dd1a3309dcc",
+      "merge_base": "e8df5ccac22f9e86d73194cf484e76335253642e",
+      "head_commit": "1c6672c10e52c1f5d0881a65c8824af6b437c6ff",
+      "head_tree": "237ec1cb382402ec460b377186b5f5b8173757d7",
+      "reviewed_source_digest": "645e13c4ef177832749060cf2b6b540ca7f27a952b35a67b59ff32c9188ef4f3",
+      "changed_paths": [
+        {
+          "status": "modified",
+          "path": ".github/workflows/ci.yml",
+          "old_blob": "18844e3828760668e6cc25478c0bd9086703346a",
+          "new_blob": "4f5b961cba57950564f4e98449a28e91b6c17e6f"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/api/oauth_api_test.go",
+          "old_blob": "4009ae671949a7a7220eec7b263cb125f030c87c",
+          "new_blob": "f2e50bc4bc510330749189f28c6439fc3b3fe399"
+        }
+      ]
+    }
+  ],
+  "facts": [
+    {
+      "id": "oauth-test-hermetic",
+      "claim": "TestOAuthStartSurfacesProviderPersistenceFailure serves the Codex device start from a local server and asserts it happened; it previously called the real device endpoint, which now rejects the fixture client ID.",
+      "status": "observed",
+      "evidence": {
+        "source": "go/internal/api/oauth_api_test.go; go/internal/api/oauth.go startOAuthFlow starts the device flow before ensureOAuthProviderConfig"
+      }
+    },
+    {
+      "id": "suite-hermetic",
+      "claim": "The full Go test suite passes with HTTP_PROXY and HTTPS_PROXY set to an unreachable address, and CI now runs the tests that way.",
+      "status": "observed",
+      "evidence": {
+        "source": ".github/workflows/ci.yml; local run with the workspace disabled"
+      }
+    },
+    {
+      "id": "no-production-change",
+      "claim": "The change touches only a test and the CI test step; no production code, build input or release configuration changes.",
+      "status": "observed",
+      "evidence": {
+        "source": "git diff between the merge base and HEAD"
+      }
+    }
+  ],
+  "impact": {
+    "assertions": [
+      {
+        "id": "A1",
+        "impact": "unchanged",
+        "supported_by": [
+          "no-production-change",
+          "suite-hermetic"
+        ]
+      },
+      {
+        "id": "A2",
+        "impact": "unchanged",
+        "supported_by": [
+          "no-production-change",
+          "suite-hermetic"
+        ]
+      },
+      {
+        "id": "A3",
+        "impact": "unchanged",
+        "supported_by": [
+          "no-production-change",
+          "suite-hermetic"
+        ]
+      },
+      {
+        "id": "A4",
+        "impact": "unchanged",
+        "supported_by": [
+          "no-production-change",
+          "suite-hermetic"
+        ]
+      }
+    ],
+    "requires": [],
+    "possible_binding_changes": []
+  },
+  "questions": [],
+  "conclusion": {
+    "action": "reuse_contract",
+    "summary": "A test-only hermeticity fix and a CI guard against network-dependent tests; no production behavior changes."
+  },
+  "proposed": {
+    "by": "hermetic-tests",
+    "at": "2026-09-24T21:14:06.82Z"
+  },
+  "digest": "d2f4da5a76cd1a3d6ca7122b939a7195bdb331a1996bd17f9b84723fa0c64464"
+}

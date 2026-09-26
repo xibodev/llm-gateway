@@ -1,0 +1,636 @@
+package router
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"net/http"
+	"net/http/httptest"
+	"strings"
+	"testing"
+	"time"
+
+	"llmgw/internal/config"
+	"llmgw/internal/iam"
+	"llmgw/internal/providers"
+
+	core "github.com/xibodev/llmgw-core"
+)
+
+// anonymous is the caller of gateway-internal work, which resolves only
+// shared credentials.
+var anonymous = core.Caller{Kind: core.CallerAnonymous}
+
+// useStateDir gives the test a state directory and an IAM of its own, as the
+// gateway initializes IAM before it serves: a request to an OpenAI-compatible
+// fixture resolves its key through IAM's credential store. IAM's handle is
+// closed when the test ends, so the directory can be removed.
+func useStateDir(t *testing.T) {
+	t.Helper()
+	t.Setenv("LLMGW_STATE_DIR", t.TempDir())
+	iam.ResetForTests()
+	t.Cleanup(iam.ResetForTests)
+	if _, err := iam.Initialize(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func setupEcho(t *testing.T) {
+	useStateDir(t)
+	config.Update(func(s *config.Settings) {
+		s.Savings.Enabled = false
+		s.Providers = map[string]*config.ProviderConfig{
+			"echo":  {Type: "echo"},
+			"echo2": {Type: "echo"},
+			"bad":   {Type: "openai_compatible", BaseURL: "http://127.0.0.1:1/v1"},
+		}
+		s.Endpoints = map[string]*config.EndpointConfig{
+			"smart":    {Failover: []config.EndpointMember{{Provider: "echo", Model: "echo-default"}}},
+			"failover": {Failover: []config.EndpointMember{{Provider: "bad", Model: "x"}, {Provider: "echo", Model: "echo-default"}}},
+			"empty":    {Failover: nil},
+		}
+	})
+	providers.ResetProviders()
+	ResetTelemetryState()
+	ResetSavingsState()
+	t.Cleanup(func() {
+		ResetTelemetryState()
+		ResetSavingsState()
+	})
+}
+
+func TestResolveTargets(t *testing.T) {
+	setupEcho(t)
+
+	// category
+	resolution, err := ResolveForPrincipal(context.Background(), "SMART", anonymous)
+	if err != nil || resolution.Category != "smart" || len(resolution.Targets) != 1 || resolution.Targets[0].Provider != "echo" {
+		t.Fatalf("category resolve wrong: %+v %v", resolution, err)
+	}
+	targets := resolution.Targets
+	// provider/model
+	targets, err = ResolveTargets("echo/echo-strong")
+	if err != nil || len(targets) != 1 || targets[0].Model != "echo-strong" {
+		t.Fatalf("provider/model resolve wrong: %v %v", targets, err)
+	}
+	// unknown -> 404
+	if _, err := ResolveTargets("does-not-exist"); err == nil {
+		t.Error("unknown model should error")
+	} else if _, ok := err.(*ModelNotFoundError); !ok {
+		t.Errorf("want ModelNotFoundError, got %T", err)
+	}
+	// empty category -> 404
+	if _, err := ResolveTargets("empty"); err == nil {
+		t.Error("empty category should error")
+	}
+}
+
+func TestResolveCategoryRejectsAmbiguousCaseVariants(t *testing.T) {
+	setupEcho(t)
+	config.Update(func(s *config.Settings) {
+		s.Endpoints["SMART"] = &config.EndpointConfig{
+			Failover: []config.EndpointMember{{Provider: "echo2", Model: "echo-deep"}},
+		}
+	})
+
+	lower, err := ResolveForPrincipal(context.Background(), "smart", anonymous)
+	if err != nil || lower.Category != "smart" || lower.Targets[0].Provider != "echo" {
+		t.Fatalf("exact lower-case route resolve wrong: %+v %v", lower, err)
+	}
+	upper, err := ResolveForPrincipal(context.Background(), "SMART", anonymous)
+	if err != nil || upper.Category != "SMART" || upper.Targets[0].Provider != "echo2" {
+		t.Fatalf("exact upper-case route resolve wrong: %+v %v", upper, err)
+	}
+	if _, err := ResolveForPrincipal(context.Background(), "SmArT", anonymous); err == nil {
+		t.Fatal("ambiguous case-insensitive route lookup should fail")
+	} else if _, ok := err.(*AmbiguousCategoryError); !ok {
+		t.Fatalf("want AmbiguousCategoryError, got %T: %v", err, err)
+	}
+}
+
+// The type name is internal; the message is not. Endpoint lookup hands this
+// error to the API layer, so its prose must use the product's current
+// vocabulary — the same word ModelNotFoundError and owned_by: "endpoint" use —
+// rather than the pre-rename "category".
+func TestAmbiguousEndpointErrorSpeaksOfEndpoints(t *testing.T) {
+	message := (&AmbiguousCategoryError{
+		Requested: "SmArT", Matches: []string{"SMART", "smart"},
+	}).Error()
+	if strings.Contains(strings.ToLower(message), "categor") {
+		t.Fatalf("message %q still uses the pre-rename vocabulary", message)
+	}
+	if !strings.Contains(message, "Endpoint") || !strings.Contains(message, "endpoints") {
+		t.Fatalf("message %q does not name the endpoint it is about", message)
+	}
+	for _, match := range []string{"SMART", "smart"} {
+		if !strings.Contains(message, match) {
+			t.Fatalf("message %q omits colliding name %q", message, match)
+		}
+	}
+}
+
+func TestNativeKey(t *testing.T) {
+	// picker's dashed native form and the catalog's dotted form must match
+	if nativeKey("claude-opus-4.8") != nativeKey("claude-opus-4-8") {
+		t.Errorf("dotted vs dashed should match: %q vs %q", nativeKey("claude-opus-4.8"), nativeKey("claude-opus-4-8"))
+	}
+	if nativeKey("Claude-Sonnet-4.5") != nativeKey("claude-sonnet-4-5") {
+		t.Error("case + dot/dash should match")
+	}
+	// but a retired opus-4 must NOT collide with opus-4.8
+	if nativeKey("claude-opus-4.8") == nativeKey("claude-opus-4") {
+		t.Error("opus-4.8 must not equal retired opus-4")
+	}
+}
+
+func TestResolveNativeAlias(t *testing.T) {
+	setupEcho(t)
+	// Duplicate aliases do not silently select whichever provider sorts first.
+	if _, err := ResolveTargets("echo-strong"); err == nil {
+		t.Fatal("duplicate bare alias should be ambiguous")
+	} else if _, ok := err.(*ModelNotFoundError); !ok {
+		t.Fatalf("want safe ModelNotFoundError, got %T: %v", err, err)
+	}
+	governed := WithGovernance(context.Background(), Governance{AllowedProviders: []string{"echo2"}})
+	targets, err := ResolveTargetsForPrincipal(governed, "echo-strong[1m]", anonymous)
+	if err != nil || len(targets) != 1 || targets[0] != (Target{Provider: "echo2", Model: "echo-strong"}) {
+		t.Fatalf("policy-filtered tagged alias resolve wrong: %v %v", targets, err)
+	}
+	if targets, err := ResolveTargetsForPrincipal(governed, "ECHO-DEEP", anonymous); err != nil || len(targets) != 1 || targets[0].Model != "echo-deep" {
+		t.Fatalf("case-insensitive resolve wrong: %v %v", targets, err)
+	}
+	config.Update(func(s *config.Settings) { s.AnthropicDiscoveryAllModels = true })
+	if targets, err := ResolveTargetsForPrincipal(governed, "claude-echo-strong", anonymous); err != nil || len(targets) != 1 || targets[0].Model != "echo-strong" {
+		t.Fatalf("prefix-strip resolve wrong: %v %v", targets, err)
+	}
+	// Exact provider/model remains authoritative even when its bare alias is ambiguous.
+	if targets, err := ResolveTargets("echo/echo-strong"); err != nil || targets[0].Provider != "echo" {
+		t.Fatalf("exact provider/model changed: %v %v", targets, err)
+	}
+	// genuinely unknown still 404s
+	if _, err := ResolveTargets("totally-unknown-9"); err == nil {
+		t.Error("unknown should still 404")
+	}
+}
+
+func TestNativeAliasCanonicalCollisionAndEndpointPrecedence(t *testing.T) {
+	setupEcho(t)
+	config.Update(func(s *config.Settings) {
+		s.Providers = map[string]*config.ProviderConfig{
+			"echo": {Type: "echo"}, "other": {Type: "echo"},
+		}
+		s.Endpoints["ECHO-STRONG"] = &config.EndpointConfig{
+			Failover: []config.EndpointMember{{Provider: "other", Model: "echo-deep"}},
+		}
+	})
+	providers.ResetProviders()
+	resolution, err := ResolveForPrincipal(context.Background(), "ECHO-STRONG", anonymous)
+	if err != nil || resolution.Category != "ECHO-STRONG" || resolution.Targets[0].Model != "echo-deep" {
+		t.Fatalf("exact endpoint lost precedence: %+v %v", resolution, err)
+	}
+	if _, err := ResolveTargets("echo.strong"); err == nil {
+		t.Fatal("canonical endpoint collision should not resolve as an alias")
+	}
+}
+
+func TestExecuteCompleteEcho(t *testing.T) {
+	setupEcho(t)
+	targets, _ := ResolveTargets("smart")
+	resp, served, err := ExecuteComplete(targets, []providers.Message{{"role": "user", "content": "hi"}}, "smart", anonymous, providers.Kwargs{})
+	if err != nil {
+		t.Fatalf("execute failed: %v", err)
+	}
+	if served.Provider != "echo" {
+		t.Errorf("served wrong: %v", served)
+	}
+	choices := resp["choices"].([]any)
+	msg := choices[0].(map[string]any)["message"].(map[string]any)
+	if msg["content"] != "echo:hi" {
+		t.Errorf("content wrong: %v", msg["content"])
+	}
+}
+
+func TestExecuteCompleteFailover(t *testing.T) {
+	setupEcho(t)
+	targets, _ := ResolveTargets("failover")
+	attributed := WithGovernance(context.Background(), Governance{Project: "p", Key: "k"})
+	resp, served, err := ExecuteCompleteContext(attributed, targets, []providers.Message{{"role": "user", "content": "hi"}}, "failover", anonymous, providers.Kwargs{})
+	if err != nil {
+		t.Fatalf("failover should succeed via echo: %v", err)
+	}
+	if served.Provider != "echo" {
+		t.Errorf("should have failed over to echo, served %v", served)
+	}
+	_ = resp
+	// telemetry should have recorded the failover chain
+	stats := TelemetryStats()
+	if stats["events"].(int64) != 1 {
+		t.Errorf("want 1 telemetry event, got %v", stats["events"])
+	}
+	recent := RecentTelemetry(10)
+	if len(recent) != 1 {
+		t.Fatalf("want 1 recent event, got %d", len(recent))
+	}
+	attempts := recent[0]["attempts"].([]map[string]any)
+	if len(attempts) != 2 {
+		t.Errorf("want 2 attempts, got %d", len(attempts))
+	}
+	if recent[0]["served"] != "echo/echo-default" {
+		t.Errorf("served wrong in telemetry: %v", recent[0]["served"])
+	}
+}
+
+func TestGenericFailoverUsesInvocationEligibility(t *testing.T) {
+	for _, status := range []int{http.StatusUnauthorized, http.StatusForbidden, http.StatusTooManyRequests, http.StatusInternalServerError} {
+		t.Run(http.StatusText(status), func(t *testing.T) {
+			useStateDir(t)
+			ResetTelemetryState()
+			t.Cleanup(ResetTelemetryState)
+			requests := 0
+			upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				requests++
+				w.WriteHeader(status)
+				_, _ = w.Write([]byte(`{"error":{"message":"fixture"}}`))
+			}))
+			defer upstream.Close()
+			config.Update(func(settings *config.Settings) {
+				settings.Providers = map[string]*config.ProviderConfig{
+					"upstream": {Type: "openai_compatible", BaseURL: upstream.URL},
+					"echo":     {Type: "echo"},
+				}
+				settings.Policies.Defaults = config.ProviderPolicy{RetryMaxAttempts: 1}
+			})
+			providers.ResetProviders()
+			t.Cleanup(providers.ResetProviders)
+			_, served, err := ExecuteComplete([]Target{{Provider: "upstream", Model: "model"}, {Provider: "echo", Model: "echo-default"}}, []providers.Message{{"role": "user", "content": "hi"}}, "route", anonymous, nil)
+			eligible := status == http.StatusTooManyRequests || status == http.StatusInternalServerError
+			if eligible && (err != nil || served == nil || served.Provider != "echo") {
+				t.Fatalf("eligible status did not fail over: served=%+v err=%v", served, err)
+			}
+			if !eligible && (err == nil || served != nil) {
+				t.Fatalf("definitive status replayed: served=%+v err=%v", served, err)
+			}
+			if requests != 1 {
+				t.Fatalf("requests=%d want=1", requests)
+			}
+		})
+	}
+}
+
+func TestFallbackTimeoutBoundsWholeChain(t *testing.T) {
+	setupEcho(t)
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		time.Sleep(200 * time.Millisecond)
+		w.WriteHeader(http.StatusServiceUnavailable)
+	}))
+	defer upstream.Close()
+	config.Update(func(settings *config.Settings) {
+		settings.Providers["slow"] = &config.ProviderConfig{Type: "openai_compatible", BaseURL: upstream.URL}
+		settings.Policies.Defaults = config.ProviderPolicy{RetryMaxAttempts: 1}
+	})
+	providers.ResetProviders()
+	started := time.Now()
+	ctx := WithFallbackOptions(context.Background(), 20*time.Millisecond, "")
+	_, _, err := ExecuteCompleteContext(ctx, []Target{{Provider: "slow", Model: "model"}, {Provider: "echo", Model: "echo-default"}}, nil, "route", anonymous, nil)
+	if err == nil || time.Since(started) > time.Second {
+		t.Fatalf("timeout err=%v elapsed=%v", err, time.Since(started))
+	}
+}
+
+func TestCompatibilityFilterExcludesOnlyKnownUnsupported(t *testing.T) {
+	setupEcho(t)
+	unsupported := providers.AdaptModelCapabilities(map[string]any{"chat": true, "tools": false}, []string{"/v1/chat/completions"}, time.Now(), time.Time{})
+	request := CompatibilityRequest{Surface: core.ModelSurfaceChatCompletions, Tools: true}
+	if unsupported.Tools != core.SupportUnsupported || modelCompatible(unsupported, request) {
+		t.Fatal("explicitly unsupported tools were accepted")
+	}
+	filtered, err := FilterCompatibleTargets([]Target{{Provider: "echo", Model: "echo-default"}}, anonymous, request)
+	if err != nil || len(filtered) != 1 || filtered[0].Provider != "echo" {
+		t.Fatalf("unknown target should remain eligible: targets=%+v err=%v", filtered, err)
+	}
+}
+
+func TestCompatibilityFilterAllowsZenChatFacadeToResponsesModel(t *testing.T) {
+	setupEcho(t)
+	config.Update(func(settings *config.Settings) {
+		settings.Providers["zen"] = &config.ProviderConfig{Type: "openai_compatible", BaseURL: "https://opencode.ai/zen/v1"}
+	})
+	capabilities := providers.AdaptModelCapabilities(map[string]any{"chat": false}, []string{"/responses"}, time.Now(), time.Time{})
+	capabilities.Operations.Chat = core.SupportUnsupported
+	capabilities.Surfaces.ChatCompletions = core.SupportUnsupported
+	request := CompatibilityRequest{Surface: core.ModelSurfaceChatCompletions}
+	if modelCompatible(capabilities, request) || !chatToResponsesCompatible(Target{Provider: "zen", Model: "muse-spark-fixture"}, capabilities, request) {
+		t.Fatal("Responses-native Zen adapter was rejected")
+	}
+}
+
+func TestCompatibilityFilterAllowsCodexChatFacadeOnly(t *testing.T) {
+	setupEcho(t)
+	config.Update(func(settings *config.Settings) {
+		settings.Providers["codex"] = &config.ProviderConfig{Type: "openai_compatible", RegistryID: "openai_codex"}
+		settings.Providers["plain"] = &config.ProviderConfig{Type: "openai_compatible", BaseURL: "https://api.example.test/v1"}
+	})
+	capabilities := providers.AdaptModelCapabilities(nil, []string{"/responses"}, time.Now(), time.Time{})
+	capabilities.Surfaces.ChatCompletions = core.SupportUnsupported
+	request := CompatibilityRequest{Surface: core.ModelSurfaceChatCompletions, Streaming: true}
+	if !chatToResponsesCompatible(Target{Provider: "codex", Model: "gpt-fixture"}, capabilities, request) {
+		t.Fatal("Codex adapts Chat to native Responses but Chat was rejected")
+	}
+	if chatToResponsesCompatible(Target{Provider: "plain", Model: "gpt-fixture"}, capabilities, request) {
+		t.Fatal("a provider without a Chat facade accepted Chat for a Responses-only model")
+	}
+}
+
+func TestAffinitySelectsDeterministicStart(t *testing.T) {
+	setupEcho(t)
+	targets := []Target{{Provider: "echo", Model: "echo-small"}, {Provider: "echo", Model: "echo-strong"}, {Provider: "echo", Model: "echo-deep"}}
+	var selected Target
+	for range 2 {
+		ctx := WithFallbackOptions(context.Background(), time.Second, "agent-loop")
+		_, served, err := ExecuteCompleteContext(ctx, targets, nil, "route", anonymous, nil)
+		if err != nil || served == nil {
+			t.Fatal(err)
+		}
+		if selected != (Target{}) && selected != *served {
+			t.Fatalf("affinity moved from %+v to %+v", selected, *served)
+		}
+		selected = *served
+	}
+}
+
+func TestFailoverErrorsAndTelemetryAreSanitized(t *testing.T) {
+	useStateDir(t)
+	secret := "llmgw_" + strings.Repeat("A", 32)
+	email := "routing-owner@example.test"
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusServiceUnavailable)
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"error": map[string]any{"message": "failed for " + email + " using " + secret},
+		})
+	}))
+	defer upstream.Close()
+
+	config.Update(func(s *config.Settings) {
+		s.Savings.Enabled = false
+		s.Providers = map[string]*config.ProviderConfig{
+			"bad":  {Type: "openai_compatible", BaseURL: upstream.URL},
+			"echo": {Type: "echo"},
+		}
+		s.Policies.Defaults = config.ProviderPolicy{RetryMaxAttempts: 1}
+		s.Policies.Overrides = map[string]config.ProviderPolicy{}
+	})
+	providers.ResetProviders()
+	ResetTelemetryState()
+	ResetSavingsState()
+	t.Cleanup(func() {
+		providers.ResetProviders()
+		ResetTelemetryState()
+		ResetSavingsState()
+	})
+
+	messages := []providers.Message{{"role": "user", "content": "hi"}}
+	_, served, err := ExecuteComplete(
+		[]Target{{Provider: "bad", Model: "bad-model"}, {Provider: "echo", Model: "echo-default"}},
+		messages, "fallback", anonymous, providers.Kwargs{},
+	)
+	if err != nil || served == nil || served.Provider != "echo" {
+		t.Fatalf("fallback result served=%+v err=%v", served, err)
+	}
+
+	_, _, err = ExecuteComplete(
+		[]Target{{Provider: "bad", Model: "bad-model"}},
+		messages, "all-targets", anonymous, providers.Kwargs{},
+	)
+	var allTargets *AllTargetsFailed
+	if !errors.As(err, &allTargets) {
+		t.Fatalf("all-target failure type = %T, want *AllTargetsFailed", err)
+	}
+	if allTargets.Status != http.StatusServiceUnavailable {
+		t.Fatalf("all-target status = %d", allTargets.Status)
+	}
+	if message := err.Error(); strings.Contains(message, secret) || strings.Contains(message, email) {
+		t.Fatalf("all-target error exposed diagnostics: %q", message)
+	}
+	if message := (&AllTargetsFailed{Msg: "raw " + email + " " + secret}).Error(); strings.Contains(message, secret) || strings.Contains(message, email) {
+		t.Fatalf("direct all-target error exposed diagnostics: %q", message)
+	}
+
+	Current().recordTelemetryEvent("sink-defense", []eventAttempt{{
+		Provider: "raw", Model: "model", Error: "raw " + email + " " + secret,
+	}}, "", "", "", "")
+
+	db, err := Current().telemetry.conn()
+	if err != nil {
+		t.Fatal(err)
+	}
+	rows, err := db.Query(`SELECT attempts_json FROM failover_events ORDER BY id`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rawRows := 0
+	for rows.Next() {
+		var raw string
+		if err := rows.Scan(&raw); err != nil {
+			rows.Close()
+			t.Fatal(err)
+		}
+		rawRows++
+		if strings.Contains(raw, secret) || strings.Contains(raw, email) {
+			rows.Close()
+			t.Fatalf("raw telemetry exposed diagnostics: %s", raw)
+		}
+		if !strings.Contains(raw, "[redacted]") {
+			rows.Close()
+			t.Fatalf("raw telemetry has no redaction marker: %s", raw)
+		}
+	}
+	if err := rows.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if rawRows != 3 {
+		t.Fatalf("raw telemetry rows = %d, want fallback, all-target, and sink-defense rows", rawRows)
+	}
+
+	legacy, _ := json.Marshal([]map[string]any{{
+		"provider": "legacy", "model": "model", "ok": false,
+		"error": "legacy " + email + " used " + secret,
+	}})
+	if _, err := db.Exec(
+		`INSERT INTO failover_events (ts, requested, served_provider, served_model, throttled, attempts_json, project, key_name)
+		 VALUES (?, ?, NULL, NULL, 0, ?, NULL, NULL)`,
+		1, "legacy", string(legacy),
+	); err != nil {
+		t.Fatal(err)
+	}
+	recent := RecentTelemetry(1)
+	if len(recent) != 1 {
+		t.Fatalf("recent telemetry rows = %d", len(recent))
+	}
+	attempts := recent[0]["attempts"].([]map[string]any)
+	message, _ := attempts[0]["error"].(string)
+	if strings.Contains(message, secret) || strings.Contains(message, email) || !strings.Contains(message, "[redacted]") {
+		t.Fatalf("historical telemetry was not sanitized on read: %q", message)
+	}
+}
+
+func TestAttemptTruncationSanitizesBeforeLimiting(t *testing.T) {
+	secret := "llmgw_" + strings.Repeat("B", 32)
+	got := truncate(strings.Repeat("safe ", 35) + secret)
+	if len(got) > 200 {
+		t.Fatalf("attempt text length = %d", len(got))
+	}
+	if strings.Contains(got, secret[:24]) || !strings.Contains(got, "[redacted]") {
+		t.Fatalf("attempt text was truncated before sanitization: %q", got)
+	}
+}
+
+func TestExecuteStreamEcho(t *testing.T) {
+	setupEcho(t)
+	targets, _ := ResolveTargets("smart")
+	it, served, err := ExecuteStream(targets, []providers.Message{{"role": "user", "content": "hi"}}, "smart", anonymous, providers.Kwargs{})
+	if err != nil {
+		t.Fatalf("stream failed: %v", err)
+	}
+
+	if served.Provider != "echo" {
+		t.Errorf("served wrong: %v", served)
+	}
+	count := 0
+	for {
+		_, more := it.Next()
+		if !more {
+			break
+		}
+		count++
+	}
+	if count == 0 {
+		t.Error("expected stream chunks")
+	}
+}
+
+func TestResponsesFallbackRejectsUnsupportedToolConstraints(t *testing.T) {
+	setupEcho(t)
+	config.Update(func(settings *config.Settings) {
+		settings.Providers["anthropic"] = &config.ProviderConfig{Type: "anthropic"}
+	})
+	target := Target{Provider: "anthropic", Model: "claude"}
+	messages := []providers.Message{{"role": "user", "content": "hi"}}
+	for name, kw := range map[string]providers.Kwargs{
+		"tool choice": {
+			"tools": []any{map[string]any{
+				"type": "function", "function": map[string]any{
+					"name": "lookup", "parameters": map[string]any{"type": "object"},
+				},
+			}},
+			"tool_choice": "required",
+		},
+		"strict tool": {
+			"tools": []any{map[string]any{
+				"type": "function", "function": map[string]any{
+					"name": "lookup", "strict": true,
+					"parameters": map[string]any{"type": "object"},
+				},
+			}},
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			if err := Current().responsesFallbackCompatibility(target, anonymous, messages, kw); err == nil {
+				t.Fatal("unsupported tool constraint was accepted")
+			}
+		})
+	}
+}
+
+func TestTargetCompatibilityPreservesClientControls(t *testing.T) {
+	setupEcho(t)
+	config.Update(func(settings *config.Settings) {
+		settings.Providers["chat"] = &config.ProviderConfig{Type: "openai_compatible"}
+		settings.Providers["anthropic"] = &config.ProviderConfig{Type: "anthropic"}
+		settings.Providers["copilot-chat"] = &config.ProviderConfig{Type: "github_copilot"}
+		settings.Providers["copilot-adapt"] = &config.ProviderConfig{Type: "github_copilot", ForceApiSupport: true}
+	})
+	chat := Target{Provider: "chat", Model: "model"}
+	unsupported := Target{Provider: "echo", Model: "echo-default"}
+
+	if err := Current().anthropicControlsCompatibility(chat, anonymous, providers.Kwargs{
+		"metadata": map[string]any{"user_id": "fixture"}, "reasoning_effort": "high",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := Current().anthropicControlsCompatibility(Target{Provider: "anthropic", Model: "model"}, anonymous, providers.Kwargs{
+		"thinking": map[string]any{"type": "disabled"},
+	}); err != nil {
+		t.Fatalf("native Anthropic should preserve disabled thinking: %v", err)
+	}
+	if err := Current().anthropicControlsCompatibility(Target{Provider: "copilot-chat", Model: "model"}, anonymous, providers.Kwargs{
+		"thinking": map[string]any{"type": "disabled"},
+	}); err != nil {
+		t.Fatalf("Copilot Chat should preserve disabled thinking: %v", err)
+	}
+	if err := Current().anthropicControlsCompatibility(Target{Provider: "copilot-adapt", Model: "model"}, anonymous, providers.Kwargs{
+		"thinking": map[string]any{"type": "disabled"},
+	}); err == nil {
+		t.Fatal("forced Copilot adaptation accepted thinking without a verified Chat surface")
+	}
+	for name, kw := range map[string]providers.Kwargs{
+		"metadata": {"metadata": map[string]any{"user_id": "fixture"}},
+		"effort":   {"reasoning_effort": "high"},
+		"thinking": {"thinking": map[string]any{"type": "disabled"}},
+	} {
+		t.Run(name, func(t *testing.T) {
+			if err := Current().anthropicControlsCompatibility(unsupported, anonymous, kw); err == nil {
+				t.Fatal("unsupported Anthropic control was accepted")
+			}
+		})
+	}
+	if err := Current().responsesFallbackCompatibility(chat, anonymous, nil, providers.Kwargs{
+		"parallel_tool_calls": false,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := Current().responsesFallbackCompatibility(Target{Provider: "anthropic", Model: "model"}, anonymous, nil, providers.Kwargs{
+		"parallel_tool_calls": false,
+	}); err == nil {
+		t.Fatal("Anthropic fallback silently accepted parallel_tool_calls")
+	}
+}
+
+func TestPrivateRouteRequiresCallerScopedCatalogMembership(t *testing.T) {
+	setupEcho(t)
+	iam.ResetForTests()
+	t.Cleanup(iam.ResetForTests)
+	config.Update(func(settings *config.Settings) {
+		settings.Providers["private"] = &config.ProviderConfig{Type: "openai_compatible", RegistryID: "openai_codex"}
+		settings.Endpoints["private-route"] = &config.EndpointConfig{Failover: []config.EndpointMember{{Provider: "private", Model: "model"}}}
+	})
+	providers.ResetProviders()
+	owner := core.Caller{ID: "owner", Kind: core.CallerHuman}
+	if _, err := ResolveForPrincipal(context.Background(), "private-route", owner); err == nil {
+		t.Fatal("private route resolved without caller-scoped catalog membership")
+	}
+}
+
+func TestRecordUsageWritesControlPlaneLedger(t *testing.T) {
+	t.Setenv("LLMGW_STATE_DIR", t.TempDir())
+	iam.ResetForTests()
+	ResetSavingsState()
+	t.Cleanup(func() {
+		iam.ResetForTests()
+		ResetSavingsState()
+	})
+	config.Update(func(s *config.Settings) {
+		s.Savings.Enabled = false
+	})
+	RecordUsage(UsageRecord{
+		Endpoint: "openai.chat", RequestedModel: "smart", RoutedModel: "echo-default",
+		Provider: "echo", InputTokens: 3, OutputTokens: 2, LatencyMS: 5,
+	})
+	stats, err := iam.UsageStats(0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := stats["totals"].(iam.UsageTotals).Requests; got != 1 {
+		t.Fatalf("control-plane requests=%d, want 1", got)
+	}
+}

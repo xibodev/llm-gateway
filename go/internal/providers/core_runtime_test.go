@@ -1,0 +1,139 @@
+package providers
+
+import (
+	"context"
+	"errors"
+	"testing"
+
+	"llmgw/internal/config"
+
+	"github.com/xibodev/llm-provider-auth/tokenstore"
+	core "github.com/xibodev/llmgw-core"
+	coreruntime "github.com/xibodev/llmgw-core/runtime"
+)
+
+// coreVerticalCases pins which registered type serves each configuration,
+// "" meaning none. The types must never both claim an instance: the table has
+// no order to break a tie with.
+var coreVerticalCases = map[string]struct {
+	cfg  *config.ProviderConfig
+	want string
+}{
+	"codex":            {&config.ProviderConfig{Type: "openai_compatible", RegistryID: "openai_codex"}, "openai_codex"},
+	"codex litellm":    {&config.ProviderConfig{Type: "litellm", RegistryID: "openai_codex"}, "openai_codex"},
+	"codex at zen URL": {&config.ProviderConfig{Type: "openai_compatible", RegistryID: "openai_codex", BaseURL: "https://opencode.ai/zen/v1"}, "openai_codex"},
+	"antigravity":      {&config.ProviderConfig{Type: "google_antigravity"}, "google_antigravity"},
+	"ai studio":        {&config.ProviderConfig{Type: "ai_studio"}, googleCoreType},
+	"vertex":           {&config.ProviderConfig{Type: "Vertex_AI"}, googleCoreType},
+	"zen":              {&config.ProviderConfig{Type: "openai_compatible", RegistryID: "opencode_zen"}, openAICompatibleCoreType},
+	"zen by URL":       {&config.ProviderConfig{Type: "litellm", BaseURL: "https://opencode.ai/zen/v1"}, openAICompatibleCoreType},
+	"bedrock at zen":   {&config.ProviderConfig{Type: "bedrock", BaseURL: "https://opencode.ai/zen/v1"}, bedrockCoreType},
+	"bedrock":          {&config.ProviderConfig{Type: " Bedrock ", Region: "eu-central-1"}, bedrockCoreType},
+	"plain":            {&config.ProviderConfig{Type: "openai_compatible", BaseURL: "https://api.example.test/v1"}, openAICompatibleCoreType},
+	"openai":           {&config.ProviderConfig{Type: "OpenAI", RegistryID: "openai"}, openAICompatibleCoreType},
+	"litellm":          {&config.ProviderConfig{Type: "litellm", BaseURL: "http://127.0.0.1:4000"}, openAICompatibleCoreType},
+	"pollinations":     {&config.ProviderConfig{Type: "openai_compatible", RegistryID: "pollinations"}, openAICompatibleCoreType},
+	"copilot":          {&config.ProviderConfig{Type: "github_copilot"}, ExtensionTypeCopilot},
+	"copilot by type":  {&config.ProviderConfig{Type: " GitHub_Copilot "}, ExtensionTypeCopilot},
+	"copilot registry": {&config.ProviderConfig{Type: "openai_compatible", RegistryID: "github_copilot"}, openAICompatibleCoreType},
+	"anthropic":        {&config.ProviderConfig{Type: "anthropic"}, anthropicCoreType},
+	"anthropic spaced": {&config.ProviderConfig{Type: " Anthropic ", RegistryID: "custom_anthropic"}, anthropicCoreType},
+	"azure":            {&config.ProviderConfig{Type: "azure_openai", RegistryID: "azure_openai"}, azureCoreType},
+	"ollama":           {&config.ProviderConfig{Type: " Ollama "}, ollamaCoreType},
+	"edge tts":         {&config.ProviderConfig{Type: "edge_tts"}, ExtensionTypeEdgeTTS},
+	"unknown":          {&config.ProviderConfig{Type: "unknown"}, ""},
+}
+
+func TestCoreVerticalsServeDisjointInstances(t *testing.T) {
+	runtime := newRuntime(func(bool) (core.CredentialStore, error) { return core.NewMemoryCredentialStore(), nil })
+	settings := config.Defaults()
+	settings.Providers = map[string]*config.ProviderConfig{}
+	for instance, fixture := range coreVerticalCases {
+		settings.Providers[instance] = fixture.cfg
+	}
+	for instance, fixture := range coreVerticalCases {
+		var serving []string
+		for name, vertical := range runtime.verticals {
+			if vertical.serves(settings, instance, fixture.cfg) {
+				serving = append(serving, name)
+			}
+		}
+		if len(serving) > 1 {
+			t.Errorf("%s: served by %v, want at most one type", instance, serving)
+		}
+		if name, _, _ := runtime.vertical(settings, instance); name != fixture.want {
+			t.Errorf("%s: served by %q, want %q", instance, name, fixture.want)
+		}
+	}
+	if _, err := runtime.coreProvider(settings, "unknown"); !IsConfig(err) {
+		t.Fatalf("an instance no type serves built a core provider: err=%v", err)
+	}
+	if refresh := runtime.coreRefresh(settings, "unknown"); refresh != nil {
+		t.Fatal("an instance no type serves has a refresh")
+	}
+	for _, instance := range []string{"zen", "plain", "bedrock"} {
+		if refresh := runtime.coreRefresh(settings, instance); refresh != nil {
+			t.Fatalf("an API key of %s would refresh", instance)
+		}
+	}
+	// An instance without a base URL of its own is Zen when the default is.
+	settings.OpenAICompatibleBaseURL = "https://opencode.ai/zen/v1"
+	if name, _, _ := runtime.vertical(settings, "plain-default"); name != "" {
+		t.Fatalf("an unconfigured instance is served by %q", name)
+	}
+	settings.Providers["plain-default"] = &config.ProviderConfig{Type: "openai_compatible"}
+	if name, _, _ := runtime.vertical(settings, "plain-default"); name != openAICompatibleCoreType {
+		t.Fatalf("an instance at the Zen default is served by %q", name)
+	}
+	settings.OpenAICompatibleBaseURL = "https://api.example.test/v1"
+	if name, _, _ := runtime.vertical(settings, "plain-default"); name != openAICompatibleCoreType {
+		t.Fatalf("an instance at another default is served by %q", name)
+	}
+}
+
+// Resolve reaches the store of the instance's type. The token-store methods
+// carry only a key, so they reach the store of the vertical the operation's
+// context names, and the OAuth store without one.
+func TestCoreCredentialsDispatchesByType(t *testing.T) {
+	ctx := context.Background()
+	oauth, fixture := core.NewMemoryCredentialStore(), core.NewMemoryCredentialStore()
+	for store, token := range map[*core.MemoryCredentialStore]string{oauth: "oauth-token", fixture: "fixture-token"} {
+		if _, err := store.Save(ctx, "key", tokenstore.Record{AccessToken: token}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	oauth.BindShared("codex", "key")
+	fixture.BindShared("fixture", "key")
+	runtime := newRuntime(func(oauthStore bool) (core.CredentialStore, error) {
+		if !oauthStore {
+			t.Error("the OAuth store opened another store")
+		}
+		return oauth, nil
+	})
+	runtime.verticals["fixture"] = coreVertical{
+		serves:      func(_ *config.Settings, instance string, _ *config.ProviderConfig) bool { return instance == "fixture" },
+		credentials: fixture,
+	}
+	settings := config.Defaults()
+	settings.Providers = map[string]*config.ProviderConfig{
+		"codex": {Type: "openai_compatible", RegistryID: "openai_codex"},
+		// A type no registered vertical serves, so only the fixture's does.
+		"fixture": {Type: "fixture"},
+	}
+	credentials := coreCredentials{runtime: runtime, settings: coreruntime.NewMemorySettings(settings)}
+
+	for _, instance := range []string{"codex", "fixture"} {
+		if key, err := credentials.Resolve(ctx, gatewayCaller(), instance); err != nil || key != "key" {
+			t.Fatalf("%s: key=%q err=%v", instance, key, err)
+		}
+	}
+	if _, err := credentials.Resolve(ctx, gatewayCaller(), "missing"); !IsConfig(err) || errors.Is(err, core.ErrNoCredential) {
+		t.Fatalf("an instance no type serves resolved: err=%v", err)
+	}
+	for vertical, want := range map[string]string{"": "oauth-token", "openai_codex": "oauth-token", "fixture": "fixture-token"} {
+		record, err := credentials.Load(withCoreOperation(ctx, vertical, gatewayCaller()), "key")
+		if err != nil || record.AccessToken != want {
+			t.Fatalf("operation of %q: token=%q err=%v, want %q", vertical, record.AccessToken, err, want)
+		}
+	}
+}

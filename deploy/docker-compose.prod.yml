@@ -1,0 +1,70 @@
+# Production deployment starting point: versioned gateway image + Caddy TLS.
+#
+#   cp .env.example .env   # fill in secrets
+#   mkdir -p state && sudo chown 65532:65532 state   # distroless nonroot uid
+#   LLMGW_IMAGE=ghcr.io/xibodev/llm-gateway:<version> \
+#     docker compose -f deploy/docker-compose.prod.yml up -d
+#
+# The gateway is loopback-only; Caddy terminates TLS and reverse-proxies it.
+services:
+  gateway:
+    image: ${LLMGW_IMAGE:?set LLMGW_IMAGE to a versioned GHCR tag or digest}
+    restart: unless-stopped
+    environment:
+      LLMGW_HOST: 0.0.0.0
+      LLMGW_PORT: "8787"
+      LLMGW_STATE_DIR: /state
+      # Admin key (or mint per-project keys in /admin). Keep unauthenticated OFF in prod.
+      LLMGW_API_KEY: ${LLMGW_API_KEY:-}
+      LLMGW_ALLOW_UNAUTHENTICATED_API: ${LLMGW_ALLOW_UNAUTHENTICATED_API:-0}
+      LLMGW_ALLOW_COPILOT_PROXY: ${LLMGW_ALLOW_COPILOT_PROXY:-0}
+      LLMGW_EXPERIMENTAL_COPILOT_PROVIDER: ${LLMGW_EXPERIMENTAL_COPILOT_PROVIDER:-0}
+      LLMGW_GOOGLE_ANTIGRAVITY_CLIENT_ID: ${LLMGW_GOOGLE_ANTIGRAVITY_CLIENT_ID:-}
+      LLMGW_GOOGLE_ANTIGRAVITY_CLIENT_SECRET: ${LLMGW_GOOGLE_ANTIGRAVITY_CLIENT_SECRET:-}
+      LLMGW_GOOGLE_ANTIGRAVITY_OAUTH_PROFILE: ${LLMGW_GOOGLE_ANTIGRAVITY_OAUTH_PROFILE:-}
+      LLMGW_GOOGLE_ANTIGRAVITY_CLIENT_MODE: ${LLMGW_GOOGLE_ANTIGRAVITY_CLIENT_MODE:-}
+      LLMGW_GOOGLE_ANTIGRAVITY_REDIRECT_URI: ${LLMGW_GOOGLE_ANTIGRAVITY_REDIRECT_URI:-}
+      LLMGW_OAUTH_PUBLIC_BASE_URL: ${LLMGW_OAUTH_PUBLIC_BASE_URL:-}
+      LLMGW_CREDENTIAL_ENCRYPTION_KEY: ${LLMGW_CREDENTIAL_ENCRYPTION_KEY:-}
+      LLMGW_SSO_ENABLED: ${LLMGW_SSO_ENABLED:-0}
+      LLMGW_SSO_SHARED_SECRET: ${LLMGW_SSO_SHARED_SECRET:-}
+      LLMGW_SSO_ADMIN_GROUP: ${LLMGW_SSO_ADMIN_GROUP:-llmgw-admin}
+      LLMGW_SSO_AUTO_PROVISION: ${LLMGW_SSO_AUTO_PROVISION:-1}
+      LLMGW_GITHUB_COPILOT_CACHE_DIR: /state/cache
+      # Discovery-only updates; registered providers and credentials are never reconciled.
+      LLMGW_PROVIDER_ROSTER_AUTO_REFRESH: ${LLMGW_PROVIDER_ROSTER_AUTO_REFRESH:-true}
+      LLMGW_PROVIDER_ROSTER_URL: ${LLMGW_PROVIDER_ROSTER_URL:-https://xibodev.github.io/llm-gateway/roster/payload.json}
+      LLMGW_PROVIDER_ROSTER_PUBLIC_KEY: ${LLMGW_PROVIDER_ROSTER_PUBLIC_KEY:-}
+      LLMGW_ANONYMOUS_PROVIDER_AUTOMATION: ${LLMGW_ANONYMOUS_PROVIDER_AUTOMATION:-false}
+      LLMGW_LOG_REQUESTS: ${LLMGW_LOG_REQUESTS:-0}
+      LLMGW_LOG_REQUEST_BODIES: ${LLMGW_LOG_REQUEST_BODIES:-0}
+      LLMGW_LOG_REQUESTS_MAX_BYTES: ${LLMGW_LOG_REQUESTS_MAX_BYTES:-104857600}
+      LLMGW_RETENTION_USAGE_DAYS: ${LLMGW_RETENTION_USAGE_DAYS:-90}
+      LLMGW_RETENTION_AUDIT_DAYS: ${LLMGW_RETENTION_AUDIT_DAYS:-365}
+      LLMGW_RETENTION_DELIVERED_OUTBOX_DAYS: ${LLMGW_RETENTION_DELIVERED_OUTBOX_DAYS:-400}
+      LLMGW_BACKUP_KEEP: ${LLMGW_BACKUP_KEEP:-7}
+    # State (config.yaml, keys.json 0600, secrets.json 0600, catalog.json, *.db).
+    # Bind mount so the nonroot container (uid 65532) can own + write it.
+    volumes:
+      - ./state:/state
+    expose:
+      - "8787"
+
+  caddy:
+    image: caddy:2.10.2-alpine
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    depends_on:
+      - gateway
+    environment:
+      LLMGW_DOMAIN: ${LLMGW_DOMAIN:?set LLMGW_DOMAIN}
+
+volumes:
+  caddy-data:
+  caddy-config:

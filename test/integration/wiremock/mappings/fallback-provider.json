@@ -1,0 +1,275 @@
+{
+  "mappings": [
+    {
+      "name": "fallback: GET /models",
+      "request": {
+        "method": "GET",
+        "urlPattern": "/fallback/v1/models"
+      },
+      "response": {
+        "status": 200,
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "jsonBody": {
+          "object": "list",
+          "data": [
+            {
+              "id": "gpt-4o",
+              "object": "model",
+              "owned_by": "uat-fallback"
+            },
+            {
+              "id": "gpt-4o-mini",
+              "object": "model",
+              "owned_by": "uat-fallback"
+            },
+            {
+              "id": "whisper-1",
+              "object": "model",
+              "owned_by": "uat-fallback"
+            },
+            {
+              "id": "tts-1",
+              "object": "model",
+              "owned_by": "uat-fallback"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "fallback: POST /chat/completions → 200 standard JSON",
+      "request": {
+        "method": "POST",
+        "urlPattern": "/fallback/v1/chat/completions"
+      },
+      "response": {
+        "status": 200,
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "jsonBody": {
+          "id": "chatcmpl-uat-fallback-001",
+          "object": "chat.completion",
+          "model": "gpt-4o",
+          "choices": [
+            {
+              "index": 0,
+              "message": {
+                "role": "assistant",
+                "content": "UAT fallback response: Hello from the llm-gateway test suite."
+              },
+              "finish_reason": "stop"
+            }
+          ],
+          "usage": {
+            "prompt_tokens": 10,
+            "completion_tokens": 12,
+            "total_tokens": 22
+          }
+        }
+      }
+    },
+    {
+      "name": "fallback: POST /chat/completions tool_calls → 200",
+      "request": {
+        "method": "POST",
+        "urlPattern": "/fallback/v1/chat/completions",
+        "bodyPatterns": [
+          {
+            "matchesJsonPath": "$.tools"
+          }
+        ]
+      },
+      "response": {
+        "status": 200,
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "jsonBody": {
+          "id": "chatcmpl-uat-fallback-tool-001",
+          "object": "chat.completion",
+          "model": "gpt-4o",
+          "choices": [
+            {
+              "index": 0,
+              "message": {
+                "role": "assistant",
+                "content": null,
+                "tool_calls": [
+                  {
+                    "id": "call_uat_001",
+                    "type": "function",
+                    "function": {
+                      "name": "get_weather",
+                      "arguments": "{\"location\":\"UAT-city\"}"
+                    }
+                  }
+                ]
+              },
+              "finish_reason": "tool_calls"
+            }
+          ],
+          "usage": {
+            "prompt_tokens": 15,
+            "completion_tokens": 8,
+            "total_tokens": 23
+          }
+        }
+      }
+    },
+    {
+      "name": "fallback: POST /responses → 200 Responses API",
+      "request": {
+        "method": "POST",
+        "urlPattern": "/fallback/v1/responses"
+      },
+      "response": {
+        "status": 200,
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "jsonBody": {
+          "id": "resp-uat-fallback-001",
+          "object": "response",
+          "model": "gpt-4o",
+          "output": [
+            {
+              "type": "message",
+              "role": "assistant",
+              "content": [
+                {
+                  "type": "output_text",
+                  "text": "UAT fallback response via Responses API."
+                }
+              ]
+            }
+          ],
+          "usage": {
+            "input_tokens": 8,
+            "output_tokens": 9,
+            "total_tokens": 17
+          }
+        }
+      }
+    },
+    {
+      "name": "fallback: POST /responses reasoning → 200 with reasoning item",
+      "request": {
+        "method": "POST",
+        "urlPattern": "/fallback/v1/responses",
+        "bodyPatterns": [
+          {
+            "matchesJsonPath": "$.reasoning"
+          }
+        ]
+      },
+      "response": {
+        "status": 200,
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "jsonBody": {
+          "id": "resp-uat-reasoning-001",
+          "object": "response",
+          "model": "gpt-4o",
+          "output": [
+            {
+              "type": "reasoning",
+              "summary": [
+                {
+                  "type": "summary_text",
+                  "text": "I will answer the question."
+                }
+              ]
+            },
+            {
+              "type": "message",
+              "role": "assistant",
+              "content": [
+                {
+                  "type": "output_text",
+                  "text": "Reasoning-aware UAT response."
+                }
+              ]
+            }
+          ],
+          "usage": {
+            "input_tokens": 10,
+            "output_tokens": 15,
+            "total_tokens": 25
+          }
+        }
+      }
+    },
+    {
+      "name": "fallback: POST /audio/transcriptions → 200 JSON",
+      "request": {
+        "method": "POST",
+        "urlPattern": "/fallback/v1/audio/transcriptions"
+      },
+      "response": {
+        "status": 200,
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "jsonBody": {
+          "text": "UAT transcription: this is a test audio file transcription result."
+        }
+      }
+    },
+    {
+      "name": "fallback: POST /audio/speech → 200 bytes",
+      "request": {
+        "method": "POST",
+        "urlPattern": "/fallback/v1/audio/speech"
+      },
+      "response": {
+        "status": 200,
+        "headers": {
+          "Content-Type": "audio/mpeg"
+        },
+        "base64Body": "SUQzBAAAAAAAI1RTU0UAAAAPAAADTGF2ZjU5LjI3LjEwMAAAAAAAAAAAAAAA"
+      }
+    },
+    {
+      "name": "fallback: multimodal image_url → 200 vision response",
+      "request": {
+        "method": "POST",
+        "urlPattern": "/fallback/v1/chat/completions",
+        "bodyPatterns": [
+          {
+            "matchesJsonPath": "$..image_url"
+          }
+        ]
+      },
+      "response": {
+        "status": 200,
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "jsonBody": {
+          "id": "chatcmpl-uat-vision-001",
+          "object": "chat.completion",
+          "model": "gpt-4o",
+          "choices": [
+            {
+              "index": 0,
+              "message": {
+                "role": "assistant",
+                "content": "I can see the image. UAT vision stub response."
+              },
+              "finish_reason": "stop"
+            }
+          ],
+          "usage": {
+            "prompt_tokens": 25,
+            "completion_tokens": 10,
+            "total_tokens": 35
+          }
+        }
+      }
+    }
+  ]
+}

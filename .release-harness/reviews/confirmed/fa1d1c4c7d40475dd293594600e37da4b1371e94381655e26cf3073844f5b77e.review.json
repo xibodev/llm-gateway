@@ -1,0 +1,287 @@
+{
+  "schema_version": "1.0.0",
+  "mode": "change",
+  "contract": {
+    "digest": "31b393ab3e80162226619c441694573993ac618382d74642101484a0bf2e9c80"
+  },
+  "authoring_provenance": {
+    "status": "established",
+    "path": ".release-harness/drafts/llm-gateway.record.json",
+    "digest": "6732ddf3dc8236b974e2aae5f81b546d89c2a466b6fb0a368d76620955bf981e"
+  },
+  "sources": [
+    {
+      "source_id": "primary",
+      "status": "established",
+      "repository_identity": "https://github.com/xibodev/llm-gateway.git",
+      "base_ref": "origin/main",
+      "base_commit": "582e7265bcab74cd8d4c19daa56a5cd48bd8e54b",
+      "merge_base": "349b72bdf5404c81fd2fd495e5eaa06b510632b9",
+      "head_commit": "51ecbe3c6b0ecec18eb822dda26fe19adeceb158",
+      "head_tree": "3b7caacb1347aaae364d63e083b363e15e283a19",
+      "reviewed_source_digest": "11ee0b4d0a10380e233ba3afe8e0689c45e0b05302429e2b795f0da6f3e90f3b",
+      "changed_paths": [
+        {
+          "status": "modified",
+          "path": "CONTRIBUTING.md",
+          "old_blob": "d3d20ed6f3851ba1277a950fc7f7dc2b4026f5ca",
+          "new_blob": "06249459dd344f0824a912d3fdef117872fb112f"
+        },
+        {
+          "status": "modified",
+          "path": "docs/ARCHITECTURE.md",
+          "old_blob": "53a633f29e501086553aef61fee15649473b5e1c",
+          "new_blob": "7d88bcf29e58c0e10a77007e45c686d8b8190b7c"
+        },
+        {
+          "status": "modified",
+          "path": "docs/PROVIDERS.md",
+          "old_blob": "e643a84bd14044e604ca0952e93e94438aa99ccb",
+          "new_blob": "45dfd54f65cddd0871f6808aff4de645831178ca"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/api/transport_mode_test.go",
+          "old_blob": "89a71c18399f739ea6c1d1b07054f3aa3c6ea0c1",
+          "new_blob": "ed3ffc0e1e8bc39970a402d428f91aa5ba7dc0cd"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/architecture/boundary_test.go",
+          "old_blob": "f4cc4a76ffd704c6275664b596c7147ac78e964b",
+          "new_blob": "6d36fd9c000617c798e3ab0304e82eae00e4e3bb"
+        },
+        {
+          "status": "added",
+          "path": "go/internal/architecture/deprecated_core_test.go",
+          "old_blob": "0000000000000000000000000000000000000000",
+          "new_blob": "51303f3c26d8adfd2def1c7c9f3e619fe9932bb6"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/architecture/doc.go",
+          "old_blob": "1b2d6dfde2bb398990fbf40f5f6a0eb0e1b87780",
+          "new_blob": "8997559236438cd288dfff7007ecb668efe20bff"
+        },
+        {
+          "status": "added",
+          "path": "go/internal/architecture/libraries_test.go",
+          "old_blob": "0000000000000000000000000000000000000000",
+          "new_blob": "d68b0b2b7e4070cbe7b905879beea57813f46d0d"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/providers/anthropic_test.go",
+          "old_blob": "60f4ecc1abdbd33ccc53e81cd17e6f321c7c6906",
+          "new_blob": "e16a6ed46842403db57afa9fbd2d95edec1b769c"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/providers/antigravity_credentials.go",
+          "old_blob": "b8898fe25d489c8417aec5f9bb179772f344ffb5",
+          "new_blob": "14babcbfa95938eaf44925f51e7f6e72b5375118"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/providers/auth_adapter.go",
+          "old_blob": "498d8b5198585cb1dc2a38146af64b08e4e6ac2b",
+          "new_blob": "42f4703e5229a5fa3d77a4a44fbeea0aa8132895"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/providers/azure_runtime_test.go",
+          "old_blob": "81c2a6d49f955ae5868179f95701b0522911010e",
+          "new_blob": "6f0dbb875d00b0f71adf22e9a0e851a42c51f03b"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/providers/catalog.go",
+          "old_blob": "703be71db72f618cf8e05abc6a2dbefb8f77b96b",
+          "new_blob": "efd8688d7bfd4f921838131fee492fbdfd37e5ab"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/providers/codex.go",
+          "old_blob": "2c6c4d8feabb38fee6607e211e07ee6f947a9be3",
+          "new_blob": "32938007409e8352ef84ae4ce1c3fbdb1d05907d"
+        },
+        {
+          "status": "deleted",
+          "path": "go/internal/providers/core_adapter_test.go",
+          "old_blob": "3b5624a314d9839e45e3e82440e8609a9957b6d6",
+          "new_blob": "0000000000000000000000000000000000000000"
+        },
+        {
+          "status": "deleted",
+          "path": "go/internal/providers/core_adapter.go",
+          "old_blob": "0c4b9cc57b25bef72c33f757fe1079fbeb094060",
+          "new_blob": "0000000000000000000000000000000000000000"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/providers/factory.go",
+          "old_blob": "d9a2928667f1d52380d8853c006efce7225d3815",
+          "new_blob": "1b8ab419e6d00346c18e5f22e0e71b71958b3561"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/providers/googleai_test.go",
+          "old_blob": "76557a5b149470287fe9048bd8864478abc5d0bd",
+          "new_blob": "ca8926a9cdf4bc68a093c40e9fa7211615dc2cfa"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/providers/ollama_test.go",
+          "old_blob": "6d8a70e844e0293a0ffb613e9fe73e9cafb6b168",
+          "new_blob": "5dd79f78bd4ab6fe8613b9295884d24156f976da"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/providers/openai_compatible_provider_test.go",
+          "old_blob": "6c663660287fb40d1bb1dccbeaab1d9455569602",
+          "new_blob": "1e275502d7bd65adfdd73220dcac234ae510d804"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/providers/openai_compatible_provider.go",
+          "old_blob": "d071edf81a179341d71bac05fab7e50a6ae82abf",
+          "new_blob": "279c00e4f4aba4537cafa3160a2297b5c05928ab"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/providers/opencode_zen_test.go",
+          "old_blob": "1f7245bab0577a0b42d13b7476ab2792da696549",
+          "new_blob": "07b020ed0e617c53d9ae49db24d09bbdf349555a"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/providers/proxy.go",
+          "old_blob": "c57f8cc8b97666093c8696273ddbee5ff4fe35de",
+          "new_blob": "17948835a3974e838f139779f8b0c29250c08cba"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/providers/zen_provider.go",
+          "old_blob": "b98427467be0284cf56b3fbbcd726b3aab2b7082",
+          "new_blob": "b490f3a022dc2d7911080d165a9f5bfc4b66e19a"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/providers/zen_runtime_test.go",
+          "old_blob": "3431384affae91d1cba0f9d0a8d0e31952475017",
+          "new_blob": "bf5cd208c24551c44855e2fa2587b42bd14c3b54"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/router/failover.go",
+          "old_blob": "54b08150fb22e572fed54a12e7bb4b6d7141ae2e",
+          "new_blob": "442f5022f451102c459343d4205a226ec5443df2"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/router/retention_test.go",
+          "old_blob": "060dff548043a600bf537b91ba91af1f31d9275a",
+          "new_blob": "52dc6bfea282ec65de40fda0b94fb6222dafa587"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/router/savings.go",
+          "old_blob": "1bbdaad00bfea2a3acbea0f8c6ee244290c52760",
+          "new_blob": "a699cc95c9b534cac0ddaaa94964cab5b950cd8a"
+        },
+        {
+          "status": "modified",
+          "path": "go/README.md",
+          "old_blob": "1b9f968b8cb04d34a64107df1e33fd1ee97a7638",
+          "new_blob": "06ece692638cbae65bd9da665abb3fe99f3a8b07"
+        }
+      ]
+    }
+  ],
+  "facts": [
+    {
+      "id": "snapshots",
+      "claim": "Facade builds, credential resolution and router resolution and recording each read one settings snapshot per operation instead of several config.Get() calls; behavior is unchanged. The unused core.Engine adapter (core_adapter.go), which nothing in production built or served and which was the gateway's only use of the deprecated core.Principal, is removed.",
+      "status": "observed",
+      "evidence": {
+        "source": "go/internal/providers/factory.go and related; go/internal/router/failover.go; removed go/internal/providers/core_adapter.go"
+      }
+    },
+    {
+      "id": "boundary",
+      "claim": "The boundary test now names internal/providers, internal/router and internal/api/transport_mode.go the product adapter layer, records why each still reads settings or iam, and keeps a ratchet that only shrinks (providers 55 iam and 13 config.Get, router 6 and 10, transport_mode 0 and 1). New tests require the three libraries at release tags with no replace directives, and keep retired deprecated core APIs out of the gateway.",
+      "status": "observed",
+      "evidence": {
+        "source": "go/internal/architecture"
+      }
+    },
+    {
+      "id": "docs",
+      "claim": "docs/ARCHITECTURE.md describes the real module graph and ownership: llmgw-core depends on llm-provider-auth and llm-translate and owns the provider verticals, transports, Runtime, catalog service, execution primitives, OAuth flow service and anonymous orchestrator; the gateway owns settings, IAM and stores, routing policy, the console and portal, and the adapters, each named. go/README.md, CONTRIBUTING.md and docs/PROVIDERS.md drop stale statements.",
+      "status": "observed",
+      "evidence": {
+        "source": "docs/ARCHITECTURE.md, go/README.md, CONTRIBUTING.md, docs/PROVIDERS.md; check-docs"
+      }
+    },
+    {
+      "id": "suite",
+      "claim": "The full Go suite passes with HTTP_PROXY and HTTPS_PROXY unreachable with unchanged characterization goldens; gofmt, vet, govulncheck (0 reachable), check-docs and git diff --check pass.",
+      "status": "observed",
+      "evidence": {
+        "source": "local gate run on the reviewed head"
+      }
+    }
+  ],
+  "impact": {
+    "assertions": [
+      {
+        "id": "A1",
+        "impact": "unchanged",
+        "supported_by": [
+          "snapshots",
+          "boundary",
+          "suite"
+        ]
+      },
+      {
+        "id": "A2",
+        "impact": "unchanged",
+        "supported_by": [
+          "snapshots",
+          "boundary",
+          "suite"
+        ]
+      },
+      {
+        "id": "A3",
+        "impact": "unchanged",
+        "supported_by": [
+          "snapshots",
+          "boundary",
+          "suite"
+        ]
+      },
+      {
+        "id": "A4",
+        "impact": "unchanged",
+        "supported_by": [
+          "snapshots",
+          "boundary",
+          "suite"
+        ]
+      }
+    ],
+    "requires": [],
+    "possible_binding_changes": []
+  },
+  "questions": [],
+  "conclusion": {
+    "action": "reuse_contract",
+    "summary": "The final library boundary is enforced by tests and documented; settings reads are consolidated per operation; CLI, health and models behavior is unchanged."
+  },
+  "proposed": {
+    "by": "boundaries-final",
+    "at": "2026-09-25T14:15:52.417Z"
+  },
+  "digest": "fa1d1c4c7d40475dd293594600e37da4b1371e94381655e26cf3073844f5b77e"
+}

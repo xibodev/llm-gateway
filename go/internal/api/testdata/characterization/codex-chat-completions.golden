@@ -1,0 +1,34 @@
+# Chat Completions to a Codex model
+request: POST /v1/chat/completions
+status: 200
+header Content-Type: application/json
+header X-Llmgw-Attempts: 1
+header X-Llmgw-Duration-Ms: <ms>
+header X-Llmgw-Fallback-Ms: <ms>
+header X-Llmgw-Prompt-Bytes: 39
+header X-Llmgw-Tool-Schema-Bytes: 0
+header X-Llmgw-Transport-Mode: translated
+header X-Llmgw-Ttfb-Ms: <ms>
+upstream: POST /backend-api/codex/responses
+upstream body: {"input":[{"content":"Say hello","role":"user"}],"instructions":"Follow the caller's request.","model":"gpt-fixture","store":false,"stream":true}
+body:
+{
+  "choices": [
+    {
+      "finish_reason": "stop",
+      "index": 0,
+      "message": {
+        "content": "Hello from codex",
+        "role": "assistant"
+      }
+    }
+  ],
+  "id": "resp_fixture",
+  "model": "gpt-fixture",
+  "object": "chat.completion",
+  "usage": {
+    "completion_tokens": 4,
+    "prompt_tokens": 3,
+    "total_tokens": 7
+  }
+}

@@ -1,0 +1,10 @@
+{
+  "providers": [
+    {"name": "Groq", "category": "inference_provider", "url": "https://console.groq.com/keys", "baseUrl": "https://api.groq.com/openai/v1", "description": "Free tier, no credit card.", "models": []},
+    {"name": "Example API", "category": "provider_api", "url": "https://example.com/signup", "baseUrl": "https://api.example.com/v1", "description": "No API key required. Terms unclear.", "models": []},
+    {"name": "Account API", "category": "provider_api", "url": "https://accounts.example.com/signup", "baseUrl": "https://api.example.com/accounts/{account_id}/run", "description": "Trial requires registration.", "models": []},
+    {"name": "测试服务测试服务测试服务测试服务测试服务测试服务测试服务测试服务测试服务测试服务测试服务测试服务测试服务测试服务测试服务测试服务测试服务测试服务测试服务测试服务测试服务测试服务测试服务测试服务测试服务", "category": "provider_api", "url": "https://cjk.example.com/signup", "baseUrl": "https://cjk.example.com/v1", "description": "Synthetic multilingual provider; terms unknown.", "models": []}
+  ],
+  "footnotes": [],
+  "glossary": []
+}

@@ -1,0 +1,202 @@
+{
+  "schema_version": "1.0.0",
+  "mode": "change",
+  "contract": {
+    "digest": "31b393ab3e80162226619c441694573993ac618382d74642101484a0bf2e9c80"
+  },
+  "authoring_provenance": {
+    "status": "established",
+    "path": ".release-harness/drafts/llm-gateway.record.json",
+    "digest": "6732ddf3dc8236b974e2aae5f81b546d89c2a466b6fb0a368d76620955bf981e"
+  },
+  "sources": [
+    {
+      "source_id": "primary",
+      "status": "established",
+      "repository_identity": "https://github.com/xibodev/llm-gateway.git",
+      "base_ref": "origin/main",
+      "base_commit": "6c4f8be6d48e5c9c512899ec14bc2a0275af11ad",
+      "merge_base": "b6ee09512840a1f3a962e721bc3747c2dcd3b8e8",
+      "head_commit": "8b16a81fe9e9458fcf707900f0f13b58801d4215",
+      "head_tree": "d8bcd9abbd11b4cb6331ff4ad3a9a22461170cbc",
+      "reviewed_source_digest": "b65ca40b086d5173cc60d6f7d1cfa65b75f29b303ae0a006d016f2718ecaa59a",
+      "changed_paths": [
+        {
+          "status": "modified",
+          "path": "go/go.mod",
+          "old_blob": "f319c0f92a8e740794de83943c02b6eacadcbf98",
+          "new_blob": "461aafa903c19e23a6630234c9153c968dcc6cc5"
+        },
+        {
+          "status": "modified",
+          "path": "go/go.sum",
+          "old_blob": "3f37cb9d680e168b2c35c018fd391570709bb0a0",
+          "new_blob": "7cd993434ac5553a7e9fe481b50de596b4d2dd1d"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/api/admin.go",
+          "old_blob": "7653b18e5ef1c89b4aed71680615ada182847e4b",
+          "new_blob": "225398ce7bb004a3cc9b7d73aace69c80d6a1da4"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/api/iam.go",
+          "old_blob": "4cdd41e2908495d42e9b94d24509efd4e11f19ff",
+          "new_blob": "42e0d79f5671d3d9cfe7cad88a419c30aa1fc9fc"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/api/oauth_api_test.go",
+          "old_blob": "6f0a8b89a094804e730a57be009a68d34779fcef",
+          "new_blob": "4009ae671949a7a7220eec7b263cb125f030c87c"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/api/user.go",
+          "old_blob": "abdd82b36fca62262ebe60c25362c859bf976a03",
+          "new_blob": "a2d7386eb02a2f85b443cc8634bebbd4659e572b"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/architecture/boundary_test.go",
+          "old_blob": "95e4966bf416c386249491ef3b989a4f496944d2",
+          "new_blob": "86e44d23edac0bd2b58f4eba8e740ebb65d20592"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/providers/auth_adapter.go",
+          "old_blob": "6095bba57a54f723a5446e5fef5d0f95cf837678",
+          "new_blob": "41ea7145de02c94bcf8aca7cdc7ea126cf298fa6"
+        },
+        {
+          "status": "added",
+          "path": "go/internal/providers/copilot_client_test.go",
+          "old_blob": "0000000000000000000000000000000000000000",
+          "new_blob": "91e356599920b2b74d2fb2cb1c4efa11b51a26b2"
+        },
+        {
+          "status": "added",
+          "path": "go/internal/providers/copilot_client.go",
+          "old_blob": "0000000000000000000000000000000000000000",
+          "new_blob": "f8d8b1fb06d4e93b2fb5264324071aa008a8ba02"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/providers/factory.go",
+          "old_blob": "9adc5a761b39e150dc0c96964b776286cf77f7f4",
+          "new_blob": "2fa9d6ec61d306e5ff0bd4b7ec77951d0a8503be"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/providers/googleai_connection_test.go",
+          "old_blob": "41148f5847c7fc974b5440d3e273b1c445a11782",
+          "new_blob": "f3793e9cf7ced069de5bee0941c6ef310c4d7f14"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/providers/googleai_live_test.go",
+          "old_blob": "a5d2d91c560ae80898c4d4c84c871e375ebbec36",
+          "new_blob": "f38e7584f3a48e31b365ab9b96eeeccc213b3163"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/providers/openai_auth.go",
+          "old_blob": "c2d3831d4a93969c70f6d4d63641b0a77f60a1b3",
+          "new_blob": "571b45fce98c67ff7ca1cdf9c927010af0f659f3"
+        }
+      ]
+    }
+  ],
+  "facts": [
+    {
+      "id": "copilot-explicit-configuration",
+      "claim": "The gateway no longer rewires llm-provider-auth globals from an init hook. A shared Copilot client reads the live settings per operation and applies the cache-directory, OAuth-token and experimental-flag environment fallbacks the library used to apply itself, in the same order.",
+      "status": "observed",
+      "evidence": {
+        "source": "go/internal/providers/copilot_client.go; go/internal/providers/openai_auth.go; TestCopilotSettingsPreserveLibraryEnvironmentFallbacks"
+      }
+    },
+    {
+      "id": "copilot-error-text-preserved",
+      "claim": "Copilot disabled, missing-token and rejected-token errors keep byte-identical messages, and the rejected-token 401 stays failover-eligible with its status.",
+      "status": "observed",
+      "evidence": {
+        "source": "go/internal/providers/copilot_client_test.go TestCopilotErrorsKeepGatewayGuidance"
+      }
+    },
+    {
+      "id": "gcp-token-cache-process-wide",
+      "claim": "Vertex service-account access tokens are cached in one process-wide TokenCache keyed by credential and scope, as the former library package cache was, so tokens outlive provider rebuilds.",
+      "status": "observed",
+      "evidence": {
+        "source": "go/internal/providers/factory.go gcpTokens; go/internal/providers/googleai_connection_test.go"
+      }
+    },
+    {
+      "id": "provider-auth-dependency",
+      "claim": "go.mod pins github.com/xibodev/llm-provider-auth v0.5.0 instead of v0.3.0; llmgw-core v0.6.0 imports only the root and codex packages, which v0.5.0 leaves unchanged.",
+      "status": "observed",
+      "evidence": {
+        "source": "go/go.mod; go/go.sum; llmgw-core v0.6.0 import list"
+      }
+    },
+    {
+      "id": "adoption-gates-pass",
+      "claim": "gofmt, go build, go vet, the full Go test suite, govulncheck and documentation checks pass with the workspace disabled; the providers config.Get() coupling budget is lowered from 23 to 21.",
+      "status": "observed",
+      "evidence": {
+        "source": "local release gates with GOWORK=off"
+      }
+    }
+  ],
+  "impact": {
+    "assertions": [
+      {
+        "id": "A1",
+        "impact": "unchanged",
+        "supported_by": [
+          "adoption-gates-pass",
+          "provider-auth-dependency"
+        ]
+      },
+      {
+        "id": "A2",
+        "impact": "unchanged",
+        "supported_by": [
+          "adoption-gates-pass",
+          "provider-auth-dependency"
+        ]
+      },
+      {
+        "id": "A3",
+        "impact": "unchanged",
+        "supported_by": [
+          "adoption-gates-pass",
+          "provider-auth-dependency"
+        ]
+      },
+      {
+        "id": "A4",
+        "impact": "unchanged",
+        "supported_by": [
+          "adoption-gates-pass",
+          "provider-auth-dependency",
+          "copilot-explicit-configuration"
+        ]
+      }
+    ],
+    "requires": [],
+    "possible_binding_changes": []
+  },
+  "questions": [],
+  "conclusion": {
+    "action": "reuse_contract",
+    "summary": "Adopting llm-provider-auth v0.5.0 moves Copilot and GCP auth configuration into the gateway with identical settings precedence, error text and token caching; release identity, health and model-list behavior are unchanged."
+  },
+  "proposed": {
+    "by": "modularization-m2-provider-auth",
+    "at": "2026-09-24T18:45:50.557Z"
+  },
+  "digest": "eb1f7c8bddc88a167086d160d3cd3ff013ee14fd85ec12670ae353f05277827f"
+}

@@ -1,0 +1,521 @@
+package config
+
+import (
+	"os"
+	"path/filepath"
+	"runtime"
+	"strings"
+	"testing"
+
+	"gopkg.in/yaml.v3"
+)
+
+func TestBedrockBaseURL(t *testing.T) {
+	cases := map[string]string{
+		"us-west-2": "https://bedrock-runtime.us-west-2.amazonaws.com/v1",
+		"":          "https://bedrock-runtime.us-east-1.amazonaws.com/v1",
+		"  ":        "https://bedrock-runtime.us-east-1.amazonaws.com/v1",
+	}
+	for region, want := range cases {
+		if got := BedrockBaseURL(region); got != want {
+			t.Errorf("BedrockBaseURL(%q)=%q want %q", region, got, want)
+		}
+	}
+}
+
+func TestKeyMintResolveRevoke(t *testing.T) {
+	t.Setenv("LLMGW_STATE_DIR", t.TempDir())
+	token := MintKey("proj", "cli")
+	if len(token) < 10 || token[:6] != "llmgw_" {
+		t.Fatalf("bad token: %q", token)
+	}
+	p := ResolvePrincipal(token)
+	if p == nil || p.Project != "proj" || p.Key != "cli" {
+		t.Fatalf("resolve wrong: %+v", p)
+	}
+	if ResolvePrincipal("nope") != nil {
+		t.Error("unknown token should resolve nil")
+	}
+	found := false
+	for _, k := range ListKeys() {
+		if k.Token == token && k.Project == "proj" {
+			found = true
+		}
+	}
+	if !found {
+		t.Error("minted key not listed")
+	}
+	if !RevokeKey(token) {
+		t.Error("revoke should return true")
+	}
+	if ResolvePrincipal(token) != nil {
+		t.Error("revoked token should resolve nil")
+	}
+	if RevokeKey(token) {
+		t.Error("second revoke should return false")
+	}
+}
+
+func TestKeyGovernance(t *testing.T) {
+	t.Setenv("LLMGW_STATE_DIR", t.TempDir())
+
+	// disabled key resolves nil
+	tok := MintKey("p", "k")
+	if !UpdateKey(tok, KeyUpdate{Disabled: ptr(true)}) {
+		t.Fatal("update should find the key")
+	}
+	if ResolvePrincipal(tok) != nil {
+		t.Error("disabled key should resolve nil")
+	}
+	// re-enable + set limits, they surface on the principal
+	UpdateKey(tok, KeyUpdate{Disabled: ptr(false), RPM: ptrInt(30), AllowedModels: &[]string{"smart"}})
+	p := ResolvePrincipal(tok)
+	if p == nil || p.RPM != 30 || len(p.AllowedModels) != 1 || p.AllowedModels[0] != "smart" {
+		t.Fatalf("governance not surfaced on principal: %+v", p)
+	}
+	// expired key resolves nil
+	tok2 := MintKey("p", "k2")
+	UpdateKey(tok2, KeyUpdate{ExpiresAt: ptrInt64(1)}) // 1970 -> long expired
+	if ResolvePrincipal(tok2) != nil {
+		t.Error("expired key should resolve nil")
+	}
+	for _, ki := range ListKeys() {
+		if ki.Token == tok2 && !ki.Expired {
+			t.Error("expired flag should be set in ListKeys")
+		}
+	}
+	if UpdateKey("nope", KeyUpdate{Disabled: ptr(true)}) {
+		t.Error("update of unknown token should return false")
+	}
+}
+
+func ptr(b bool) *bool        { return &b }
+func ptrInt(i int) *int       { return &i }
+func ptrInt64(i int64) *int64 { return &i }
+
+func TestLoadSeedsWritableConfigOnce(t *testing.T) {
+	dir := t.TempDir()
+	target := filepath.Join(dir, "state", "config.yaml")
+	seed := filepath.Join(dir, "seed.yaml")
+	t.Setenv("LLMGW_STATE_DIR", filepath.Join(dir, "state"))
+	t.Setenv("LLMGW_CONFIG", target)
+	t.Setenv("LLMGW_CONFIG_SEED", seed)
+	if err := os.WriteFile(seed, []byte("providers:\n  seeded:\n    type: echo\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	loaded := Load()
+	if loaded.Providers["seeded"] == nil {
+		t.Fatal("seeded provider was not loaded")
+	}
+	if err := os.WriteFile(seed, []byte("providers:\n  replaced:\n    type: echo\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	loaded = Load()
+	if loaded.Providers["seeded"] == nil || loaded.Providers["replaced"] != nil {
+		t.Fatalf("existing writable config was overwritten: %+v", loaded.Providers)
+	}
+}
+
+func TestSaveLoadRoundTrip(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("LLMGW_STATE_DIR", dir)
+	t.Setenv("LLMGW_CONFIG", filepath.Join(dir, "config.yaml"))
+	Update(func(s *Settings) {
+		s.Providers = map[string]*ProviderConfig{
+			"br":  {Type: "bedrock", Region: "eu-central-1"},
+			"cop": {Type: "github_copilot", RegistryID: "github_copilot", ForceApiSupport: true},
+			"vertex": {
+				Type: "vertex_ai", RegistryID: "vertex_ai",
+				Project: "project-a", Location: "us-central1",
+				VertexRequestType: "dedicated", DefaultVoice: "voice-a", Disabled: true,
+			},
+		}
+		s.OpenAICodexClientID = "codex-client"
+		s.Endpoints = map[string]*EndpointConfig{
+			"smart": {Failover: []EndpointMember{{Provider: "br", Model: "m1", AllowUnverified: true}}},
+		}
+	})
+	if err := Save(); err != nil {
+		t.Fatalf("save: %v", err)
+	}
+	reloaded := Load()
+	br, ok := reloaded.Providers["br"]
+	if !ok || br.Type != "bedrock" || br.Region != "eu-central-1" {
+		t.Fatalf("provider round-trip wrong: %+v", br)
+	}
+	if br.ForceApiSupport {
+		t.Fatalf("force_api_support should default false: %+v", br)
+	}
+	cop, ok := reloaded.Providers["cop"]
+	if !ok || cop.RegistryID != "github_copilot" || !cop.ForceApiSupport {
+		t.Fatalf("force_api_support did not round-trip: %+v", cop)
+	}
+	vertex, ok := reloaded.Providers["vertex"]
+	if !ok || vertex.Project != "project-a" || vertex.Location != "us-central1" ||
+		vertex.VertexRequestType != "dedicated" || vertex.DefaultVoice != "voice-a" || !vertex.Disabled {
+		t.Fatalf("provider setup fields did not round-trip: %+v", vertex)
+	}
+	if reloaded.OpenAICodexClientID != "codex-client" {
+		t.Fatalf("codex client id did not round-trip: %q", reloaded.OpenAICodexClientID)
+	}
+	ep, ok := reloaded.Endpoints["smart"]
+	if !ok || len(ep.Failover) != 1 || ep.Failover[0].Provider != "br" || !ep.Failover[0].AllowUnverified {
+		t.Fatalf("endpoint round-trip wrong: %+v", ep)
+	}
+}
+
+func TestAntigravityOAuthClientConfigurationIsRuntimeOnly(t *testing.T) {
+	t.Setenv("LLMGW_GOOGLE_ANTIGRAVITY_CLIENT_ID", "fixture-client-id")
+	t.Setenv("LLMGW_GOOGLE_ANTIGRAVITY_CLIENT_SECRET", "fixture-client-secret")
+	t.Setenv("LLMGW_GOOGLE_ANTIGRAVITY_OAUTH_PROFILE", "consumer_manual")
+	t.Setenv("LLMGW_GOOGLE_ANTIGRAVITY_CLIENT_MODE", "confidential")
+	t.Setenv("LLMGW_GOOGLE_ANTIGRAVITY_REDIRECT_URI", "https://callback.example.test/oauth")
+	settings := Defaults()
+	applyEnv(settings)
+	if settings.GoogleAntigravityClientID != "fixture-client-id" || settings.GoogleAntigravityClientSecret != "fixture-client-secret" ||
+		settings.GoogleAntigravityOAuthProfile != "consumer_manual" || settings.GoogleAntigravityClientMode != "confidential" ||
+		settings.GoogleAntigravityRedirectURI != "https://callback.example.test/oauth" {
+		t.Fatalf("runtime OAuth configuration was not loaded")
+	}
+	payload := configPayload(settings)
+	if _, ok := payload["google_antigravity_client_id"]; ok {
+		t.Fatal("Antigravity client ID entered persisted config")
+	}
+	if _, ok := payload["google_antigravity_client_secret"]; ok {
+		t.Fatal("Antigravity client secret entered persisted config")
+	}
+	for _, field := range []string{"google_antigravity_oauth_profile", "google_antigravity_client_mode", "google_antigravity_redirect_uri"} {
+		if _, ok := payload[field]; ok {
+			t.Fatalf("Antigravity runtime OAuth field %q entered persisted config", field)
+		}
+	}
+}
+
+func TestAntigravityPublicOAuthClientIDPersistsWithProvider(t *testing.T) {
+	settings := Defaults()
+	settings.Providers["antigravity"] = &ProviderConfig{
+		Type: "google_antigravity", PublicOAuthClientID: "fixture-public-client",
+	}
+	payload := configPayload(settings)
+	provider := payload["providers"].(map[string]any)["antigravity"].(map[string]any)
+	if provider["public_oauth_client_id"] != "fixture-public-client" {
+		t.Fatalf("provider payload=%+v", provider)
+	}
+}
+
+func TestPublicOAuthClientIDLoadsAndRoundTrips(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("LLMGW_STATE_DIR", dir)
+	t.Setenv("LLMGW_CONFIG", filepath.Join(dir, "config.yaml"))
+	if err := os.WriteFile(ConfigFilePath(), []byte("providers:\n  antigravity:\n    type: google_antigravity\n    public_oauth_client_id: fixture-public-client\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	loaded := Load()
+	if loaded.Providers["antigravity"].PublicOAuthClientID != "fixture-public-client" {
+		t.Fatalf("loaded provider=%+v", loaded.Providers["antigravity"])
+	}
+	if err := Save(); err != nil {
+		t.Fatal(err)
+	}
+	reloaded := Load()
+	if reloaded.Providers["antigravity"].PublicOAuthClientID != "fixture-public-client" {
+		t.Fatalf("reloaded provider=%+v", reloaded.Providers["antigravity"])
+	}
+}
+
+func TestAddProviderIfMissingPersistsWithoutOverwrite(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("LLMGW_STATE_DIR", dir)
+	t.Setenv("LLMGW_CONFIG", filepath.Join(dir, "config.yaml"))
+	if err := os.WriteFile(filepath.Join(dir, "config.yaml"), []byte("gateway_preamble: keep-me\ncustom_future_setting: keep-too\nproviders:\n  existing:\n    type: openai_compatible\n    api_key: ${ENV:EXISTING_KEY}\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	Load()
+	added, err := AddProviderIfMissing("anonymous", &ProviderConfig{Type: "openai_compatible", RegistryID: "fixture", BaseURL: "https://example.com/v1"})
+	if err != nil || !added {
+		t.Fatalf("added=%v err=%v", added, err)
+	}
+	added, err = AddProviderIfMissing("anonymous", &ProviderConfig{Type: "echo"})
+	if err != nil || added {
+		t.Fatalf("overwrite added=%v err=%v", added, err)
+	}
+	reloaded := Load()
+	if got := reloaded.Providers["anonymous"]; got == nil || got.RegistryID != "fixture" || got.Type != "openai_compatible" {
+		t.Fatalf("provider=%+v", got)
+	}
+	raw, err := os.ReadFile(filepath.Join(dir, "config.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(raw)
+	for _, preserved := range []string{"gateway_preamble: keep-me", "custom_future_setting: keep-too", "api_key: ${ENV:EXISTING_KEY}"} {
+		if !strings.Contains(text, preserved) {
+			t.Fatalf("provider patch dropped %q:\n%s", preserved, text)
+		}
+	}
+	if info, err := os.Stat(filepath.Join(dir, "config.yaml")); err != nil ||
+		(runtime.GOOS != "windows" && info.Mode().Perm()&0o077 != 0) {
+		t.Fatalf("config permissions=%v err=%v", info.Mode().Perm(), err)
+	}
+}
+
+func TestAddProviderIfMissingRejectsMalformedExistingConfig(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("LLMGW_STATE_DIR", dir)
+	t.Setenv("LLMGW_CONFIG", filepath.Join(dir, "config.yaml"))
+	Update(func(s *Settings) { s.Providers = map[string]*ProviderConfig{} })
+	if err := os.WriteFile(filepath.Join(dir, "config.yaml"), []byte("providers: [broken\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	added, err := AddProviderIfMissing("anonymous", &ProviderConfig{Type: "openai_compatible"})
+	if err == nil || added || Get().Providers["anonymous"] != nil {
+		t.Fatalf("added=%v err=%v providers=%+v", added, err, Get().Providers)
+	}
+}
+
+func TestSavingsLedgerDefaultsOffAndExplicitConfigIsPreserved(t *testing.T) {
+	if Defaults().Savings.Enabled {
+		t.Fatal("legacy savings ledger should default off")
+	}
+	s := parseSettingsForTest(t, `
+savings:
+  enabled: true
+  db_path: custom/usage.db
+  baseline_model: provider/baseline
+`)
+	if !s.Savings.Enabled || s.Savings.DBPath != "custom/usage.db" || s.Savings.BaselineModel != "provider/baseline" {
+		t.Fatalf("explicit savings config not preserved: %+v", s.Savings)
+	}
+}
+
+func TestSecretsIsolation(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("LLMGW_STATE_DIR", dir)
+	SaveSecret("prov", "sk-secret")
+	if LoadSecrets()["prov"] != "sk-secret" {
+		t.Error("secret not stored")
+	}
+	DeleteSecret("prov")
+	if LoadSecrets()["prov"] != "" {
+		t.Error("secret not deleted")
+	}
+}
+
+// parseSettingsForTest applies config.go's own parse path (applyConfig) to a
+// YAML snippet, rather than reimplementing yaml.Unmarshal + field mapping.
+func parseSettingsForTest(t *testing.T, yamlStr string) *Settings {
+	t.Helper()
+	var payload map[string]any
+	if err := yaml.Unmarshal([]byte(yamlStr), &payload); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	s := Defaults()
+	applyConfig(s, payload)
+	return s
+}
+
+// serialiseSettingsForTest applies config.go's own serialise path
+// (configPayload) so the test observes exactly what Save() would write.
+func serialiseSettingsForTest(t *testing.T, s *Settings) string {
+	t.Helper()
+	b, err := yaml.Marshal(configPayload(s))
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	return string(b)
+}
+
+// A config written before the rename must keep loading. This is a config-file
+// first product; silently dropping a user's routing chains on upgrade is not an
+// acceptable migration.
+func TestLegacyCategoriesKeyStillLoads(t *testing.T) {
+	settings := parseSettingsForTest(t, `
+providers:
+  openai:
+    type: openai
+categories:
+  smart:
+    failover:
+      - { provider: openai, model: gpt-4o-mini }
+`)
+	chain, ok := settings.Endpoints["smart"]
+	if !ok {
+		t.Fatalf("legacy categories: key did not populate Endpoints: %+v", settings.Endpoints)
+	}
+	if len(chain.Failover) != 1 || chain.Failover[0].Provider != "openai" {
+		t.Fatalf("failover=%+v", chain.Failover)
+	}
+}
+
+func TestEndpointsKeyLoads(t *testing.T) {
+	settings := parseSettingsForTest(t, `
+providers:
+  openai:
+    type: openai
+endpoints:
+  smart:
+    failover:
+      - { provider: openai, model: gpt-4o-mini }
+`)
+	if _, ok := settings.Endpoints["smart"]; !ok {
+		t.Fatalf("endpoints: key did not load: %+v", settings.Endpoints)
+	}
+}
+
+func TestProviderPoliciesLoadAndRoundTrip(t *testing.T) {
+	settings := parseSettingsForTest(t, `
+policies:
+  defaults:
+    retry_max_attempts: 3
+    retry_initial_backoff_seconds: 0.25
+    retry_max_backoff_seconds: 5
+    retry_backoff_multiplier: 1.5
+    circuit_failure_threshold: 6
+    circuit_cooldown_seconds: 45
+  overrides:
+    copilot:
+      retry_max_attempts: 1
+      circuit_failure_threshold: 2
+`)
+	if settings.Policies.Defaults.RetryMaxAttempts != 3 ||
+		settings.Policies.Defaults.CircuitCooldownSeconds != 45 ||
+		settings.Policies.Overrides["copilot"].CircuitFailureThreshold != 2 ||
+		settings.Policies.Overrides["copilot"].RetryInitialBackoffSeconds != 0.25 ||
+		settings.Policies.Overrides["copilot"].RetryBackoffMultiplier != 1.5 {
+		t.Fatalf("policies did not load: %+v", settings.Policies)
+	}
+	reloaded := parseSettingsForTest(t, serialiseSettingsForTest(t, settings))
+	if reloaded.Policies.Defaults.RetryInitialBackoffSeconds != 0.25 ||
+		reloaded.Policies.Overrides["copilot"].RetryMaxAttempts != 1 {
+		t.Fatalf("policies did not round-trip: %+v", reloaded.Policies)
+	}
+}
+
+func TestPartialProviderPoliciesInheritDefaultsAndPreserveExplicitZero(t *testing.T) {
+	settings := parseSettingsForTest(t, `
+policies:
+  defaults:
+    retry_max_attempts: 3
+  overrides:
+    inherited:
+      circuit_failure_threshold: 2
+    disabled:
+      retry_max_attempts: 0
+      circuit_failure_threshold: 0
+`)
+	if settings.Policies.Defaults.RetryInitialBackoffSeconds != 0.5 ||
+		settings.Policies.Defaults.RetryMaxBackoffSeconds != 8 ||
+		settings.Policies.Overrides["inherited"].RetryMaxAttempts != 3 ||
+		settings.Policies.Overrides["inherited"].RetryInitialBackoffSeconds != 0.5 ||
+		settings.Policies.Overrides["disabled"].RetryMaxAttempts != 0 ||
+		settings.Policies.Overrides["disabled"].CircuitFailureThreshold != 0 {
+		t.Fatalf("partial policy inheritance=%+v", settings.Policies)
+	}
+	serialized := serialiseSettingsForTest(t, settings)
+	var payload map[string]any
+	if err := yaml.Unmarshal([]byte(serialized), &payload); err != nil {
+		t.Fatal(err)
+	}
+	policies := payload["policies"].(map[string]any)
+	overrides := policies["overrides"].(map[string]any)
+	inherited := overrides["inherited"].(map[string]any)
+	if len(inherited) != 1 || inherited["circuit_failure_threshold"] == nil {
+		t.Fatalf("save materialized inherited policy fields: %+v", inherited)
+	}
+	defaults := policies["defaults"].(map[string]any)
+	defaults["retry_initial_backoff_seconds"] = 1.25
+	encoded, err := yaml.Marshal(payload)
+	if err != nil {
+		t.Fatal(err)
+	}
+	reloaded := parseSettingsForTest(t, string(encoded))
+	if reloaded.Policies.Overrides["inherited"].RetryInitialBackoffSeconds != 1.25 {
+		t.Fatalf("saved sparse override stopped inheriting new default: %+v", reloaded.Policies)
+	}
+	configured := settings.Policies.ConfiguredOverrides()["inherited"].(map[string]any)
+	if len(configured) != 1 || configured["circuit_failure_threshold"] == nil {
+		t.Fatalf("configured override exposed inherited fields: %+v", configured)
+	}
+}
+
+// When both keys are present the new one wins, and the old one must not
+// silently merge — an operator mid-migration should get a predictable result.
+//
+// "smart" alone would pass under merge semantics too, since a merge that
+// applies endpoints: on top of categories: converges to the same value for a
+// key present in both. legacy-only is the case that tells ignore and merge
+// apart: a merge would carry it through from categories:, an ignore drops it
+// entirely because categories: is never consulted once endpoints: is present.
+func TestEndpointsWinsOverLegacyCategories(t *testing.T) {
+	settings := parseSettingsForTest(t, `
+providers:
+  openai:
+    type: openai
+categories:
+  smart:
+    failover:
+      - { provider: openai, model: legacy-model }
+  legacy-only:
+    failover:
+      - { provider: openai, model: legacy-model }
+endpoints:
+  smart:
+    failover:
+      - { provider: openai, model: current-model }
+`)
+	chain := settings.Endpoints["smart"]
+	if len(chain.Failover) != 1 || chain.Failover[0].Model != "current-model" {
+		t.Fatalf("endpoints: did not take precedence: %+v", chain.Failover)
+	}
+	if _, ok := settings.Endpoints["legacy-only"]; ok {
+		t.Fatalf("categories:-only key leaked through — endpoints: should ignore categories: entirely, not merge: %+v", settings.Endpoints)
+	}
+}
+
+// Round-tripping writes the new key, so a save quietly migrates the file: the
+// legacy key must both appear as endpoints: and disappear as categories:.
+func TestSaveWritesEndpointsKey(t *testing.T) {
+	settings := parseSettingsForTest(t, `
+providers:
+  openai:
+    type: openai
+categories:
+  smart:
+    failover:
+      - { provider: openai, model: gpt-4o-mini }
+`)
+	out := serialiseSettingsForTest(t, settings)
+	if !strings.Contains(out, "endpoints:") {
+		t.Fatalf("serialised config has no endpoints: key:\n%s", out)
+	}
+	if strings.Contains(out, "categories:") {
+		t.Fatalf("serialised config still has the legacy categories: key, save did not migrate it:\n%s", out)
+	}
+}
+
+func TestUpdateAndSaveFailurePreservesMemory(t *testing.T) {
+	keepSettings(t)
+	dir := t.TempDir()
+	t.Setenv("LLMGW_STATE_DIR", dir)
+	t.Setenv("LLMGW_CONFIG", filepath.Join(dir, "missing", "config.yaml"))
+	Update(func(s *Settings) {
+		*s = *Defaults()
+		s.Endpoints["existing"] = &EndpointConfig{Failover: []EndpointMember{{Provider: "echo", Model: "old"}}}
+	})
+	before, generation := Snapshot()
+
+	restore, err := UpdateAndSave(func(next *Settings) error {
+		next.Endpoints["new"] = &EndpointConfig{Failover: []EndpointMember{{Provider: "echo", Model: "new"}}}
+		return nil
+	})
+	if err == nil || restore != nil {
+		t.Fatalf("restore=%v err=%v", restore != nil, err)
+	}
+	current, currentGeneration := Snapshot()
+	if current != before || currentGeneration != generation {
+		t.Fatalf("failed save published generation %d over %d", currentGeneration, generation)
+	}
+	if current.Endpoints["new"] != nil || current.Endpoints["existing"].Failover[0].Model != "old" {
+		t.Fatalf("failed save changed memory: %+v", current.Endpoints)
+	}
+}

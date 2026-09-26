@@ -1,0 +1,48 @@
+{
+  "schemaVersion": 1,
+  "identity": {
+    "formalName": "llm-gateway",
+    "visibleWordmark": "llmgw",
+    "markName": "Optical Rail Splitter"
+  },
+  "source": {
+    "origin": "Original project artwork authored from the approved geometry documented in BRAND.md.",
+    "owner": "Xibodev",
+    "thirdPartyArtwork": [],
+    "fontBinaries": []
+  },
+  "assets": {
+    "editableMasters": [
+      "logos/mark.svg",
+      "logos/mark-inverse.svg",
+      "logos/lockup.svg",
+      "logos/lockup-inverse.svg",
+      "logos/wordmark.svg",
+      "logos/wordmark-inverse.svg",
+      "logos/mono-black.svg",
+      "logos/mono-white.svg",
+      "icons/favicon.svg",
+      "icons/app-icon.svg",
+      "icons/icon-192.svg",
+      "icons/icon-512.svg",
+      "og/og-default.svg"
+    ],
+    "generated": ["og/og-default.png"]
+  },
+  "projections": {
+    "website/favicon.svg": "icons/favicon.svg",
+    "website/logo-mark.svg": "logos/mark.svg",
+    "website/icon-192.svg": "icons/icon-192.svg",
+    "website/icon-512.svg": "icons/icon-512.svg",
+    "website/og-default.svg": "og/og-default.svg",
+    "website/og-default.png": "og/og-default.png"
+  },
+  "renderer": {
+    "package": "@resvg/resvg-js",
+    "version": "2.6.2",
+    "cliPackage": "@resvg/resvg-js-cli",
+    "cliVersion": "2.6.2-beta.1",
+    "script": "scripts/render-brand-assets.mjs"
+  },
+  "license": "See LICENSES.md and the repository LICENSE and NOTICE files."
+}

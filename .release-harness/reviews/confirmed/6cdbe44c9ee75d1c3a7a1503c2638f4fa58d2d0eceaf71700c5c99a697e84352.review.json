@@ -1,0 +1,647 @@
+{
+  "schema_version": "1.0.0",
+  "mode": "change",
+  "contract": {
+    "digest": "31b393ab3e80162226619c441694573993ac618382d74642101484a0bf2e9c80"
+  },
+  "authoring_provenance": {
+    "status": "established",
+    "path": ".release-harness/drafts/llm-gateway.record.json",
+    "digest": "6732ddf3dc8236b974e2aae5f81b546d89c2a466b6fb0a368d76620955bf981e"
+  },
+  "sources": [
+    {
+      "source_id": "primary",
+      "status": "established",
+      "repository_identity": "https://github.com/xibodev/llm-gateway.git",
+      "base_ref": "origin/main",
+      "base_commit": "53e8c49ebd20564f0b4ae4a38f5cb42dee492bc2",
+      "merge_base": "7bd5cc23661e54a0906952577fe3141580ba3a97",
+      "head_commit": "fa46714288d2d165fc36fe3f646efd495df62dcc",
+      "head_tree": "34071f299735fd30c72277f9221fc57275f22f96",
+      "reviewed_source_digest": "69cae462faac38c64fe410408ebadf1814a70c09693842c1c3359aa0c9d07ef9",
+      "changed_paths": [
+        {
+          "status": "modified",
+          "path": "go/cmd/llmgw/main.go",
+          "old_blob": "9dfef0db5c4a16a13f9704ec0b8df4aeeaa424bc",
+          "new_blob": "c623f4d5f62d097d974ed84ccb085782b0bca176"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/api/admin.go",
+          "old_blob": "903de7467b25b30f661cf99ea850e37bb71beb40",
+          "new_blob": "d77d48a6d0db65390ee91cbc1dd389b8fccd77c5"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/api/anonymous_provider_automation_test.go",
+          "old_blob": "fea46e74262e890eb02dee61267332d6da45147f",
+          "new_blob": "c1c65f9a4d6e4b8f7a87578da6576e41d1d8507f"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/api/anonymous_provider_automation.go",
+          "old_blob": "5521bfbfb24338f668daa6c5a09e2dfe14b0aa7e",
+          "new_blob": "49cb016eccc4b1ef3699f6071e6f6d074590cdb3"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/api/anthropic_test.go",
+          "old_blob": "9549116105b0d169e447b5d0d48bd2c5fa40b2c7",
+          "new_blob": "ccb6f5e5e870df2556372a76fca3bd4fd6ceaf82"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/api/audio_test.go",
+          "old_blob": "eae997e7f6898a64d70bd660dc6434e7bf364a23",
+          "new_blob": "3e28ad8f0724134b060ac7c4396223153fe5a0ac"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/api/build_info_test.go",
+          "old_blob": "38f0077f1f69b6ed0b7489f0252b9749e2d7933e",
+          "new_blob": "94afc84dd9f5ad94f35557f8a0a3a9b9df95f25f"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/api/cancellation_test.go",
+          "old_blob": "44935becafed8d2d65821a3f0ec4a408cee37c5a",
+          "new_blob": "da7a0cb9f2b151b5b85c0c4318968f4ffa2a5250"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/api/catalog_diagnostics_test.go",
+          "old_blob": "852867d64c0e03c77a017104ba317e8f15a8dbe4",
+          "new_blob": "773ae7d2afabbcc40d4f14bcbc95f688580be7cd"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/api/characterization_test.go",
+          "old_blob": "e08e0dd760080d73c84a8699d185bf688a4e9b5c",
+          "new_blob": "84668cd2f79bc31c0f339aec8594210282548bed"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/api/chat_tool_finish_test.go",
+          "old_blob": "a9eb313f2fbf857c2500c665190d356c83d6ddb0",
+          "new_blob": "443abded5d4da926746991bda0e043e84d9d5c0a"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/api/cli_contract_test.go",
+          "old_blob": "4bca06adcb549dc3442a27cff5c18b5f6c604505",
+          "new_blob": "c7f4433e20aadbc2d837a3432829e43fdef088fa"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/api/connection_apikey_types_test.go",
+          "old_blob": "4a12a9e0a857ab9a2c4a0f4154c5b9139cd88740",
+          "new_blob": "56f3f512a5a00844661a2d0a67fb9c42f0d9f012"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/api/connections_api_test.go",
+          "old_blob": "76c0cfcb6ad86172bb8876d2f939c8c75ceabb7c",
+          "new_blob": "e4dfcd4e5e272b5d9e5997808fd555d2fa5edf30"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/api/credential_upload_test.go",
+          "old_blob": "779276380469076b82e11ee9f7dd8b2c301596e1",
+          "new_blob": "03a10ae5a438cac3081b3cce1b919112c28fde2c"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/api/embeddings_test.go",
+          "old_blob": "32acdb27e89929fb0f05f51a4c30baf6eb144485",
+          "new_blob": "012d219bdeeea6e9c5fa87a7832c9de3198a899f"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/api/endpoints_api_test.go",
+          "old_blob": "91f614f11054aeb72e5e12d719a38ce32069491f",
+          "new_blob": "fd1aa28c5aeb4bada58b50911bda52eaf4b0efd6"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/api/governance_test.go",
+          "old_blob": "aabef82e11d26fc91d980b60a1ef4a429ab30d00",
+          "new_blob": "1e9fb9bed501741937f4aa0dd3451568f1591a23"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/api/iam_api_test.go",
+          "old_blob": "8a3058e37e5bf1ace0e5d4d359352f8c513e9ed0",
+          "new_blob": "6b6233ec1d3fbc16d0b265d0db7655e1b354fff5"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/api/key_scope_test.go",
+          "old_blob": "f860d731dc03b8583d5e2d89ec31e0aa1484c0e0",
+          "new_blob": "6a12a7f1f3b59047135e2c2cf6e5602fc4ee716c"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/api/load_benchmark_test.go",
+          "old_blob": "4ae9fa61b88f095ce90ba5f78c4e6c742a6c207e",
+          "new_blob": "82639ed83d8443fe57702bd9fd701a071c04e535"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/api/media_scope_regression_test.go",
+          "old_blob": "aec6cae39332289f1709a88a1fa8b4c5b9801097",
+          "new_blob": "c5837a735ec19ab536750f003bfabc040b7e3da9"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/api/models_test.go",
+          "old_blob": "d8070abf7aaf374b3326b6e7f84e77061928c2fc",
+          "new_blob": "0abb79719b80332840fd487426adbee96e0e1369"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/api/oauth_api_test.go",
+          "old_blob": "b9ce6991c1c20768bc29343c0c314ae38f1ccc1b",
+          "new_blob": "5d888109d61ecfe38101434329fbfddaeab83fae"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/api/openai_test.go",
+          "old_blob": "7070f0b8a360c7e4b9fe8b04a90ea2e72722ff9b",
+          "new_blob": "91140e715248a64c900ad2c5cd075d235ca2d76f"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/api/playground_audio_test.go",
+          "old_blob": "5a9d378aedcdbeaa7853ab8ad2c2f8ea56a341d6",
+          "new_blob": "a19ddf9615ccd135301dee0703f54e15caabb87d"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/api/playground_test.go",
+          "old_blob": "cd362afe9d532fa4af46cb0aad08252253011cb0",
+          "new_blob": "d58fe9bddabfa7ba1e90dae599a9c7e4908bad94"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/api/provider_credentials_test.go",
+          "old_blob": "39958e59aa12f8621d40b8df538190e0059ca1be",
+          "new_blob": "e028bddd6da7e06e5076e96704335fbb12382d30"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/api/provider_instances_test.go",
+          "old_blob": "81559d9abe3feead4834e9e36b18944550f8de02",
+          "new_blob": "e285a3d2e7fc8108d964e0027fe1172eaf89d5e4"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/api/provider_lifecycle_test.go",
+          "old_blob": "b365d6ffa053ceed8d384489851d7b9512173255",
+          "new_blob": "9af92fef664a284588f9dfcae8abf4ac4c9b61c7"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/api/provider_quota_test.go",
+          "old_blob": "404e041fd27181f14555c18308a765a40de8d587",
+          "new_blob": "1075263da02372940a10dcf56a8ab1a809d5fa84"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/api/provider_registry_test.go",
+          "old_blob": "d544b19e8eefffd3fcd2246a27933b9d470fc109",
+          "new_blob": "fee6fe60956c74951ff0ae3a0fc014a6b669ed6e"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/api/provider_service_account_test.go",
+          "old_blob": "0e53c85d6bd7c95858586f57c79ab07419b94c40",
+          "new_blob": "648e7930cc6fcb9bbc56504c2804152f5464f5d6"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/api/routes_models_api_test.go",
+          "old_blob": "7cfbffa20bf01a4ea2a91f93be7a6070e5d7b002",
+          "new_blob": "1592a42e855d59dd899f3354c41064bf14afa9e7"
+        },
+        {
+          "status": "added",
+          "path": "go/internal/api/server_runtime_test.go",
+          "old_blob": "0000000000000000000000000000000000000000",
+          "new_blob": "2c2dd2ac2da41659c0080a6292a55e980e7ae517"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/api/server_test.go",
+          "old_blob": "817c6139e0a84f0ee80b4540b967a58e7490b579",
+          "new_blob": "b3fc487975f5b988abe858415c58193e51ffc395"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/api/server.go",
+          "old_blob": "434400c30367b68759a14273989983b368196194",
+          "new_blob": "8a0604847135e18fd4583d8239ce74550e718f99"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/api/sso_test.go",
+          "old_blob": "b05dcd823be360f49e1142d838e68a7e725194b8",
+          "new_blob": "8e54140555f81e016ee070992735ab0b33f154f4"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/api/transport_mode_test.go",
+          "old_blob": "11d9ab909fefec2af81193455050b448bbb550f0",
+          "new_blob": "ccd82a702acd2cad1b7e398663a55ad8ef562ca2"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/api/user_key_audit_test.go",
+          "old_blob": "68189935701645b2e2846ba762d9f2fb903fa151",
+          "new_blob": "b64ef8d3c7757f09c342ed0457fed6bae7af4cd6"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/api/user_provider_test.go",
+          "old_blob": "7bd4184f5c95ebd7683b8d2bdbc9e345d980906d",
+          "new_blob": "7836ea5efa138110b595c88dff871248dc5fd08c"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/api/user_test.go",
+          "old_blob": "d7d1bce0c9e344c472398ddd7a94549776eacd23",
+          "new_blob": "64be4f36f4ede09d37548be50add767f9bc42896"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/api/vendor_fields_test.go",
+          "old_blob": "391d1ee726ad6b2e02cef79a3bb3c68a02f8032a",
+          "new_blob": "da27474a9d45b221c677b935ad624f6e0974efb7"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/api/zen_muse_regression_test.go",
+          "old_blob": "90360933909ed6877ca33345b79910993579383f",
+          "new_blob": "7ecfcd00d8e41cfe19734c73940ae56f6b7bfdee"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/architecture/doc.go",
+          "old_blob": "f72a5e28a9637e656d077b0c88f2a1ff7a9e6ad5",
+          "new_blob": "1b2d6dfde2bb398990fbf40f5f6a0eb0e1b87780"
+        },
+        {
+          "status": "added",
+          "path": "go/internal/architecture/package_state_test.go",
+          "old_blob": "0000000000000000000000000000000000000000",
+          "new_blob": "317506690d470aaeb489530ca18c57bb08d3bea6"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/providers/antigravity_test.go",
+          "old_blob": "91ce065764d9b5080fa1f9849941ae5a8309e3ce",
+          "new_blob": "1a21f01a3e02a9c980bef27ffa72a93d99d8b117"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/providers/antigravity.go",
+          "old_blob": "611e799ca8c22b28dc34ce186cceb5e45467aff3",
+          "new_blob": "81e96e634f2b7f9a710371515ac0a3a68eb8ea08"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/providers/auth_adapter_test.go",
+          "old_blob": "87e0b015752edec90230f263a42882d31caf3836",
+          "new_blob": "527b3357def0fbc2f50d3c522c564c011e4b4691"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/providers/auth_adapter.go",
+          "old_blob": "7ef157ccc3d9c80ac6c1dbdd6ef0ceeebd3f5273",
+          "new_blob": "3cf9f26cfd388ce5997ed4b23e736a9bb65e68e5"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/providers/byoc_test.go",
+          "old_blob": "9cfa56882a9c44b2dac58112b7babd0da6aeecfd",
+          "new_blob": "fe6ec52ea14d9f705685cf00e7cb12b243c8d8e0"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/providers/catalog_http_test.go",
+          "old_blob": "b306c2ca87a9a379bc89ddc8509ea174fcf41a22",
+          "new_blob": "cda6cc69a8b05d68cabe7664dbf7a63c9c0b84a2"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/providers/catalog_payload_test.go",
+          "old_blob": "f3f546fff69e2474e638f2607db275286914d6a0",
+          "new_blob": "3a00018a24c6c09578a18dbb176090b99986c861"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/providers/catalog_read_test.go",
+          "old_blob": "3c87350591da713641f5d8b088f31818bbbcfef2",
+          "new_blob": "3418ea806743fdff1d142ad56c104fa0c0b962e8"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/providers/catalog_schema_test.go",
+          "old_blob": "2c3b0d62cd7b0e15b0132e05207f1810f4142eef",
+          "new_blob": "38bb2a92ba94db11fc3f94d808025f3136e7a1b1"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/providers/catalog_snapshot_test.go",
+          "old_blob": "98fe53c0a783dc78227331a61160146222f526a8",
+          "new_blob": "235f5a715c7d65cdccacb48c0d670753d25386e6"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/providers/catalog.go",
+          "old_blob": "ad44f44a23d76aa641860dabd39dfda15f98c67d",
+          "new_blob": "d50501da00a44611436c110d521dec90462a88e7"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/providers/codex_endpoints.go",
+          "old_blob": "f6caced82f7b01234d89b569708e17ec9b801e22",
+          "new_blob": "f8e3ae7b754e30f9b15f7fdd12d29c471452384b"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/providers/codex.go",
+          "old_blob": "ad4428bee3c0509d4bd7d7c025a86843fb419b88",
+          "new_blob": "bbbc1e61485442be73b057683be2998589bd15bd"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/providers/copilot_client_test.go",
+          "old_blob": "91e356599920b2b74d2fb2cb1c4efa11b51a26b2",
+          "new_blob": "781459b62abbb8bd16e5fd2f4a166aada4380184"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/providers/copilot_client.go",
+          "old_blob": "f8d8b1fb06d4e93b2fb5264324071aa008a8ba02",
+          "new_blob": "c4e7888aef3230fabb876078d17bd8263621f313"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/providers/edgetts_test.go",
+          "old_blob": "730d3367b823a85dd03ac75b45546599dd268119",
+          "new_blob": "e5de64fca2d3d317be8655efabc1b503e2794d3c"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/providers/edgetts.go",
+          "old_blob": "d6f1acf6bdacddacd917999ebdbeb345196c330f",
+          "new_blob": "31f3e89e0bc85267164eafea449222cab2101e8e"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/providers/factory.go",
+          "old_blob": "c263f8d1028deda98134a2abcbab1e897bd255e2",
+          "new_blob": "d4cab9391bee867c4100e94676fc3b87c160464d"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/providers/googleai_connection_test.go",
+          "old_blob": "8a1f634c97fcdecc456684bd10a197ffce9f0901",
+          "new_blob": "ff44b48a901f00c51fde97fedf7dd04ce352dd49"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/providers/googleai_pagination_limits_test.go",
+          "old_blob": "3c03ac0f7f7f02a2e408b33c9779df8c8dd44b79",
+          "new_blob": "e6ea99083ba65b7692ccae148b1d212575645e48"
+        },
+        {
+          "status": "added",
+          "path": "go/internal/providers/installed.go",
+          "old_blob": "0000000000000000000000000000000000000000",
+          "new_blob": "07910ede08d4309669cbeb87a8c3affbfd14b6c0"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/providers/openai_auth.go",
+          "old_blob": "82821a638ec844bceee6153a6c521212c208b3a1",
+          "new_blob": "fa1ca21f364f92a5ad3a6af64e8431c1fa7d1db4"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/providers/opencode_zen_test.go",
+          "old_blob": "465b561da35add594c497b65bf0fbde55e0ea328",
+          "new_blob": "8757bcd75fa2bb0a829fc5b47c3f9401f7bca764"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/providers/policy.go",
+          "old_blob": "0bd8ed4ec29506e4d3027a0d7e858b5c9b9a266e",
+          "new_blob": "85f239a51311884eb178362d0fb907968e5e6c83"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/providers/provider_orchestrator.go",
+          "old_blob": "2b428faf08c3309dc5d994aa36e0787651ce254f",
+          "new_blob": "6fc93bce2974fdc8ad57fbcb829e5c2069c2fd86"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/providers/proxy.go",
+          "old_blob": "2e5f6ab3293c71965f7d92d9252d86d460a7a445",
+          "new_blob": "db8a1baa2ff3a81f5293aca4de9b214dfca13ac8"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/providers/quota_adapter_test.go",
+          "old_blob": "51a6db6e3512d84c40d52ea7d6cecee59ef9e8c2",
+          "new_blob": "85011991bc9fae6ab39ab2d6373b8602c705ae77"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/providers/quota_adapter.go",
+          "old_blob": "9c64140e1e85678ff2116c3346845293eb4e781d",
+          "new_blob": "d3f21b84b3170fe39bc6b88818e82a4911229d2a"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/providers/registry_overlay.go",
+          "old_blob": "12633e388af7f6b7d7417e93ed12709f92075198",
+          "new_blob": "88f69e39757d2121935ab55b573ca091631bad3a"
+        },
+        {
+          "status": "added",
+          "path": "go/internal/providers/runtime_test.go",
+          "old_blob": "0000000000000000000000000000000000000000",
+          "new_blob": "8000a6afb867f1825cdf633aecc2e572aa06cf8c"
+        },
+        {
+          "status": "added",
+          "path": "go/internal/providers/runtime.go",
+          "old_blob": "0000000000000000000000000000000000000000",
+          "new_blob": "6feeeabd10084ee360a740cb471a5f1ff3c523bd"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/roster/api_test.go",
+          "old_blob": "682c7210ee113f5448173b637c47024f516cef90",
+          "new_blob": "b48c458db4aa5727c213aa3fc4adae97571ac897"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/router/classification_parity_test.go",
+          "old_blob": "ba8e89fc39d298b9477b57d803acd11262e79c20",
+          "new_blob": "65737b11863aea63faf49c3e5ac0f247abaf2bf3"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/router/failover_test.go",
+          "old_blob": "5f1033351c612337ea91c7da32d32f35ad786324",
+          "new_blob": "562ea12f74556f8ed42a61293fc0f15d0a12c056"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/router/failover.go",
+          "old_blob": "4c48a1f8d6847714994178411a5abc1906571ec4",
+          "new_blob": "2e945ef99d2a57ab5332e1f1b6a34a37777261fa"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/router/governance_test.go",
+          "old_blob": "96ae38e68080dc6f304046717449013517406816",
+          "new_blob": "4d799f6913be1918b0aa46a3bfa84847fe05fde6"
+        },
+        {
+          "status": "added",
+          "path": "go/internal/router/installed.go",
+          "old_blob": "0000000000000000000000000000000000000000",
+          "new_blob": "528925603bc1b994aea9879ecb66365eaa31c19f"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/router/prices.go",
+          "old_blob": "aee7bccc93e687984e6970a6a44db2567eebf0cb",
+          "new_blob": "bc8b32c529ba94f234145bb4158ffa4c53476224"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/router/retention_test.go",
+          "old_blob": "5c569179ebda539821a1e6b84429c3a7df5f0716",
+          "new_blob": "060dff548043a600bf537b91ba91af1f31d9275a"
+        },
+        {
+          "status": "added",
+          "path": "go/internal/router/runtime_test.go",
+          "old_blob": "0000000000000000000000000000000000000000",
+          "new_blob": "f46be3d9d06cea3cf49ac09ab7481c0a163580e3"
+        },
+        {
+          "status": "added",
+          "path": "go/internal/router/runtime.go",
+          "old_blob": "0000000000000000000000000000000000000000",
+          "new_blob": "2629c8ca348f4c80bc7c2b4f302badd8ac16c51f"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/router/savings.go",
+          "old_blob": "20d7895e6014720bdb79cc65ce4cd45ffd76e1f2",
+          "new_blob": "1bbdaad00bfea2a3acbea0f8c6ee244290c52760"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/router/telemetry.go",
+          "old_blob": "7da7ab907933e8fcd269bdac354a5dcafe5b7d73",
+          "new_blob": "4c77f5281cef6b1893a1aa037902fbd8a5b47463"
+        }
+      ]
+    }
+  ],
+  "facts": [
+    {
+      "id": "runtime-value",
+      "claim": "The mutable package state of internal/providers (provider cache, catalog state, refresh-lock tables, circuits, GCP token cache, Copilot client, auth and quota adapter registries, Edge TTS clock and the Codex, Copilot and Antigravity test seams) lives in providers.Runtime, and router telemetry and savings state lives in router.Runtime. cmd/llmgw builds both after config.Load and iam.Initialize and hands them to their owners; deep paths reach the installed runtime through one documented seam per package.",
+      "status": "observed",
+      "evidence": {
+        "source": "go/internal/providers/runtime.go and installed.go; go/internal/router/runtime.go and installed.go; go/cmd/llmgw/main.go"
+      }
+    },
+    {
+      "id": "guard",
+      "claim": "A new architecture test fails on any package-level variable or init function in internal/providers and internal/router production code outside an allowlist of the two runtime seams and four tables constant after init, each documented; a throwaway variable makes it fail.",
+      "status": "observed",
+      "evidence": {
+        "source": "go/internal/architecture"
+      }
+    },
+    {
+      "id": "no-behavior-change",
+      "claim": "The state moved without changing what it holds or when it is read or written; request handling, refresh, catalog caching and circuit breaking behave as before, and coupling budgets are unchanged.",
+      "status": "observed",
+      "evidence": {
+        "source": "git diff between the merge base and HEAD; characterization and full test suites"
+      }
+    },
+    {
+      "id": "suite",
+      "claim": "The full Go suite passes with HTTP_PROXY and HTTPS_PROXY unreachable with unchanged characterization goldens; gofmt, vet, govulncheck (0 reachable), check-docs and git diff --check pass.",
+      "status": "observed",
+      "evidence": {
+        "source": "local gate run on the reviewed head"
+      }
+    }
+  ],
+  "impact": {
+    "assertions": [
+      {
+        "id": "A1",
+        "impact": "unchanged",
+        "supported_by": [
+          "runtime-value",
+          "no-behavior-change",
+          "suite"
+        ]
+      },
+      {
+        "id": "A2",
+        "impact": "unchanged",
+        "supported_by": [
+          "runtime-value",
+          "no-behavior-change",
+          "suite"
+        ]
+      },
+      {
+        "id": "A3",
+        "impact": "unchanged",
+        "supported_by": [
+          "runtime-value",
+          "no-behavior-change",
+          "suite"
+        ]
+      },
+      {
+        "id": "A4",
+        "impact": "unchanged",
+        "supported_by": [
+          "runtime-value",
+          "no-behavior-change",
+          "suite"
+        ]
+      }
+    ],
+    "requires": [],
+    "possible_binding_changes": []
+  },
+  "questions": [],
+  "conclusion": {
+    "action": "reuse_contract",
+    "summary": "Package state moves into providers and router Runtime values built in main; CLI, health and models behavior is unchanged."
+  },
+  "proposed": {
+    "by": "providers-runtime",
+    "at": "2026-09-25T05:53:35.047Z"
+  },
+  "digest": "6cdbe44c9ee75d1c3a7a1503c2638f4fa58d2d0eceaf71700c5c99a697e84352"
+}

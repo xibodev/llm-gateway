@@ -1,0 +1,101 @@
+{
+  "schema_version": "1.0.0",
+  "mode": "baseline",
+  "contract": {
+    "digest": "31b393ab3e80162226619c441694573993ac618382d74642101484a0bf2e9c80"
+  },
+  "authoring_provenance": {
+    "status": "established",
+    "path": ".release-harness/drafts/llm-gateway.record.json",
+    "digest": "6732ddf3dc8236b974e2aae5f81b546d89c2a466b6fb0a368d76620955bf981e"
+  },
+  "sources": [
+    {
+      "source_id": "primary",
+      "status": "established",
+      "repository_identity": "https://github.com/xibodev/llm-gateway.git",
+      "head_commit": "f3b801fcc5256382757a502dd072290baaa5f549",
+      "head_tree": "e9d70181694c65b2b8269c79750f7983210d8745",
+      "reviewed_source_digest": "0f291e0e9d0d89e4ccd98db96575649b5626f0f4834965df8999dd213ba25e60",
+      "changed_paths": []
+    }
+  ],
+  "facts": [
+    {
+      "id": "cli-version-command",
+      "claim": "llmgw version prints version, commit, and build time and exits 0",
+      "status": "observed",
+      "evidence": {
+        "source": "go/cmd/llmgw/main.go:65-66"
+      }
+    },
+    {
+      "id": "cli-health-command",
+      "claim": "llmgw health probes local /health endpoint and exits 0 on success",
+      "status": "observed",
+      "evidence": {
+        "source": "go/cmd/llmgw/main.go:61"
+      }
+    },
+    {
+      "id": "http-health-endpoint",
+      "claim": "the server exposes an unauthenticated GET /health endpoint returning HTTP 200 with status ok",
+      "status": "observed",
+      "evidence": {
+        "source": "go/internal/api/server.go:33"
+      }
+    },
+    {
+      "id": "http-models-endpoint",
+      "claim": "the server exposes GET /v1/models returning model list",
+      "status": "observed",
+      "evidence": {
+        "source": "go/internal/api/server.go:43"
+      }
+    }
+  ],
+  "impact": {
+    "assertions": [
+      {
+        "id": "A1",
+        "impact": "unchanged",
+        "supported_by": [
+          "cli-version-command"
+        ]
+      },
+      {
+        "id": "A2",
+        "impact": "unchanged",
+        "supported_by": [
+          "cli-health-command"
+        ]
+      },
+      {
+        "id": "A3",
+        "impact": "unchanged",
+        "supported_by": [
+          "http-health-endpoint"
+        ]
+      },
+      {
+        "id": "A4",
+        "impact": "unchanged",
+        "supported_by": [
+          "http-models-endpoint"
+        ]
+      }
+    ],
+    "requires": [],
+    "possible_binding_changes": []
+  },
+  "questions": [],
+  "conclusion": {
+    "action": "reuse_contract",
+    "summary": "Baseline review establishes that the accepted contract is valid and appropriate for current source."
+  },
+  "proposed": {
+    "by": "agent-session",
+    "at": "2026-09-16T23:45:00.000Z"
+  },
+  "digest": "084f6f1af5904a57216659ee27d021bb42e690232709f8c605ea5a04ac222e0b"
+}
