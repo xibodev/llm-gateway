@@ -63,12 +63,20 @@ jobs:
           fi
           if [ "$GITHUB_EVENT_NAME" = "push" ]; then
             git fetch --no-tags origin main:refs/remotes/origin/main
+            releases=$(gh api --paginate --slurp "repos/$GH_REPO/releases?per_page=100")
+            matches=$(printf '%s' "$releases" | jq --arg tag "$REQUESTED_TAG" '[.[][] | select(.tag_name == $tag)]')
+            published_count=$(printf '%s' "$matches" | jq '[.[] | select(.draft == false)] | length')
+            draft_count=$(printf '%s' "$matches" | jq '[.[] | select(.draft == true)] | length')
+            test "$published_count" -eq 0 || {
+              echo "release already exists; published version tags are immutable" >&2
+              exit 1
+            }
+            test "$draft_count" -le 1 || {
+              echo "multiple draft releases exist for $REQUESTED_TAG; refusing ambiguous resume" >&2
+              exit 1
+            }
             release_exists=false
-            if release=$(gh release view "$REQUESTED_TAG" --json isDraft 2>/dev/null); then
-              if [ "$(printf '%s' "$release" | jq -r .isDraft)" != "true" ]; then
-                echo "release already exists; published version tags are immutable" >&2
-                exit 1
-              fi
+            if [ "$draft_count" -eq 1 ]; then
               release_exists=true
             fi
             if [ "$release_exists" = "true" ]; then
@@ -260,6 +268,8 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: write
+    outputs:
+      release_id: ${{ steps.stage.outputs.release_id }}
     steps:
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
@@ -270,19 +280,59 @@ jobs:
         working-directory: dist
         run: sha256sum -c SHA256SUMS
 
-      - name: Stage draft release
+      - name: Stage and verify exact draft release
+        id: stage
         env:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ needs.validate.outputs.tag }}
         run: |
-          for id in $(gh release list --json id,isDraft,tagName -q '.[] | select(.isDraft and (.tagName == "'"$TAG"'" or .tagName == "")) | .id'); do
-            gh release delete "$id" --yes 2>/dev/null || true
-          done
+          set -euo pipefail
+          releases=$(gh api --paginate --slurp "repos/$GH_REPO/releases?per_page=100")
+          matches=$(printf '%s' "$releases" | jq --arg tag "$TAG" '[.[][] | select(.tag_name == $tag)]')
+          match_count=$(printf '%s' "$matches" | jq 'length')
+          published_count=$(printf '%s' "$matches" | jq '[.[] | select(.draft == false)] | length')
+          test "$published_count" -eq 0 || {
+            echo "published release already exists for $TAG" >&2
+            exit 1
+          }
           if [ "${{ needs.validate.outputs.release_exists }}" = "true" ]; then
-            gh release upload "$TAG" dist/* --clobber
+            test "$match_count" -eq 1 || {
+              echo "expected exactly one resumable draft for $TAG, found $match_count" >&2
+              exit 1
+            }
+            release_id=$(printf '%s' "$matches" | jq -r '.[0].id')
+            test "$(printf '%s' "$matches" | jq -r '.[0].draft')" = "true"
           else
-            gh release create "$TAG" dist/* --draft --generate-notes --verify-tag --title "$TAG"
+            test "$match_count" -eq 0 || {
+              echo "unexpected release record already exists for $TAG" >&2
+              exit 1
+            }
+            created=$(gh api --method POST "repos/$GH_REPO/releases" \
+              -f tag_name="$TAG" \
+              -f name="$TAG" \
+              -F draft=true \
+              -F generate_release_notes=true)
+            release_id=$(printf '%s' "$created" | jq -r .id)
           fi
+
+          mapfile -t asset_ids < <(gh api --paginate --slurp \
+            "repos/$GH_REPO/releases/$release_id/assets?per_page=100" | jq -r '.[][] | .id')
+          for asset_id in "${asset_ids[@]}"; do
+            gh api --method DELETE "repos/$GH_REPO/releases/assets/$asset_id"
+          done
+          gh release upload "$TAG" dist/*
+
+          local_manifest=$(mktemp)
+          remote_manifest=$(mktemp)
+          trap 'rm -f "$local_manifest" "$remote_manifest"' EXIT
+          for file in dist/*; do
+            printf '%s  %s\n' "$(sha256sum "$file" | cut -d' ' -f1)" "$(basename "$file")"
+          done | sort -k2,2 > "$local_manifest"
+          gh api --paginate --slurp "repos/$GH_REPO/releases/$release_id/assets?per_page=100" |
+            jq -r '.[][] | select(.digest != null) | "\(.digest | sub("^sha256:"; ""))  \(.name)"' |
+            sort -k2,2 > "$remote_manifest"
+          diff -u "$local_manifest" "$remote_manifest"
+          echo "release_id=$release_id" >> "$GITHUB_OUTPUT"
 
   image-publish:
     name: publish candidate image
@@ -501,4 +551,24 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ needs.validate.outputs.tag }}
-        run: gh release edit "$TAG" --draft=false
+          RELEASE_ID: ${{ needs.release-stage.outputs.release_id }}
+        run: |
+          set -euo pipefail
+          release=$(gh api "repos/$GH_REPO/releases/$RELEASE_ID")
+          test "$(printf '%s' "$release" | jq -r .tag_name)" = "$TAG"
+          test "$(printf '%s' "$release" | jq -r .draft)" = "true"
+
+          local_manifest=$(mktemp)
+          remote_manifest=$(mktemp)
+          trap 'rm -f "$local_manifest" "$remote_manifest"' EXIT
+          for file in dist/*; do
+            printf '%s  %s\n' "$(sha256sum "$file" | cut -d' ' -f1)" "$(basename "$file")"
+          done | sort -k2,2 > "$local_manifest"
+          gh api --paginate --slurp "repos/$GH_REPO/releases/$RELEASE_ID/assets?per_page=100" |
+            jq -r '.[][] | select(.digest != null) | "\(.digest | sub("^sha256:"; ""))  \(.name)"' |
+            sort -k2,2 > "$remote_manifest"
+          diff -u "$local_manifest" "$remote_manifest"
+
+          published=$(gh api --method PATCH "repos/$GH_REPO/releases/$RELEASE_ID" -F draft=false)
+          test "$(printf '%s' "$published" | jq -r .draft)" = "false"
+          test "$(printf '%s' "$published" | jq -r .tag_name)" = "$TAG"
