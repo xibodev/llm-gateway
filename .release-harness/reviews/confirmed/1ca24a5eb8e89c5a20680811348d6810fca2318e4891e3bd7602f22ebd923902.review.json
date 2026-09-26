@@ -1,0 +1,276 @@
+{
+  "schema_version": "1.0.0",
+  "mode": "change",
+  "contract": {
+    "digest": "31b393ab3e80162226619c441694573993ac618382d74642101484a0bf2e9c80"
+  },
+  "authoring_provenance": {
+    "status": "established",
+    "path": ".release-harness/drafts/llm-gateway.record.json",
+    "digest": "6732ddf3dc8236b974e2aae5f81b546d89c2a466b6fb0a368d76620955bf981e"
+  },
+  "sources": [
+    {
+      "source_id": "primary",
+      "status": "established",
+      "repository_identity": "https://github.com/xibodev/llm-gateway.git",
+      "base_ref": "f030933",
+      "base_commit": "f030933e7a3362d5e4334c1f909d6da3bf1651fb",
+      "merge_base": "f030933e7a3362d5e4334c1f909d6da3bf1651fb",
+      "head_commit": "29e344c3156d246c2039722a05177c56d9065bd3",
+      "head_tree": "70be4e2055cc823baaa61c0a959c7123a74afc5b",
+      "reviewed_source_digest": "4dfa806dc6d7331c5e8b19dd6071fc80573aa137fe1797abc0d18b6cad4351d5",
+      "changed_paths": [
+        {
+          "status": "modified",
+          "path": "docs/MULTI_USER.md",
+          "old_blob": "489c4414ebe7704afe452fee2fb7d81e99e9b246",
+          "new_blob": "603067d7bb85922b399983ca566d6131e15c5487"
+        },
+        {
+          "status": "modified",
+          "path": "docs/PROVIDERS.md",
+          "old_blob": "45dfd54f65cddd0871f6808aff4de645831178ca",
+          "new_blob": "3ecd5d0efae19196a1872df6a3e44729cdf2eab8"
+        },
+        {
+          "status": "modified",
+          "path": "go/go.mod",
+          "old_blob": "85776364b7521579cde21cf61f44ed38f2a50c48",
+          "new_blob": "8e6cdfff1de6d143f9c21b642a1814219bb6ff71"
+        },
+        {
+          "status": "modified",
+          "path": "go/go.sum",
+          "old_blob": "27b36e8b5ce6e5dee36395c2c3325fed2a3563c8",
+          "new_blob": "ae56b2a5d74af7cf71645db60948a965b5cebcdd"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/api/audio_test.go",
+          "old_blob": "3e28ad8f0724134b060ac7c4396223153fe5a0ac",
+          "new_blob": "a1b62afb0b5e0c6d75e1b518d4c5da1fd58a158f"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/api/audio.go",
+          "old_blob": "b699860bb87446eedd1941164945830c1bc7bb96",
+          "new_blob": "73ee57cbddbfd4aff31f4b619b80e0fb4bf9234a"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/api/playground_audio.go",
+          "old_blob": "c71fbf88ed135c26ffdfeec2fc22f7dbb63181e0",
+          "new_blob": "4a1ec093158def64a90d43430258f97d91d72c96"
+        },
+        {
+          "status": "added",
+          "path": "go/internal/providers/audio_vertical.go",
+          "old_blob": "0000000000000000000000000000000000000000",
+          "new_blob": "b5b37b516b33c43f18f9cde6767d353e0bdafa45"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/providers/core_runtime_test.go",
+          "old_blob": "8baea29cfe1fefcd5c893977f8e876e160c9dc2e",
+          "new_blob": "9a370f1c503f697a58b1d6ff6022f4a94b9be9c3"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/providers/core_runtime.go",
+          "old_blob": "eb6ba994379f331a9951e7c5f0ce4214d93a6727",
+          "new_blob": "c1daf973b1780240dced9da38c58287f67b33355"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/providers/factory.go",
+          "old_blob": "5c03c5338bada5721b151d90e3fe228e77806ec9",
+          "new_blob": "e000e666d80dd5af0b5e0ec59e97c954ab54cb9f"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/providers/helpers.go",
+          "old_blob": "56a4397c549c7dc24d404e8f49237dfffc29bcf4",
+          "new_blob": "450e97dfa7a50cf1634c57ec43a905d09776925f"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/providers/provider.go",
+          "old_blob": "2a1da656e775e7c8fa07baaefea94d6aec572dce",
+          "new_blob": "80e78282309a54fb0b44c169bf79cc9e4507b4f0"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/providers/registry_snapshot.json",
+          "old_blob": "c44613537517bbb35559e5fff7137edfbea0451e",
+          "new_blob": "732f19d269b36ac1f77af476c579a2ec48a684df"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/providers/registry_test.go",
+          "old_blob": "416aecf62a0f59f547b8c892c3245af626fca9ab",
+          "new_blob": "2e3f5dee51e5d8b1ebaf880d5350d0b13fb6ead7"
+        },
+        {
+          "status": "deleted",
+          "path": "go/internal/web/console/dist/assets/index-C06t2_O9.js",
+          "old_blob": "93a26ae9a6b5f4a57931768fffceb426893cd930",
+          "new_blob": "0000000000000000000000000000000000000000"
+        },
+        {
+          "status": "added",
+          "path": "go/internal/web/console/dist/assets/index-CyfBXFkd.js",
+          "old_blob": "0000000000000000000000000000000000000000",
+          "new_blob": "e13e70075c638183681220efb95fcb3d53f8ee39"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/web/console/dist/index.html",
+          "old_blob": "f8ad67d1951cf0e5cba3e50169276691626604fc",
+          "new_blob": "69f47bf5a87722c9cd3f4ef2326dc1704657eb40"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/web/console/src/components/KeyScopeEditor.tsx",
+          "old_blob": "91846b35d149f0873a17afde1a05638dc3380d07",
+          "new_blob": "0bc87af627c83e9b9740bf6643544c7d08fe3364"
+        },
+        {
+          "status": "added",
+          "path": "go/internal/web/console/src/lib/key-policy.ts",
+          "old_blob": "0000000000000000000000000000000000000000",
+          "new_blob": "1fa6a31e5368b2e526d140c3fcb057af84963aed"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/web/console/src/pages/ApiKeys.tsx",
+          "old_blob": "a196c0425e27d2bda52dff28f7b242dd2e364592",
+          "new_blob": "5527ced5766f9b4db56524bff7177da1f07b56b6"
+        },
+        {
+          "status": "added",
+          "path": "go/internal/web/console/tests/key-policy-editor.test.mjs",
+          "old_blob": "0000000000000000000000000000000000000000",
+          "new_blob": "302d55f4b524961b2f1212de85ed2d566eef9110"
+        },
+        {
+          "status": "modified",
+          "path": "website/docs.html",
+          "old_blob": "3378a85988658dedef148bb6934b5c7d1621ddce",
+          "new_blob": "5095db08f7dc790591936752893ae17ed3934475"
+        },
+        {
+          "status": "modified",
+          "path": "website/governance.html",
+          "old_blob": "5307dd313abfefc880f34d85e5f23de769f6ce04",
+          "new_blob": "cafb60c441234c5bc235635514af10765a53ebe4"
+        },
+        {
+          "status": "modified",
+          "path": "website/providers.html",
+          "old_blob": "3a99546507ff0b8c64f3f879a211f307ccbb2295",
+          "new_blob": "68e3a7cb143eaec8b11f59f44bc6dee658971a6c"
+        }
+      ]
+    }
+  ],
+  "facts": [
+    {
+      "id": "quota-editor-completion",
+      "claim": "The administrative console exposes all ten existing-key quota controls. Explicit zero values clear an intrinsic key quota, blank drafts normalize to zero, and negative or unsafe values are rejected; the server API and database schema are unchanged.",
+      "status": "observed",
+      "evidence": {
+        "source": "go/internal/web/console/tests/key-policy-editor.test.mjs and commit c94990333e13e437208465a0a293bb12d3096c77"
+      }
+    },
+    {
+      "id": "released-core-audio-contract",
+      "claim": "The gateway pins the immutable github.com/xibodev/llmgw-core v1.2.0 module at commit 2a291bb74f05f12f1d0dd8f110f3e1c958f96cd2. That release adds native ElevenLabs transcription and speech, native Xiaomi MiMo speech, and an explicit opt-in chat-model transcription adapter without model-name inference.",
+      "status": "observed",
+      "evidence": {
+        "source": "go/go.mod, go/go.sum, llmgw-core v1.2.0, and llmgw-core providers/translation fixture tests"
+      }
+    },
+    {
+      "id": "gateway-audio-dispatch",
+      "claim": "The gateway registers ElevenLabs and MiMo as audio-only core verticals, publishes only their exact audio surfaces in the model catalog, and invokes core only when the selected model explicitly declares the requested surface. Existing Edge TTS and OpenAI-compatible audio proxy paths remain the fallback paths.",
+      "status": "observed",
+      "evidence": {
+        "source": "go/internal/providers/audio_vertical.go, go/internal/api/audio.go, and go/internal/api/playground_audio.go"
+      }
+    },
+    {
+      "id": "audio-wire-and-auth-tests",
+      "claim": "Deterministic gateway tests prove ElevenLabs transcription uses /v1/speech-to-text with xi-api-key and MiMo speech uses /v1/chat/completions with Api-Key and no Authorization header. Core fixture tests cover ElevenLabs speech/transcription success and 429, MiMo speech success and 401, catalog surface declarations, response normalization, and fail-closed transcription opt-in.",
+      "status": "observed",
+      "evidence": {
+        "source": "go/internal/api/audio_test.go and llmgw-core v1.2.0 provider/translation tests"
+      }
+    },
+    {
+      "id": "model-list-contract-preserved",
+      "claim": "The effective provider registry expands from 25 to 27 entries and can add audio model rows after configuration, while GET /v1/models retains its public list envelope and authorization/filtering behavior. No health route, CLI health, build identity, database migration, or container contract changed.",
+      "status": "observed",
+      "evidence": {
+        "source": "go/internal/providers/registry_snapshot.json, full Go tests, and accepted assertions A1-A4"
+      }
+    },
+    {
+      "id": "release-gates",
+      "claim": "Against published llmgw-core v1.2.0, full Go tests, Go build, Go vet, govulncheck, console typecheck, all 116 console tests, npm audit, deterministic console-dist verification, documentation checks, and all 15 live-acceptance policy tests pass. The Windows-local race detector is unavailable because CGO/GCC is absent and remains enforced by Linux CI.",
+      "status": "observed",
+      "evidence": {
+        "source": "local release-gate execution for source revision 29e344c3156d246c2039722a05177c56d9065bd3"
+      }
+    }
+  ],
+  "impact": {
+    "assertions": [
+      {
+        "id": "A1",
+        "impact": "unchanged",
+        "supported_by": [
+          "model-list-contract-preserved",
+          "release-gates"
+        ]
+      },
+      {
+        "id": "A2",
+        "impact": "unchanged",
+        "supported_by": [
+          "model-list-contract-preserved",
+          "release-gates"
+        ]
+      },
+      {
+        "id": "A3",
+        "impact": "unchanged",
+        "supported_by": [
+          "model-list-contract-preserved",
+          "release-gates"
+        ]
+      },
+      {
+        "id": "A4",
+        "impact": "unchanged",
+        "supported_by": [
+          "gateway-audio-dispatch",
+          "model-list-contract-preserved",
+          "release-gates"
+        ]
+      }
+    ],
+    "requires": [],
+    "possible_binding_changes": []
+  },
+  "questions": [],
+  "conclusion": {
+    "action": "reuse_contract",
+    "summary": "The cohort adds quota-editor completeness and explicitly declared audio provider capabilities without changing the accepted CLI identity, CLI health, HTTP health, or public model-list propositions. The existing accepted contract and bindings remain appropriate."
+  },
+  "proposed": {
+    "by": "release operator",
+    "at": "2026-09-26T21:10:56.281Z"
+  },
+  "digest": "1ca24a5eb8e89c5a20680811348d6810fca2318e4891e3bd7602f22ebd923902"
+}
