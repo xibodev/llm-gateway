@@ -44,8 +44,15 @@ func (rt *Runtime) instantiate(
 	if cfg.Timeout != nil {
 		timeout = *cfg.Timeout
 	}
-	if isExtensionType(ptype) {
-		return rt.newExtensionFacade(providerID, ptype, caller), nil
+	extensionType := ptype
+	// Codex intentionally retains the OpenAI-compatible public runtime type in
+	// the provider registry. Its registry identity, not that compatibility type,
+	// selects the private extension transport and OAuth credential store.
+	if strings.EqualFold(strings.TrimSpace(cfg.RegistryID), ExtensionTypeCodex) {
+		extensionType = ExtensionTypeCodex
+	}
+	if isExtensionType(extensionType) {
+		return rt.newExtensionFacade(providerID, extensionType, caller), nil
 	}
 	switch ptype {
 	case "ai_studio":
@@ -199,6 +206,9 @@ func AsSpeechSynthesizer(provider Provider) (SpeechSynthesizer, bool) {
 				return nil, false
 			}
 			return resilient, true
+		}
+		if extension, ok := provider.(*ExtensionProviderFacade); ok && extension.providerID != ExtensionTypeEdgeTTS {
+			return nil, false
 		}
 		if synthesizer, ok := provider.(SpeechSynthesizer); ok {
 			return synthesizer, true
