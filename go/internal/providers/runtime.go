@@ -46,6 +46,9 @@ type Runtime struct {
 	// so the cache lives here, where tokens outlive those rebuilds.
 	gcpTokens     gcpauth.TokenCache
 	quotaAdapters quotaAdapterRegistry
+	// extensions is the client of the extension daemon, kept here so every
+	// extension-served request shares its connection pool.
+	extensions extensionClients
 }
 
 // NewRuntime returns a Runtime with empty caches and the built-in auth

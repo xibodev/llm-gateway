@@ -1,24 +1,18 @@
 package providers
 
 import (
-	"bufio"
-	"bytes"
 	"context"
-	"encoding/base64"
 	"encoding/json"
-	"errors"
 	"fmt"
-	"io"
-	"net/http"
 	"os"
 	"strings"
-	"time"
+	"sync"
 
 	"llmgw/internal/config"
 
 	"github.com/xibodev/llm-provider-auth/tokenstore"
 	core "github.com/xibodev/llmgw-core"
-	"github.com/xibodev/llmgw-core/oauthflow"
+	"github.com/xibodev/llmgw-core/extension"
 )
 
 // Extension-served provider types
@@ -30,6 +24,23 @@ const (
 	ExtensionTypeZenAnonymous   = "opencode_zen_anonymous"
 	ExtensionTypeAnthropicSetup = "anthropic_setup_token"
 )
+
+// defaultExtensionURL is where the extension daemon listens unless
+// LLMGW_EXTENSION_URL names another address.
+const defaultExtensionURL = "http://127.0.0.1:18888"
+
+// extensionSurfaces are the surfaces every extension-served provider
+// accepts. The gateway does not ask the daemon which surfaces each provider
+// serves, so the daemon itself refuses one a provider lacks.
+func extensionSurfaces() []core.ModelSurface {
+	return []core.ModelSurface{
+		core.ModelSurfaceChatCompletions,
+		core.ModelSurfaceResponses,
+		core.ModelSurfaceMessages,
+		core.ModelSurfaceAudioSpeech,
+		core.ModelSurfaceImages,
+	}
+}
 
 func isExtensionType(ptype string) bool {
 	switch strings.ToLower(strings.TrimSpace(ptype)) {
@@ -49,28 +60,51 @@ func (rt *Runtime) isExtensionEnabled() bool {
 	return strings.TrimSpace(os.Getenv("LLMGW_EXTENSION_URL")) != ""
 }
 
-type ExtensionClient struct {
-	BaseURL    string
-	Secret     string
-	HTTPClient *http.Client
+// extensionClients holds the client of the extension daemon the environment
+// names. Each llmgw-core extension client owns its connection pool, so every
+// extension-served request shares this one, which is rebuilt only when the
+// address or the secret changes.
+type extensionClients struct {
+	mu     sync.Mutex
+	url    string
+	secret string
+	client *extension.Client
 }
 
-func (rt *Runtime) extensionClient() *ExtensionClient {
+// extensionClient returns the client of the daemon at LLMGW_EXTENSION_URL,
+// authenticated with LLMGW_EXTENSION_SECRET. An address the client cannot
+// use is a configuration error, which permits failover without marking the
+// provider unhealthy.
+func (rt *Runtime) extensionClient() (*extension.Client, error) {
 	url := strings.TrimSpace(os.Getenv("LLMGW_EXTENSION_URL"))
 	if url == "" {
-		url = "http://127.0.0.1:18888"
+		url = defaultExtensionURL
 	}
 	secret := strings.TrimSpace(os.Getenv("LLMGW_EXTENSION_SECRET"))
-	return &ExtensionClient{
-		BaseURL:    strings.TrimRight(url, "/"),
-		Secret:     secret,
-		HTTPClient: &http.Client{Timeout: 180 * time.Second},
+
+	cache := &rt.extensions
+	cache.mu.Lock()
+	defer cache.mu.Unlock()
+	if cache.client != nil && cache.url == url && cache.secret == secret {
+		return cache.client, nil
 	}
+	client, err := extension.NewClient(extension.Config{BaseURL: url, Secret: secret})
+	if err != nil {
+		// The message names the variable but not its value, which may
+		// carry credentials.
+		return nil, core.NewConfigurationError(
+			"LLMGW_EXTENSION_URL is not a valid extension daemon address: it must be an absolute http or https URL without credentials, query or fragment", err)
+	}
+	cache.url, cache.secret, cache.client = url, secret, client
+	return client, nil
 }
 
-// extensionCoreVertical returns a coreVertical that delegates to the local extension sidecar.
+// extensionCoreVertical returns the coreVertical of providerType, which the
+// local extension daemon serves. The Runtime builds its verticals when it is
+// created, where an invalid LLMGW_EXTENSION_URL could not be reported, so
+// the shared client is looked up when a provider is built or a credential
+// refreshed instead.
 func (rt *Runtime) extensionCoreVertical(providerType string) coreVertical {
-	client := rt.extensionClient()
 	isOAuth := providerType == ExtensionTypeCodex || providerType == ExtensionTypeCopilot || providerType == ExtensionTypeAntigravity
 	return coreVertical{
 		serves: func(_ *config.Settings, _ string, cfg *config.ProviderConfig) bool {
@@ -84,15 +118,19 @@ func (rt *Runtime) extensionCoreVertical(providerType string) coreVertical {
 			}
 			return t == providerType
 		},
-		provider: func(_ *config.Settings, instance string) (core.Provider, error) {
-			return &extensionProvider{
-				client:     client,
-				instance:   instance,
-				providerID: providerType,
-			}, nil
+		provider: func(_ *config.Settings, _ string) (core.Provider, error) {
+			client, err := rt.extensionClient()
+			if err != nil {
+				return nil, err
+			}
+			return extension.NewProvider(client, extension.ProviderInfo{ID: providerType, Surfaces: extensionSurfaces()}), nil
 		},
 		refresh: func(_ *config.Settings, _ string) tokenstore.RefreshFunc {
 			return func(ctx context.Context, current tokenstore.Record) (tokenstore.Record, error) {
+				client, err := rt.extensionClient()
+				if err != nil {
+					return tokenstore.Record{}, err
+				}
 				return client.Refresh(ctx, providerType, current)
 			}
 		},
@@ -153,329 +191,6 @@ func (c extensionCredentials) Lease(ctx context.Context, key string) (func(), er
 	}
 	return store.Lease(ctx, key)
 }
-
-type extensionProvider struct {
-	client     *ExtensionClient
-	instance   string
-	providerID string
-}
-
-func (p *extensionProvider) NativeSurfaces(model string) []core.ModelSurface {
-	return []core.ModelSurface{
-		core.ModelSurfaceChatCompletions,
-		core.ModelSurfaceResponses,
-		core.ModelSurfaceMessages,
-		core.ModelSurfaceAudioSpeech,
-		core.ModelSurfaceImages,
-	}
-}
-
-func (p *extensionProvider) Invoke(ctx context.Context, req core.Request) (core.Response, error) {
-	return p.client.Invoke(ctx, p.providerID, req)
-}
-
-func (p *extensionProvider) Stream(ctx context.Context, req core.Request) (core.StreamIter, error) {
-	return p.client.Stream(ctx, p.providerID, req)
-}
-
-func (p *extensionProvider) ListModels(ctx context.Context, cred *core.Credential) ([]core.ModelInfo, error) {
-	return p.client.ListModels(ctx, p.providerID, cred)
-}
-
-// Invoke executes an invoke call on the extension daemon.
-func (c *ExtensionClient) Invoke(ctx context.Context, provider string, req core.Request) (core.Response, error) {
-	url := fmt.Sprintf("%s/extension/v1/%s/invoke", c.BaseURL, provider)
-	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(req.Body))
-	if err != nil {
-		return core.Response{}, err
-	}
-	c.applyHeaders(httpReq, provider, req)
-	resp, err := c.HTTPClient.Do(httpReq)
-	if err != nil {
-		return core.Response{}, fmt.Errorf("extension invoke %s: %w", provider, err)
-	}
-	defer resp.Body.Close()
-
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return core.Response{}, fmt.Errorf("read extension response: %w", err)
-	}
-	if resp.StatusCode >= 400 {
-		return core.Response{}, parseExtensionError(resp.StatusCode, body)
-	}
-	var losses []core.Loss
-	if lossesHdr := resp.Header.Get("X-Losses"); lossesHdr != "" {
-		if raw, err := base64.StdEncoding.DecodeString(lossesHdr); err == nil {
-			_ = json.Unmarshal(raw, &losses)
-		}
-	}
-	return core.Response{
-		Body:        body,
-		ContentType: resp.Header.Get("Content-Type"),
-		Losses:      losses,
-	}, nil
-}
-
-// Stream executes a streaming call on the extension daemon.
-func (c *ExtensionClient) Stream(ctx context.Context, provider string, req core.Request) (core.StreamIter, error) {
-	url := fmt.Sprintf("%s/extension/v1/%s/stream", c.BaseURL, provider)
-	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(req.Body))
-	if err != nil {
-		return nil, err
-	}
-	c.applyHeaders(httpReq, provider, req)
-	resp, err := c.HTTPClient.Do(httpReq)
-	if err != nil {
-		return nil, fmt.Errorf("extension stream %s: %w", provider, err)
-	}
-	if resp.StatusCode >= 400 {
-		defer resp.Body.Close()
-		body, _ := io.ReadAll(resp.Body)
-		return nil, parseExtensionError(resp.StatusCode, body)
-	}
-	return &extensionStream{
-		body: resp.Body,
-		r:    bufio.NewReader(resp.Body),
-	}, nil
-}
-
-type extensionStream struct {
-	body io.ReadCloser
-	r    *bufio.Reader
-}
-
-func (s *extensionStream) Next() ([]byte, error) {
-	var frame []byte
-	for {
-		line, err := s.r.ReadBytes('\n')
-		if len(line) > 0 {
-			frame = append(frame, line...)
-		}
-		if err != nil {
-			if len(frame) > 0 {
-				return frame, nil
-			}
-			return nil, err
-		}
-		if bytes.Equal(line, []byte("\n")) || bytes.Equal(line, []byte("\r\n")) {
-			if len(frame) > 0 {
-				return frame, nil
-			}
-		}
-	}
-}
-
-func (s *extensionStream) Close() error {
-	return s.body.Close()
-}
-
-// ListModels gets the models from the extension daemon.
-func (c *ExtensionClient) ListModels(ctx context.Context, provider string, cred *core.Credential) ([]core.ModelInfo, error) {
-	url := fmt.Sprintf("%s/extension/v1/%s/models", c.BaseURL, provider)
-	httpReq, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
-	if err != nil {
-		return nil, err
-	}
-	c.applyAuthHeader(httpReq)
-	if cred != nil {
-		c.applyCredentialHeaders(httpReq, cred)
-	}
-	resp, err := c.HTTPClient.Do(httpReq)
-	if err != nil {
-		return nil, fmt.Errorf("extension list models %s: %w", provider, err)
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode >= 400 {
-		body, _ := io.ReadAll(resp.Body)
-		return nil, parseExtensionError(resp.StatusCode, body)
-	}
-	var res struct {
-		Models []core.ModelInfo `json:"models"`
-	}
-	if err := json.NewDecoder(resp.Body).Decode(&res); err != nil {
-		return nil, fmt.Errorf("decode extension models: %w", err)
-	}
-	return res.Models, nil
-}
-
-// Refresh calls the extension daemon to refresh tokens.
-func (c *ExtensionClient) Refresh(ctx context.Context, provider string, record tokenstore.Record) (tokenstore.Record, error) {
-	url := fmt.Sprintf("%s/extension/v1/%s/refresh", c.BaseURL, provider)
-	reqBody, _ := json.Marshal(map[string]any{"record": record})
-	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(reqBody))
-	if err != nil {
-		return tokenstore.Record{}, err
-	}
-	c.applyAuthHeader(httpReq)
-	httpReq.Header.Set("Content-Type", "application/json")
-	resp, err := c.HTTPClient.Do(httpReq)
-	if err != nil {
-		return tokenstore.Record{}, fmt.Errorf("extension refresh %s: %w", provider, err)
-	}
-	defer resp.Body.Close()
-	var res struct {
-		Record   tokenstore.Record `json:"record"`
-		Terminal bool              `json:"terminal"`
-		Error    string            `json:"error"`
-	}
-	_ = json.NewDecoder(resp.Body).Decode(&res)
-	if resp.StatusCode >= 400 || res.Error != "" {
-		if res.Terminal {
-			return tokenstore.Record{}, &extensionTerminalError{msg: res.Error}
-		}
-		return tokenstore.Record{}, errors.New(res.Error)
-	}
-	return res.Record, nil
-}
-
-func (c *ExtensionClient) applyHeaders(httpReq *http.Request, provider string, req core.Request) {
-	c.applyAuthHeader(httpReq)
-	httpReq.Header.Set("Content-Type", req.ContentType)
-	httpReq.Header.Set("X-Surface", string(req.Surface))
-	httpReq.Header.Set("X-Model", req.Model)
-	if req.Credential != nil {
-		c.applyCredentialHeaders(httpReq, req.Credential)
-	}
-}
-
-func (c *ExtensionClient) applyCredentialHeaders(httpReq *http.Request, cred *core.Credential) {
-	if cred.Token != "" {
-		httpReq.Header.Set("X-Credential-Token", cred.Token)
-	}
-	if cred.AccountID != "" {
-		httpReq.Header.Set("X-Credential-Account-ID", cred.AccountID)
-	}
-	if cred.TokenType != "" {
-		httpReq.Header.Set("X-Credential-Token-Type", cred.TokenType)
-	}
-	if len(cred.Metadata) > 0 {
-		if b, err := json.Marshal(cred.Metadata); err == nil {
-			httpReq.Header.Set("X-Credential-Metadata", base64.StdEncoding.EncodeToString(b))
-		}
-	}
-}
-
-func (c *ExtensionClient) applyAuthHeader(httpReq *http.Request) {
-	if c.Secret != "" {
-		httpReq.Header.Set("Authorization", "Bearer "+c.Secret)
-	}
-}
-
-type extensionTerminalError struct {
-	msg string
-}
-
-func (e *extensionTerminalError) Error() string  { return e.msg }
-func (e *extensionTerminalError) Terminal() bool { return true }
-
-func parseExtensionError(status int, body []byte) error {
-	var parsed struct {
-		Error struct {
-			Message string `json:"message"`
-			Code    int    `json:"code"`
-		} `json:"error"`
-	}
-	if err := json.Unmarshal(body, &parsed); err == nil && parsed.Error.Message != "" {
-		return &core.ProviderError{
-			Message:        parsed.Error.Message,
-			Classification: core.ProviderErrorClassification{StatusCode: status},
-		}
-	}
-	return &core.ProviderError{
-		Message:        string(body),
-		Classification: core.ProviderErrorClassification{StatusCode: status},
-	}
-}
-
-// OAuthDriver returns an oauthflow.Driver that delegates OAuth calls to the extension.
-func (c *ExtensionClient) OAuthDriver(provider string) oauthflow.Driver {
-	return &extensionOAuthDriver{client: c, provider: provider}
-}
-
-type extensionOAuthDriver struct {
-	client   *ExtensionClient
-	provider string
-}
-
-func (d *extensionOAuthDriver) Start(ctx context.Context, req oauthflow.StartRequest) (oauthflow.Authorization, error) {
-	url := fmt.Sprintf("%s/extension/v1/%s/oauth/start", d.client.BaseURL, d.provider)
-	reqBody, _ := json.Marshal(req)
-	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(reqBody))
-	if err != nil {
-		return oauthflow.Authorization{}, err
-	}
-	d.client.applyAuthHeader(httpReq)
-	httpReq.Header.Set("Content-Type", "application/json")
-	resp, err := d.client.HTTPClient.Do(httpReq)
-	if err != nil {
-		return oauthflow.Authorization{}, err
-	}
-	defer resp.Body.Close()
-	var res struct {
-		Authorization oauthflow.Authorization `json:"authorization"`
-		Error         string                  `json:"error"`
-	}
-	_ = json.NewDecoder(resp.Body).Decode(&res)
-	if res.Error != "" {
-		return oauthflow.Authorization{}, errors.New(res.Error)
-	}
-	return res.Authorization, nil
-}
-
-func (d *extensionOAuthDriver) Poll(ctx context.Context, flow oauthflow.Flow) (oauthflow.PollResult, error) {
-	url := fmt.Sprintf("%s/extension/v1/%s/oauth/poll", d.client.BaseURL, d.provider)
-	reqBody, _ := json.Marshal(map[string]any{"flow": flow})
-	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(reqBody))
-	if err != nil {
-		return oauthflow.PollResult{}, err
-	}
-	d.client.applyAuthHeader(httpReq)
-	httpReq.Header.Set("Content-Type", "application/json")
-	resp, err := d.client.HTTPClient.Do(httpReq)
-	if err != nil {
-		return oauthflow.PollResult{}, err
-	}
-	defer resp.Body.Close()
-	var res struct {
-		Result oauthflow.PollResult `json:"result"`
-		Error  string               `json:"error"`
-	}
-	_ = json.NewDecoder(resp.Body).Decode(&res)
-	if res.Error != "" {
-		return oauthflow.PollResult{}, errors.New(res.Error)
-	}
-	return res.Result, nil
-}
-
-func (d *extensionOAuthDriver) Exchange(ctx context.Context, flow oauthflow.Flow, code string) (tokenstore.Record, error) {
-	url := fmt.Sprintf("%s/extension/v1/%s/oauth/exchange", d.client.BaseURL, d.provider)
-	reqBody, _ := json.Marshal(map[string]any{"flow": flow, "code": code})
-	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(reqBody))
-	if err != nil {
-		return tokenstore.Record{}, err
-	}
-	d.client.applyAuthHeader(httpReq)
-	httpReq.Header.Set("Content-Type", "application/json")
-	resp, err := d.client.HTTPClient.Do(httpReq)
-	if err != nil {
-		return tokenstore.Record{}, err
-	}
-	defer resp.Body.Close()
-	var res struct {
-		Record tokenstore.Record `json:"record"`
-		Error  string            `json:"error"`
-	}
-	_ = json.NewDecoder(resp.Body).Decode(&res)
-	if res.Error != "" {
-		return tokenstore.Record{}, errors.New(res.Error)
-	}
-	return res.Record, nil
-}
-
-var (
-	_ oauthflow.DeviceDriver = (*extensionOAuthDriver)(nil)
-	_ oauthflow.CodeDriver   = (*extensionOAuthDriver)(nil)
-)
 
 // ExtensionProviderFacade wraps an extension-served provider for the gateway's router.
 type ExtensionProviderFacade struct {
@@ -578,7 +293,11 @@ func (f *ExtensionProviderFacade) ListModelsWithError() ([]ModelInfo, *Credentia
 	if err != nil {
 		return nil, nil, err
 	}
-	models, err := f.runtime.extensionClient().ListModels(ctx, f.providerID, cred)
+	client, err := f.runtime.extensionClient()
+	if err != nil {
+		return nil, collector.Observation(), err
+	}
+	models, err := client.ListModels(ctx, f.providerID, cred)
 	if err != nil {
 		return nil, collector.Observation(), err
 	}
@@ -590,7 +309,11 @@ func (f *ExtensionProviderFacade) DefaultVoice() string {
 }
 
 func (f *ExtensionProviderFacade) Synthesize(voice, text, speed string) ([]byte, string, error) {
-	resp, err := f.runtime.extensionClient().Invoke(context.Background(), f.providerID, core.Request{
+	client, err := f.runtime.extensionClient()
+	if err != nil {
+		return nil, "", err
+	}
+	resp, err := client.Invoke(context.Background(), f.providerID, core.Request{
 		Surface: core.ModelSurfaceAudioSpeech,
 		Model:   voice,
 		Body:    []byte(text),
