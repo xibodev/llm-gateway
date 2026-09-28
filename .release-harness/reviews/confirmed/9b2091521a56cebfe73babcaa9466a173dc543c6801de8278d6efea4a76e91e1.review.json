@@ -1,0 +1,142 @@
+{
+  "schema_version": "1.0.0",
+  "mode": "change",
+  "contract": {
+    "digest": "31b393ab3e80162226619c441694573993ac618382d74642101484a0bf2e9c80"
+  },
+  "authoring_provenance": {
+    "status": "established",
+    "path": ".release-harness/drafts/llm-gateway.record.json",
+    "digest": "6732ddf3dc8236b974e2aae5f81b546d89c2a466b6fb0a368d76620955bf981e"
+  },
+  "sources": [
+    {
+      "source_id": "primary",
+      "status": "established",
+      "repository_identity": "https://github.com/xibodev/llm-gateway.git",
+      "base_ref": "origin/main",
+      "base_commit": "c6085ccd1ead7c3ed7aa85cd6c977406c55cac33",
+      "merge_base": "c6085ccd1ead7c3ed7aa85cd6c977406c55cac33",
+      "head_commit": "f6c7f6870dfcd00d1f8adae233637e918941ced0",
+      "head_tree": "12e9b7a3dc03e21fa4a8c220d9159db6b5495ad2",
+      "reviewed_source_digest": "566ae4e1d422eafdbe2aa60726becd96075c5d48f3cfd614b511cb82346bfb38",
+      "changed_paths": [
+        {
+          "status": "modified",
+          "path": "go/internal/providers/extension_vertical_test.go",
+          "old_blob": "1783a7f0a923b128ce0417093a2e52862441a2b6",
+          "new_blob": "34960680f6fb2dadcbe277c66b37eae97c260a49"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/providers/extension_vertical.go",
+          "old_blob": "39154dee76ae0d9098fef26c96810564ab9c71bf",
+          "new_blob": "772a322a2dbd9944b9bca5c6a81fef14a62fbd9c"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/providers/oauth_drivers.go",
+          "old_blob": "2844801beb7b67eb6d09117526acf12e5037ec42",
+          "new_blob": "beac1858462db8844772d3ee9921c5de1d40909c"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/providers/runtime.go",
+          "old_blob": "24a93689bf25922e7613d55715fab76d435bcf11",
+          "new_blob": "9d3c00d52aeabba26a6eea3ed6fefc7faaee39ee"
+        }
+      ]
+    }
+  ],
+  "facts": [
+    {
+      "id": "extension-client-from-core",
+      "claim": "The gateway reaches the extension daemon through github.com/xibodev/llmgw-core/extension, which go.mod already requires at v1.2.0, instead of its own HTTP client. Runtime.extensionClient builds one extension.Client from LLMGW_EXTENSION_URL (default http://127.0.0.1:18888) and LLMGW_EXTENSION_SECRET and shares it until either changes. The vertical's provider is extension.NewProvider with the same five surfaces, and refresh, OAuthDriver, ListModelsWithError and Synthesize all use the shared client.",
+      "status": "observed",
+      "evidence": {
+        "source": "go/internal/providers/extension_vertical.go; go/internal/providers/runtime.go; go/internal/providers/oauth_drivers.go"
+      }
+    },
+    {
+      "id": "scope-of-change",
+      "claim": "Only the four collected files under go/internal/providers change. go.mod and go.sum are unchanged, and no file of the CLI, the version and build identity, the /health route (go/internal/api/server.go) or the /v1/models handler (go/internal/api/models.go) changes.",
+      "status": "observed",
+      "evidence": {
+        "source": "changed_paths of source primary; git diff --stat origin/main...HEAD"
+      }
+    },
+    {
+      "id": "extension-behaviour",
+      "claim": "Behaviour that comes with core's client, for extension-served requests only. Streams have no total timeout (they were cut at 180 s), while invoke keeps a 180 s default deadline. Listing, refresh and sign-in steps get a 30 s default deadline when the caller sets none. Daemon error text is bounded to one line and classified by status, and redirects are not followed.",
+      "status": "observed",
+      "evidence": {
+        "source": "go/internal/providers/extension_vertical.go; github.com/xibodev/llmgw-core v1.2.0 extension package"
+      }
+    },
+    {
+      "id": "extension-tests",
+      "claim": "extension_vertical_test.go drives the vertical, the facade's ListModelsWithError and Synthesize, and Runtime.OAuthDriver against an httptest daemon that checks the shared secret. It covers invoke, streams with a skipped keepalive, models, refresh, bounded status-classified errors, OAuth start, poll and exchange, and the reuse and rebuilding of the shared client.",
+      "status": "observed",
+      "evidence": {
+        "source": "go/internal/providers/extension_vertical_test.go"
+      }
+    },
+    {
+      "id": "ci-passes",
+      "claim": "On head f6c7f68, CI's go build / vet / test, console lint / test / dist and deterministic Docker acceptance jobs pass. The deterministic acceptance boots the gateway container on a clean state. The workflow / container validation job fails only with REVIEW_STALE, which this review addresses.",
+      "status": "observed",
+      "evidence": {
+        "source": "https://github.com/xibodev/llm-gateway/actions/runs/36459840419 (pull request #109)"
+      }
+    }
+  ],
+  "impact": {
+    "assertions": [
+      {
+        "id": "A1",
+        "impact": "unchanged",
+        "supported_by": [
+          "scope-of-change",
+          "ci-passes"
+        ]
+      },
+      {
+        "id": "A2",
+        "impact": "unchanged",
+        "supported_by": [
+          "scope-of-change",
+          "ci-passes"
+        ]
+      },
+      {
+        "id": "A3",
+        "impact": "unchanged",
+        "supported_by": [
+          "scope-of-change",
+          "ci-passes"
+        ]
+      },
+      {
+        "id": "A4",
+        "impact": "unchanged",
+        "supported_by": [
+          "scope-of-change",
+          "extension-tests",
+          "ci-passes"
+        ]
+      }
+    ],
+    "requires": [],
+    "possible_binding_changes": []
+  },
+  "questions": [],
+  "conclusion": {
+    "action": "reuse_contract",
+    "summary": "The gateway reaches the extension daemon through llmgw-core's extension client instead of its own copy. No dependency, CLI, health or model-list code changes, the extension paths are tested against a fake daemon, and CI's build, test and deterministic acceptance jobs pass. Release identity, health and the public model list are therefore unchanged."
+  },
+  "proposed": {
+    "by": "extension-core-client",
+    "at": "2026-09-28T20:53:27.914Z"
+  },
+  "digest": "9b2091521a56cebfe73babcaa9466a173dc543c6801de8278d6efea4a76e91e1"
+}
