@@ -63,7 +63,11 @@ func OAuthManualConfig(params map[string]string) ProviderAuthManualConfig {
 // llm-provider-auth exactly as the adapter's own flow methods do.
 func (rt *Runtime) OAuthDriver(adapterID, providerID string, method oauthflow.Method) (oauthflow.Driver, error) {
 	if isExtensionType(adapterID) {
-		return rt.extensionClient().OAuthDriver(adapterID), nil
+		client, err := rt.extensionClient()
+		if err != nil {
+			return nil, err
+		}
+		return client.OAuthDriver(adapterID), nil
 	}
 	return nil, fmt.Errorf("provider %q does not offer %s authorization", providerID, method)
 }
