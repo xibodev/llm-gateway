@@ -187,6 +187,57 @@ func TestExtensionFacadeReachesTheDaemonThroughTheSharedClient(t *testing.T) {
 	}
 }
 
+// The gateway's own controls, the fields prefixed "_", stay in the gateway,
+// while the client's fields and the output limit the daemon reads go with
+// the request, streamed or not.
+func TestExtensionRequestsCarryNoGatewayControls(t *testing.T) {
+	bodies := make(chan map[string]any, 2)
+	record := func(r *http.Request) {
+		var body map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Error(err)
+		}
+		bodies <- body
+	}
+	mux := http.NewServeMux()
+	mux.HandleFunc("POST /extension/v1/openai_codex/invoke", func(w http.ResponseWriter, r *http.Request) {
+		record(r)
+		writeExtensionJSON(t, w, http.StatusOK, map[string]any{"choices": []any{}})
+	})
+	mux.HandleFunc("POST /extension/v1/openai_codex/stream", func(w http.ResponseWriter, r *http.Request) {
+		record(r)
+		w.Header().Set("Content-Type", core.ContentTypeEventStream)
+		_, _ = io.WriteString(w, "data: [DONE]\n\n")
+	})
+	extensionDaemon(t, mux)
+	facade := extensionFacadeFixture(t, ExtensionTypeCodex, "codex")
+	messages := []Message{{"role": "user", "content": "hi"}}
+	kw := Kwargs{
+		"temperature": 0.5, "_max_output_tokens": 64,
+		"_affinity_key": "session", "_fallback_timeout_ms": 1000, "_force_api_support": true,
+	}
+
+	if _, err := facade.Complete("gpt-test", messages, kw); err != nil {
+		t.Fatal(err)
+	}
+	stream, err := facade.StreamContext(context.Background(), "gpt-test", messages, kw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = stream.Close()
+	for _, operation := range []string{"complete", "stream"} {
+		body := <-bodies
+		if body["temperature"] != 0.5 || body["_max_output_tokens"] != float64(64) {
+			t.Errorf("%s body %v lost a field the daemon reads", operation, body)
+		}
+		for field := range body {
+			if strings.HasPrefix(field, "_") && field != "_max_output_tokens" {
+				t.Errorf("%s body carries the gateway control %s", operation, field)
+			}
+		}
+	}
+}
+
 func TestExtensionClientIsSharedUntilTheEnvironmentChanges(t *testing.T) {
 	t.Setenv("LLMGW_EXTENSION_URL", "")
 	t.Setenv("LLMGW_EXTENSION_SECRET", "one")

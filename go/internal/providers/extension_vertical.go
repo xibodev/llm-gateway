@@ -213,6 +213,17 @@ func (f *ExtensionProviderFacade) IsStub() bool {
 	return false
 }
 
+// daemonField reports whether a request field goes to the daemon. A field
+// prefixed "_" is one of the gateway's own controls, such as the failover
+// budget, the affinity key or the adaptation switch: it is not part of the
+// client's request, and the daemon does not read it, so it stays here. The
+// daemon reads one: _max_output_tokens, the output limit a Responses request
+// carries through the Chat fallback, which it turns into the provider's own
+// limit where the provider has one.
+func daemonField(key string) bool {
+	return !strings.HasPrefix(key, "_") || key == "_max_output_tokens"
+}
+
 func (f *ExtensionProviderFacade) Complete(model string, messages []Message, kw Kwargs) (map[string]any, error) {
 	resp, _, err := f.CompleteContextWithObservation(context.Background(), model, messages, kw)
 	return resp, err
@@ -228,7 +239,9 @@ func (f *ExtensionProviderFacade) CompleteContextWithObservation(ctx context.Con
 		"messages": messages,
 	}
 	for k, v := range kw {
-		payload[k] = v
+		if daemonField(k) {
+			payload[k] = v
+		}
 	}
 	raw, err := json.Marshal(payload)
 	if err != nil {
@@ -263,7 +276,9 @@ func (f *ExtensionProviderFacade) StreamContext(ctx context.Context, model strin
 		"stream":   true,
 	}
 	for k, v := range kw {
-		payload[k] = v
+		if daemonField(k) {
+			payload[k] = v
+		}
 	}
 	raw, err := json.Marshal(payload)
 	if err != nil {
