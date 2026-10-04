@@ -22,6 +22,7 @@ type chatRequest struct {
 	Model               string           `json:"model"`
 	Messages            []map[string]any `json:"messages"`
 	Stream              bool             `json:"stream"`
+	StreamOptions       any              `json:"stream_options"`
 	Temperature         any              `json:"temperature"`
 	MaxTokens           any              `json:"max_tokens"`
 	MaxCompletionTokens any              `json:"max_completion_tokens"`
@@ -73,6 +74,13 @@ func chatKwargs(req *chatRequest) providers.Kwargs {
 	put("stop", req.Stop)
 	put("reasoning_effort", req.ReasoningEffort)
 	put("_fallback_timeout_ms", req.FallbackTimeoutMS)
+	// include_usage asks the upstream for the stream's usage, which the
+	// client then reads and the gateway records exactly. Upstreams refuse
+	// stream_options on a request that does not stream, so it goes with a
+	// stream only.
+	if req.Stream {
+		put("stream_options", req.StreamOptions)
+	}
 	if strings.TrimSpace(req.AffinityKey) != "" {
 		kw["_affinity_key"] = strings.TrimSpace(req.AffinityKey)
 	}

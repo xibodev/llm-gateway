@@ -2,10 +2,13 @@ package api
 
 import (
 	"context"
+	"encoding/json"
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -91,6 +94,78 @@ func TestStreamUsageEstimatesTheStreamedText(t *testing.T) {
 	}})
 	if input, output := responses.tokens(); input != 9 || output != 8 {
 		t.Fatalf("responses reported=%d/%d, want 9/8", input, output)
+	}
+}
+
+// A Chat client that asks for its stream's usage gets it: stream_options
+// reaches the upstream, whose usage chunk reaches the client, and the
+// stream is recorded with exactly that usage. A request that does not
+// stream never sends stream_options, which upstreams refuse there.
+func TestChatStreamForwardsStreamOptions(t *testing.T) {
+	var mu sync.Mutex
+	var sent map[string]any
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body map[string]any
+		_ = json.NewDecoder(r.Body).Decode(&body)
+		mu.Lock()
+		sent = body
+		mu.Unlock()
+		if body["stream"] != true {
+			writeJSON(w, http.StatusOK, map[string]any{
+				"id": "chatcmpl_1", "object": "chat.completion", "model": "model",
+				"choices": []any{map[string]any{"index": 0, "finish_reason": "stop", "message": map[string]any{"role": "assistant", "content": "Hello there"}}},
+				"usage":   map[string]any{"prompt_tokens": 21, "completion_tokens": 5, "total_tokens": 26},
+			})
+			return
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = io.WriteString(w, `data: {"id":"chatcmpl_1","object":"chat.completion.chunk","model":"model","choices":[{"index":0,"delta":{"content":"Hello there"},"finish_reason":"stop"}]}`+"\n\n")
+		if options, _ := body["stream_options"].(map[string]any); options["include_usage"] == true {
+			_, _ = io.WriteString(w, `data: {"id":"chatcmpl_1","object":"chat.completion.chunk","model":"model","choices":[],"usage":{"prompt_tokens":21,"completion_tokens":5,"total_tokens":26}}`+"\n\n")
+		}
+		_, _ = io.WriteString(w, "data: [DONE]\n\n")
+	}))
+	t.Cleanup(upstream.Close)
+	const messages = `"messages":[{"role":"user","content":"Say hello"}]`
+	for _, tc := range []struct {
+		name, body          string
+		stream, wantOptions bool
+		wantInput, wantOut  int
+	}{
+		// Without usage the stream is estimated: ten prompt tokens for 39
+		// bytes, two for the 11 streamed.
+		{"stream", `{"model":"chat/model","stream":true,` + messages + `}`, true, false, 10, 2},
+		{"stream with usage", `{"model":"chat/model","stream":true,"stream_options":{"include_usage":true},` + messages + `}`, true, true, 21, 5},
+		{"no stream", `{"model":"chat/model","stream_options":{"include_usage":true},` + messages + `}`, false, false, 21, 5},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			gateway := setupStreamOutcomeTest(t, upstream.URL)
+			if tc.stream {
+				body := streamThroughGateway(t, gateway, "/v1/chat/completions", tc.body)
+				if got := strings.Contains(body, `"completion_tokens":5`); got != tc.wantOptions {
+					t.Fatalf("usage chunk relayed=%v body=%q", got, body)
+				}
+			} else {
+				response, err := http.Post(gateway.URL+"/v1/chat/completions", "application/json", strings.NewReader(tc.body))
+				if err != nil {
+					t.Fatal(err)
+				}
+				_, _ = io.Copy(io.Discard, response.Body)
+				_ = response.Body.Close()
+				if response.StatusCode != http.StatusOK {
+					t.Fatalf("status=%d", response.StatusCode)
+				}
+			}
+			mu.Lock()
+			options, forwarded := sent["stream_options"]
+			mu.Unlock()
+			if forwarded != tc.wantOptions || (forwarded && !reflect.DeepEqual(options, map[string]any{"include_usage": true})) {
+				t.Fatalf("upstream stream_options=%#v, want forwarded %v", options, tc.wantOptions)
+			}
+			if row := readStreamUsageRow(t); row.status != http.StatusOK || row.input != tc.wantInput || row.output != tc.wantOut {
+				t.Fatalf("usage=%+v, want %d/%d tokens", row, tc.wantInput, tc.wantOut)
+			}
+		})
 	}
 }
 

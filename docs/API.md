@@ -70,7 +70,9 @@ credential and policy. It is not a global list of every model a provider sells.
 
 The core profile supports non-streaming and SSE streaming, ordinary chat
 messages, function tools, tool calls, usage normalization, vision filtering, and
-request cancellation. Ordered endpoint failover is possible before output
+request cancellation. A streaming request's `stream_options` reaches the
+upstream, so `include_usage` returns the stream's usage where the upstream
+reports it. Ordered endpoint failover is possible before output
 starts. Chat Completions and Responses accept request-level controls for the
 failover deadline and member order; see
 [failover budget and affinity](ROUTING.md#failover-budget-and-affinity).
