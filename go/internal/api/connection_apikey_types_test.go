@@ -12,8 +12,8 @@ import (
 	"llmgw/internal/router"
 )
 
-// A provider added from the legacy admin page carries no registry id — its
-// addProvider() posts {id, type, base_url} only — so every such provider is
+// A provider saved by the removed legacy admin page carries no registry id —
+// its addProvider() posted {id, type, base_url} only — so every such provider is
 // judged by its runtime type alone. azure_openai declares
 // auth_methods: ["api_key"] in the registry manifest, and must therefore accept
 // an API-key connection on that path too, not only when a registry id happens
@@ -36,8 +36,8 @@ func TestAPIKeyConnectionFollowsTheManifestForRegistrylessProviders(t *testing.T
 		s.AllowUnauthenticatedAPI = false
 		s.CredentialEncryptionKey = base64.RawURLEncoding.EncodeToString(key)
 		s.Providers = map[string]*config.ProviderConfig{
-			// No RegistryID on either: this is exactly what the legacy admin
-			// page writes.
+			// No RegistryID on either: this is exactly what the removed legacy
+			// admin page wrote.
 			"my-azure":  {Type: "azure_openai", BaseURL: "https://azure.invalid/openai/v1"},
 			"my-ollama": {Type: "ollama", BaseURL: "http://ollama.invalid"},
 		}

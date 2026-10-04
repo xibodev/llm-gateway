@@ -25,7 +25,7 @@ internal/operations   locked backup, inspection, restore, and recovery journal
 internal/providers    core runtime assembly and verticals, facades, stores over IAM, catalogs, sign-in, retries and circuits
 internal/roster       provider catalog synchronization and metadata
 internal/router       target resolution, ordered failover, telemetry, usage bridge
-internal/web          embedded Preact bundle and legacy compatibility documents
+internal/web          embedded Preact console bundle
 ```
 
 ## Build and test

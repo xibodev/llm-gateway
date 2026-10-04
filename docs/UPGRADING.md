@@ -115,8 +115,10 @@ protected.
 ## Console compatibility
 
 `/admin` redirects to `/console`. `/portal` serves owner mode. The old documents
-remain at `/admin-legacy` and `/portal-legacy` for compatibility, but new
-workflows should use the Preact console.
+at `/admin-legacy` and `/portal-legacy` have been removed and those paths now
+return `404`; use `/console` and `/portal` instead. The old admin document kept
+the administrator key in the browser's local storage as `llmgw_key`. Nothing
+reads it any more: clear the gateway site's data in browsers that used it.
 
 ## Rollback
 

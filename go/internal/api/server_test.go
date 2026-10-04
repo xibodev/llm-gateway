@@ -8,7 +8,7 @@ import (
 	"testing"
 )
 
-func TestConsoleRoutesPreserveLegacySurfaces(t *testing.T) {
+func TestConsoleRoutesServeTheEmbeddedBundle(t *testing.T) {
 	handler := NewServer(Runtime{})
 
 	admin := httptest.NewRecorder()
@@ -36,11 +36,13 @@ func TestConsoleRoutesPreserveLegacySurfaces(t *testing.T) {
 		t.Fatalf("portal does not serve the same local bundle: status=%d", portal.Code)
 	}
 
-	for _, legacyPath := range []string{"/admin-legacy", "/portal-legacy"} {
-		legacy := httptest.NewRecorder()
-		handler.ServeHTTP(legacy, httptest.NewRequest(http.MethodGet, legacyPath, nil))
-		if legacy.Code != http.StatusOK || !strings.Contains(legacy.Body.String(), "<") {
-			t.Fatalf("legacy route %s status=%d", legacyPath, legacy.Code)
+	// The pages these paths served loaded third-party scripts; the console
+	// and the portal replace them.
+	for _, removed := range []string{"/admin-legacy", "/admin-legacy/", "/portal-legacy", "/portal-legacy/"} {
+		response := httptest.NewRecorder()
+		handler.ServeHTTP(response, httptest.NewRequest(http.MethodGet, removed, nil))
+		if response.Code != http.StatusNotFound {
+			t.Fatalf("removed route %s status=%d, want 404", removed, response.Code)
 		}
 	}
 }

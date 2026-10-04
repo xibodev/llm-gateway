@@ -205,9 +205,6 @@ playground, keys, access, usage, alerts, project policy, and retained audit
 history. Management APIs exist for shared Copilot bindings even though the
 primary console does not yet expose every binding control.
 
-Legacy documents remain at `/admin-legacy` and `/portal-legacy` for compatibility;
-new deployments should use `/console` and `/portal`.
-
 ## Storage and recovery
 
 The authoritative control plane is local SQLite. No Postgres, Redis, embedded

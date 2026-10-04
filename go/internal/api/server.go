@@ -117,8 +117,7 @@ func (s *server) handler() http.Handler {
 	mux.HandleFunc("POST /v1/messages", handleMessages)
 	mux.HandleFunc("POST /v1/messages/count_tokens", handleCountTokens)
 
-	// The local console is the default operational surface. Legacy pages stay
-	// available at explicit paths while teams complete their migration.
+	// The local console is the operational surface.
 	redirectConsole := func(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, "/console", http.StatusFound)
 	}
@@ -142,13 +141,6 @@ func (s *server) handler() http.Handler {
 	mux.HandleFunc("GET /console/{$}", serveConsole)
 	mux.HandleFunc("GET /console/{path...}", serveConsole)
 
-	serveLegacyAdmin := func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		_, _ = w.Write([]byte(web.AdminHTML))
-	}
-	mux.HandleFunc("GET /admin-legacy", serveLegacyAdmin)
-	mux.HandleFunc("GET /admin-legacy/{$}", serveLegacyAdmin)
-
 	// Portal mode serves the same local bundle. Its client selects only user API
 	// routes from the location, keeping the admin API boundary on the server.
 	servePortal := func(w http.ResponseWriter, r *http.Request) {
@@ -158,12 +150,6 @@ func (s *server) handler() http.Handler {
 	}
 	mux.HandleFunc("GET /portal", servePortal)
 	mux.HandleFunc("GET /portal/{$}", servePortal)
-	serveLegacyPortal := func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		_, _ = w.Write([]byte(web.PortalHTML))
-	}
-	mux.HandleFunc("GET /portal-legacy", serveLegacyPortal)
-	mux.HandleFunc("GET /portal-legacy/{$}", serveLegacyPortal)
 	mux.HandleFunc("GET /user/api/me", handleUserMe)
 	mux.HandleFunc("GET /user/api/usage", handleUserUsage)
 	mux.HandleFunc("GET /user/api/models", handleUserModels)

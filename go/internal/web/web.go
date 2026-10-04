@@ -5,16 +5,6 @@ import (
 	"io/fs"
 )
 
-// AdminHTML is the preserved legacy admin dashboard.
-//
-//go:embed admin.html
-var AdminHTML string
-
-// PortalHTML is the preserved legacy self-service portal.
-//
-//go:embed portal.html
-var PortalHTML string
-
 // ConsoleFS holds the generated, local-only Preact console assets. The build
 // output is committed so a normal Go build has no Node.js runtime dependency.
 //

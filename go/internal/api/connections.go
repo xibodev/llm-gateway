@@ -192,9 +192,9 @@ func handleUserRevokeConnection(w http.ResponseWriter, r *http.Request) {
 }
 
 // runtimeTypeAcceptsAPIKey answers, for a provider configured WITHOUT a
-// registry id (the shape the legacy admin page's addProvider() posts, and the
-// shape any hand-written config takes), whether its runtime type can consume an
-// API-key connection.
+// registry id (the shape the removed legacy admin page's addProvider() saved,
+// and the shape any hand-written config takes), whether its runtime type can
+// consume an API-key connection.
 //
 // It asks the registry manifest rather than a hand-maintained list, because
 // that list has now been the bug twice: vertex_ai was missing until a custom
