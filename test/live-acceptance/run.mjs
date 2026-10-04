@@ -214,6 +214,19 @@ async function waitHealth() {
   throw new Error("gateway did not become healthy");
 }
 
+// waitFixture waits until a fixture container's server answers, so the
+// gateway never configures a provider whose upstream is still starting: a
+// catalog refresh that cannot connect leaves the provider without models.
+async function waitFixture(name, timeoutMs = 30_000) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    const probe = await docker("exec", name, "wget", "-qO-", "http://127.0.0.1:8080/models").catch(() => null);
+    if (probe) return;
+    await new Promise((done) => setTimeout(done, 200));
+  }
+  throw new Error(`fixture ${name} did not answer within ${timeoutMs / 1000}s`);
+}
+
 async function configureProvider(id, registry_id, base_url) {
   const result = await request("/admin/api/providers", {
     method: "POST",
@@ -767,11 +780,7 @@ async function runAcceptance() {
         const name = `${project}-${id}`;
         await docker("run", "-d", "--name", name, "--network", network, "-e", `STATUS=${status}`, "-e", `MODELS=${models.join(",")}`, "-v", `${resolve(import.meta.dirname)}:/harness:ro`, "node:22.23.2-alpine", "node", "/harness/fixture-server.mjs");
         servers.push(name);
-        for (let attempt = 0; attempt < 20; attempt++) {
-          const probe = await docker("exec", name, "wget", "-qO-", "http://127.0.0.1:8080/models").catch(() => null);
-          if (probe) break;
-          await new Promise((done) => setTimeout(done, 100));
-        }
+        await waitFixture(name);
         await configureProvider(id, "custom_openai", `http://${name}:8080`);
         return models.map((model) => ({ id: model }));
       };
@@ -788,11 +797,7 @@ async function runAcceptance() {
         const name = `${project}-${id}`;
         await docker("run", "-d", "--name", name, "--network", network, "-e", `STATUS=${status}`, "-e", "MODELS=fault-model", "-v", `${resolve(import.meta.dirname)}:/harness:ro`, "node:22.23.2-alpine", "node", "/harness/fixture-server.mjs");
         servers.push(name);
-        for (let attempt = 0; attempt < 20; attempt++) {
-          const probe = await docker("exec", name, "wget", "-qO-", "http://127.0.0.1:8080/models").catch(() => null);
-          if (probe) break;
-          await new Promise((done) => setTimeout(done, 100));
-        }
+        await waitFixture(name);
         await configureProvider(id, "custom_openai", `http://${name}:8080`);
       }
     }
