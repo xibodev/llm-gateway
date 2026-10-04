@@ -435,6 +435,36 @@ func TestPlainPayloadAcceptanceAndCache(t *testing.T) {
 	}
 }
 
+// Configured keys promise that every accepted roster was signed: neither a
+// fetched nor a cached unsigned document may satisfy them.
+func TestConfiguredKeysRejectUnsignedFeedAndCache(t *testing.T) {
+	pub, key, p := fixture(t)
+	body := plainBody(t, p)
+	var calls atomic.Int32
+	plain := Options{URL: "https://feed.example.com/roster.json", StateDir: t.TempDir(), Client: clientFor(&body, &calls)}
+	if got := New(plain).Refresh(context.Background()); got.Revision != 1 || got.Error != "" {
+		t.Fatalf("plain mode rejected unsigned feed: %+v", got)
+	}
+	keyed := plain
+	keyed.Keys = map[string]ed25519.PublicKey{"staging": pub}
+	if got := New(keyed).Snapshot(); got.Revision != 0 || got.Error != "Roster cache is invalid." {
+		t.Fatalf("unsigned cache accepted with keys configured: %+v", got)
+	}
+	if got := New(plain).Snapshot(); got.Revision != 1 || got.Error != "" {
+		t.Fatalf("plain mode rejected unsigned cache: %+v", got)
+	}
+	if got := New(keyed).Refresh(context.Background()); got.Revision != 0 || got.Error != "Roster signature or payload is invalid." {
+		t.Fatalf("unsigned feed accepted with keys configured: %+v", got)
+	}
+	body = signed(t, key, p)
+	if got := New(keyed).Refresh(context.Background()); got.Revision != 1 || got.Error != "" {
+		t.Fatalf("signed feed rejected: %+v", got)
+	}
+	if got := New(keyed).Snapshot(); got.Revision != 1 || got.Error != "" {
+		t.Fatalf("signed cache rejected: %+v", got)
+	}
+}
+
 func TestPlainModeRejectsMalformedJSON(t *testing.T) {
 	for _, raw := range []string{
 		"not json",

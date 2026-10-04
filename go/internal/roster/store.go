@@ -137,6 +137,17 @@ func (s *Store) cachePath() string {
 	return filepath.Join(s.options.StateDir, "provider-roster-cache.json")
 }
 
+// verifyFeed applies the trust mode selected at construction. Configured keys
+// make a signature mandatory: falling back to plain validation would let an
+// unsigned document, fetched or left in the cache by plain mode, stand in for
+// a signed one.
+func (s *Store) verifyFeed(raw []byte) (Payload, [32]byte, error) {
+	if len(s.options.Keys) > 0 {
+		return verify(raw, s.options.Keys, s.clock())
+	}
+	return verifyPlain(raw, s.clock())
+}
+
 func (s *Store) loadCache() {
 	if s.options.StateDir == "" {
 		return
@@ -156,17 +167,7 @@ func (s *Store) loadCache() {
 		s.snapshot.Error = "Roster cache is invalid."
 		return
 	}
-	// Try signed verification first when keys are configured, then plain.
-	// When no keys are configured, only plain verification applies.
-	var p Payload
-	var digest [32]byte
-	var verifyErr error
-	if len(s.options.Keys) > 0 {
-		p, digest, verifyErr = verify(c.Envelope, s.options.Keys, s.clock())
-	}
-	if verifyErr != nil || len(s.options.Keys) == 0 {
-		p, digest, verifyErr = verifyPlain(c.Envelope, s.clock())
-	}
+	p, digest, verifyErr := s.verifyFeed(c.Envelope)
 	success, timeErr := time.Parse(time.RFC3339, c.LastSuccess)
 	if verifyErr != nil || timeErr != nil || success.After(s.clock().Add(10*time.Minute)) {
 		s.snapshot.Error = "Roster cache is invalid."
@@ -278,20 +279,9 @@ func (s *Store) fetch(ctx context.Context) (Payload, [32]byte, []byte, error) {
 	if err != nil || len(raw) > maxFeedBytes {
 		return empty, digest, nil, errors.New("Roster response is unreadable or too large.")
 	}
-	// Try signed verification first when keys are configured, then plain.
-	// When no keys are configured, only plain verification applies.
-	if len(s.options.Keys) > 0 {
-		p, d, signErr := verify(raw, s.options.Keys, s.clock())
-		if signErr == nil {
-			return p, d, raw, nil
-		}
-	}
-	p, d, plainErr := verifyPlain(raw, s.clock())
-	if plainErr != nil {
-		if len(s.options.Keys) > 0 {
-			return empty, digest, nil, errors.New("Roster signature or payload is invalid.")
-		}
-		return empty, digest, nil, plainErr
+	p, d, err := s.verifyFeed(raw)
+	if err != nil {
+		return empty, digest, nil, err
 	}
 	return p, d, raw, nil
 }
