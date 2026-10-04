@@ -246,8 +246,8 @@ func handleImportSharedProviderCredential(w http.ResponseWriter, r *http.Request
 		writeError(w, 400, "source must be 'configured'")
 		return
 	}
-	secret, err := providers.CopilotAuth().ResolveOAuthToken()
-	if err != nil {
+	secret := config.Get().GithubCopilotOAuthToken
+	if secret == "" {
 		writeError(w, 400, "configured provider credential is unavailable")
 		return
 	}
@@ -384,77 +384,6 @@ func handleListPrincipalCredentials(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, 200, map[string]any{"credentials": items})
-}
-
-func handlePrincipalCopilotLoginStart(w http.ResponseWriter, r *http.Request) {
-	if !adminAuthed(w, r) {
-		return
-	}
-	principal, ok, err := iam.PrincipalByID(strings.TrimSpace(r.PathValue("id")))
-	if err != nil {
-		writeError(w, 500, "Identity store unavailable.")
-		return
-	}
-	if !ok {
-		writeError(w, 404, "unknown principal")
-		return
-	}
-	if principal.Kind != "human" {
-		writeError(w, 400, "Copilot BYOC requires a human principal.")
-		return
-	}
-	dc, err := providers.CopilotAuth().StartDeviceFlow()
-	if err != nil {
-		writeError(w, 502, oauthErrorText(err.Error()))
-		return
-	}
-	writeJSON(w, 200, map[string]any{
-		"device_code": dc.DeviceCode, "user_code": dc.UserCode,
-		"verification_uri": dc.VerificationURI, "interval": dc.Interval,
-		"expires_in": dc.ExpiresIn,
-	})
-}
-
-func handlePrincipalCopilotLoginPoll(w http.ResponseWriter, r *http.Request) {
-	if !adminAuthed(w, r) {
-		return
-	}
-	principalID := strings.TrimSpace(r.PathValue("id"))
-	principal, ok, err := iam.PrincipalByID(principalID)
-	if err != nil {
-		writeError(w, 500, "Identity store unavailable.")
-		return
-	}
-	if !ok {
-		writeError(w, 404, "unknown principal")
-		return
-	}
-	if principal.Kind != "human" {
-		writeError(w, 400, "Copilot BYOC requires a human principal.")
-		return
-	}
-	var body struct {
-		DeviceCode string `json:"device_code"`
-	}
-	if !decodeBody(r, &body) || strings.TrimSpace(body.DeviceCode) == "" {
-		writeError(w, 400, "device_code required")
-		return
-	}
-	result := providers.CopilotAuth().PollDeviceFlowTokenOnce(body.DeviceCode)
-	if result.Status == "authorized" {
-		if _, err := iam.PutOAuthProviderConnection(iam.OAuthConnectionCreate{
-			PrincipalID: principalID, ProviderID: "copilot", Kind: "github_oauth",
-			Source: iam.ConnectionSourceAdmin, MakeDefault: true, AccessToken: result.AccessToken,
-		}); err != nil {
-			writeError(w, 500, oauthErrorText(err.Error()))
-			return
-		}
-		providers.ForgetProviderForPrincipal("copilot", principalID)
-		providers.ForgetCatalogForPrincipal("copilot", principalID)
-		auditAdmin(r, "oauth_connection.connect", "principal", principalID, map[string]any{"provider": "copilot"})
-	}
-	response := safeOAuthPollResponse(result.Status, result.Error)
-	writeJSON(w, 200, response)
 }
 
 func handlePrincipalCopilotRevoke(w http.ResponseWriter, r *http.Request) {

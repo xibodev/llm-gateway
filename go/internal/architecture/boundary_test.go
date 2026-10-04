@@ -78,7 +78,7 @@ var productAdapters = []adapterUnit{
 		// refresh (auth_adapter.go, antigravity_credentials.go).
 		path:    "internal/providers",
 		allowed: []string{"llmgw/internal/config", "llmgw/internal/iam"},
-		budget:  map[string]int{metricIAM: 27, metricConfigGet: 8, metricConfigPrincipal: 0},
+		budget:  map[string]int{metricIAM: 27, metricConfigGet: 7, metricConfigPrincipal: 0},
 	},
 	{
 		// The gateway's routing policy over llmgw-core's execution

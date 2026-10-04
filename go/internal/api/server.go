@@ -38,9 +38,9 @@ type Runtime struct {
 
 // server owns the Runtime it serves and the console's OAuth flows. Handlers
 // become its methods as they take their state from it: so far the usage,
-// telemetry, Copilot sign-in, OAuth connection and free-provider handlers.
-// The rest reach the same state through the installed runtimes, which the
-// process installs before it serves.
+// telemetry, OAuth connection and free-provider handlers. The rest reach the
+// same state through the installed runtimes, which the process installs
+// before it serves.
 type server struct {
 	runtime Runtime
 	// now is the clock of the OAuth flows and their responses.
@@ -183,8 +183,6 @@ func (s *server) handler() http.Handler {
 	mux.HandleFunc("POST /user/api/playground/v1/chat/completions", handleUserPlaygroundChat)
 	mux.HandleFunc("POST /user/api/playground/v1/responses", handleUserPlaygroundResponses)
 	mux.HandleFunc("POST /user/api/playground/v1/messages", handleUserPlaygroundMessages)
-	mux.HandleFunc("POST /user/api/copilot/login/start", handleUserCopilotLoginStart)
-	mux.HandleFunc("POST /user/api/copilot/login/poll", handleUserCopilotLoginPoll)
 	mux.HandleFunc("DELETE /user/api/copilot", handleUserCopilotRevoke)
 	mux.HandleFunc("GET /admin/api/state", handleState)
 	mux.HandleFunc("GET /admin/api/settings/anonymous-provider-automation", handleGetAnonymousProviderAutomation)
@@ -246,8 +244,6 @@ func (s *server) handler() http.Handler {
 	mux.HandleFunc("POST /admin/api/principals/{id}/connections/{provider_id}/oauth/complete", s.handlePrincipalOAuthComplete)
 	mux.HandleFunc("POST /admin/api/principals/{id}/connections/{provider_id}/oauth/refresh", handlePrincipalOAuthRefresh)
 	mux.HandleFunc("POST /admin/api/principals/{id}/connections/{provider_id}/oauth/revoke", handlePrincipalOAuthRevoke)
-	mux.HandleFunc("POST /admin/api/principals/{id}/copilot/login/start", handlePrincipalCopilotLoginStart)
-	mux.HandleFunc("POST /admin/api/principals/{id}/copilot/login/poll", handlePrincipalCopilotLoginPoll)
 	mux.HandleFunc("DELETE /admin/api/principals/{id}/copilot", handlePrincipalCopilotRevoke)
 	mux.HandleFunc("GET /admin/api/alerts", handleListAlerts)
 	mux.HandleFunc("POST /admin/api/alerts", handleCreateAlert)
@@ -262,9 +258,6 @@ func (s *server) handler() http.Handler {
 	mux.HandleFunc("POST /admin/api/detect", handleDetect)
 	mux.HandleFunc("GET /admin/api/usage", s.handleUsage)
 	mux.HandleFunc("GET /admin/api/telemetry", s.handleTelemetry)
-	mux.HandleFunc("POST /admin/api/copilot/login/start", s.handleCopilotLoginStart)
-	mux.HandleFunc("POST /admin/api/copilot/login/poll", s.handleCopilotLoginPoll)
-	mux.HandleFunc("POST /admin/api/copilot/logout", s.handleCopilotLogout)
 
 	return securityHeaders(aliasMiddleware(requestLogMiddleware(anthropicErrors(limitRequestBodies(mux)))))
 }

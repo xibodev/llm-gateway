@@ -327,55 +327,6 @@ func handleUserAudit(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 200, map[string]any{"events": events})
 }
 
-func handleUserCopilotLoginStart(w http.ResponseWriter, r *http.Request) {
-	if _, ok := requireSSOUser(w, r); !ok {
-		return
-	}
-	dc, err := providers.CopilotAuth().StartDeviceFlow()
-	if err != nil {
-		writeError(w, 502, oauthErrorText(err.Error()))
-		return
-	}
-	writeJSON(w, 200, map[string]any{
-		"device_code": dc.DeviceCode, "user_code": dc.UserCode,
-		"verification_uri": dc.VerificationURI, "interval": dc.Interval,
-		"expires_in": dc.ExpiresIn,
-	})
-}
-
-func handleUserCopilotLoginPoll(w http.ResponseWriter, r *http.Request) {
-	principal, ok := requireSSOUser(w, r)
-	if !ok {
-		return
-	}
-	var body struct {
-		DeviceCode string `json:"device_code"`
-	}
-	if !decodeBody(r, &body) || strings.TrimSpace(body.DeviceCode) == "" {
-		writeError(w, 400, "device_code required")
-		return
-	}
-	result := providers.CopilotAuth().PollDeviceFlowTokenOnce(body.DeviceCode)
-	if result.Status == "authorized" {
-		if _, err := iam.PutOAuthProviderConnection(iam.OAuthConnectionCreate{
-			PrincipalID: principal.ID, ProviderID: "copilot", Kind: "github_oauth",
-			Source: iam.ConnectionSourceUser, MakeDefault: true, AccessToken: result.AccessToken,
-		}); err != nil {
-			writeError(w, 500, oauthErrorText(err.Error()))
-			return
-		}
-		providers.ForgetProviderForPrincipal("copilot", principal.ID)
-		providers.ForgetCatalogForPrincipal("copilot", principal.ID)
-		_ = iam.RecordAudit(iam.AuditEvent{
-			ActorPrincipalID: principal.ID, Action: "oauth_connection.connect",
-			TargetType: "principal", TargetID: principal.ID, Result: "success",
-			Detail: map[string]any{"provider": "copilot", "source": "self-service"},
-		})
-	}
-	response := safeOAuthPollResponse(result.Status, result.Error)
-	writeJSON(w, 200, response)
-}
-
 func handleUserCopilotRevoke(w http.ResponseWriter, r *http.Request) {
 	principal, ok := requireSSOUser(w, r)
 	if !ok {

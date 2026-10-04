@@ -316,7 +316,6 @@ func handleState(w http.ResponseWriter, r *http.Request) {
 			"overrides": s.Policies.ConfiguredOverrides(),
 		},
 		"savings": router.Totals(false),
-		"copilot": map[string]any{"enabled": providers.CopilotEnabled(), "auth": providers.CopilotAuth().AuthStatus()},
 	})
 }
 
@@ -1431,44 +1430,6 @@ func (s *server) handleTelemetry(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, 200, map[string]any{"stats": s.router().TelemetryStats(), "recent": s.router().RecentTelemetry(50)})
-}
-
-// ---- copilot device login ---------------------------------------------- //
-
-func (s *server) handleCopilotLoginStart(w http.ResponseWriter, r *http.Request) {
-	if !adminAuthed(w, r) {
-		return
-	}
-	dc, err := s.providers().CopilotAuth().StartDeviceFlow()
-	if err != nil {
-		writeJSON(w, 200, map[string]any{"error": oauthErrorText(err.Error())})
-		return
-	}
-	writeJSON(w, 200, map[string]any{
-		"device_code": dc.DeviceCode, "user_code": dc.UserCode,
-		"verification_uri": dc.VerificationURI, "interval": dc.Interval, "expires_in": dc.ExpiresIn,
-	})
-}
-
-func (s *server) handleCopilotLoginPoll(w http.ResponseWriter, r *http.Request) {
-	if !adminAuthed(w, r) {
-		return
-	}
-	var body struct {
-		DeviceCode string `json:"device_code"`
-	}
-	_ = decodeBody(r, &body)
-	result := s.providers().CopilotAuth().PollDeviceFlowOnce(body.DeviceCode)
-	status, _ := result["status"].(string)
-	detail, _ := result["error"].(string)
-	writeJSON(w, 200, safeOAuthPollResponse(status, detail))
-}
-
-func (s *server) handleCopilotLogout(w http.ResponseWriter, r *http.Request) {
-	if !adminAuthed(w, r) {
-		return
-	}
-	writeJSON(w, 200, s.providers().CopilotAuth().ClearCachedCredentials())
 }
 
 // ---- helpers ------------------------------------------------------------ //

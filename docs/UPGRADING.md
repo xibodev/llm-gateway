@@ -109,6 +109,14 @@ matched `owned_by: "category"` must accept the new value.
 Catalog cache entries carry a schema version. Entries from an incompatible cache
 schema are discarded and rediscovered rather than reinterpreted.
 
+The Copilot device-login routes, `POST /admin/api/copilot/login/start`,
+`/login/poll` and `/logout`, and the `login/start` and `login/poll` routes under
+`/admin/api/principals/{id}/copilot` and `/user/api/copilot`, are removed, as is
+the `copilot` object of the admin state. They only answered that Copilot signs
+in through the companion daemon, which the OAuth connection routes reach.
+`DELETE /admin/api/principals/{id}/copilot` and `DELETE /user/api/copilot` still
+revoke a Copilot connection.
+
 ## Legacy state migration
 
 On startup, applicable old state is migrated:

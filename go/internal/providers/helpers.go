@@ -160,55 +160,6 @@ func InvokeCoreSurfaceForPrincipal(
 	return Current().InvokeCoreSurfaceForPrincipal(ctx, providerID, caller, request)
 }
 
-func CopilotEnabled() bool { return false }
-
-type CopilotDeviceFlowInfo struct {
-	DeviceCode      string `json:"device_code"`
-	UserCode        string `json:"user_code"`
-	VerificationURI string `json:"verification_uri"`
-	Interval        int    `json:"interval"`
-	ExpiresIn       int    `json:"expires_in"`
-}
-
-type CopilotPollResult struct {
-	Status      string
-	AccessToken string
-	Error       string
-}
-
-type copilotAuthStub struct{}
-
-func (copilotAuthStub) AuthStatus() map[string]any {
-	return map[string]any{"status": "not_configured"}
-}
-
-func (copilotAuthStub) StartDeviceFlow() (CopilotDeviceFlowInfo, error) {
-	return CopilotDeviceFlowInfo{}, errors.New("GitHub Copilot authentication is available via the companion daemon")
-}
-
-func (copilotAuthStub) PollDeviceFlowOnce(string) map[string]any {
-	return map[string]any{"status": "error", "error": "GitHub Copilot authentication is available via the companion daemon"}
-}
-
-func (copilotAuthStub) PollDeviceFlowTokenOnce(string) CopilotPollResult {
-	return CopilotPollResult{Status: "error", Error: "GitHub Copilot authentication is available via the companion daemon"}
-}
-
-func (copilotAuthStub) ResolveOAuthToken() (string, error) {
-	if token := config.Get().GithubCopilotOAuthToken; token != "" {
-		return token, nil
-	}
-	return "", errors.New("GitHub Copilot token resolution is available via the companion daemon")
-}
-
-func (copilotAuthStub) ClearCachedCredentials() map[string]any {
-	return map[string]any{"ok": true}
-}
-
-func CopilotAuth() copilotAuthStub { return copilotAuthStub{} }
-
-func (rt *Runtime) CopilotAuth() copilotAuthStub { return copilotAuthStub{} }
-
 type ProviderAuthAdapter interface {
 	ID() string
 	AdapterID() string
