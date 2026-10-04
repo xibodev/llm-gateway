@@ -64,11 +64,13 @@ The full first-run journey and Windows commands are in
 
 | Client | Gateway configuration |
 | --- | --- |
-| Claude Code | `ANTHROPIC_BASE_URL=http://127.0.0.1:8787` and a gateway key in `ANTHROPIC_API_KEY` or `ANTHROPIC_AUTH_TOKEN` |
-| Codex | Custom provider with `base_url = "http://127.0.0.1:8787/v1"`, `env_key = "LLMGW_API_KEY"`, and `wire_api = "responses"` |
-| Copilot CLI BYOK | `COPILOT_PROVIDER_BASE_URL=http://127.0.0.1:8787/v1`, gateway key, explicit wire API, and exact wire model |
-| OpenAI SDKs | `OPENAI_BASE_URL=http://127.0.0.1:8787/v1` and `OPENAI_API_KEY=<gateway key>` |
+| Claude Code | `ANTHROPIC_BASE_URL=http://127.0.0.1:8787` and a project key in `ANTHROPIC_API_KEY` or `ANTHROPIC_AUTH_TOKEN` |
+| Codex | Custom provider with `base_url = "http://127.0.0.1:8787/v1"`, `env_key = "LLMGW_PROJECT_KEY"` (a variable holding a project key), and `wire_api = "responses"` |
+| Copilot CLI BYOK | `COPILOT_PROVIDER_BASE_URL=http://127.0.0.1:8787/v1`, a project key, explicit wire API, and exact wire model |
+| OpenAI SDKs | `OPENAI_BASE_URL=http://127.0.0.1:8787/v1` and `OPENAI_API_KEY=<GATEWAY_PROJECT_KEY>` |
 
+Give each client a gateway-issued project key from the console's **API keys**
+page. `LLMGW_API_KEY` is the administrator key; use it for administration only.
 Use an ID returned by `GET /v1/models`. Complete, copyable profiles and their
 known limits are in [`docs/CLIENTS.md`](docs/CLIENTS.md).
 
@@ -88,9 +90,10 @@ known limits are in [`docs/CLIENTS.md`](docs/CLIENTS.md).
 | `POST` | `/v1/images/generations` | Inline base64 image generation through a capable provider |
 | `POST` | `/v1/videos/generations` | Start or poll a long-running video operation |
 
-Except for `/health`, data-plane requests require a static gateway key or a
-gateway-issued project key unless unauthenticated local mode was explicitly
-enabled. See [`docs/API.md`](docs/API.md) for aliases, request limits, streaming,
+Except for `/health`, data-plane requests require a gateway-issued project key
+unless unauthenticated local mode was explicitly enabled. The static
+administrator keys are accepted too, but skip key and project policy and quotas.
+See [`docs/API.md`](docs/API.md) for aliases, request limits, streaming,
 adaptation, cancellation, and per-surface failover semantics.
 
 ## Model addressing

@@ -21,7 +21,8 @@ services.
 
 `/admin/api/*` accepts either:
 
-- the static `LLMGW_API_KEY` recovery/administrator credential; or
+- a static recovery/administrator key from `LLMGW_API_KEY` or
+  `LLMGW_API_KEYS`; or
 - a verified SSO identity in `LLMGW_SSO_ADMIN_GROUP`.
 
 A gateway-issued project key is never an administrator credential.
@@ -33,9 +34,11 @@ must also be same-origin.
 
 ### Data plane
 
-`/v1/*` accepts a static gateway key or an active gateway-issued project key.
-The resolved principal carries project, role, model/provider policy, and quota
-limits through the request path.
+`/v1/*` accepts an active gateway-issued project key. The resolved principal
+carries project, role, model/provider policy, and quota limits through the
+request path. The static administrator keys are accepted too, but belong to no
+principal or project, so key and project allowlists and quotas do not apply to
+them; give clients project keys.
 
 ## SSO trust boundary
 

@@ -4,10 +4,16 @@ These profiles describe the gateway wire contract covered by automated fixtures.
 They do not certify every future installed client release. Use an exact model ID
 or endpoint returned by `GET /v1/models`.
 
+Every profile authenticates with a gateway-issued project key, minted in the
+console under **API keys**. The administrator keys (`LLMGW_API_KEY` and
+`LLMGW_API_KEYS`) are for administration only: the data plane accepts them, but
+without key or project policy and quotas.
+
 ## Claude Code
 
 For normal use, merge these settings into your private `~/.claude/settings.json`.
-Replace the placeholder with a gateway-issued key, never an upstream provider key:
+Replace the placeholder with a gateway-issued project key, never an upstream
+provider key or the administrator key:
 
 ```json
 {
@@ -30,7 +36,7 @@ Process-scoped API-key setup for a controlled compatibility test:
 
 ```bash
 export ANTHROPIC_BASE_URL=http://127.0.0.1:8787
-export ANTHROPIC_API_KEY='<LLMGW_API_KEY>'
+export ANTHROPIC_API_KEY='<GATEWAY_PROJECT_KEY>'
 claude --bare --model '<MODEL_SELECTOR>'
 ```
 
@@ -78,15 +84,17 @@ model = "<MODEL_SELECTOR>"
 [model_providers.llmgw]
 name = "llm-gateway"
 base_url = "http://127.0.0.1:8787/v1"
-env_key = "LLMGW_API_KEY"
+env_key = "LLMGW_PROJECT_KEY"
 wire_api = "responses"
 requires_openai_auth = false
 ```
 
-Then set the project key in the process:
+`env_key` names the variable Codex reads the key from. Any name works; avoid
+`LLMGW_API_KEY`, which is the gateway's administrator key variable. Set the
+project key in the process:
 
 ```bash
-export LLMGW_API_KEY='<LLMGW_API_KEY>'
+export LLMGW_PROJECT_KEY='<GATEWAY_PROJECT_KEY>'
 codex
 ```
 
@@ -99,7 +107,7 @@ discard advanced fields.
 
 ```bash
 export COPILOT_PROVIDER_BASE_URL=http://127.0.0.1:8787/v1
-export COPILOT_PROVIDER_API_KEY='<LLMGW_API_KEY>'
+export COPILOT_PROVIDER_API_KEY='<GATEWAY_PROJECT_KEY>'
 export COPILOT_MODEL='<CLIENT_MODEL_ENTRY>'
 export COPILOT_PROVIDER_WIRE_MODEL='<MODEL_SELECTOR>'
 export COPILOT_PROVIDER_WIRE_API=completions
@@ -124,7 +132,7 @@ discard native tool schemas.
 
 ```bash
 export OPENAI_BASE_URL=http://127.0.0.1:8787/v1
-export OPENAI_API_KEY='<LLMGW_API_KEY>'
+export OPENAI_API_KEY='<GATEWAY_PROJECT_KEY>'
 ```
 
 The supported core surfaces are Chat Completions, Responses, models, embeddings,
@@ -134,7 +142,7 @@ audio, images, and videos. This is not a claim of every OpenAI API or field.
 
 ```bash
 export ANTHROPIC_BASE_URL=http://127.0.0.1:8787
-export ANTHROPIC_API_KEY='<LLMGW_API_KEY>'
+export ANTHROPIC_API_KEY='<GATEWAY_PROJECT_KEY>'
 ```
 
 Messages and token counting are supported. Token counting uses a native provider

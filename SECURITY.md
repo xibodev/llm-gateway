@@ -23,12 +23,14 @@ runtime configuration. Use synthetic reproduction data.
 
 ## Authentication and authorization
 
-- **Administrator**: static `LLMGW_API_KEY` or verified SSO identity in the
-  configured admin group. Project keys cannot call admin APIs.
+- **Administrator**: a static key from `LLMGW_API_KEY` or `LLMGW_API_KEYS`, or a
+  verified SSO identity in the configured admin group. Project keys cannot call
+  admin APIs.
 - **Human portal**: verified reverse-proxy SSO identity. Mutations must be
   same-origin.
-- **Data plane**: static gateway key or active project key, unless deliberate
-  unauthenticated local mode is enabled.
+- **Data plane**: active project key, unless deliberate unauthenticated local
+  mode is enabled. Static administrator keys are also accepted there but bypass
+  key and project allowlists and quotas, so never hand them to clients.
 - **Gateway key**: assigned to one principal/project and authenticated against a
   SHA-256 hash.
 - **Recoverable key**: encrypted with AES-GCM only when credential encryption was
