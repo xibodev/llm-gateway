@@ -15,59 +15,71 @@ import (
 
 // ---- circuit breaker state ---------------------------------------------- //
 
-// circuits keeps every provider's circuit breaker in one llmgw-core
-// HealthTracker, keyed by provider name, so the instances of a provider share
-// its circuit and the circuit outlives the provider cache. The zero value is
-// ready for use.
+// circuits keeps the circuit breakers of every provider in llmgw-core
+// HealthTrackers, one tracker per provider name, so they outlive the provider
+// cache. A provider's tracker keys one circuit per caller scope, as the cache
+// keys its instances (see providerCacheKey), because each scope resolves its
+// own credential: one principal's rate-limited key then opens no other
+// caller's circuit, and other callers' answers do not end its streak.
+// Resetting a provider drops its tracker, and every scope's circuit with it.
+// A circuit whose cooldown has passed admits every request until one fails or
+// succeeds, since core's tracker has no single-probe half-open state. The zero
+// value is ready for use.
 //
 // Each wrapper counts against the policy it was built with, as it did when it
 // kept the counters itself, so a circuit follows the wrapper acting on it:
 // every tracker call runs under mu with that wrapper's policy in effect, and
 // the tracker reads the policy back while the call holds mu.
 type circuits struct {
-	mu      sync.Mutex
-	tracker *execution.HealthTracker
-	policy  execution.HealthPolicy
+	mu       sync.Mutex
+	trackers map[string]*execution.HealthTracker
+	policy   execution.HealthPolicy
 }
 
-// use puts policy in effect and returns the tracker. The caller holds mu.
-func (c *circuits) use(policy config.ProviderPolicy) *execution.HealthTracker {
-	if c.tracker == nil {
-		c.tracker = execution.NewHealthTracker(execution.HealthOptions{
+// use puts policy in effect and returns the tracker of name's circuits. The
+// caller holds mu.
+func (c *circuits) use(name string, policy config.ProviderPolicy) *execution.HealthTracker {
+	tracker := c.trackers[name]
+	if tracker == nil {
+		if c.trackers == nil {
+			c.trackers = map[string]*execution.HealthTracker{}
+		}
+		tracker = execution.NewHealthTracker(execution.HealthOptions{
 			Policy:  func(string) execution.HealthPolicy { return c.policy },
 			Observe: observeCircuit,
 		})
+		c.trackers[name] = tracker
 	}
 	c.policy = circuitPolicy(policy)
-	return c.tracker
+	return tracker
 }
 
-// available reports whether name's circuit admits a request under policy and,
-// when it does not, until when.
-func (c *circuits) available(name string, policy config.ProviderPolicy) (bool, time.Time) {
+// available reports whether name's circuit for scope admits a request under
+// policy and, when it does not, until when.
+func (c *circuits) available(name, scope string, policy config.ProviderPolicy) (bool, time.Time) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	return c.use(policy).Available(name)
+	return c.use(name, policy).Available(scope)
 }
 
-// record moves name's circuit by the outcome of one operation under policy:
-// nil for a success, otherwise the error the operation returned.
-func (c *circuits) record(name string, policy config.ProviderPolicy, err error) {
+// record moves name's circuit for scope by the outcome of one operation under
+// policy: nil for a success, otherwise the error the operation returned.
+func (c *circuits) record(name, scope string, policy config.ProviderPolicy, err error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	c.use(policy).Record(name, err)
+	c.use(name, policy).Record(scope, err)
 }
 
-// reset forgets name's circuit, or every circuit when name is empty.
+// reset forgets every circuit of name, whichever caller scope it keys, or
+// every circuit when name is empty.
 func (c *circuits) reset(name string) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	switch {
-	case name == "":
-		c.tracker = nil
-	case c.tracker != nil:
-		c.tracker.Reset(name)
+	if name == "" {
+		c.trackers = nil
+		return
 	}
+	delete(c.trackers, name)
 }
 
 // circuitPolicy is the breaker a provider policy configures: its threshold
@@ -97,13 +109,18 @@ func observeCircuit(err error) execution.Observation {
 	return execution.Observation{}
 }
 
-// ResetCircuit clears breaker state (test helper).
+// ResetCircuit forgets every circuit of provider name, whatever caller scope
+// it keys, or every circuit when name is empty (test helper).
 func (rt *Runtime) ResetCircuit(name string) { rt.circuits.reset(name) }
 
 // ResilientProvider wraps a Provider with retry + circuit-breaker behaviour.
 type ResilientProvider struct {
-	inner  Provider
-	name   string
+	inner Provider
+	name  string
+	// scope keys the wrapper's circuit among name's: the instance's cache
+	// key, which names the caller scope of its credential (see
+	// providerCacheKey). Empty is name itself, the gateway's scope.
+	scope  string
 	policy config.ProviderPolicy
 }
 
@@ -118,7 +135,7 @@ func (r *ResilientProvider) checkCircuit() error {
 	if !r.policy.CircuitEnabled() {
 		return nil
 	}
-	if available, until := Current().circuits.available(r.name, r.policy); !available {
+	if available, until := Current().circuits.available(r.name, r.circuitScope(), r.policy); !available {
 		remaining := time.Until(until).Seconds()
 		return invocationStatus(r.name+": circuit breaker open for another "+
 			formatSeconds(remaining)+"s", 503)
@@ -126,12 +143,21 @@ func (r *ResilientProvider) checkCircuit() error {
 	return nil
 }
 
-// record moves the provider's circuit by the outcome of an operation's last
-// try: nil for a success, otherwise the error the operation returns.
+// record moves the circuit of the wrapper's scope by the outcome of an
+// operation's last try: nil for a success, otherwise the error the operation
+// returns.
 func (r *ResilientProvider) record(err error) {
 	if r.policy.CircuitEnabled() {
-		Current().circuits.record(r.name, r.policy, err)
+		Current().circuits.record(r.name, r.circuitScope(), r.policy, err)
 	}
+}
+
+// circuitScope is the key of the wrapper's circuit among its provider's.
+func (r *ResilientProvider) circuitScope() string {
+	if r.scope == "" {
+		return r.name
+	}
+	return r.scope
 }
 
 func (r *ResilientProvider) nextBackoff(attempt int) float64 {

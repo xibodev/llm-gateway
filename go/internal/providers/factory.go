@@ -175,7 +175,9 @@ func (rt *Runtime) GetProviderForPrincipal(
 			policy := policyFor(settings, providerID)
 			provider = instance
 			if policy.RetryEnabled() || policy.CircuitEnabled() {
-				provider = &ResilientProvider{inner: instance, name: providerID, policy: policy}
+				// The circuit is the cache key's, so it guards the credential
+				// this instance resolves for its scope and no other.
+				provider = &ResilientProvider{inner: instance, name: providerID, scope: cacheKey, policy: policy}
 			}
 		}
 

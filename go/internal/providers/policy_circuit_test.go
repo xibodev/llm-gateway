@@ -2,12 +2,18 @@ package providers
 
 import (
 	"context"
+	"encoding/base64"
 	"net/http"
+	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
 	"llmgw/internal/config"
+	"llmgw/internal/iam"
+
+	core "github.com/xibodev/llmgw-core"
 )
 
 // These tests pin the resilience wrapper's circuit breaker as its callers
@@ -116,16 +122,126 @@ func TestCircuitIsHalfOpenAfterItsCooldown(t *testing.T) {
 	}
 }
 
-// Every instance of a provider shares its circuit, as the caller-scoped
-// instances of one configured provider do.
-func TestInstancesOfAProviderShareItsCircuit(t *testing.T) {
+// Instances of a provider share its circuit only within one caller scope, as
+// the instances the factory caches for one scope do; another scope's circuit
+// stays closed.
+func TestInstancesShareTheCircuitOfTheirCallerScope(t *testing.T) {
 	policy := config.ProviderPolicy{RetryMaxAttempts: 1, CircuitFailureThreshold: 1, CircuitCooldownSeconds: 60}
 	first, _ := circuitFixture(t, policy)
-	other := &circuitProvider{}
-	second := &ResilientProvider{inner: other, name: first.name, policy: policy}
+	first.scope = first.name + "@prn_first"
+	sameInner, otherInner := &circuitProvider{}, &circuitProvider{}
+	same := &ResilientProvider{inner: sameInner, name: first.name, scope: first.scope, policy: policy}
+	other := &ResilientProvider{inner: otherInner, name: first.name, scope: first.name + "@prn_other", policy: policy}
 	_ = completeThrough(first)
-	if err := completeThrough(second); UpstreamStatus(err) != http.StatusServiceUnavailable || other.calls != 0 {
-		t.Fatalf("err=%v calls=%d, want the circuit the first instance opened", err, other.calls)
+	if err := completeThrough(same); UpstreamStatus(err) != http.StatusServiceUnavailable || sameInner.calls != 0 {
+		t.Fatalf("err=%v calls=%d, want the circuit the first instance opened", err, sameInner.calls)
+	}
+	if err := completeThrough(other); err != nil || otherInner.calls != 1 {
+		t.Fatalf("err=%v calls=%d, want another scope's circuit closed", err, otherInner.calls)
+	}
+}
+
+// Each caller scope the factory builds an instance for keeps its own circuit:
+// a principal's rate-limited private key opens only that principal's, and
+// neither another principal's answers nor its successes end that streak. The
+// gateway's shared key still opens the gateway's circuit, and resetting the
+// provider closes every scope's.
+func TestEachCallerScopeOfAProviderHasItsOwnCircuit(t *testing.T) {
+	var (
+		mu       sync.Mutex
+		limited  = map[string]bool{"Bearer fixture-key-a": true, "Bearer fixture-key-gateway": true}
+		requests = map[string]int{}
+	)
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		key := r.Header.Get("Authorization")
+		mu.Lock()
+		requests[key]++
+		refuse := limited[key]
+		mu.Unlock()
+		if refuse {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusTooManyRequests)
+			_, _ = w.Write([]byte(`{"error":{"message":"rate limited"}}`))
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"id":"fixture","object":"chat.completion","model":"fixture-model","choices":[` +
+			`{"index":0,"message":{"role":"assistant","content":"ok"},"finish_reason":"stop"}]}`))
+	}))
+	defer upstream.Close()
+	installAnonymousFixture(t, map[string]*config.ProviderConfig{
+		"scoped": {Type: "openai_compatible", BaseURL: upstream.URL, APIKey: "fixture-key-gateway"},
+	})
+	config.Update(func(s *config.Settings) {
+		s.CredentialEncryptionKey = base64.RawURLEncoding.EncodeToString(make([]byte, 32))
+		s.Policies.Overrides = map[string]config.ProviderPolicy{
+			"scoped": {RetryMaxAttempts: 1, CircuitFailureThreshold: 2, CircuitCooldownSeconds: 60},
+		}
+	})
+	callers := map[string]core.Caller{"gateway": gatewayCaller()}
+	for _, name := range []string{"a", "b"} {
+		human, err := iam.CreatePrincipal("human", "fixture:circuit-"+name, "", "Fixture "+name)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := iam.PutProviderConnection(iam.ProviderConnectionCreate{
+			PrincipalID: human.ID, ProviderID: "scoped", Name: "personal", Kind: "api_key", Secret: "fixture-key-" + name,
+		}); err != nil {
+			t.Fatal(err)
+		}
+		callers[name] = core.Caller{ID: human.ID, Kind: core.CallerHuman}
+	}
+	complete := func(name string) error {
+		t.Helper()
+		provider, err := GetProviderForPrincipal("scoped", callers[name])
+		if err != nil {
+			t.Fatalf("%s: %v", name, err)
+		}
+		_, err = provider.(*ResilientProvider).CompleteContext(
+			context.Background(), "fixture-model", []Message{{"role": "user", "content": "hi"}}, nil,
+		)
+		return err
+	}
+	sent := func(name string) int {
+		mu.Lock()
+		defer mu.Unlock()
+		return requests["Bearer fixture-key-"+name]
+	}
+	refused := func(err error) bool { return err != nil && strings.Contains(err.Error(), "circuit breaker open") }
+
+	// a's failures interleave with b's successes, which a shared circuit
+	// would count as the end of a's streak.
+	for range 2 {
+		if err := complete("a"); err == nil || refused(err) {
+			t.Fatalf("a: err=%v, want the upstream refusal", err)
+		}
+		if err := complete("b"); err != nil {
+			t.Fatalf("b: %v", err)
+		}
+	}
+	if err := complete("a"); !refused(err) || sent("a") != 2 {
+		t.Fatalf("a: err=%v sent=%d, want its own circuit open after two failures", err, sent("a"))
+	}
+	if err := complete("b"); err != nil || sent("b") != 3 {
+		t.Fatalf("b: err=%v sent=%d, want b served past a's open circuit", err, sent("b"))
+	}
+	for range 2 {
+		if err := complete("gateway"); err == nil || refused(err) {
+			t.Fatalf("gateway: err=%v, want the upstream refusal", err)
+		}
+	}
+	if err := complete("gateway"); !refused(err) || sent("gateway") != 2 {
+		t.Fatalf("gateway: err=%v sent=%d, want the gateway's circuit open", err, sent("gateway"))
+	}
+	if err := complete("b"); err != nil || sent("b") != 4 {
+		t.Fatalf("b: err=%v sent=%d, want b served past the gateway's open circuit", err, sent("b"))
+	}
+
+	ResetCircuit("scoped")
+	for _, name := range []string{"a", "gateway"} {
+		if err := complete(name); refused(err) || sent(name) != 3 {
+			t.Fatalf("%s: err=%v sent=%d, want the reset to close every scope's circuit", name, err, sent(name))
+		}
 	}
 }
 

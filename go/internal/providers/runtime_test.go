@@ -20,14 +20,16 @@ func putCatalogEntry(key string, entry catalogEntry) {
 	Current().catalogs.put(key, entry)
 }
 
-// streak returns how many consecutive circuit failures rt holds for name.
+// streak returns how many consecutive circuit failures rt holds for the
+// gateway scope of provider name.
 func streak(rt *Runtime, name string) int {
 	rt.circuits.mu.Lock()
 	defer rt.circuits.mu.Unlock()
-	if rt.circuits.tracker == nil {
+	tracker := rt.circuits.trackers[name]
+	if tracker == nil {
 		return 0
 	}
-	return rt.circuits.tracker.State(name).Streak
+	return tracker.State(name).Streak
 }
 
 func TestInstallForTestsIsolatesAndRestoresTheRuntime(t *testing.T) {
@@ -40,7 +42,7 @@ func TestInstallForTestsIsolatesAndRestoresTheRuntime(t *testing.T) {
 			t.Fatal("InstallForTests did not install a new Runtime")
 		}
 		for range 3 {
-			Current().circuits.record("fixture", config.ProviderPolicy{CircuitFailureThreshold: 5}, unavailable())
+			Current().circuits.record("fixture", "fixture", config.ProviderPolicy{CircuitFailureThreshold: 5}, unavailable())
 		}
 	})
 	if Current() != outer {

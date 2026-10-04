@@ -35,9 +35,9 @@ type Runtime struct {
 	// wraps, once per operation; see iamCredentialStore.
 	openCredentials func(oauth bool) (core.CredentialStore, error)
 	credentials     core.CredentialStore
-	// circuits holds every provider's circuit breaker in an llmgw-core
-	// HealthTracker, as core's Runtime holds the circuits of the instances it
-	// guards.
+	// circuits holds the circuit breakers of every provider, one per caller
+	// scope, in llmgw-core HealthTrackers, as core's Runtime holds the
+	// circuits of the instances it guards.
 	circuits circuits
 
 	// gcpTokens caches service-account access tokens for the gateway's Vertex

@@ -113,6 +113,12 @@ responses, local credential-state failures, and definitive upstream 4xx
 responses do not repeat against the same target. Circuit state is process-local
 and resets on restart.
 
+A provider keeps a separate circuit for each caller scope that resolves its
+credentials separately: callers limited to the gateway's shared credentials,
+each principal, and each service principal within a project. A failing or
+rate-limited credential therefore opens only its own scope's circuit, and
+answers in one scope do not end a failure streak in another.
+
 Each retry waits a random time between zero and the policy's exponential
 backoff (full jitter), so requests that failed together do not retry together.
 An upstream `Retry-After` lengthens that wait to at most 5 seconds; a target
