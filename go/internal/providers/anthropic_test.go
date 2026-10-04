@@ -273,19 +273,31 @@ func TestAnthropicNativePayloadTranslationLossPolicy(t *testing.T) {
 	}
 }
 
-// The Chat stream ends as the transport's did: without an error when
-// Anthropic ends it, message_stop or not, and with the gateway's size error
-// for a record over the limit.
-func TestAnthropicStreamNormalAndOversizedRecords(t *testing.T) {
+// The Chat stream ends without an error once Anthropic sends message_stop,
+// with an error when the stream ends before it, an error event included, and
+// with the gateway's size error for a record over the limit. A stream cut
+// short never closes with a finish reason, so no client reads it as complete.
+func TestAnthropicStreamCompleteCutShortAndOversizedRecords(t *testing.T) {
+	const started = "event: message_start\ndata: {\"type\":\"message_start\"}\n\n" +
+		"event: content_block_delta\ndata: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"text_delta\",\"text\":\"hello\"}}\n\n"
+	cutShort := func(err error) bool {
+		var invocation *InvocationError
+		return errors.As(err, &invocation) && strings.Contains(invocation.Msg, "ended before message_stop")
+	}
+	oversized := func(err error) bool {
+		var sizeErr *StreamRecordTooLargeError
+		return errors.As(err, &sizeErr)
+	}
 	for _, tc := range []struct {
 		name     string
 		response string
 		wantText string
-		wantErr  bool
+		wantErr  func(error) bool
 	}{
-		{name: "normal", response: "event: message_start\ndata: {\"type\":\"message_start\"}\n\n" +
-			"event: content_block_delta\ndata: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"text_delta\",\"text\":\"hello\"}}\n\n", wantText: "hello"},
-		{name: "oversized", response: "data: " + strings.Repeat("x", maxStreamRecordWireSize) + "\n\n", wantErr: true},
+		{name: "complete", response: started + "event: message_stop\ndata: {\"type\":\"message_stop\"}\n\n", wantText: "hello"},
+		{name: "cut short", response: started, wantText: "hello", wantErr: cutShort},
+		{name: "error event", response: started + "event: error\ndata: {\"type\":\"error\",\"error\":{\"type\":\"overloaded_error\",\"message\":\"Overloaded\"}}\n\n", wantText: "hello", wantErr: cutShort},
+		{name: "oversized", response: "data: " + strings.Repeat("x", maxStreamRecordWireSize) + "\n\n", wantErr: oversized},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			base := anthropicServer(t, func(w http.ResponseWriter, _ *http.Request) {
@@ -306,9 +318,14 @@ func TestAnthropicStreamNormalAndOversizedRecords(t *testing.T) {
 			if tc.wantText != "" && !strings.Contains(chunks.String(), tc.wantText) {
 				t.Fatalf("chunks = %s", chunks.String())
 			}
-			var sizeErr *StreamRecordTooLargeError
-			if errors.As(iter.Err(), &sizeErr) != tc.wantErr || (!tc.wantErr && iter.Err() != nil) {
-				t.Fatalf("error = %#v, want oversized %v", iter.Err(), tc.wantErr)
+			if tc.wantErr == nil {
+				if iter.Err() != nil || !strings.Contains(chunks.String(), `"finish_reason":"stop"`) {
+					t.Fatalf("error = %#v chunks = %s", iter.Err(), chunks.String())
+				}
+				return
+			}
+			if !tc.wantErr(iter.Err()) || strings.Contains(chunks.String(), `"finish_reason":"stop"`) {
+				t.Fatalf("error = %#v chunks = %s", iter.Err(), chunks.String())
 			}
 		})
 	}

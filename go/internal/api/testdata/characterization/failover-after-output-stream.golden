@@ -13,5 +13,3 @@ body:
 data: {"choices":[{"delta":{"content":"Partial","role":"assistant"},"finish_reason":null,"index":0}],"created":"<time>","id":"chatcmpl_fixture","model":"model-a","object":"chat.completion.chunk"}
 
 data: {"error":{"code":"provider_invocation_failed","message":"Upstream provider request failed.","type":"provider_error"}}
-
-data: [DONE]

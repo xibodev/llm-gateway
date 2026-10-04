@@ -25,6 +25,28 @@ func httpExceptionType(status int) string {
 	}
 }
 
+// anthropicErrorType is the error type the Messages API documents for an
+// HTTP status. Anthropic clients decide on it, as they retry an
+// overloaded_error or a rate_limit_error but not an invalid_request_error.
+func anthropicErrorType(status int) string {
+	switch {
+	case status == 401:
+		return "authentication_error"
+	case status == 403:
+		return "permission_error"
+	case status == 404:
+		return "not_found_error"
+	case status == 429:
+		return "rate_limit_error"
+	case status == 529:
+		return "overloaded_error"
+	case status >= 500:
+		return "api_error"
+	default:
+		return "invalid_request_error"
+	}
+}
+
 // writeJSON writes v as JSON with the given status.
 func writeJSON(w http.ResponseWriter, status int, v any) {
 	w.Header().Set("Content-Type", "application/json")

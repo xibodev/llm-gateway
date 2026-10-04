@@ -130,11 +130,14 @@ func anthropicCountFailure(err error, instance string) error {
 }
 
 // anthropicStreamEnd is how a Chat stream ends for what core's stream
-// returned, as the transport's stream ended: without an error when Anthropic
-// ended the stream, message_stop or not, with the gateway's
+// returned: without an error once Anthropic sent message_stop, with an
+// error when the stream ended before it, with the gateway's
 // StreamRecordTooLargeError for a record over the size limit, and with the
 // reader's own error when the stream broke. A stream core relays reports
 // only the missing message_stop as an upstream failure without a cause.
+// That failure is kept: a stream that ends early, after an error event or
+// when a connection closes cleanly mid-answer, must not reach a client as a
+// complete answer.
 func anthropicStreamEnd(err error) error {
 	var failure *core.ProviderError
 	switch {
@@ -143,7 +146,7 @@ func anthropicStreamEnd(err error) error {
 	case !errors.As(err, &failure):
 		return err
 	case failure.Class == core.ProviderErrorUpstream && failure.Cause == nil:
-		return nil
+		return circuitFailureInvocation("anthropic: streamed Messages response ended before message_stop")
 	case failure.Class == core.ProviderErrorUpstream:
 		return &StreamRecordTooLargeError{Format: "SSE", Limit: maxStreamRecordWireSize}
 	case failure.Cause != nil:

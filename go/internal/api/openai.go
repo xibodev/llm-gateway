@@ -442,21 +442,21 @@ func streamChatSSE(w http.ResponseWriter, ctx context.Context, targets []router.
 			return
 		}
 	}
-	if it.Err() != nil {
-		if ctx.Err() != nil {
-			recordClientCancelled(endpoint, requested, principal, started)
-			return
-		}
-		if err := writeSSE(w, jsonStr(providerErrorPayloadOpenAI())); err != nil {
-			recordClientCancelled(endpoint, requested, principal, started)
-			return
-		}
-	}
 	if ctx.Err() != nil {
 		recordClientCancelled(endpoint, requested, principal, started)
 		return
 	}
-	if err := writeSSE(w, "[DONE]"); err != nil {
+	status, errorCode := http.StatusOK, ""
+	if it.Err() != nil {
+		// The status line went out with the first byte, so the failure
+		// travels as one error event. [DONE] is what tells a client the
+		// answer is complete; a failed stream never sends it.
+		if err := writeSSE(w, jsonStr(providerErrorPayloadOpenAI())); err != nil {
+			recordClientCancelled(endpoint, requested, principal, started)
+			return
+		}
+		status, errorCode = http.StatusBadGateway, "upstream_stream"
+	} else if err := writeSSE(w, "[DONE]"); err != nil {
 		recordClientCancelled(endpoint, requested, principal, started)
 		return
 	}
@@ -465,6 +465,7 @@ func streamChatSSE(w http.ResponseWriter, ctx context.Context, targets []router.
 		Provider: served.Provider, Project: principal.Project, Key: principal.Key,
 		ProjectID: principal.ProjectID, PrincipalID: principal.PrincipalID, KeyID: principal.KeyID,
 		InputTokens: usageAcc["prompt_tokens"], OutputTokens: usageAcc["completion_tokens"],
+		StatusCode: status, ErrorCode: errorCode,
 		LatencyMS: time.Since(started).Milliseconds(), IsStub: isStub(served.Provider),
 	})
 }

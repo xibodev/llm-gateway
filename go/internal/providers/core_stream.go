@@ -2,8 +2,10 @@ package providers
 
 import (
 	"bytes"
+	"encoding/json"
 	"errors"
 	"io"
+	"strings"
 
 	core "github.com/xibodev/llmgw-core"
 )
@@ -28,20 +30,40 @@ func nextCoreData(stream core.StreamIter) (string, error) {
 // relayedStream relays a core stream of SSE records as the data events the
 // API layer reads, as the gateway's HTTP stream returned them; see
 // relayedStreamEnd for how it ends. prefix is what that stream's errors
-// began with.
+// began with. responses marks a stream of Responses events, which ends with
+// a terminal event the API layer checks itself.
+//
+// A Chat stream is complete once the upstream sent [DONE] or a chunk with a
+// finish reason. Core relays the end of the body as it is, so an upstream
+// that closes the stream before either, a proxy timing out the connection
+// cleanly included, cut the answer short and fails it.
 type relayedStream struct {
-	inner  core.StreamIter
-	prefix string
-	err    error
+	inner     core.StreamIter
+	prefix    string
+	responses bool
+	finished  bool
+	err       error
 }
 
 func (s *relayedStream) Next() (string, bool) {
-	data, err := nextCoreData(s.inner)
-	if err != nil {
-		s.err = relayedStreamEnd(err, s.prefix)
-		return "", false
+	for {
+		frame, err := s.inner.Next()
+		if err != nil {
+			s.err = relayedStreamEnd(err, s.prefix)
+			if s.err == nil && !s.responses && !s.finished {
+				s.err = circuitFailureInvocation(s.prefix + ": stream ended without a finish reason")
+			}
+			return "", false
+		}
+		data, ok := newSSERecordReader(bytes.NewReader(frame)).Next()
+		if !ok {
+			// The reader skips [DONE] as it skips a record without data.
+			s.finished = s.finished || relayedDone(frame)
+			continue
+		}
+		s.finished = s.finished || chatChunkFinishes(data)
+		return data, true
 	}
-	return data, true
 }
 
 func (s *relayedStream) Err() error   { return s.err }
@@ -65,4 +87,34 @@ func relayedStreamEnd(err error, prefix string) error {
 		return &InvocationError{Msg: prefix + ": streaming transport error: " + failure.Cause.Error()}
 	}
 	return err
+}
+
+// relayedDone reports a record whose data is [DONE], read as the gateway's
+// reader reads a record's data lines.
+func relayedDone(frame []byte) bool {
+	var data []string
+	for _, line := range strings.Split(string(frame), "\n") {
+		if field, value, _ := strings.Cut(strings.TrimSuffix(line, "\r"), ":"); field == "data" {
+			data = append(data, strings.TrimPrefix(value, " "))
+		}
+	}
+	return strings.Join(data, "\n") == "[DONE]"
+}
+
+// chatChunkFinishes reports a Chat chunk with a choice that has finished.
+func chatChunkFinishes(data string) bool {
+	var chunk struct {
+		Choices []struct {
+			FinishReason any `json:"finish_reason"`
+		} `json:"choices"`
+	}
+	if json.Unmarshal([]byte(data), &chunk) != nil {
+		return false
+	}
+	for _, choice := range chunk.Choices {
+		if reason, _ := choice.FinishReason.(string); reason != "" {
+			return true
+		}
+	}
+	return false
 }

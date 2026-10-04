@@ -270,8 +270,14 @@ func (s *anthropicChatStream) line() (string, bool) {
 }
 
 // emit hands a chunk to Next, or drops it once the stream is closed, so the
-// goroutine never outlives a reader that stopped reading.
+// goroutine never outlives a reader that stopped reading. A stream that
+// failed drops it too: llm-translate still closes it with a finish reason,
+// which would let a failed stream read as complete. line sets err on this
+// goroutine, so reading it here needs no lock.
 func (s *anthropicChatStream) emit(chunk string) {
+	if s.err != nil {
+		return
+	}
 	select {
 	case s.chunks <- chunk:
 	case <-s.done:

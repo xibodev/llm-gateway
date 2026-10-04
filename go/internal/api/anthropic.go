@@ -202,7 +202,17 @@ func streamMessagesSSE(w http.ResponseWriter, ctx context.Context, targets []rou
 
 	usageAcc := map[string]int{"prompt_tokens": 0, "completion_tokens": 0}
 	var writeErr error
-	terminalWritten := false
+	write := func(event string) error {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		return writeAndFlush(w, []byte(event))
+	}
+	// ended is set once the source stream ended, as opposed to the client
+	// going away. The translator then closes the message however the source
+	// ended, so those closing events wait in closing until it is known.
+	ended := false
+	var closing []string
 	// pull func peeks usage as it forwards OpenAI chunks into the translator
 	pull := func() (string, bool) {
 		if writeErr != nil || ctx.Err() != nil {
@@ -213,36 +223,59 @@ func streamMessagesSSE(w http.ResponseWriter, ctx context.Context, targets []rou
 			return "", false
 		}
 		if !more {
+			ended = true
 			return "", false
 		}
 		accumulateStreamUsage(chunk, usageAcc)
 		return chunk, true
 	}
 	translate.OpenAIStreamToAnthropicSSE(pull, served.Model, func(event string) {
-		if writeErr != nil {
-			return
-		}
-		terminal := strings.HasPrefix(event, "event: message_stop\n")
-		if err := ctx.Err(); err != nil {
-			writeErr = err
-			return
-		}
-		writeErr = writeAndFlush(w, []byte(event))
-		if writeErr == nil && terminal {
-			terminalWritten = true
+		switch {
+		case ended:
+			closing = append(closing, event)
+		case writeErr == nil:
+			writeErr = write(event)
 		}
 	})
-	if writeErr != nil || !terminalWritten {
+	if writeErr != nil || !ended || ctx.Err() != nil {
 		recordClientCancelled("anthropic.messages", requested, principal, started)
 		return
+	}
+	status, errorCode := http.StatusOK, ""
+	if err := it.Err(); err != nil {
+		// Anthropic ends a stream it cannot finish with an error event and
+		// no message_stop, so a client never reads it as complete.
+		if write(anthropicStreamErrorEvent(err)) != nil {
+			recordClientCancelled("anthropic.messages", requested, principal, started)
+			return
+		}
+		status, errorCode = http.StatusBadGateway, "upstream_stream"
+	} else {
+		for _, event := range closing {
+			if write(event) != nil {
+				recordClientCancelled("anthropic.messages", requested, principal, started)
+				return
+			}
+		}
 	}
 	router.RecordUsage(router.UsageRecord{
 		Endpoint: "anthropic.messages", RequestedModel: requested, RoutedModel: served.Model,
 		Provider: served.Provider, Project: principal.Project, Key: principal.Key,
 		ProjectID: principal.ProjectID, PrincipalID: principal.PrincipalID, KeyID: principal.KeyID,
 		InputTokens: usageAcc["prompt_tokens"], OutputTokens: usageAcc["completion_tokens"],
+		StatusCode: status, ErrorCode: errorCode,
 		LatencyMS: time.Since(started).Milliseconds(), IsStub: isStub(served.Provider),
 	})
+}
+
+// anthropicStreamErrorEvent is the Messages error event for a stream its
+// upstream failed, typed by the upstream's status where it reported one.
+func anthropicStreamErrorEvent(err error) string {
+	return "event: error\ndata: " + jsonStr(map[string]any{
+		"type": "error", "error": map[string]any{
+			"type": anthropicErrorType(upstreamErrorStatus(err)), "message": "Upstream provider stream failed.",
+		},
+	}) + "\n\n"
 }
 
 func handleCountTokens(w http.ResponseWriter, r *http.Request) {

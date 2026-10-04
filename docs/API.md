@@ -149,6 +149,12 @@ Upstream errors preserve meaningful status while credential-shaped diagnostics
 are sanitized. Client cancellation on covered coding endpoints stops upstream
 work and suppresses success terminals, retry, and failover after abort.
 
+A stream whose upstream fails after the first byte, or closes the stream
+before its end, ends with the surface's error event and never with its success
+terminal: Chat Completions sends an `error` data event without `[DONE]`,
+Messages sends `event: error` without `message_delta` or `message_stop`, and
+Responses sends `response.failed`. Usage records such a stream as a `502`.
+
 ## Management APIs
 
 `/admin/api/*` and `/user/api/*` power the embedded console and portal. They are

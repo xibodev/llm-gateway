@@ -80,7 +80,7 @@ func (p *openAICompatibleProvider) stream(ctx context.Context, request core.Requ
 	if err != nil {
 		return nil, p.failure(err, operation.words())
 	}
-	return &relayedStream{inner: stream, prefix: operation.words().stream}, nil
+	return &relayedStream{inner: stream, prefix: operation.words().stream, responses: operation == openAIResponsesStream}, nil
 }
 
 // failure returns the gateway error for what the core Runtime returned for

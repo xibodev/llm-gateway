@@ -138,11 +138,12 @@ func TestOpenAICompatibleResponsesFallBackToChat(t *testing.T) {
 }
 
 // Core relays the upstream's records byte for byte; the facade hands the API
-// layer their data as the transport's stream did, and ends as it ended:
-// without an error at the stream's end, the Responses stream's missing
-// terminal event included, with a StreamRecordTooLargeError for a record
-// over the size limit, and with the transport's streaming error, not
-// repeated, when the stream broke.
+// layer their data as the transport's stream did, and ends without an error
+// at the stream's end, with a StreamRecordTooLargeError for a record over
+// the size limit, and with the transport's streaming error, not repeated,
+// when the stream broke. A Chat stream ends complete with [DONE] or a finish
+// reason, and fails when the upstream closes it before either; a Responses
+// stream leaves its missing terminal event to the API layer.
 func TestOpenAICompatibleStreamsRelayDataEvents(t *testing.T) {
 	const first = `{"choices":[{"index":0,"delta":{"content":"a"}}]}`
 	const second = `{"choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}`
@@ -190,6 +191,24 @@ func TestOpenAICompatibleStreamsRelayDataEvents(t *testing.T) {
 		response = "data: " + first + "\n\ndata: {\"choices\":[" + "break"
 		if chunks, err := drain(responses); len(chunks) != 1 || !IsInvocation(err) || !strings.HasPrefix(err.Error(), prefix) || InvocationRetryable(err) {
 			t.Fatalf("responses=%v broken stream: chunks=%q err=%v", responses, chunks, err)
+		}
+		for _, end := range []struct {
+			name, body string
+			complete   bool
+		}{
+			{"[DONE] without a finish reason", "data: " + first + "\n\ndata: [DONE]\n\n", true},
+			{"finish reason without [DONE]", "data: " + first + "\n\ndata: " + second + "\n\n", true},
+			{"neither", "data: " + first + "\n\n", responses},
+			{"nothing", ": keepalive\n\n", responses},
+		} {
+			response = end.body
+			chunks, err := drain(responses)
+			if end.complete && err != nil {
+				t.Fatalf("responses=%v %s: chunks=%q err=%v", responses, end.name, chunks, err)
+			}
+			if !end.complete && (err == nil || err.Error() != "openai: stream ended without a finish reason" || InvocationRetryable(err)) {
+				t.Fatalf("responses=%v %s: chunks=%q err=%v", responses, end.name, chunks, err)
+			}
 		}
 	}
 }
