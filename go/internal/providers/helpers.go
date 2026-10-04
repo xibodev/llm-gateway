@@ -183,22 +183,22 @@ func (copilotAuthStub) AuthStatus() map[string]any {
 }
 
 func (copilotAuthStub) StartDeviceFlow() (CopilotDeviceFlowInfo, error) {
-	return CopilotDeviceFlowInfo{}, errors.New("GitHub Copilot authentication is available via the llmgw-extension companion daemon")
+	return CopilotDeviceFlowInfo{}, errors.New("GitHub Copilot authentication is available via the companion daemon")
 }
 
 func (copilotAuthStub) PollDeviceFlowOnce(string) map[string]any {
-	return map[string]any{"status": "error", "error": "GitHub Copilot authentication is available via the llmgw-extension companion daemon"}
+	return map[string]any{"status": "error", "error": "GitHub Copilot authentication is available via the companion daemon"}
 }
 
 func (copilotAuthStub) PollDeviceFlowTokenOnce(string) CopilotPollResult {
-	return CopilotPollResult{Status: "error", Error: "GitHub Copilot authentication is available via the llmgw-extension companion daemon"}
+	return CopilotPollResult{Status: "error", Error: "GitHub Copilot authentication is available via the companion daemon"}
 }
 
 func (copilotAuthStub) ResolveOAuthToken() (string, error) {
 	if token := config.Get().GithubCopilotOAuthToken; token != "" {
 		return token, nil
 	}
-	return "", errors.New("GitHub Copilot token resolution is available via the llmgw-extension companion daemon")
+	return "", errors.New("GitHub Copilot token resolution is available via the companion daemon")
 }
 
 func (copilotAuthStub) ClearCachedCredentials() map[string]any {
