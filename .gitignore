@@ -36,8 +36,6 @@ test/live-acceptance/report*.json
 .github/release-harness/node_modules/
 .acceptance-claude/
 test/upgrade-drill/
-test/docker-roster/build-context/
-test/docker-roster/test-output-*/
 
 # editors / OS
 .vscode/
