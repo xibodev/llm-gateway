@@ -1,0 +1,106 @@
+{
+  "schema_version": "1.0.0",
+  "mode": "change",
+  "contract": {
+    "digest": "31b393ab3e80162226619c441694573993ac618382d74642101484a0bf2e9c80"
+  },
+  "authoring_provenance": {
+    "status": "established",
+    "path": ".release-harness/drafts/llm-gateway.record.json",
+    "digest": "6732ddf3dc8236b974e2aae5f81b546d89c2a466b6fb0a368d76620955bf981e"
+  },
+  "sources": [
+    {
+      "source_id": "primary",
+      "status": "established",
+      "repository_identity": "https://github.com/xibodev/llm-gateway.git",
+      "base_ref": "v1.4.0",
+      "base_commit": "85ebb19abef2985f300f86da920be7970ae09d12",
+      "merge_base": "85ebb19abef2985f300f86da920be7970ae09d12",
+      "head_commit": "5c6a554b586eab7f227528add814d3cea22fe1fd",
+      "head_tree": "1cb22cd0d0a0601c7832d963de0d63681609216e",
+      "reviewed_source_digest": "9ec0ead9918b555928153a45b1563a67aa223e837ebf997751c91c5ff9c806d4",
+      "changed_paths": [
+        {
+          "status": "modified",
+          "path": "go/internal/providers/facade_cancellation_test.go",
+          "old_blob": "06aeb6893ee21bb8286fb5211883f2a70ec30dbd",
+          "new_blob": "4369a0909ef832128e83077cf7f8eafbf8452fcd"
+        },
+        {
+          "status": "modified",
+          "path": "test/live-acceptance/core.mjs",
+          "old_blob": "9b26f6b7bd7113cf3bb3df0f4080a6365c81c138",
+          "new_blob": "29cdae984a4896266703c1b42a2316387a5d3e53"
+        },
+        {
+          "status": "modified",
+          "path": "test/live-acceptance/core.test.mjs",
+          "old_blob": "d184316c4f0b38a13f7090d5a354b6cea3f4cbfc",
+          "new_blob": "d382eba96726e7d183a3a2651496afa1f1cb9e83"
+        }
+      ]
+    }
+  ],
+  "facts": [
+    {
+      "id": "tests-only",
+      "claim": "The change since v1.4.0 touches only go/internal/providers/facade_cancellation_test.go and the live-acceptance harness (test/live-acceptance/core.mjs and core.test.mjs). The cancelled-retry test waits a fixed five-second Retry-After instead of a jittered backoff, and the harness counts a router model's direct answer as served. No gateway source, build, configuration or workflow file changes.",
+      "status": "observed",
+      "evidence": {
+        "source": "git diff v1.4.0..HEAD"
+      }
+    },
+    {
+      "id": "tests-pass",
+      "claim": "The old cancelled-retry test failed 4 of 800 subtest runs, the new one 0 of 800; the live-acceptance unit tests pass 17 of 17.",
+      "status": "observed",
+      "evidence": {
+        "source": "local test execution"
+      }
+    }
+  ],
+  "impact": {
+    "assertions": [
+      {
+        "id": "A1",
+        "impact": "unchanged",
+        "supported_by": [
+          "tests-only"
+        ]
+      },
+      {
+        "id": "A2",
+        "impact": "unchanged",
+        "supported_by": [
+          "tests-only"
+        ]
+      },
+      {
+        "id": "A3",
+        "impact": "unchanged",
+        "supported_by": [
+          "tests-only"
+        ]
+      },
+      {
+        "id": "A4",
+        "impact": "unchanged",
+        "supported_by": [
+          "tests-only"
+        ]
+      }
+    ],
+    "requires": [],
+    "possible_binding_changes": []
+  },
+  "questions": [],
+  "conclusion": {
+    "action": "reuse_contract",
+    "summary": "Only tests and the acceptance harness changed; the accepted CLI identity, CLI health, HTTP health and model-list propositions are unaffected."
+  },
+  "proposed": {
+    "by": "release operator",
+    "at": "2026-10-04T16:26:04.487Z"
+  }
+}
