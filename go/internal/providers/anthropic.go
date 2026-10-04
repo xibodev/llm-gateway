@@ -103,9 +103,7 @@ func (p AnthropicNativeProvider) payload(model string, messages []Message, strea
 	}
 	system, anthropicMessages := conversion.Value.System, conversion.Value.Messages
 	maxTokens := anthropicDefaultMax
-	if v := intOf(kw["max_tokens"]); v > 0 {
-		maxTokens = v
-	} else if v := intOf(kw["_max_output_tokens"]); v > 0 {
+	if v := intOf(chatMaxTokens(kw)); v > 0 {
 		maxTokens = v
 	}
 	payload := map[string]any{

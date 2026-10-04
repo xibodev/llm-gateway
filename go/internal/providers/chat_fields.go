@@ -49,12 +49,39 @@ func (rt *Runtime) UnsentChatField(cfg *config.ProviderConfig, providerID, model
 // does not name and that asks for something.
 func unsentChatField(kw Kwargs, sends func(string) bool) (string, bool) {
 	for _, field := range slices.Sorted(maps.Keys(kw)) {
-		if strings.HasPrefix(field, "_") || field == "stream_options" || sends(field) || chatFieldAsksNothing(field, kw[field]) {
+		if strings.HasPrefix(field, "_") || field == "stream_options" || sends(field) ||
+			chatFieldAdvisory(field) || chatFieldAsksNothing(field, kw[field]) {
 			continue
 		}
 		return field, true
 	}
 	return "", false
+}
+
+// chatFieldAdvisory reports a field whose loss leaves an answer's content and
+// shape as the client asked: who is asking, how the request is billed,
+// stored or cached, sampling preferences, and how hard a reasoning model
+// thinks. Earlier releases dropped these without a word for providers that
+// cannot send them, and still do, so a request that sets one is served.
+func chatFieldAdvisory(field string) bool {
+	switch field {
+	case "user", "metadata", "store", "service_tier", "prompt_cache_key", "safety_identifier",
+		"seed", "top_p", "presence_penalty", "frequency_penalty", "reasoning_effort":
+		return true
+	}
+	return false
+}
+
+// chatMaxTokens is the output limit of a Chat request for a provider that
+// reads only max_tokens: max_tokens, or max_completion_tokens, which current
+// OpenAI clients send in its place, or the limit of a Responses request.
+func chatMaxTokens(kw Kwargs) any {
+	for _, field := range []string{"max_tokens", "max_completion_tokens", "_max_output_tokens"} {
+		if value := kw[field]; value != nil {
+			return value
+		}
+	}
+	return nil
 }
 
 // unsentChatFieldError refuses, before anything is sent, a client's Chat
@@ -135,7 +162,7 @@ func responsesAdaptedChatField(field string) bool {
 // its Messages request; see AnthropicNativeProvider.payload.
 func anthropicChatField(field string) bool {
 	switch field {
-	case "temperature", "top_p", "max_tokens", "stop", "tools", "metadata", "thinking", "output_config":
+	case "temperature", "top_p", "max_tokens", "max_completion_tokens", "stop", "tools", "metadata", "thinking", "output_config":
 		return true
 	}
 	return false
@@ -144,14 +171,14 @@ func anthropicChatField(field string) bool {
 // googleChatField reports a Chat field the Google facade carries into
 // generateContent; see googleProvider.CompleteContext.
 func googleChatField(field string) bool {
-	return field == "max_tokens" || field == "temperature"
+	return field == "max_tokens" || field == "max_completion_tokens" || field == "temperature"
 }
 
 // ollamaChatField reports a Chat field core's Ollama carries into Ollama's
 // /api/chat.
 func ollamaChatField(field string) bool {
 	switch field {
-	case "temperature", "max_tokens", "top_p", "tools":
+	case "temperature", "max_tokens", "max_completion_tokens", "top_p", "tools":
 		return true
 	}
 	return false

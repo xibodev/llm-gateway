@@ -269,6 +269,32 @@ func TestChatFieldsAnthropicCannotSendAreRefused(t *testing.T) {
 	}
 }
 
+// A field whose loss leaves the answer as asked does not refuse a request:
+// the Anthropic target serves it without those fields, and reads the output
+// limit current OpenAI clients send as max_completion_tokens.
+func TestChatFieldsAnthropicServesAdvisoryFieldsAndTheCompletionLimit(t *testing.T) {
+	handler, upstream := setupChatFieldFixture(t)
+	advisory := map[string]any{
+		"max_completion_tokens": 64, "user": "fixture-user", "seed": 7, "service_tier": "auto",
+		"store": true, "reasoning_effort": "high", "presence_penalty": 0.5,
+	}
+	for _, stream := range []bool{false, true} {
+		w := apiSmokeRequest(handler, "/v1/chat/completions", chatFieldRequest("native/claude-fixture", stream, advisory))
+		sent := upstream.take("/n/v1/messages")
+		if w.Code != http.StatusOK || sent == nil {
+			t.Fatalf("stream=%v: status=%d body=%s", stream, w.Code, w.Body.String())
+		}
+		if limit, _ := sent["max_tokens"].(float64); limit != 64 {
+			t.Fatalf("stream=%v: max_tokens=%v, want the request's max_completion_tokens", stream, sent["max_tokens"])
+		}
+		for name := range advisory {
+			if _, found := sent[name]; found {
+				t.Fatalf("stream=%v: %s reached the Messages body: %v", stream, name, sent)
+			}
+		}
+	}
+}
+
 // An endpoint member that cannot send a field the request sets is skipped,
 // as one capability filtering excludes is, and the next member serves.
 func TestChatFieldsSkipAnEndpointMemberThatCannotSendThem(t *testing.T) {

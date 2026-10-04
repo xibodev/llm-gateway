@@ -83,8 +83,7 @@ Opt-in Chat-to-Responses adaptation uses `force_api_support` and catalog
 
 ### Request fields
 
-A field the client sets is sent upstream or the request is refused; none is
-dropped. `fallback_timeout_ms`, `affinity_key`, and `force_api_support` are the
+`fallback_timeout_ms`, `affinity_key`, and `force_api_support` are the
 gateway's own and never reach the upstream. Every other field, including
 `response_format`, `n`, `seed`, `logprobs`, `parallel_tool_calls`, `user`, and
 fields the gateway does not know, reaches an OpenAI-compatible, OpenAI, or
@@ -101,9 +100,18 @@ wire carries:
 | Google AI Studio, Vertex AI | `temperature`, `max_tokens`. |
 | Ollama | `temperature`, `top_p`, `max_tokens`, `tools`. |
 
-A request that sets a field its target does not send fails with `400` naming
-the field before anything is sent. A value that asks for nothing does not count:
-`null`, `false`, an empty value, `n: 1`, a zero penalty or `top_logprobs`, a
+Anthropic, Google and Ollama targets read `max_completion_tokens` as their
+output limit when `max_tokens` is unset.
+
+A request that sets a field whose loss would change the answer, and that its
+target does not send, fails with `400` naming the field before anything is sent;
+for example `response_format`, `n` above 1, `logprobs`, `stop`, or `tools` on a
+target that cannot carry them. Advisory fields are dropped for such targets, as
+earlier releases dropped them, and do not refuse the request: `user`,
+`metadata`, `store`, `service_tier`, `prompt_cache_key`, `safety_identifier`,
+`seed`, `top_p`, `presence_penalty`, `frequency_penalty`, and
+`reasoning_effort`. A value that asks for nothing does not count either:
+`null`, `false`, an empty value, `n: 1`, a zero `top_logprobs`, a
 `response_format` of type `text`, text-only `modalities`, `tool_choice: "auto"`,
 and `parallel_tool_calls: true`. In an endpoint, a member that cannot send a
 field is skipped as capability filtering skips one, and the request fails only

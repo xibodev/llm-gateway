@@ -95,9 +95,9 @@ func (p *ollamaProvider) StreamContext(ctx context.Context, model string, messag
 
 // ollamaRequest is the Chat body core's Ollama reads: the model, the
 // messages and the options. Keys that begin with an underscore are the
-// gateway's own hints, not Chat fields, and stay out, except the output
-// limit of a Responses request, which the transport sent as num_predict
-// when max_tokens was unset, and so is sent as max_tokens.
+// gateway's own hints, not Chat fields, and stay out. Core reads the output
+// limit only from max_tokens, so max_completion_tokens, or a Responses
+// request's limit, is sent there when max_tokens is unset.
 func ollamaRequest(model string, messages []Message, kw Kwargs) (core.Request, error) {
 	payload := make(map[string]any, len(kw)+2)
 	for key, value := range kw {
@@ -105,8 +105,8 @@ func ollamaRequest(model string, messages []Message, kw Kwargs) (core.Request, e
 			payload[key] = value
 		}
 	}
-	if payload["max_tokens"] == nil && kw["_max_output_tokens"] != nil {
-		payload["max_tokens"] = kw["_max_output_tokens"]
+	if maxTokens := chatMaxTokens(kw); maxTokens != nil {
+		payload["max_tokens"] = maxTokens
 	}
 	payload["model"], payload["messages"] = model, messages
 	body, err := json.Marshal(payload)

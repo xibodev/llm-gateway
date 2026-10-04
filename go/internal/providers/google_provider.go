@@ -81,11 +81,7 @@ func (p *googleProvider) CompleteContext(ctx context.Context, model string, mess
 		return nil, err
 	}
 	payload := map[string]any{"messages": messages}
-	maxTokens := kw["max_tokens"]
-	if maxTokens == nil {
-		maxTokens = kw["_max_output_tokens"]
-	}
-	if maxTokens != nil {
+	if maxTokens := chatMaxTokens(kw); maxTokens != nil {
 		payload["max_tokens"] = maxTokens
 	}
 	if temperature := kw["temperature"]; temperature != nil {
