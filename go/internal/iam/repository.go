@@ -268,16 +268,34 @@ ON CONFLICT(project_id,principal_id) DO UPDATE SET role=excluded.role`,
 	return nil
 }
 
+// RemoveMembership removes a principal from a project and revokes the
+// principal's keys in it. Key resolution already requires the membership, so
+// the keys stop working either way; revoking them, disabled ones included,
+// keeps a later SetMembership from making them usable again.
 func RemoveMembership(projectID, principalID string) error {
 	db, err := DB()
 	if err != nil {
 		return err
 	}
-	_, err = db.Exec(
+	tx, err := db.Begin()
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+	if _, err := tx.Exec(
 		"DELETE FROM project_memberships WHERE project_id=? AND principal_id=?",
 		projectID, principalID,
-	)
-	return err
+	); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(`
+UPDATE api_keys SET status='revoked'
+WHERE project_id=? AND principal_id=? AND status!='revoked'`,
+		projectID, principalID,
+	); err != nil {
+		return err
+	}
+	return tx.Commit()
 }
 
 func ListMemberships(projectID string) ([]Membership, error) {

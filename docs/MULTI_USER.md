@@ -114,6 +114,10 @@ encrypted copy supports explicit reveal:
 Disabled, expired, and revoked state controls authentication. Reveal authorization
 is based on ownership/admin access rather than key status.
 
+Removing a principal from a project revokes that principal's keys in the
+project, including disabled ones; adding the membership back does not restore
+them.
+
 `admin_managed` is a server-controlled, key-only flag. New administrator-issued
 keys are admin-managed; an administrator updating a key's policy, status, or
 expiry also sets the flag. Owners cannot change those fields through the portal

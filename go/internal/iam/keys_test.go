@@ -261,3 +261,68 @@ func TestStaleAPIKeyUpdateCannotOverwriteRevocation(t *testing.T) {
 		t.Fatalf("revoked key resolved: ok=%v err=%v", ok, err)
 	}
 }
+
+func TestRemovingMembershipRevokesTheMembersKeysInThatProject(t *testing.T) {
+	t.Setenv("LLMGW_STATE_DIR", t.TempDir())
+	ResetForTests()
+	t.Cleanup(ResetForTests)
+
+	member, err := CreatePrincipal("human", "authentik:removed-member", "", "Removed Member")
+	if err != nil {
+		t.Fatal(err)
+	}
+	colleague, err := CreatePrincipal("human", "authentik:remaining-member", "", "Remaining Member")
+	if err != nil {
+		t.Fatal(err)
+	}
+	project, err := CreateProject("membership-removal", "Membership Removal")
+	if err != nil {
+		t.Fatal(err)
+	}
+	other, err := CreateProject("membership-kept", "Membership Kept")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, membership := range []struct{ projectID, principalID string }{
+		{project.ID, member.ID}, {project.ID, colleague.ID}, {other.ID, member.ID},
+	} {
+		if err := SetMembership(membership.projectID, membership.principalID, "member"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	issue := func(projectID, principalID string) IssuedKey {
+		t.Helper()
+		issued, err := IssueKey(KeyCreate{ProjectID: projectID, PrincipalID: principalID})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return issued
+	}
+	active, disabled := issue(project.ID, member.ID), issue(project.ID, member.ID)
+	disabledStatus := "disabled"
+	if err := UpdateAPIKey(disabled.ID, KeyUpdate{Status: &disabledStatus}); err != nil {
+		t.Fatal(err)
+	}
+	unrelated := []IssuedKey{issue(other.ID, member.ID), issue(project.ID, colleague.ID)}
+
+	if err := RemoveMembership(project.ID, member.ID); err != nil {
+		t.Fatal(err)
+	}
+	if err := SetMembership(project.ID, member.ID, "member"); err != nil {
+		t.Fatal(err)
+	}
+	for _, issued := range []IssuedKey{active, disabled} {
+		if _, ok, err := ResolveAPIKey(issued.Token); err != nil || ok {
+			t.Fatalf("key of a removed membership resolved after re-adding: ok=%v err=%v", ok, err)
+		}
+		key, found, err := APIKeyByID(issued.ID)
+		if err != nil || !found || key.Status != "revoked" {
+			t.Fatalf("key=%+v found=%v err=%v, want revoked", key, found, err)
+		}
+	}
+	for _, issued := range unrelated {
+		if _, ok, err := ResolveAPIKey(issued.Token); err != nil || !ok {
+			t.Fatalf("unrelated key stopped resolving: ok=%v err=%v", ok, err)
+		}
+	}
+}
