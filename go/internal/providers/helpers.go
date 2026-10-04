@@ -159,14 +159,6 @@ func InvokeCoreSurfaceForPrincipal(
 	return Current().InvokeCoreSurfaceForPrincipal(ctx, providerID, caller, request)
 }
 
-type CodexEndpoints struct {
-	ResponsesURL     string
-	ResponsesBaseURL string
-	ModelsURL        string
-}
-
-func SetCodexEndpointsForTests(t any, endpoints CodexEndpoints) {}
-
 func CopilotEnabled() bool { return false }
 
 type CopilotDeviceFlowInfo struct {

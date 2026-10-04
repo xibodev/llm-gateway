@@ -2,9 +2,7 @@ package api
 
 import (
 	"bytes"
-	"crypto/sha256"
 	"encoding/base64"
-	"encoding/hex"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -12,7 +10,6 @@ import (
 	"path/filepath"
 	"sync/atomic"
 	"testing"
-	"time"
 
 	"llmgw/internal/config"
 	"llmgw/internal/iam"
@@ -20,34 +17,35 @@ import (
 	"llmgw/internal/router"
 )
 
-func skipTestServiceProviderCredentialControlsModelsAndRoutes(t *testing.T) {
+func TestServiceProviderCredentialControlsModelsAndRoutes(t *testing.T) {
 	stateDir := t.TempDir()
 	var chatRequests atomic.Int32
-	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Header.Get("Authorization") != "Bearer fake-session" {
-			t.Errorf("upstream authorization header was not the cached session")
+	daemon := http.NewServeMux()
+	daemon.HandleFunc("GET /extension/v1/github_copilot/models", func(w http.ResponseWriter, r *http.Request) {
+		if token := r.Header.Get("X-Credential-Token"); token != "shared-secret" && token != "human-secret" {
+			t.Errorf("catalog credential %q is neither the bound nor the human's", token)
 		}
-		switch r.URL.Path {
-		case "/models":
-			writeJSON(w, http.StatusOK, map[string]any{"data": []any{
-				map[string]any{"id": "model-a"}, map[string]any{"id": "model-b"},
-			}})
-		case "/chat/completions":
-			chatRequests.Add(1)
-			writeJSON(w, http.StatusOK, map[string]any{
-				"id": "local-test", "choices": []any{map[string]any{
-					"message": map[string]any{"role": "assistant", "content": "local-test"},
-				}},
-			})
-		default:
-			http.NotFound(w, r)
+		writeJSON(w, http.StatusOK, map[string]any{"models": []any{
+			map[string]any{"id": "model-a"}, map[string]any{"id": "model-b"},
+		}})
+	})
+	daemon.HandleFunc("POST /extension/v1/github_copilot/invoke", func(w http.ResponseWriter, r *http.Request) {
+		if token := r.Header.Get("X-Credential-Token"); token != "shared-secret" {
+			t.Errorf("service request credential %q is not the bound one", token)
 		}
-	}))
-	defer upstream.Close()
+		chatRequests.Add(1)
+		writeJSON(w, http.StatusOK, map[string]any{
+			"id": "local-test", "choices": []any{map[string]any{
+				"message": map[string]any{"role": "assistant", "content": "local-test"},
+			}},
+		})
+	})
+	serveExtensionDaemon(t, daemon)
 	setupProviderCredentialAPI(t, stateDir)
+	// An extension request loads its credential through the store the
+	// Runtime opened when it was built, so build one over this test's state.
+	providers.InstallForTests(t)
 	config.Update(func(s *config.Settings) {
-		s.AllowCopilotProxy = true
-		s.GithubCopilotCacheDir = filepath.Join(stateDir, "cache")
 		s.Providers = map[string]*config.ProviderConfig{
 			"copilot": {Type: "github_copilot"},
 		}
@@ -56,8 +54,6 @@ func skipTestServiceProviderCredentialControlsModelsAndRoutes(t *testing.T) {
 	})
 	providers.ResetProviders()
 	t.Cleanup(providers.ResetProviders)
-	writeCopilotSession(t, filepath.Join(stateDir, "cache"), "shared-secret", upstream.URL)
-	writeCopilotSession(t, filepath.Join(stateDir, "cache"), "human-secret", upstream.URL)
 
 	credential, _ := iam.PutGatewayProviderCredential("copilot", "github_oauth", "shared-secret")
 	authorizedToken, authorizedPrincipal := issueProviderTestKey(
@@ -177,24 +173,23 @@ func TestAdminSharedCredentialBindingIsSecretFreeAndAudited(t *testing.T) {
 	}
 }
 
-func skipTestServiceBindingPreservesUnrelatedHumanCatalog(t *testing.T) {
+func TestServiceBindingPreservesUnrelatedHumanCatalog(t *testing.T) {
 	stateDir := t.TempDir()
 	setupProviderCredentialAPI(t, stateDir)
 	var upstreamAvailable atomic.Bool
 	upstreamAvailable.Store(true)
-	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	daemon := http.NewServeMux()
+	daemon.HandleFunc("GET /extension/v1/github_copilot/models", func(w http.ResponseWriter, r *http.Request) {
 		if !upstreamAvailable.Load() {
 			http.Error(w, "unavailable", http.StatusServiceUnavailable)
 			return
 		}
 		writeJSON(w, http.StatusOK, map[string]any{
-			"data": []any{map[string]any{"id": "existing-human-model"}},
+			"models": []any{map[string]any{"id": "existing-human-model"}},
 		})
-	}))
-	defer upstream.Close()
+	})
+	serveExtensionDaemon(t, daemon)
 	config.Update(func(s *config.Settings) {
-		s.AllowCopilotProxy = true
-		s.GithubCopilotCacheDir = filepath.Join(stateDir, "cache")
 		s.GithubCopilotOAuthToken = "shared-secret"
 		s.Providers = map[string]*config.ProviderConfig{
 			"copilot": {Type: "github_copilot"},
@@ -204,7 +199,6 @@ func skipTestServiceBindingPreservesUnrelatedHumanCatalog(t *testing.T) {
 	})
 	providers.ResetProviders()
 	t.Cleanup(providers.ResetProviders)
-	writeCopilotSession(t, filepath.Join(stateDir, "cache"), "human-secret", upstream.URL)
 	humanToken, humanPrincipal := issueHumanProviderTestKeyForModels(
 		t, "human-secret", []string{"copilot/existing-human-model"},
 	)
@@ -325,21 +319,13 @@ func issueHumanProviderTestKeyForModels(
 	}
 }
 
-func writeCopilotSession(t *testing.T, cacheDir, oauth, baseURL string) {
+// serveExtensionDaemon serves mux as the extension daemon, which serves
+// Copilot and Codex for the gateway.
+func serveExtensionDaemon(t *testing.T, mux *http.ServeMux) {
 	t.Helper()
-	if err := os.MkdirAll(cacheDir, 0o700); err != nil {
-		t.Fatal(err)
-	}
-	sum := sha256.Sum256([]byte(oauth))
-	fingerprint := hex.EncodeToString(sum[:])[:16]
-	payload, _ := json.Marshal(map[string]any{
-		"fingerprint": fingerprint, "token": "fake-session",
-		"chat_base_url": baseURL, "expires_at": time.Now().Add(time.Hour).Unix(),
-	})
-	path := filepath.Join(cacheDir, "github_copilot_session_"+fingerprint+".json")
-	if err := os.WriteFile(path, payload, 0o600); err != nil {
-		t.Fatal(err)
-	}
+	server := httptest.NewServer(mux)
+	t.Cleanup(server.Close)
+	t.Setenv("LLMGW_EXTENSION_URL", server.URL)
 }
 
 func assertModelIDs(t *testing.T, baseURL, token string, want []string) {

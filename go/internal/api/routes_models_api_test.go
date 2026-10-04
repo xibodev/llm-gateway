@@ -6,6 +6,7 @@ import (
 	"net/http/httptest"
 	"path/filepath"
 	"sync"
+	"sync/atomic"
 	"testing"
 
 	"llmgw/internal/config"
@@ -507,7 +508,7 @@ func TestUserModelsUsesOnlyOwnerScopedPortalEndpoint(t *testing.T) {
 	}
 }
 
-func skipTestAdminCodexCatalogAndRouteValidationArePrincipalScoped(t *testing.T) {
+func TestAdminCodexCatalogAndRouteValidationArePrincipalScoped(t *testing.T) {
 	t.Setenv("LLMGW_STATE_DIR", t.TempDir())
 	iam.ResetForTests()
 	providers.ResetProviders()
@@ -553,18 +554,16 @@ func skipTestAdminCodexCatalogAndRouteValidationArePrincipalScoped(t *testing.T)
 	}); err != nil {
 		t.Fatal(err)
 	}
-	modelCalls := 0
-	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/models" {
-			http.NotFound(w, r)
-			return
+	var modelCalls atomic.Int32
+	daemon := http.NewServeMux()
+	daemon.HandleFunc("GET /extension/v1/openai_codex/models", func(w http.ResponseWriter, r *http.Request) {
+		if token := r.Header.Get("X-Credential-Token"); token != "owner-access" {
+			t.Errorf("catalog credential %q is not the owner's connection", token)
 		}
-		modelCalls++
-		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"data":[{"id":"gpt-5-codex","owned_by":"openai","supported_in_api":true,"visibility":"list"}]}`))
-	}))
-	defer upstream.Close()
-	providers.SetCodexEndpointsForTests(t, providers.CodexEndpoints{ModelsURL: upstream.URL + "/models"})
+		modelCalls.Add(1)
+		writeJSON(w, http.StatusOK, map[string]any{"models": []any{map[string]any{"id": "gpt-5-codex", "owned_by": "openai"}}})
+	})
+	serveExtensionDaemon(t, daemon)
 	server := httptest.NewServer(NewServer(Runtime{}))
 	defer server.Close()
 	contains := func(payload map[string]any, want string) bool {
@@ -577,16 +576,16 @@ func skipTestAdminCodexCatalogAndRouteValidationArePrincipalScoped(t *testing.T)
 	}
 
 	status, payload := jsonRequest(t, server.URL+"/admin/api/models", http.MethodGet, "admin-secret", nil)
-	if status != http.StatusOK || contains(payload, "codex/gpt-5-codex") || modelCalls != 0 {
-		t.Fatalf("unscoped models status=%d payload=%+v calls=%d", status, payload, modelCalls)
+	if status != http.StatusOK || contains(payload, "codex/gpt-5-codex") || modelCalls.Load() != 0 {
+		t.Fatalf("unscoped models status=%d payload=%+v calls=%d", status, payload, modelCalls.Load())
 	}
 	status, refreshed := jsonRequest(t, server.URL+"/admin/api/providers/codex/refresh?principal_id="+owner.ID, http.MethodPost, "admin-secret", nil)
-	if status != http.StatusOK || refreshed["success"] != true || modelCalls != 1 {
-		t.Fatalf("owner refresh status=%d payload=%+v calls=%d", status, refreshed, modelCalls)
+	if status != http.StatusOK || refreshed["success"] != true || modelCalls.Load() != 1 {
+		t.Fatalf("owner refresh status=%d payload=%+v calls=%d", status, refreshed, modelCalls.Load())
 	}
 	status, payload = jsonRequest(t, server.URL+"/admin/api/models?principal_id="+owner.ID, http.MethodGet, "admin-secret", nil)
-	if status != http.StatusOK || !contains(payload, "codex/gpt-5-codex") || modelCalls != 1 {
-		t.Fatalf("owner models status=%d payload=%+v calls=%d", status, payload, modelCalls)
+	if status != http.StatusOK || !contains(payload, "codex/gpt-5-codex") || modelCalls.Load() != 1 {
+		t.Fatalf("owner models status=%d payload=%+v calls=%d", status, payload, modelCalls.Load())
 	}
 	if _, err := resolveAs("codex/gpt-5-codex", &config.Principal{
 		PrincipalID: owner.ID, PrincipalKind: owner.Kind,
@@ -599,16 +598,16 @@ func skipTestAdminCodexCatalogAndRouteValidationArePrincipalScoped(t *testing.T)
 		t.Fatal("other principal resolved owner-scoped direct model")
 	}
 	status, payload = jsonRequest(t, server.URL+"/admin/api/models?principal_id="+owner.ID+"&project_id="+project.ID, http.MethodGet, "admin-secret", nil)
-	if status != http.StatusOK || !contains(payload, "codex/gpt-5-codex") || modelCalls != 1 {
-		t.Fatalf("owner project models status=%d payload=%+v calls=%d", status, payload, modelCalls)
+	if status != http.StatusOK || !contains(payload, "codex/gpt-5-codex") || modelCalls.Load() != 1 {
+		t.Fatalf("owner project models status=%d payload=%+v calls=%d", status, payload, modelCalls.Load())
 	}
 	status, denied := jsonRequest(t, server.URL+"/admin/api/models?principal_id="+other.ID+"&project_id="+project.ID, http.MethodGet, "admin-secret", nil)
 	if status != http.StatusBadRequest || denied["error"] == nil {
 		t.Fatalf("non-member project models status=%d payload=%+v", status, denied)
 	}
 	status, payload = jsonRequest(t, server.URL+"/admin/api/models?principal_id="+other.ID, http.MethodGet, "admin-secret", nil)
-	if status != http.StatusOK || contains(payload, "codex/gpt-5-codex") || modelCalls != 1 {
-		t.Fatalf("other models status=%d payload=%+v calls=%d", status, payload, modelCalls)
+	if status != http.StatusOK || contains(payload, "codex/gpt-5-codex") || modelCalls.Load() != 1 {
+		t.Fatalf("other models status=%d payload=%+v calls=%d", status, payload, modelCalls.Load())
 	}
 	member := []map[string]any{{"provider": "codex", "model": "gpt-5-codex"}}
 	status, saved := jsonRequest(t, server.URL+"/admin/api/categories?principal_id="+owner.ID, http.MethodPost, "admin-secret", map[string]any{"name": "owner-codex", "failover": member})
