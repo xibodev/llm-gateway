@@ -203,6 +203,10 @@ FROM usage_events `+where+` GROUP BY `+group.column+` ORDER BY COUNT(*) DESC LIM
 			}
 			items = append(items, item)
 		}
+		if err := rows.Err(); err != nil {
+			rows.Close()
+			return nil, err
+		}
 		rows.Close()
 		groups[group.name] = items
 	}

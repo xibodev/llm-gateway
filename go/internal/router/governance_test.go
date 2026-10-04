@@ -132,6 +132,9 @@ func TestGovernanceAttributesTelemetry(t *testing.T) {
 		}
 		got = append(got, project.String+"|"+key.String)
 	}
+	if err := rows.Err(); err != nil {
+		t.Fatal(err)
+	}
 	if len(got) != 2 || got[0] != "fixture-project|fixture-key" || got[1] != "|" {
 		t.Fatalf("telemetry attribution=%q, want the governed names then none", got)
 	}

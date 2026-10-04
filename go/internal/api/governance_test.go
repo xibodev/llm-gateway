@@ -145,6 +145,9 @@ func TestGovernanceNamesTheKeyInFailoverTelemetry(t *testing.T) {
 			t.Errorf("chain attributed to %q/%q, want %q/telemetry-key", projectName, keyName, project.Slug)
 		}
 	}
+	if err := rows.Err(); err != nil {
+		t.Fatal(err)
+	}
 	if chains != len(requests) {
 		t.Fatalf("recorded %d failover chains, want %d", chains, len(requests))
 	}

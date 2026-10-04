@@ -223,6 +223,9 @@ func (rt *Runtime) ByProject(includeStubs bool) []map[string]any {
 			"cost_usd": round6(cost), "input_tokens": inTok, "output_tokens": outTok,
 		})
 	}
+	if rows.Err() != nil {
+		return []map[string]any{}
+	}
 	return out
 }
 
@@ -256,6 +259,9 @@ func (rt *Runtime) RecentUsage(limit int) []map[string]any {
 			"key": nullOrString(key), "input_tokens": inTok, "output_tokens": outTok,
 			"cost_usd": round6(cost.Float64),
 		})
+	}
+	if rows.Err() != nil {
+		return []map[string]any{}
 	}
 	return out
 }

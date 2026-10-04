@@ -537,6 +537,10 @@ func TestFailoverErrorsAndTelemetryAreSanitized(t *testing.T) {
 			t.Fatalf("raw telemetry has no redaction marker: %s", raw)
 		}
 	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		t.Fatal(err)
+	}
 	if err := rows.Close(); err != nil {
 		t.Fatal(err)
 	}

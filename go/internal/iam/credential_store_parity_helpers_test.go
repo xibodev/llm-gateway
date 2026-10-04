@@ -122,6 +122,9 @@ COALESCE(last_health_event_at_ns,-1),COALESCE(last_failure_code,'<null>') FROM p
 			}
 			snapshot[table] = append(snapshot[table], fmt.Sprint(values...))
 		}
+		if err := rows.Err(); err != nil {
+			t.Fatal(err)
+		}
 		if err := rows.Close(); err != nil {
 			t.Fatal(err)
 		}

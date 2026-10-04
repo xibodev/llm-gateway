@@ -221,6 +221,10 @@ ORDER BY id LIMIT ?`, now, now, limit)
 		}
 		ids = append(ids, id)
 	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return nil, err
+	}
 	rows.Close()
 	leaseUntil := time.Now().Add(lease).Unix()
 	claimed := []OutboxEvent{}
@@ -338,6 +342,9 @@ WHERE enabled=1
 			rules = append(rules, rule)
 		}
 	}
+	if err := rows.Err(); err != nil {
+		return err
+	}
 	if err := rows.Close(); err != nil {
 		return err
 	}
@@ -434,6 +441,10 @@ WHERE r.enabled=1 AND r.kind='key_expiry' AND k.status='active'
 		if item.expiresAt <= now.Add(time.Duration(item.days)*24*time.Hour).Unix() {
 			items = append(items, item)
 		}
+	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return 0, err
 	}
 	rows.Close()
 	count := 0

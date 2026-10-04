@@ -387,6 +387,9 @@ SELECT COUNT(*) FROM provider_account_state WHERE connection_id='cred_existing'`
 	if rows.Next() {
 		t.Fatal("foreign_key_check returned a violation")
 	}
+	if err := rows.Err(); err != nil {
+		t.Fatal(err)
+	}
 }
 
 func TestMigrationsRejectAmbiguousPartialV034Upgrade(t *testing.T) {

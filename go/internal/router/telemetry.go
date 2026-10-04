@@ -140,6 +140,9 @@ func (rt *Runtime) RecentTelemetry(limit int) []map[string]any {
 			"throttled": throttled != 0, "attempts": attempts,
 		})
 	}
+	if rows.Err() != nil {
+		return []map[string]any{}
+	}
 	return out
 }
 
@@ -162,6 +165,9 @@ func (rt *Runtime) TelemetryStats() map[string]any {
 			if rows.Scan(&requested, &c, &t) == nil {
 				byReq = append(byReq, map[string]any{"requested": requested.String, "events": c, "throttled": t})
 			}
+		}
+		if rows.Err() != nil {
+			byReq = []any{}
 		}
 	}
 	return map[string]any{"events": events, "throttled": throttled, "by_requested": byReq}
