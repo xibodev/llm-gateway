@@ -656,8 +656,12 @@ async function setupDocker() {
   report.execution.commit = (await command("git", ["rev-parse", "HEAD"])).stdout;
   const candidateImage = process.env.LLMGW_ACCEPTANCE_IMAGE;
   if (candidateImage) {
-    progress("docker: pulling candidate image");
-    await docker("pull", candidateImage);
+    // A candidate built on this engine has nothing to pull; a published one does.
+    const present = await docker("image", "inspect", candidateImage).then(() => true, () => false);
+    if (!present) {
+      progress("docker: pulling candidate image");
+      await docker("pull", candidateImage);
+    }
     const inspection = JSON.parse((await docker("image", "inspect", candidateImage)).stdout)[0];
     const expectedCommit = process.env.LLMGW_ACCEPTANCE_EXPECT_COMMIT || "";
     const expectedDigest = candidateImage.includes("@") ? candidateImage.split("@").at(-1) : "";
