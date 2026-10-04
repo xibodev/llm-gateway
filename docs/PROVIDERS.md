@@ -26,7 +26,7 @@ is `endpoints`.
 | --- | --- | --- | --- | --- |
 | GitHub Copilot | OpenAI-shaped Copilot transport | Official device authorization | Personal | Disabled by default; owner-private; general gateway use is a grey area. |
 | Claude Code | Anthropic gateway client | Gateway key | Client only | Client setup, not an upstream provider; no Claude personal OAuth. |
-| OpenAI Codex | Native Responses-oriented transport | Device authorization plus PKCE | Personal | Experimental; requires an OAuth client ID the operator is authorized to use. |
+| OpenAI Codex | Native Responses-oriented transport | Device authorization plus PKCE | Personal | Experimental; signs in with the companion daemon's OAuth client unless one is configured. |
 | OpenAI | OpenAI-compatible | API key | System or personal | Standard project API-key integration. |
 | Anthropic | Native Anthropic | API key or setup token | System or personal | Native Messages and token counting; setup tokens are stored only as encrypted connections. |
 | Google Gemini | Google's OpenAI-compatible endpoint | API key | System or personal | Distinct from native AI Studio. |
@@ -84,8 +84,10 @@ Copilot is stricter:
 
 Codex OAuth is human-private and is not assignable to services or the system
 principal. OAuth subscription connections cannot be copied between humans.
-The gateway embeds the verified public Codex client ID and supports official
-device authorization plus browser PKCE. Browser sign-in uses OpenAI's registered
+Sign-in uses official device authorization or browser PKCE through the companion
+daemon, which signs in with its own OAuth client unless
+[`LLMGW_OPENAI_CODEX_CLIENT_ID`](CONFIGURATION.md#credential-and-identity-boundary)
+names one for the gateway to forward. Browser sign-in uses OpenAI's registered
 loopback redirect and accepts the final redirect URL pasted back into the console;
 no client secret, browser cookie, or local Codex credential file is imported.
 Connections created before client-profile binding was introduced must be

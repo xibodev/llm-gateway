@@ -207,7 +207,7 @@ on loopback only.
 | `LLMGW_SSO_SHARED_SECRET` | Secret that must be overwritten by the trusted proxy. |
 | `LLMGW_SSO_ADMIN_GROUP` | SSO group allowed to call admin APIs. |
 | `LLMGW_SSO_AUTO_PROVISION` | Provision verified human identities automatically. |
-| `LLMGW_OPENAI_CODEX_CLIENT_ID` | OAuth client ID the operator is authorized to use for owner-private Codex connections. |
+| `LLMGW_OPENAI_CODEX_CLIENT_ID` | Optional OAuth client ID for owner-private Codex sign-in, which runs through the companion daemon. When unset, the daemon signs in with its own client. When set, the gateway forwards it to the daemon with every Codex sign-in; a daemon that does not support a forwarded client ignores it. Set only a client you are authorized to use. |
 | `LLMGW_GOOGLE_ANTIGRAVITY_CLIENT_ID` | Confidential OAuth client ID used with explicit `client_secret_post` for experimental owner-private Antigravity connections. |
 | `LLMGW_GOOGLE_ANTIGRAVITY_CLIENT_SECRET` | Matching confidential-client secret; runtime-only and never written to gateway config. |
 | `LLMGW_GOOGLE_ANTIGRAVITY_OAUTH_PROFILE` | Set to `consumer_manual` to enable the manual-code profile from runtime configuration. |

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"strings"
 	"time"
 
 	"llmgw/internal/config"
@@ -277,6 +278,13 @@ func NewProviderAuthAdapter(adapterID, providerID string) (mockAuthAdapter, erro
 	return mockAuthAdapter{id: adapterID}, nil
 }
 
-func EffectiveCodexClientID() string {
-	return ""
+// EffectiveCodexClientID returns the Codex OAuth client ID settings configure,
+// which a Codex sign-in names to the companion daemon. Empty means none: the
+// daemon then signs in with its own client. The caller passes its settings
+// snapshot, so this layer adds no read of the published settings.
+func EffectiveCodexClientID(settings *config.Settings) string {
+	if settings == nil {
+		return ""
+	}
+	return strings.TrimSpace(settings.OpenAICodexClientID)
 }

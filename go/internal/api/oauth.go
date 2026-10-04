@@ -189,6 +189,9 @@ func oauthRegistryIDForRef(providerRef string) string {
 	return providers.CanonicalRegistryID(reference)
 }
 
+// configureOAuthClientID saves the Codex OAuth client ID an administrator's
+// start names. A start that names none needs none: the companion daemon owns
+// a Codex client, and signs in with it unless the gateway configures another.
 func configureOAuthClientID(providerRef, clientID string, allowUpdate bool) error {
 	if oauthRegistryIDForRef(providerRef) != "openai_codex" {
 		return nil
@@ -209,10 +212,17 @@ func configureOAuthClientID(providerRef, clientID string, allowUpdate bool) erro
 			}
 		}
 	}
-	if strings.TrimSpace(providers.EffectiveCodexClientID()) == "" {
-		return fmt.Errorf("OpenAI Codex client ID is required. Enter it in the official sign-in dialog.")
-	}
 	return nil
+}
+
+// codexClientParams names, in a Codex start's params, the OAuth client ID
+// configured for Codex, which the companion daemon signs in with. Other
+// providers' params are returned as they are.
+func codexClientParams(providerRef string, params map[string]string) map[string]string {
+	if oauthRegistryIDForRef(providerRef) != "openai_codex" {
+		return params
+	}
+	return providers.WithOAuthClientID(params, providers.EffectiveCodexClientID(config.Get()))
 }
 
 func (s *server) startOAuthFlow(
@@ -260,7 +270,7 @@ func (s *server) startOAuthFlow(
 			return nil, err
 		}
 		view, err := s.oauth.Start(ctx, oauthCaller(principal), providerID, oauthflow.MethodBrowser,
-			oauthflow.WithRedirectURI(redirectURI), oauthflow.WithParams(oauthConnectionParams(connectionName, source, kind)))
+			oauthflow.WithRedirectURI(redirectURI), oauthflow.WithParams(codexClientParams(providerRef, oauthConnectionParams(connectionName, source, kind))))
 		if err != nil {
 			return nil, err
 		}
@@ -280,7 +290,7 @@ func (s *server) startOAuthFlow(
 	}
 	// The poll that completes a device flow names its connection.
 	view, err := s.oauth.Start(ctx, oauthCaller(principal), providerID, oauthflow.MethodDevice,
-		oauthflow.WithParams(map[string]string{oauthParamKind: kind}))
+		oauthflow.WithParams(codexClientParams(providerRef, map[string]string{oauthParamKind: kind})))
 	if err != nil {
 		return nil, err
 	}
@@ -414,11 +424,14 @@ func (s *server) startCodexBrowserFlow(principal iam.Principal, providerRef, cli
 		return nil, fmt.Errorf("provider %q does not support manual browser authorization", providerRef)
 	}
 	// The flow captures the client configured now: the owner's grant, and
-	// the connection that keeps it, belong to that client.
-	capturedConfig := providers.ProviderAuthManualConfig{ClientID: providers.EffectiveCodexClientID(), ClientMode: "public", RedirectURI: codexBrowserLoopbackRedirectURI}
+	// the connection that keeps it, belong to that client. With none
+	// configured the start names none, and the companion daemon signs in
+	// with its own.
+	capturedConfig := providers.ProviderAuthManualConfig{ClientID: providers.EffectiveCodexClientID(config.Get()), ClientMode: "public", RedirectURI: codexBrowserLoopbackRedirectURI}
+	params := providers.WithOAuthClientID(manualOAuthParams(connectionName, source, kind, capturedConfig, false), capturedConfig.ClientID)
 	startedAt := s.now()
 	view, err := s.oauth.Start(context.Background(), oauthCaller(principal), providerID, oauthflow.MethodManual,
-		oauthflow.WithParams(manualOAuthParams(connectionName, source, kind, capturedConfig, false)))
+		oauthflow.WithParams(params))
 	if err != nil {
 		return nil, err
 	}

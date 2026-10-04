@@ -130,9 +130,13 @@ not expose it to untrusted users.
 
 - GitHub Copilot gateway use is a personal-use grey area, not a sanctioned public
   provider API. Respect provider terms and keep entitlements owner-private.
-- Codex uses the verified public Codex OAuth client ID with official device or
-  browser-PKCE authorization. Tokens remain owner-private; the gateway does not
-  extract browser cookies or import the local Codex CLI credential store.
+- Codex sign-in uses official device or browser-PKCE authorization through the
+  companion daemon. The gateway embeds no Codex OAuth client ID: the daemon
+  signs in with its own client, by default the public Codex CLI client, unless
+  `LLMGW_OPENAI_CODEX_CLIENT_ID` names one for the gateway to forward (see
+  [configuration](docs/CONFIGURATION.md#credential-and-identity-boundary)).
+  Tokens remain owner-private; the gateway does not extract browser cookies or
+  import the local Codex CLI credential store.
 - Claude personal-subscription OAuth, browser-cookie extraction, MITM
   interception, and stealth session reuse are not implemented.
 - Edge TTS uses an unofficial public read-aloud service and may change.

@@ -84,9 +84,11 @@ resolution. Project and key allowlists remain a separate intersecting gate.
 ### Codex
 
 Codex OAuth connections are experimental, human-private, and not assignable to
-services or the system principal. The operator must supply an OAuth client ID
-they are authorized to use; the gateway does not embed the official CLI's
-first-party client ID.
+services or the system principal. The gateway embeds no Codex OAuth client ID:
+sign-in runs through the companion daemon, which uses its own client unless
+[`LLMGW_OPENAI_CODEX_CLIENT_ID`](CONFIGURATION.md#credential-and-identity-boundary)
+names one for the gateway to forward. Configure only a client you are authorized
+to use.
 
 ## Shared Copilot credential API
 

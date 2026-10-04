@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"llmgw/internal/diagnostics"
@@ -22,13 +23,26 @@ const (
 	OAuthMetadataClientID     = "oauth_client_id"
 )
 
-// Start parameters that carry a manual flow's OAuth client to its driver.
+// Start parameters that carry a flow's OAuth client to its driver: a manual
+// flow's whole client, and the client ID a Codex sign-in names.
 const (
 	oauthParamClientID     = "client_id"
 	oauthParamClientSecret = "client_secret"
 	oauthParamClientMode   = "client_mode"
 	oauthParamRedirectURI  = "redirect_uri"
 )
+
+// WithOAuthClientID returns params naming clientID as the OAuth client the
+// flow signs in with. An empty clientID names none, rather than an empty one,
+// so the companion daemon signs in with its own client.
+func WithOAuthClientID(params map[string]string, clientID string) map[string]string {
+	if clientID = strings.TrimSpace(clientID); clientID != "" {
+		params[oauthParamClientID] = clientID
+	} else {
+		delete(params, oauthParamClientID)
+	}
+	return params
+}
 
 type ProviderAuthManualConfig struct {
 	ClientID     string `json:"client_id"`
