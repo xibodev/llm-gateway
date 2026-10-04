@@ -81,43 +81,47 @@ entry. A maintainer restore override starts a new incident epoch.
 The UI opens GitHub's authenticated issue/report flow. No GitHub token is shipped
 to installations, and the gateway does not post reports on behalf of users.
 
-## Staging boundary
+## Publication boundary
 
-Workflows build and validate downloadable artifacts only. Publishing a trusted
-home feed, provisioning its signing secret, and deploying services are separate
-operator actions. Scheduled workflows execute from GitHub's default branch, so
-a workflow present only on staging can be exercised manually but has no active
-daily schedule until integrated into the default branch.
+`provider-roster.yml` publishes the feed as plain JSON. Signing is not
+automated: provisioning a signing key and publishing signed envelopes are
+separate operator actions. Scheduled runs execute from the default branch,
+`main`, and only runs on `main` publish.
 
-## Staging operations
+## Workflow operations
 
-`provider-roster.yml` has three isolated jobs: collection, read-only GitHub
-report reconciliation, and payload validation/packaging. Checkouts do not persist
-credentials. The collector receives no provider credentials or GitHub token;
-GitHub reads use the short-lived workflow token only in the steps that need it.
-The packaging job validates payload size and schema, then uploads the plain JSON.
-There are no issue/comment/reaction event triggers, issue writes, Pages deployment,
-release publication, or signing secrets in this workflow.
+`provider-roster.yml` has four isolated jobs: collection, read-only GitHub
+report reconciliation, payload validation/packaging, and publication. Checkouts
+do not persist credentials. The collector receives no provider credentials or
+GitHub token; GitHub reads use the short-lived workflow token only in the steps
+that need it. The packaging job validates payload size and schema, then uploads
+the plain JSON. On `main`, scheduled and manual runs then deploy the website to
+GitHub Pages with that payload as `roster/payload.json`, the feed installations
+fetch by default. Website deployments from `pages.yml` republish the payload of
+the newest successful run, so a documentation change keeps the feed; if that
+run's artifact has expired, the website deploys without it and the run warns.
+Both deployments share one concurrency group. There are no
+issue/comment/reaction event triggers, issue writes, release publication, or
+signing secrets in this workflow.
 
-The cron expression is `23 5 * * *` (daily, UTC). GitHub schedules run only from
-the default branch and can be delayed. A staging branch alone has no active cron.
-To dispatch a staging revision, GitHub must first know the workflow on the default
-branch; select the staging ref in the manual workflow UI. Local validation remains
-available before that integration. Scheduled collection enables bounded public
-reachability probes; manual dispatch defaults `no_probe` to true for staging and
-can explicitly enable probes. Collector fixture tests run before collection.
-Issue-supplied URLs are never probe targets.
+The cron expression is `23 5 * * *` (daily, UTC). GitHub runs schedules only
+from the default branch and can delay them. Manual dispatch can also run the
+workflow on another branch to validate a change before it reaches `main`.
+Scheduled collection enables bounded public reachability probes; manual
+dispatch defaults `no_probe` to true and can explicitly enable probes. Collector
+fixture tests run before collection. Issue-supplied URLs are never probe targets.
 
-The first manual run requires `bootstrap: true`. Subsequent runs retrieve
-`provider-roster-staging` from the latest successful run of this workflow
-on the same branch. They pass its `payload.json` to the collector and its
-`report-state.json` to reconciliation. Jobs are serialized per branch. Missing,
-expired, inaccessible, malformed, or pagination-truncated baseline state stops
-the build rather than silently resetting it or falling back to older state.
-Artifacts are retained for 90 days; this is staging continuity, not a durable
-production state store. Preserve both files before retention expires. If the
-latest artifact is lost, recover the saved pair and validate locally; changing
-branches or deleting run history must not be used to bypass existing tombstones.
+The first manual run on a branch requires `bootstrap: true`. Subsequent runs
+retrieve `provider-roster-staging` from the latest successful run of this
+workflow on the same branch. They pass its `payload.json` to the collector and
+its `report-state.json` to reconciliation. Jobs are serialized per branch.
+Missing, expired, inaccessible, malformed, or pagination-truncated baseline
+state stops the build rather than silently resetting it or falling back to
+older state. Artifacts are retained for 90 days; this is continuity between
+runs, not a durable production state store. Preserve both files before
+retention expires. If the latest artifact is lost, recover the saved pair and
+validate locally; changing branches or deleting run history must not be used to
+bypass existing tombstones.
 
 The final artifact contains:
 
@@ -174,8 +178,9 @@ community incident does not reactivate the source-withdrawn entry.
 For local maintainer overrides, copy `overrides.example.json` to a local file
 outside the repository and add `restores` objects with `entry_id` and
 `incident_since`. Pass its path using `--overrides`. Real state and override
-configuration must not be committed. Staging has no `--apply` mode and requests
-no `issues: write` permission: its plan never posts, closes, or edits an issue.
+configuration must not be committed. The reconciler has no `--apply` mode and the
+workflow requests no `issues: write` permission: the plan never posts, closes, or
+edits an issue.
 Provider/source requests use the separate form and require human review plus
 source-specific extractor code; the issue itself never enrolls a source.
 
@@ -193,7 +198,7 @@ node scripts/provider-roster-community/cli.mjs --repository example/roster --pay
 node scripts/check-docs.mjs
 ```
 
-For an explicitly new staging baseline, omit the collector's `--previous` and
+For an explicitly new baseline, omit the collector's `--previous` and
 replace the reconciler's `--previous` pair with `--bootstrap`. The reconciler
 requires a valid nonempty payload, persistent report state, and a dry-run plan.
 Oversized artifacts fail before output files are written. Fixtures cover duplicate

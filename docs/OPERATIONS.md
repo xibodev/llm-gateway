@@ -57,33 +57,26 @@ docker compose --env-file .env up -d --build
 Console edits and restores update `/state/config.yaml`, not the read-only seed.
 Keep source and standalone installation folders, projects and volumes separate.
 
-### Existing source-based TLS deployment
+### Production Compose with TLS
 
 `deploy/docker-compose.prod.yml` and `deploy/Caddyfile` are a starting point for
-a single-user or static-admin deployment. Pin the image to a semantic version or
-digest, set a real domain, bind the gateway behind Caddy, keep unauthenticated
-mode off, and protect the state directory. The gateway closes keep-alive
-connections that stay idle for three minutes, so a proxy in front must close its
-idle upstream connections sooner; Caddy's two-minute default does.
-
-The released Compose example uses a local image name and `build:`. Merely
-exporting `LLMGW_IMAGE` does not override it. Add a private Compose override:
-
-```yaml
-services:
-  gateway:
-    image: ${LLMGW_IMAGE:?pin a published image version or digest}
-```
-
-Pass that override with a second `-f`, keep the same project, environment and
-state mounts, and use `up -d --no-build --no-deps gateway` for the existing
-service. The image entrypoint is `/llmgw`; use `exec -T gateway /llmgw version`
-to check the running build. Follow the full
-[pin and snapshot procedure](../deploy/DEPLOY.md#pin-and-snapshot), including
-draining traffic and retaining the original rollback snapshot before changing
-images. Select the image from the
+a single-user or static-admin deployment behind Caddy. The gateway service runs
+the image that `LLMGW_IMAGE` names and has no `build:` section; Compose stops
+with an error while the variable is unset. Set it in `deploy/.env` to an exact
+published version or digest from the
 [latest release](https://github.com/xibodev/llm-gateway/releases/latest), not an
-assumed floating tag.
+assumed floating tag. Set a real domain, keep unauthenticated mode off, and
+protect the state directory. [`deploy/DEPLOY.md`](../deploy/DEPLOY.md) has the
+setup commands. The gateway closes keep-alive connections that stay idle for
+three minutes, so a proxy in front must close its idle upstream connections
+sooner; Caddy's two-minute default does.
+
+To change images, complete the [pre-upgrade checklist](UPGRADING.md#before-an-upgrade),
+including draining traffic and retaining the original rollback snapshot, then
+follow the [production Compose upgrade](UPGRADING.md#production-compose-deployment).
+The image entrypoint is `/llmgw`; from the repository root,
+`docker compose -f deploy/docker-compose.prod.yml exec -T gateway /llmgw version`
+checks the running build.
 
 ### Multi-user SSO deployment
 
@@ -154,23 +147,21 @@ Only archives created in `<state>/backups` participate in
 
 ## Backup contents
 
-Check the **installed** binary with `llmgw --help` first. The v0.1 and v0.2
-releases have no backup CLI; v0.3.1 provides the commands below.
-Source documentation does not establish what an installed binary supports.
+Check the **installed** binary with `llmgw --help` first. Source documentation
+does not establish what an installed binary supports, so use the commands below
+only when its help lists them.
 
 Stop all gateway writers before maintenance and retain the service's actual
 state/config environment, not the maintenance user's default home. `serve`,
-`backup create`, and `backup restore` share an exclusive state lock in releases
-that provide these commands.
+`backup create`, and `backup restore` share an exclusive state lock.
 
-If the installed binary lacks backup support, follow the repository-versioned
-[offline snapshot procedure](../deploy/DEPLOY.md#pin-and-snapshot). Archive the
-**entire stopped state volume**, including SQLite `-wal` and `-shm` files,
-configuration, secrets and caches. Snapshot configured external config, savings
-database and OAuth cache paths while the same writers remain stopped. Retain the
-deployment environment and original encryption key separately. Do not start a
-new binary against original state just to obtain a backup. Keep the original
-snapshot unchanged outside automatic retention and test extraction separately.
+If the installed binary lacks backup support, archive the **entire stopped state
+volume**, including SQLite `-wal` and `-shm` files, configuration, secrets and
+caches. Snapshot configured external config, savings database and OAuth cache
+paths while the same writers remain stopped. Retain the deployment environment
+and original encryption key separately. Do not start a new binary against
+original state just to obtain a backup. Keep the original snapshot unchanged
+outside automatic retention and test extraction separately.
 
 ```bash
 llmgw backup create
@@ -294,5 +285,5 @@ part of the repository.
 
 There is no supported database downgrade. Never run the old image against the
 migrated database. Rollback discards writes made after the snapshot. Built-in
-restore expects its manifest/checksum archive, not a raw volume tarball. Follow
-the [complete rollback procedure](../deploy/DEPLOY.md#roll-back).
+restore expects its manifest/checksum archive, not a raw volume tarball; see
+[restore behavior](#restore-behavior).

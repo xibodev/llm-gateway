@@ -55,6 +55,16 @@ is `endpoints`.
 `litellm` is also available as an advanced runtime type without a curated
 registry card.
 
+## Companion daemon
+
+The `github_copilot`, `openai_codex`, `google_antigravity`, `edge_tts`,
+`opencode_zen_anonymous`, and `anthropic_setup_token` provider types are served
+by an optional companion daemon that is distributed separately. The gateway
+reaches it at `LLMGW_EXTENSION_URL` and authenticates with
+`LLMGW_EXTENSION_SECRET`; both are described in
+[Configuration](CONFIGURATION.md#providers-and-discovery). Without the daemon,
+those provider types are unavailable. Other provider types do not use it.
+
 ## Connection resolution
 
 Generic API-key providers resolve:

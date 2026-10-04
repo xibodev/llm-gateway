@@ -69,11 +69,11 @@ Open `http://127.0.0.1:8080/llm-gateway/`. The preview serves the generated
 `.website-dist` at the actual project subpath, including nested 404 fallback.
 Set `PORT` to change the loopback port. Stop the preview with Ctrl+C.
 
-The checker validates documentation links, HTML links/fragments and duplicate
-IDs, one h1 per page, dialog labels, copy targets, search/manifest/sitemap URLs,
-API paths, provider labels and count, known stale claims, runtime brand inventory
-and projection parity, mark geometry, homepage image metadata, PNG dimensions,
-and an asset-size budget.
+The checker validates Markdown links and the headings their fragments name, the
+website page inventory and header brand, SVG/XML structure and references,
+manifest icons and search index syntax, API paths, provider labels and count,
+known stale claims, runtime brand inventory and projection parity, mark
+geometry, homepage image metadata, PNG dimensions, and an asset-size budget.
 It deliberately does not lint legacy application UI copy. Rebuild after edits.
 
 Browser QA should cover desktop and 320/390px layouts; menu and no-JavaScript

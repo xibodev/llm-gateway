@@ -26,16 +26,17 @@ same credential and policy checks. Responses continue to identify the native
 model actually served, not the alias selected by the client.
 
 Gateway fixture coverage does not prove an installed CLI works against a real
-provider. The `staging -> main` gate in [`BACKLOG.md`](../BACKLOG.md) therefore
-uses the installed host clients against the disposable Docker gateway after a
-real provider is connected. Cancellation uses the same HTTP request lifecycle
-for CLIs, SDKs, browsers, and backend applications.
+provider. The [release validation](../BACKLOG.md#release-validation) run before
+a release from `main` therefore uses the installed host clients against the
+disposable Docker gateway after a real provider is connected. Cancellation uses
+the same HTTP request lifecycle for CLIs, SDKs, browsers, and backend
+applications.
 
 ## Current-source API contracts
 
 These contracts describe the current implementation, not a claim that every
-published release includes them. See the [upgrade procedure](../deploy/DEPLOY.md#upgrade-and-rollback)
-before replacing a deployed image.
+published release includes them. Read the [upgrade guide](UPGRADING.md) before
+replacing a deployed image.
 
 - `GET /admin/api/providers/{id}/catalog` and
   `POST /admin/api/providers/{id}/models` retain their `models` lists and HTTP 200

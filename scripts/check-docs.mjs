@@ -72,14 +72,93 @@ function checkXml(file) {
   }
 }
 
+// The text GitHub renders for a heading, from which it derives the anchor.
+// Code spans keep their content verbatim; elsewhere links and images keep
+// their text, and tags, escapes and emphasis underscores disappear.
+function headingText(markdown) {
+  const entities = { amp: "&", lt: "<", gt: ">", quot: "\"", "#39": "'" };
+  return markdown.split(/(`+[^`]*`+)/).map((part, index) => index % 2
+    ? part.replace(/^`+|`+$/g, "")
+    : part
+      .replace(/!?\[([^\]]*)\]\([^)]*\)/g, "$1")
+      .replace(/<[^>]*>/g, "")
+      .replace(/&(amp|lt|gt|quot|#39);/g, (_, name) => entities[name])
+      .replace(/(^|[^\p{L}\p{N}_\\])_+|(?<!\\)_+(?=[^\p{L}\p{N}_]|$)/gu, "$1")
+      .replace(/\\([!-/:-@[-`{-~])/g, "$1"))
+    .join("").trim();
+}
+
+// GitHub's anchor slug: lowercase, drop punctuation and symbols except
+// hyphens and underscores, and turn each space into a hyphen.
+function slug(text) {
+  return text.toLowerCase().replace(/[^\p{L}\p{M}\p{N}_ -]/gu, "").replaceAll(" ", "-");
+}
+
+const anchorCache = new Map();
+function anchors(file) {
+  if (anchorCache.has(file)) return anchorCache.get(file);
+  const found = new Set();
+  const seen = new Map();
+  // Repeated headings get -1, -2, ... in document order.
+  const addHeading = (markdown) => {
+    const base = slug(headingText(markdown));
+    const count = seen.get(base) ?? 0;
+    seen.set(base, count + 1);
+    found.add(count ? `${base}-${count}` : base);
+  };
+  const lines = source(file).split(/\r?\n/);
+  // YAML front matter is not rendered as Markdown.
+  const frontMatterEnd = lines[0] === "---" ? lines.indexOf("---", 1) : -1;
+  let fence = null;
+  let paragraph = "";
+  for (const line of lines.slice(frontMatterEnd + 1)) {
+    const marker = line.match(/^ {0,3}(`{3,}|~{3,})/)?.[1];
+    if (fence) {
+      if (marker?.[0] === fence[0] && marker.length >= fence.length && !line.trim().slice(marker.length).trim()) fence = null;
+      continue;
+    }
+    if (marker) {
+      fence = marker;
+      paragraph = "";
+      continue;
+    }
+    const atx = line.match(/^ {0,3}#{1,6}(?:[ \t]+(.*?))?(?:[ \t]+#+)?[ \t]*$/);
+    if (atx) {
+      addHeading(atx[1] ?? "");
+      paragraph = "";
+      continue;
+    }
+    if (paragraph && /^ {0,3}(?:=+|-+)[ \t]*$/.test(line)) {
+      addHeading(paragraph);
+      paragraph = "";
+      continue;
+    }
+    // Explicit HTML anchors are link targets too.
+    for (const match of line.matchAll(/<a\s[^>]*?\b(?:id|name)="([^"]+)"/gi)) found.add(match[1]);
+    const container = /^ {0,3}(?:[-*+>]|\d+[.)])(?:\s|$)/.test(line) || line.includes("|");
+    paragraph = line.trim() && !container ? line.trim() : "";
+  }
+  anchorCache.set(file, found);
+  return found;
+}
+
 for (const file of markdownFiles) {
   const text = source(file);
   for (const match of text.matchAll(/\[[^\]]*\]\(([^)]+)\)/g)) {
     const raw = match[1].trim().replace(/^<|>$/g, "");
-    if (!raw || raw.startsWith("#") || /^[a-z][a-z0-9+.-]*:/i.test(raw)) continue;
-    const decoded = decodeURIComponent(raw.split("#")[0]);
-    const target = normalize(resolve(dirname(file), decoded));
-    check(existsSync(target), `${repoPath(file)} links to missing ${raw}`);
+    if (!raw || /^[a-z][a-z0-9+.-]*:/i.test(raw)) continue;
+    const hash = raw.indexOf("#");
+    const path = hash < 0 ? raw : raw.slice(0, hash);
+    const fragment = hash < 0 ? "" : decodeURIComponent(raw.slice(hash + 1));
+    const target = path ? normalize(resolve(dirname(file), decodeURIComponent(path))) : file;
+    if (!existsSync(target)) {
+      failures.push(`${repoPath(file)} links to missing ${raw}`);
+      continue;
+    }
+    // Only Markdown headings are checked; other targets have no portable anchors.
+    if (fragment && extname(target).toLowerCase() === ".md") {
+      check(anchors(target).has(fragment), `${repoPath(file)} links to missing heading ${raw}`);
+    }
   }
 }
 

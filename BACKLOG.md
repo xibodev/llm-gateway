@@ -17,12 +17,12 @@ translation framework.
 
 ## Delivery policy
 
-- One focused acceptance slice per feature branch and PR into `staging`.
+- One focused acceptance slice per feature branch and pull request into `main`.
 - Run targeted tests while implementing. GitHub CI runs the complete Go and
   console gates for each PR.
-- The `staging -> main` gate is Docker endpoint integration against a real
-  provider plus simple host-side checks with the installed Claude, Codex, and
-  Copilot CLIs.
+- Before a release from `main`, validation runs Docker endpoint integration
+  against a real provider plus simple host-side checks with the installed
+  Claude, Codex, and Copilot CLIs.
 - Do not build a test framework when direct endpoint calls or existing CLIs can
   establish the behavior.
 - Fix only failures demonstrated by code inspection, focused tests, endpoint
@@ -72,12 +72,12 @@ cd internal/web/console && npm ci && npm audit --json && npm run lint && npm tes
 Local development may run only focused tests. The complete gate is required once
 in GitHub CI before merge.
 
-### Real-provider staging gate
+### Real-provider release gate
 
-Use `test/uat/docker-compose.uat.yml` with a fresh disposable state volume and a
-real provider configured interactively or through local environment references.
-Do not add provider secrets to `.env.example`, Compose files, fixtures, reports,
-or chat transcripts.
+Before a release from `main`, use `test/uat/docker-compose.uat.yml` with a fresh
+disposable state volume and a real provider configured interactively or through
+local environment references. Do not add provider secrets to `.env.example`,
+Compose files, fixtures, reports, or chat transcripts.
 
 The operator runs the host CLIs with process-scoped temporary environment or an
 ephemeral config directory. The final gate instructions must include exact setup,

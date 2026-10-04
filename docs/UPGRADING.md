@@ -3,9 +3,9 @@
 ## Before an upgrade
 
 1. Schedule maintenance, drain traffic, and stop all gateway writers.
-2. Check the installed binary's `llmgw --help`. Use its built-in backup if
-   available; v0.1/v0.2 have no backup CLI. Otherwise archive the entire stopped
-   state volume, including SQLite WAL/SHM, configuration, secrets and caches.
+2. Check the installed binary's `llmgw --help` and use its built-in backup if
+   it lists one. Otherwise archive the entire stopped state volume, including
+   SQLite WAL/SHM, configuration, secrets and caches.
 3. Record the current image digest or binary checksum.
 4. Keep `LLMGW_CREDENTIAL_ENCRYPTION_KEY` available from the secret store.
 5. Read the release notes for storage and compatibility changes.
@@ -13,7 +13,8 @@
 Retain the same deployment environment, state mounts and any configured external
 config/database/cache paths. Preserve the original snapshot unchanged and test
 extraction separately. Do not start the new binary on original state to make a
-backup. Follow the [repository-versioned procedure](../deploy/DEPLOY.md#upgrade-and-rollback).
+backup. The operations runbook details [backups](OPERATIONS.md#backup-contents)
+and [rollback](OPERATIONS.md#rollback).
 
 Database migrations are idempotent and recorded in `schema_migrations` and
 `control_metadata`. A binary refuses to inspect/restore a backup whose schema is
@@ -56,6 +57,23 @@ Start with the same saved keys and absolute state/config paths, using
 against the maintenance user's default `~/.llmgw`. Preserve the old binary and
 original snapshot together for rollback.
 
+## Production Compose deployment
+
+The TLS starting point in [`deploy/`](../deploy/DEPLOY.md) runs the image that
+`LLMGW_IMAGE` names; Compose stops with an error while it is unset. After the
+same offline backup, keep the Compose project, `deploy/.env`, state directory
+and any private overrides, and record the current `LLMGW_IMAGE` value for
+rollback. Change only that value in `deploy/.env` to the selected published
+version or digest, then from the repository root:
+
+```bash
+docker compose -f deploy/docker-compose.prod.yml pull gateway
+docker compose -f deploy/docker-compose.prod.yml up -d gateway
+```
+
+Check the running version and run `deploy/smoke.sh` before restoring traffic.
+[Rollback](#rollback) restores the snapshot and the recorded image.
+
 ## Developers: source installation
 
 For the [root source Compose recipe](QUICKSTART.md#developers-from-source), back
@@ -68,12 +86,6 @@ After clearing stale shell overrides, rebuild from that clone:
 ```bash
 docker compose --env-file .env up -d --build
 ```
-
-For an existing production Compose stack, retain its actual files, overrides,
-project, environment source and mounts; follow the
-[deployment-specific procedure](../deploy/DEPLOY.md#upgrade-and-rollback).
-Neither released repository Compose file supports `LLMGW_IMAGE` by itself;
-that procedure explicitly adds it to private configuration before using it.
 
 ## Current compatibility aliases
 
