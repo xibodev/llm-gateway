@@ -3,7 +3,7 @@ module llmgw
 go 1.26.6
 
 require (
-	github.com/xibodev/llm-provider-auth v1.0.0
+	github.com/xibodev/llm-provider-auth v1.0.1
 	github.com/xibodev/llm-translate v0.3.0
 	github.com/xibodev/llmgw-core v1.3.0
 	golang.org/x/sys v0.48.0

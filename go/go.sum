@@ -14,8 +14,8 @@ github.com/pmezard/go-difflib v1.0.0 h1:4DBwDE0NGyQoBHbLQYPwSUPoCMWR5BEzIk/f1lZb
 github.com/pmezard/go-difflib v1.0.0/go.mod h1:iKH77koFhYxTK1pcRnkKkqfTogsbg7gZNVY4sRDYZ/4=
 github.com/remyoudompheng/bigfft v0.0.0-20230129092748-24d4a6f8daec h1:W09IVJc94icq4NjY3clb7Lk8O1qJ8BdBEF8z0ibU0rE=
 github.com/remyoudompheng/bigfft v0.0.0-20230129092748-24d4a6f8daec/go.mod h1:qqbHyh8v60DhA7CoWK5oRCqLrMHRGoxYCSS9EjAz6Eo=
-github.com/xibodev/llm-provider-auth v1.0.0 h1:1MlKpRBTqhUDf/zzjX9OfG04MGCIMqjjnqz/YZukw3Y=
-github.com/xibodev/llm-provider-auth v1.0.0/go.mod h1:u6XRI5ljvcAqmJdx/uqxKF2Ou7Sfuo1OoiTkpkEu/9w=
+github.com/xibodev/llm-provider-auth v1.0.1 h1:Dz88a1DTM/HhZFLhNkCQty/NOqhKOCFIhMatnvkirm0=
+github.com/xibodev/llm-provider-auth v1.0.1/go.mod h1:u6XRI5ljvcAqmJdx/uqxKF2Ou7Sfuo1OoiTkpkEu/9w=
 github.com/xibodev/llm-translate v0.3.0 h1:92aORYeW/M0X0RrmdFG0xW0fLc/mZw/wOiIxbJJL+HI=
 github.com/xibodev/llm-translate v0.3.0/go.mod h1:0XVHeiJ2cuH+vSULiZt2BLolzjx7f6Y+ZLiGdpsAkxg=
 github.com/xibodev/llmgw-core v1.3.0 h1:EjLGoKaJHLv3LwmB4TmPCW0LixTiddP2s/oZIWWKyZw=
