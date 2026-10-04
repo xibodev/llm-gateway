@@ -1,67 +1,86 @@
-# Weekly version updates. Minor and patch bumps are grouped into one pull
-# request per directory; major bumps stay separate so each gets a review.
+# Monthly version updates. Minor and patch bumps are grouped into one pull
+# request per directory. Major versions are upgraded deliberately, together
+# with the code and pins that depend on them, so they are not proposed here.
 version: 2
 updates:
   - package-ecosystem: github-actions
     directory: /
     schedule:
-      interval: weekly
-    open-pull-requests-limit: 3
+      interval: monthly
+    open-pull-requests-limit: 2
     groups:
       minor-and-patch:
         patterns: ["*"]
         update-types: [minor, patch]
+    ignore:
+      - dependency-name: "*"
+        update-types: [version-update:semver-major]
 
   - package-ecosystem: gomod
     directory: /go
     schedule:
-      interval: weekly
-    open-pull-requests-limit: 3
+      interval: monthly
+    open-pull-requests-limit: 2
     groups:
       minor-and-patch:
         patterns: ["*"]
         update-types: [minor, patch]
+    ignore:
+      - dependency-name: "*"
+        update-types: [version-update:semver-major]
 
   # dist/ is committed and embedded; CI's check:dist fails until an update
   # that changes the bundle is rebuilt and committed with it.
   - package-ecosystem: npm
     directory: /go/internal/web/console
     schedule:
-      interval: weekly
-    open-pull-requests-limit: 3
+      interval: monthly
+    open-pull-requests-limit: 2
     groups:
       minor-and-patch:
         patterns: ["*"]
         update-types: [minor, patch]
+    ignore:
+      - dependency-name: "*"
+        update-types: [version-update:semver-major]
 
   - package-ecosystem: npm
     directory: /test/live-acceptance
     schedule:
-      interval: weekly
-    open-pull-requests-limit: 2
+      interval: monthly
+    open-pull-requests-limit: 1
     groups:
       minor-and-patch:
         patterns: ["*"]
         update-types: [minor, patch]
+    ignore:
+      - dependency-name: "*"
+        update-types: [version-update:semver-major]
 
   - package-ecosystem: npm
     directory: /.github/release-harness
     schedule:
-      interval: weekly
-    open-pull-requests-limit: 2
+      interval: monthly
+    open-pull-requests-limit: 1
     groups:
       minor-and-patch:
         patterns: ["*"]
         update-types: [minor, patch]
+    ignore:
+      - dependency-name: "*"
+        update-types: [version-update:semver-major]
 
-  # The Node and Go base images match the versions the workflows set up;
-  # move them together.
+  # The Go and Node base images match go.mod and the versions the workflows
+  # set up, so only patch releases and digests move here.
   - package-ecosystem: docker
     directory: /go
     schedule:
-      interval: weekly
-    open-pull-requests-limit: 2
+      interval: monthly
+    open-pull-requests-limit: 1
     groups:
-      minor-and-patch:
+      patch:
         patterns: ["*"]
-        update-types: [minor, patch]
+        update-types: [patch]
+    ignore:
+      - dependency-name: "*"
+        update-types: [version-update:semver-major, version-update:semver-minor]
