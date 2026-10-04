@@ -32,6 +32,7 @@ concurrency:
 jobs:
   collect:
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     permissions:
       contents: read
       actions: read
@@ -90,6 +91,7 @@ jobs:
   reconcile:
     needs: collect
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     permissions:
       contents: read
       issues: read
@@ -135,6 +137,7 @@ jobs:
   package:
     needs: reconcile
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     permissions:
       contents: read
     steps:
@@ -175,6 +178,7 @@ jobs:
     needs: package
     if: github.ref == 'refs/heads/main' && (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch')
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     # Shared with the website deployment in pages.yml so the two never interleave.
     concurrency:
       group: pages

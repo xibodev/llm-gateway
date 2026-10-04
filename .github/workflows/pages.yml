@@ -40,6 +40,7 @@ concurrency:
 jobs:
   validate:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     permissions:
       contents: read
       # Reads the provider roster workflow's runs and downloads its artifact.
@@ -99,6 +100,7 @@ jobs:
     needs: validate
     if: github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     # Shared with the roster workflow's deployment so the two never interleave.
     concurrency:
       group: pages

@@ -28,6 +28,7 @@ jobs:
   validate:
     name: validate release identity
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     outputs:
       tag: ${{ steps.identity.outputs.tag }}
       version: ${{ steps.identity.outputs.version }}
@@ -132,6 +133,7 @@ jobs:
     name: binaries / SBOM / checksums
     needs: [validate, ci]
     runs-on: ubuntu-latest
+    timeout-minutes: 60
     permissions:
       contents: read
     steps:
@@ -233,6 +235,7 @@ jobs:
     if: github.event_name == 'workflow_dispatch'
     needs: [validate, ci, binaries]
     runs-on: ubuntu-latest
+    timeout-minutes: 60
     permissions:
       contents: read
     steps:
@@ -285,6 +288,7 @@ jobs:
     if: github.event_name == 'push' && github.ref_type == 'tag'
     needs: [validate, ci, binaries]
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     permissions:
       contents: write
     outputs:
@@ -358,6 +362,7 @@ jobs:
     if: github.event_name == 'push' && github.ref_type == 'tag'
     needs: [validate, ci, binaries, release-stage]
     runs-on: ubuntu-latest
+    timeout-minutes: 60
     permissions:
       contents: read
       packages: write
@@ -504,6 +509,7 @@ jobs:
     if: github.event_name == 'push' && github.ref_type == 'tag'
     needs: [validate, image-publish, live-acceptance]
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     permissions:
       contents: read
       packages: write
@@ -547,6 +553,7 @@ jobs:
     if: github.event_name == 'push' && github.ref_type == 'tag'
     needs: [validate, image-publish, image-promote, release-stage, live-acceptance]
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     permissions:
       contents: write
       attestations: write
