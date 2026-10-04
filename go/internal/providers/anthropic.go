@@ -84,6 +84,7 @@ func (p AnthropicNativeProvider) invoke(ctx context.Context, model string, paylo
 	if err != nil {
 		return core.Response{}, err
 	}
+	request.Header = anthropicClientHeaders(ctx)
 	response, err := p.runtime.core.Invoke(p.operation(ctx), p.caller, p.instance, request)
 	if err != nil {
 		if ctxErr := ctx.Err(); ctxErr != nil {
@@ -235,6 +236,34 @@ func (s *anthropicRecordStream) Next() (string, bool) {
 func (s *anthropicRecordStream) Err() error   { return s.err }
 func (s *anthropicRecordStream) Close() error { return s.inner.Close() }
 
+// anthropicClientHeadersKey carries, in a request's context, the Anthropic
+// headers a Messages client sent.
+type anthropicClientHeadersKey struct{}
+
+// WithAnthropicClientHeaders returns ctx carrying the anthropic-version and
+// anthropic-beta values of a Messages client's request, which a native
+// Anthropic Messages request then forwards so the client reaches the beta
+// features it asked for. Core's Anthropic checks each value and reads no
+// other header, so credentials a client sends never travel this way.
+func WithAnthropicClientHeaders(ctx context.Context, header http.Header) context.Context {
+	forwarded := http.Header{}
+	if version := header.Get("anthropic-version"); version != "" {
+		forwarded.Set("anthropic-version", version)
+	}
+	for _, beta := range header.Values("anthropic-beta") {
+		forwarded.Add("anthropic-beta", beta)
+	}
+	if len(forwarded) == 0 {
+		return ctx
+	}
+	return context.WithValue(ctx, anthropicClientHeadersKey{}, forwarded)
+}
+
+func anthropicClientHeaders(ctx context.Context) http.Header {
+	header, _ := ctx.Value(anthropicClientHeadersKey{}).(http.Header)
+	return header
+}
+
 // CountAnthropicTokens counts through core.CountTokens, which the core
 // Runtime does not perform, with the credential Anthropic's store resolves
 // for the caller, as a request would be sent. Core's Anthropic forwards the
@@ -300,6 +329,7 @@ func (p AnthropicNativeProvider) stream(ctx context.Context, model string, paylo
 	if err != nil {
 		return nil, err
 	}
+	request.Header = anthropicClientHeaders(ctx)
 	stream, err := p.runtime.core.Stream(p.operation(ctx), p.caller, p.instance, request)
 	if err != nil {
 		if ctxErr := ctx.Err(); ctxErr != nil {

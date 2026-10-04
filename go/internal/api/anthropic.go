@@ -111,7 +111,7 @@ func handleMessages(w http.ResponseWriter, r *http.Request) {
 	if pre := config.Get().GatewayPreamble; pre != "" && transportMode != "transparent" {
 		raw["_llmgw_preamble"] = pre
 	}
-	ctx := messagesFallbackContext(r, raw)
+	ctx := providers.WithAnthropicClientHeaders(messagesFallbackContext(r, raw), r.Header)
 
 	resolution, err := resolveModel(r.Context(), req.Model, principal)
 	if err != nil {
