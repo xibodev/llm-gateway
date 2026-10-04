@@ -67,6 +67,10 @@ export function classifyPairedObservation(gateway, direct) {
   return classifications.attributionInconclusive;
 }
 
+// directProviderObservation reads a provider's direct answer for attribution:
+// whether the provider served the model at all. A router model, such as an
+// "auto" or free-tier router, answers under the name of the model it chose, so
+// the answer's model name is not compared; content and status decide.
 export function directProviderObservation(result, text, model) {
 	const transportStatus = result?.status || 0;
 	const embeddedStatus = Number(result?.json?.error?.code ?? result?.json?.error?.status ?? 0);
@@ -74,7 +78,7 @@ export function directProviderObservation(result, text, model) {
 	  Number.isInteger(embeddedStatus) && embeddedStatus >= 400 && embeddedStatus <= 599
 	  ? embeddedStatus : transportStatus;
   const error = result?.error || result?.json?.error?.message || result?.json?.error || result?.text || "";
-  return { ...result, status, error, validEnvelope: status >= 200 && status < 300 && Boolean(text) && result?.json?.model === model };
+  return { ...result, status, error, servedModel: result?.json?.model || model, validEnvelope: status >= 200 && status < 300 && Boolean(text) };
 }
 
 export function chatCompletionPassed(result, model) {

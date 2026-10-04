@@ -78,6 +78,23 @@ test("direct provider soft errors are never valid success envelopes", () => {
 	assert.equal(classifyObservation(observation), classifications.dependencyOutage);
 });
 
+test("a router model's direct answer under another model name is a served answer", () => {
+  const routed = directProviderObservation(
+    { status: 200, json: { model: "vendor/chosen-model", choices: [{ message: { content: "hi" } }] } },
+    "hi", "router/auto",
+  );
+  assert.equal(routed.validEnvelope, true);
+  assert.equal(routed.servedModel, "vendor/chosen-model");
+  // A gateway timeout beside a provider that answers directly is an outage of
+  // the gateway's attempt, not an unattributable result.
+  assert.equal(
+    classifyPairedObservation({ status: 0, timedOut: true, error: "timeout" }, routed),
+    classifications.dependencyOutage,
+  );
+  const empty = directProviderObservation({ status: 200, json: { model: "vendor/chosen-model" } }, "", "router/auto");
+  assert.equal(empty.validEnvelope, false);
+});
+
 test("live results distinguish external availability from product regressions", () => {
   assert.equal(classifyObservation({ status: 200, validEnvelope: true }), classifications.pass);
   assert.equal(classifyObservation({ status: 200, validEnvelope: false }), classifications.productRegression);
