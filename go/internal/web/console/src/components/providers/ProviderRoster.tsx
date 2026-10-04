@@ -58,6 +58,23 @@ export function rosterUnavailable(entry: JSONRecord): boolean {
   return ["quarantined", "withdrawn"].includes(stringValue(entry.state));
 }
 
+// configuredInstanceFor finds the configured instance a roster entry already
+// is: one at the same endpoint, or one named after the entry.
+export function configuredInstanceFor(remote: JSONRecord, instances: JSONRecord[]): JSONRecord | undefined {
+  const id = stringValue(remote.id);
+  const endpoint = endpointIdentity(remote.base_url);
+  const slug = stringValue(remote.name, id)
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 48);
+  return instances.find((inst) => {
+    const instEndpoint = endpointIdentity(inst.base_url);
+    const instID = stringValue(inst.id).toLowerCase();
+    return (endpoint && instEndpoint && endpoint === instEndpoint) || instID === slug || instID === id.toLowerCase();
+  });
+}
+
 export function mergeProviderRoster(builtins: JSONRecord[], roster: JSONRecord[]): JSONRecord[] {
   const merged: (JSONRecord & { roster_entries: JSONRecord[] })[] = builtins.map((entry) => ({ ...entry, roster_entries: [] }));
   const candidates: JSONRecord[] = [];
@@ -80,16 +97,7 @@ export function mergeProviderRoster(builtins: JSONRecord[], roster: JSONRecord[]
     if (builtin && !rosterUnavailable(remote)) {
       builtin.roster_entries.push(remote);
     } else {
-      const slug = stringValue(remote.name, id)
-        .toLowerCase()
-        .replace(/[^a-z0-9]+/g, "-")
-        .replace(/^-+|-+$/g, "")
-        .slice(0, 48);
-      const matchingInstance = allInstances.find((inst) => {
-        const instEndpoint = endpointIdentity(inst.base_url);
-        const instID = stringValue(inst.id).toLowerCase();
-        return (endpoint && instEndpoint && endpoint === instEndpoint) || instID === slug || instID === id.toLowerCase();
-      });
+      const matchingInstance = configuredInstanceFor(remote, allInstances);
       const isConfigured = !!matchingInstance;
       candidates.push({
         ...remote,
@@ -216,16 +224,19 @@ export function rosterCandidateSetup(entry: JSONRecord, registry: JSONRecord[]):
   };
 }
 
-export function useProviderRoster(mode: ConsoleMode) {
+// useProviderRoster loads the optional remote roster. A page that needs it only
+// for some entries passes enabled=false otherwise, and no request is made.
+export function useProviderRoster(mode: ConsoleMode, enabled = true) {
   const [state, setState] = useState<JSONRecord>({});
-  const [busy, setBusy] = useState(true);
+  const [busy, setBusy] = useState(enabled);
   const [error, setError] = useState("");
   const generation = useRef(0);
   useEffect(() => {
     const current = ++generation.current;
     setState({});
-    setBusy(true);
+    setBusy(enabled);
     setError("");
+    if (!enabled) return;
     void getJSON<JSONRecord>(mode, "/provider-roster")
       .then((payload) => {
         if (generation.current === current) setState(asRecord(payload));
@@ -239,7 +250,7 @@ export function useProviderRoster(mode: ConsoleMode) {
     return () => {
       generation.current += 1;
     };
-  }, [mode]);
+  }, [mode, enabled]);
   const refresh = async () => {
     if (mode !== "admin" || busy) return;
     const current = generation.current;

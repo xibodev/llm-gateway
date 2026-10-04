@@ -43,8 +43,8 @@ export function ConnectDialog({ entry, onClose, onConfigured, mode = "create", t
   const requiresKey = boolValue(entry.requires_api_key);
   // providerConfig is the FIRST configured instance's record, which says nothing
   // about the instance being created. Trusting it when adding an instance
-  // promised "leave blank to keep the current key" for a provider that has no
-  // key, and skipped the guard, so the operator submitted blank and got a 400.
+  // promised "leave blank to keep the current credential" for a provider that
+  // has no key, and skipped the guard, so the operator submitted blank and got a 400.
   const apiKeySet = mode === "edit" && boolValue(providerConfig.api_key_set);
   const takesServiceAccount = new Set(asList(entry.auth_methods).map(String)).has(SERVICE_ACCOUNT_KIND);
   const takesSetupToken = new Set(asList(entry.auth_methods).map(String)).has(SETUP_TOKEN_KIND);
@@ -103,6 +103,8 @@ export function ConnectDialog({ entry, onClose, onConfigured, mode = "create", t
         form.set("project", project.trim());
         form.set("location", location.trim());
         if (fields.has("vertex_request_type")) form.set("vertex_request_type", vertexRequestType);
+        // Every save replaces the setting, so the file path must carry it too.
+        form.set("force_api_support", String(forceApiSupport));
         form.set("api_key", selectedFile);
         await sendForm<JSONRecord>("admin", "/providers", form);
       } else {

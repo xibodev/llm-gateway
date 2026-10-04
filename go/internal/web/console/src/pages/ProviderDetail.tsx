@@ -3,11 +3,13 @@ import { ArrowLeft, CheckCircle2, ExternalLink, Plug, Play, Power, RefreshCw, Se
 import { getJSON, sendJSON, type JSONRecord } from "../lib/api";
 import type { ConsoleMode } from "../lib/mode";
 import { asList, asRecord, numberValue, stringValue } from "../lib/records";
+import { verifyModelChoices } from "../lib/models";
 import { ProviderMark } from "../components/ProviderMark";
-import { EmptyState, PageHeading } from "../components/PageState";
+import { EmptyState, LoadingState, PageHeading } from "../components/PageState";
 import { OAuthConnectDialog } from "../components/providers/OAuthConnectDialog";
 import { Pager, defaultPageSize } from "../components/ModelPicker";
 import { ConnectDialog, PrivateAPIKeyDialog } from "../components/providers/ProviderHub";
+import { RosterMetadata, configuredInstanceFor, rosterSetupEntry, rosterSetupUnavailableReason, useProviderRoster } from "../components/providers/ProviderRoster";
 import {
   ResultNotice,
   StatusBadge,
@@ -37,42 +39,47 @@ export function ProviderDetail({ entryID, data, mode, onChanged, onBack, onOpenP
 }) {
   const registry = asList(data.provider_registry).map(asRecord);
   const statuses = asList(data.provider_statuses).map(asRecord);
-  let registryEntry = registry.find((candidate) => stringValue(candidate.id) === entryID || asList(candidate.aliases).includes(entryID));
+  const registryFor = (id: string) => registry.find((candidate) => stringValue(candidate.id) === id || asList(candidate.aliases).includes(id));
+  let registryEntry = registryFor(entryID);
   let statusEntry = statuses.find((candidate) => stringValue(candidate.id) === entryID && !(registryEntry && boolValue(candidate.custom)));
 
-  // If entryID did not match a top-level tile directly, check whether it is a configured instance of a multi-instance tile
-  if (!registryEntry && !statusEntry) {
+  // A configured instance of a multi-instance tile is shown as an entry of its own.
+  const instanceView = (instanceID: string): { status: JSONRecord; registry?: JSONRecord } | null => {
     for (const status of statuses) {
-      const match = asList(status.instances).map(asRecord).find((inst) => stringValue(inst.id) === entryID);
-      if (match) {
-        statusEntry = {
-          ...status,
-          ...match,
-          id: entryID,
-          label: stringValue(match.label, entryID),
-          instances: [match],
-          configured_provider_ids: [entryID],
-        };
-        const regID = stringValue(match.registry_id);
-        if (regID) {
-          registryEntry = registry.find((c) => stringValue(c.id) === regID || asList(c.aliases).includes(regID));
-        }
-        break;
-      }
+      const match = asList(status.instances).map(asRecord).find((inst) => stringValue(inst.id) === instanceID);
+      if (!match) continue;
+      const regID = stringValue(match.registry_id);
+      return {
+        status: { ...status, ...match, id: instanceID, label: stringValue(match.label, instanceID), instances: [match], configured_provider_ids: [instanceID] },
+        registry: regID ? registryFor(regID) : undefined,
+      };
     }
+    return null;
+  };
+  if (!registryEntry && !statusEntry) {
+    const view = instanceView(entryID);
+    if (view) ({ status: statusEntry, registry: registryEntry } = view);
   }
 
-  // If entryID is a remote roster candidate, resolve its candidate metadata:
-  if (!registryEntry && !statusEntry && entryID.startsWith("roster:")) {
-    const rawRosterID = entryID.replace(/^roster:/, "");
-    const rosterEntries = asList(asRecord(data.provider_roster)?.entries).map(asRecord);
-    const candidate = rosterEntries.find((c) => stringValue(c.id) === rawRosterID);
-    if (candidate) {
+  // Gateway state carries no roster, so a roster candidate is read from the
+  // roster endpoint, and only for such an entry. A candidate that has since
+  // been connected is shown as its configured instance.
+  const rosterID = !registryEntry && !statusEntry && entryID.startsWith("roster:") ? entryID.slice("roster:".length) : "";
+  const roster = useProviderRoster(mode, Boolean(rosterID));
+  const candidate = rosterID ? roster.entries.find((remote) => stringValue(remote.id) === rosterID) : undefined;
+  let candidateSetup: JSONRecord | null = null;
+  let candidateReason = "";
+  if (candidate) {
+    const instance = configuredInstanceFor(candidate, statuses.flatMap((status) => asList(status.instances).map(asRecord)));
+    const view = instance ? instanceView(stringValue(instance.id)) : null;
+    if (view) {
+      ({ status: statusEntry, registry: registryEntry } = view);
+    } else {
       statusEntry = {
         id: entryID,
-        label: stringValue(candidate.name, rawRosterID),
+        label: stringValue(candidate.name, rosterID),
         description: stringValue(candidate.description, "Community discovery candidate."),
-        protocol: stringValue(candidate.protocol, "openai"),
+        protocol: stringValue(candidate.protocol, "unknown"),
         default_base_url: stringValue(candidate.base_url),
         base_url: stringValue(candidate.base_url),
         configured: false,
@@ -81,6 +88,10 @@ export function ProviderDetail({ entryID, data, mode, onChanged, onBack, onOpenP
         remote_roster: true,
         roster_entries: [candidate],
       };
+      // Connecting creates an instance of the matching adapter, never of the
+      // roster id itself, which the server does not know.
+      candidateSetup = rosterSetupEntry(candidate, registry);
+      candidateReason = candidateSetup ? "" : rosterSetupUnavailableReason(candidate, registry);
     }
   }
 
@@ -170,7 +181,8 @@ export function ProviderDetail({ entryID, data, mode, onChanged, onBack, onOpenP
   useEffect(() => { setModelPage(0); }, [modelSearch, catalogPath]);
 
   if (!registryEntry && !statusEntry) {
-    return <div class="page-stack"><PageHeading eyebrow="Provider" title="Unknown integration" detail="This integration is not present in the registry or the configured providers." /><button class="button button--secondary" type="button" onClick={onBack}><ArrowLeft size={16} /> Back to providers</button></div>;
+    if (rosterID && roster.busy) return <div class="page-stack"><LoadingState title="Loading roster candidate" /></div>;
+    return <div class="page-stack"><PageHeading eyebrow="Provider" title="Unknown integration" detail={rosterID ? "This candidate is not in the current provider roster." : "This integration is not present in the registry or the configured providers."} /><button class="button button--secondary" type="button" onClick={onBack}><ArrowLeft size={16} /> Back to providers</button></div>;
   }
 
   const active = (providerID: string, operation: string) => busy === `${providerID}-${operation}`;
@@ -230,7 +242,7 @@ export function ProviderDetail({ entryID, data, mode, onChanged, onBack, onOpenP
         </div>
         {mode === "admin" && !isClient && !unavailable ? <div class="detail-heading__actions">
           {supportsOAuth || configured ? <label class="owner-select">Catalog owner<select value={ownerID} onInput={(event) => setOwnerID((event.currentTarget as HTMLSelectElement).value)}><option value="">No private owner selected</option>{owners.map((owner) => <option value={stringValue(owner.id)} key={stringValue(owner.id)}>{stringValue(owner.display_name, stringValue(owner.id))}</option>)}</select></label> : null}
-          {supportsOAuth ? <button class="button button--primary" type="button" disabled={!ownerID || !oauthProviderID} title={!oauthProviderID ? "Multiple instances are configured for this integration; resolve to a single instance before adding an OAuth account." : undefined} onClick={() => setOAuthOpen(true)}><Plug size={15} /> Add account</button> : isZen ? <><button class="button button--primary" type="button" onClick={() => { setZenAPIKey(false); setConnectOpen(true); }}><Plug size={15} /> {configured ? "Edit anonymous connection" : "Connect anonymously"}</button><button class="button button--secondary" type="button" onClick={() => { setZenAPIKey(true); setConnectOpen(true); }}><ShieldCheck size={15} /> Connect with API key</button></> : <button class="button button--primary" type="button" onClick={() => setConnectOpen(true)}><Plug size={15} /> {configured ? "Edit configuration" : "Connect"}</button>}
+          {supportsOAuth ? <button class="button button--primary" type="button" disabled={!ownerID || !oauthProviderID} title={!oauthProviderID ? "Multiple instances are configured for this integration; resolve to a single instance before adding an OAuth account." : undefined} onClick={() => setOAuthOpen(true)}><Plug size={15} /> Add account</button> : isZen ? <><button class="button button--primary" type="button" onClick={() => { setZenAPIKey(false); setConnectOpen(true); }}><Plug size={15} /> {configured ? "Edit anonymous connection" : "Connect anonymously"}</button><button class="button button--secondary" type="button" onClick={() => { setZenAPIKey(true); setConnectOpen(true); }}><ShieldCheck size={15} /> Connect with API key</button></> : <button class="button button--primary" type="button" disabled={Boolean(candidateReason)} title={candidateReason || undefined} onClick={() => setConnectOpen(true)}><Plug size={15} /> {configured ? "Edit configuration" : "Connect"}</button>}
         </div> : mode === "portal" && !isClient && !unavailable ? <div class="detail-heading__actions">
           {supportsOAuth || configured ? <button class="button button--primary" type="button" disabled={supportsOAuth ? !oauthProviderID : providerIDs.length !== 1} title={supportsOAuth ? (!oauthProviderID ? "Multiple instances are configured for this integration; resolve to a single instance before adding an OAuth account." : undefined) : (providerIDs.length > 1 ? "Multiple instances are configured for this integration; ask an administrator to add a private connection for a specific instance." : undefined)} onClick={() => (supportsOAuth ? setOAuthOpen(true) : setPrivateKeyOpen(true))}><Plug size={15} /> {connections.length ? "Add or replace account" : "Connect"}</button> : <span class="provider-card__meta">Administrator setup required</span>}
         </div> : null}
@@ -261,7 +273,7 @@ export function ProviderDetail({ entryID, data, mode, onChanged, onBack, onOpenP
             </tr>;
           })}
         </tbody></table></div>
-        {models.length ? <label class="verify-model-select">Test completion model<select value={verifyModel} onInput={(event) => setVerifyModel((event.currentTarget as HTMLSelectElement).value)}><option value="">Automatic (recommended model)</option>{models.map((row) => <option value={stringValue(row.id).split("/").pop()} key={stringValue(row.id)}>{stringValue(row.id)}</option>)}</select></label> : null}
+        {models.length ? <label class="verify-model-select">Test completion model<select value={verifyModel} onInput={(event) => setVerifyModel((event.currentTarget as HTMLSelectElement).value)}><option value="">Automatic (recommended model)</option>{verifyModelChoices(models.map((row) => stringValue(row.id))).map((model) => <option value={model} key={model}>{model}</option>)}</select></label> : null}
         <dl class="compact-facts provider-check-facts">
           <div><dt>Last check</dt><dd>{stringValue(entry.last_check_operation) ? `${stringValue(entry.last_check_operation).replaceAll("_", " ")} · ${entry.last_check_success === true ? "passed" : "failed"} · ${stringValue(entry.last_checked_at)}` : "No check recorded yet"}</dd></div>
           <div><dt>Last verified</dt><dd>{stringValue(entry.last_verified_at) ? `${stringValue(entry.last_verified_at)} (${stringValue(entry.verified_model, "model unknown")})` : "Never — run a test completion"}</dd></div>
@@ -281,8 +293,9 @@ export function ProviderDetail({ entryID, data, mode, onChanged, onBack, onOpenP
           {connections.map((connection) => <tr key={stringValue(connection.id)}><td><strong>{stringValue(connection.connection_name, "connection")}</strong></td><td>{principalName(stringValue(connection.principal_id))}</td><td>{stringValue(connection.oauth_account_label, stringValue(connection.oauth_account_id, "Not reported"))}</td><td class="technical">{stringValue(connection.credential_kind)}</td><td><span class={`status-pill ${stringValue(connection.status, "active") === "active" ? "status-pill--ready" : "status-pill--muted"}`}>{stringValue(connection.status, "active")}</span></td><td class="technical">{formatEpoch(connection.last_used_at)}</td><td>{stringValue(connection.status, "active") === "active" ? <button class="button button--danger" type="button" disabled={connectionBusy === stringValue(connection.id)} onClick={() => void disconnect(connection)}><Trash2 size={14} /> Disconnect</button> : "—"}</td></tr>)}
         </tbody></table></div>}
       </section> : null}
-      {!configured && !isClient && !unavailable ? <section class="surface"><EmptyState title="Not connected yet" detail={supportsOAuth ? "Add an account with the official OAuth flow to configure this integration." : "Connect this integration to sync its catalog and route requests through it."} action={mode === "admin" && !supportsOAuth ? <button class="button button--primary" type="button" onClick={() => setConnectOpen(true)}><Plug size={16} /> Connect</button> : undefined} /></section> : null}
-      {connectOpen ? <ConnectDialog entry={{ ...entry, requires_api_key: zenAPIKey || entry.requires_api_key, provider_config: providerConfig }} mode={configured ? "edit" : "create"} takenIDs={allProviderIDs} onClose={() => setConnectOpen(false)} onConfigured={onChanged} /> : null}
+      {candidate && !configured ? <section class="surface"><div class="section-heading"><div><p class="eyebrow">Provider roster</p><h2>Discovery details</h2></div></div><RosterMetadata entries={[candidate]} revision={roster.state.revision} /></section> : null}
+      {!configured && !isClient && !unavailable ? <section class="surface"><EmptyState title="Not connected yet" detail={candidateReason || (supportsOAuth ? "Add an account with the official OAuth flow to configure this integration." : "Connect this integration to sync its catalog and route requests through it.")} action={mode === "admin" && !supportsOAuth && !candidateReason ? <button class="button button--primary" type="button" onClick={() => setConnectOpen(true)}><Plug size={16} /> Connect</button> : undefined} /></section> : null}
+      {connectOpen ? <ConnectDialog entry={candidateSetup ?? { ...entry, requires_api_key: zenAPIKey || entry.requires_api_key, provider_config: providerConfig }} mode={configured ? "edit" : "create"} takenIDs={allProviderIDs} onClose={() => setConnectOpen(false)} onConfigured={onChanged} /> : null}
       {privateKeyOpen ? <PrivateAPIKeyDialog entry={entry} providerID={providerIDs.length === 1 ? providerIDs[0] : ""} onClose={() => setPrivateKeyOpen(false)} onConfigured={onChanged} /> : null}
       {oauthOpen ? <OAuthConnectDialog entry={entry} providerID={oauthProviderID} ownerID={ownerID} data={data} mode={mode} onClose={() => setOAuthOpen(false)} onComplete={onChanged} onOpenPlayground={onOpenPlayground} /> : null}
     </div>

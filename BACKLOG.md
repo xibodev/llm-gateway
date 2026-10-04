@@ -86,9 +86,7 @@ test, inspection, and cleanup commands; they must not persist or print secrets.
 ## Known Caveats & Planned Polish
 
 - **Console Route Rename:** Renaming a route in the Web Console creates the new route, then deletes the original, and refuses a name another route already uses. It is two requests rather than an atomic rename, and key grants and project policies that name the old route are not moved; the confirmation lists the affected keys. A server-side rename that carries grants along remains open.
-- **Provider Edit UI API Adaptation Toggle:** Expose `force_api_support` as a toggle checkbox in the Web Console "Edit configuration" dialog so operators can enable auto-routing for Responses-only models (e.g. GPT-5.5, GPT-5.6 Sol/Luna) without manual config edits.
 - **Anonymous Provider Verify Selection:** Verification probes on providers without configured API keys must automatically pick free-tier models (`-free`, `:free`) rather than naive alphabetical first rows.
-- **Candidate Roster Tile Details Routing:** Clicking details on remote roster candidates should navigate to the configured instance if already connected, or render an in-depth candidate view rather than falling through to unknown integration.
 
 ## Deferred efforts
 

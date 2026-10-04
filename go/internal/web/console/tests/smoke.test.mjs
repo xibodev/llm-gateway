@@ -269,7 +269,7 @@ test("provider onboarding renders required setup fields and editable configurati
   assert.match(hub, /fields\.has\("vertex_request_type"\)/);
   assert.match(hub, /Provisioned throughput only/);
   assert.match(hub, /form\.set\("vertex_request_type", vertexRequestType\)/);
-  assert.match(hub, /leave blank to keep the current key/);
+  assert.match(hub, /\{apiKeySet \? " \(leave blank to keep the current credential\)" : ""\}/);
   assert.match(detail, /Edit configuration/);
   assert.match(oauth, /OAuth client ID/);
   assert.match(oauth, /client_id: clientID\.trim\(\)/);
