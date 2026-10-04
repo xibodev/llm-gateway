@@ -157,10 +157,19 @@ provider policy and credential eligibility. They neither bind an upstream
 account/connection nor provide per-HTTP-surface ACLs. See
 [`ROUTING.md`](ROUTING.md).
 
-Project and key allowlists intersect. Request-count slots are consumed in SQLite
-before provider dispatch. Token, estimated-cost, and credit counters reconcile
-after response completion, so those limits may exceed by one in-flight request;
-request-count limits are strict.
+Project and key allowlists intersect. Every limit is checked, and the request
+counted, in one SQLite transaction just before provider dispatch and after
+request validation, so request-count limits are strict. Token, estimated-cost,
+and credit counters settle only after a response completes, and a request is
+admitted while they are below their limit, so concurrent requests can each pass
+and together exceed it. Quota windows are fixed UTC calendar minutes, days, and
+months, not rolling windows.
+
+A model that neither the built-in price table nor
+[`savings.price_catalog`](CONFIGURATION.md#legacy-savings-ledger) prices records
+zero estimated cost, so cost limits never stop it. Keys from an external key
+document (`LLMGW_EXTERNAL_KEYS_FILE` or `LLMGW_EXTERNAL_KEYS_URL`) have no quota
+limits of their own but count against their project's limits.
 
 A stream that ends early, because its client left (`499`) or its upstream failed
 (`502`), still counts the tokens it consumed against the model that served it.
