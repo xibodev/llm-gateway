@@ -274,6 +274,28 @@ func jsonRequest(
 	return resp.StatusCode, out
 }
 
+// The alerts API answers a quota rule that no limit covers with 400, naming
+// the period that does have one.
+func TestAlertAPIRefusesQuotaRulesWithoutALimit(t *testing.T) {
+	env := newCredentialTestEnv(t)
+	defer env.server.Close()
+	route := env.server.URL + "/admin/api/alerts"
+
+	status, body := jsonRequest(t, route, http.MethodPost, "admin-secret", map[string]any{
+		"kind": "quota_usage", "metric": "total_tokens", "threshold": 80, "period": "day",
+	})
+	failure, _ := body["error"].(map[string]any)
+	if msg, _ := failure["message"].(string); status != http.StatusBadRequest || !containsAll(msg, "total_tokens", "use period month") {
+		t.Fatalf("status=%d body=%+v, want 400 naming the monthly limit", status, body)
+	}
+	status, body = jsonRequest(t, route, http.MethodPost, "admin-secret", map[string]any{
+		"kind": "quota_usage", "metric": "total_tokens", "threshold": 80, "period": "month",
+	})
+	if status != http.StatusCreated {
+		t.Fatalf("supported rule: status=%d body=%+v", status, body)
+	}
+}
+
 func TestFailedRequestRecordedInUsageStats(t *testing.T) {
 	t.Setenv("LLMGW_STATE_DIR", t.TempDir())
 	iam.ResetForTests()

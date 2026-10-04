@@ -44,6 +44,27 @@ var quotaMetrics = map[string]bool{
 	"total_tokens": true, "cost_microusd": true, "credits_milli": true,
 }
 
+// quotaLimitColumns names the key and project policy column that limits a
+// metric over a period. A quota alert fires at a share of that limit, so a
+// pair without one could never fire.
+var quotaLimitColumns = map[string]string{
+	"day:requests":        "daily_requests",
+	"month:requests":      "monthly_requests",
+	"day:input_tokens":    "daily_input_tokens",
+	"day:output_tokens":   "daily_output_tokens",
+	"month:total_tokens":  "monthly_total_tokens",
+	"day:cost_microusd":   "daily_cost_microusd",
+	"month:cost_microusd": "monthly_cost_microusd",
+	"day:credits_milli":   "daily_credits_milli",
+	"month:credits_milli": "monthly_credits_milli",
+}
+
+// maxOutboxAttempts bounds delivery retries. Claims take the oldest events
+// first, so an event that can never be delivered would otherwise hold a claim
+// slot ahead of newer ones indefinitely. It stays in the outbox, failed, with
+// its last error.
+const maxOutboxAttempts = 10
+
 func CreateAlertRule(rule AlertRule) (AlertRule, error) {
 	switch rule.Kind {
 	case "quota_usage", "key_expiry":
@@ -58,6 +79,18 @@ func CreateAlertRule(rule AlertRule) (AlertRule, error) {
 	}
 	if rule.Period != "day" && rule.Period != "month" && rule.Kind == "quota_usage" {
 		return AlertRule{}, fmt.Errorf("quota alert period must be day or month")
+	}
+	if rule.Kind == "quota_usage" && quotaLimitColumns[rule.Period+":"+rule.Metric] == "" {
+		periods := []string{}
+		for _, period := range []string{"day", "month"} {
+			if quotaLimitColumns[period+":"+rule.Metric] != "" {
+				periods = append(periods, period)
+			}
+		}
+		return AlertRule{}, fmt.Errorf(
+			"quota metric %q has no %s limit, so the alert could never fire; use period %s",
+			rule.Metric, rule.Period, strings.Join(periods, " or "),
+		)
 	}
 	if rule.Threshold <= 0 || (rule.Kind == "quota_usage" && rule.Threshold > 100) {
 		return AlertRule{}, fmt.Errorf("invalid alert threshold")
@@ -207,8 +240,8 @@ func ClaimOutbox(workerID string, limit int, lease time.Duration) ([]OutboxEvent
 	rows, err := tx.Query(`
 SELECT id FROM outbox_events
 WHERE status IN ('pending','failed') AND available_at<=?
-  AND (lease_until IS NULL OR lease_until<?)
-ORDER BY id LIMIT ?`, now, now, limit)
+  AND (lease_until IS NULL OR lease_until<?) AND attempts<?
+ORDER BY id LIMIT ?`, now, now, maxOutboxAttempts, limit)
 	if err != nil {
 		return nil, err
 	}
@@ -501,27 +534,8 @@ func metricValue(counter quotaCounter, metric string) int64 {
 func keyMetricLimitTx(
 	tx *sql.Tx, keyID, period, metric string,
 ) (int64, error) {
-	column := ""
-	switch period + ":" + metric {
-	case "day:requests":
-		column = "daily_requests"
-	case "month:requests":
-		column = "monthly_requests"
-	case "day:input_tokens":
-		column = "daily_input_tokens"
-	case "day:output_tokens":
-		column = "daily_output_tokens"
-	case "month:total_tokens":
-		column = "monthly_total_tokens"
-	case "day:cost_microusd":
-		column = "daily_cost_microusd"
-	case "month:cost_microusd":
-		column = "monthly_cost_microusd"
-	case "day:credits_milli":
-		column = "daily_credits_milli"
-	case "month:credits_milli":
-		column = "monthly_credits_milli"
-	default:
+	column := quotaLimitColumns[period+":"+metric]
+	if column == "" {
 		return 0, nil
 	}
 
@@ -533,27 +547,8 @@ func keyMetricLimitTx(
 func projectMetricLimitTx(
 	tx *sql.Tx, projectID, period, metric string,
 ) (int64, error) {
-	column := ""
-	switch period + ":" + metric {
-	case "day:requests":
-		column = "daily_requests"
-	case "month:requests":
-		column = "monthly_requests"
-	case "day:input_tokens":
-		column = "daily_input_tokens"
-	case "day:output_tokens":
-		column = "daily_output_tokens"
-	case "month:total_tokens":
-		column = "monthly_total_tokens"
-	case "day:cost_microusd":
-		column = "daily_cost_microusd"
-	case "month:cost_microusd":
-		column = "monthly_cost_microusd"
-	case "day:credits_milli":
-		column = "daily_credits_milli"
-	case "month:credits_milli":
-		column = "monthly_credits_milli"
-	default:
+	column := quotaLimitColumns[period+":"+metric]
+	if column == "" {
 		return 0, nil
 	}
 	var limit int64

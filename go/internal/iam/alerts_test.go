@@ -69,6 +69,95 @@ func TestQuotaAlertsEnqueueWarningAndExhaustionOnce(t *testing.T) {
 	}
 }
 
+// A quota rule fires at a share of the key or project limit for its period, so
+// a metric and period that no limit covers are refused when the rule is
+// created rather than stored to never fire.
+func TestQuotaAlertRulesNeedALimitForTheirPeriod(t *testing.T) {
+	t.Setenv("LLMGW_STATE_DIR", t.TempDir())
+	ResetForTests()
+	t.Cleanup(ResetForTests)
+	supported := map[string]bool{
+		"day:requests": true, "month:requests": true, "day:input_tokens": true,
+		"day:output_tokens": true, "month:total_tokens": true, "day:cost_microusd": true,
+		"month:cost_microusd": true, "day:credits_milli": true, "month:credits_milli": true,
+	}
+	for metric := range quotaMetrics {
+		for _, period := range []string{"day", "month"} {
+			_, err := CreateAlertRule(AlertRule{Kind: "quota_usage", Metric: metric, Threshold: 80, Period: period})
+			if supported[period+":"+metric] != (err == nil) {
+				t.Errorf("%s %s: err=%v, supported=%v", period, metric, err, supported[period+":"+metric])
+			}
+		}
+	}
+	_, err := CreateAlertRule(AlertRule{Kind: "quota_usage", Metric: "input_tokens", Threshold: 80, Period: "month"})
+	if err == nil || err.Error() !=
+		`quota metric "input_tokens" has no month limit, so the alert could never fire; use period day` {
+		t.Fatalf("refusal=%v, want it to name the period that has a limit", err)
+	}
+
+	// The accepted rules have no scope, so the key's monthly token limit is
+	// the only limit any of them can reach.
+	p, _ := quotaPrincipal(t, KeyPolicy{MonthlyTotalTokens: 100})
+	if err := RecordUsageEvent(UsageEvent{
+		Endpoint: "openai.chat", StatusCode: 200, ProjectID: p.ProjectID,
+		PrincipalID: p.PrincipalID, KeyID: p.KeyID, InputTokens: 45, OutputTokens: 45,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	events, err := PendingOutbox(20)
+	if err != nil || len(events) != 1 || events[0].Kind != "quota_warning" ||
+		events[0].Payload["metric"] != "total_tokens" {
+		t.Fatalf("events=%+v err=%v, want one total_tokens warning", events, err)
+	}
+}
+
+// Claims take the oldest events first, so an event that can never be
+// delivered stops being claimed after a bounded number of failures. It stays
+// listed with its last error.
+func TestOutboxStopsClaimingAfterBoundedFailures(t *testing.T) {
+	t.Setenv("LLMGW_STATE_DIR", t.TempDir())
+	ResetForTests()
+	t.Cleanup(ResetForTests)
+	db, err := DB()
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now().Unix()
+	insert := func(kind string) int64 {
+		t.Helper()
+		result, err := db.Exec(`INSERT INTO outbox_events(ts,kind,payload_json,status,attempts,available_at)
+			VALUES(?,?,'{}','pending',0,?)`, now, kind, now)
+		if err != nil {
+			t.Fatal(err)
+		}
+		id, err := result.LastInsertId()
+		if err != nil {
+			t.Fatal(err)
+		}
+		return id
+	}
+	undeliverable := insert("fixture")
+	for attempt := 1; attempt <= maxOutboxAttempts; attempt++ {
+		claimed, err := ClaimOutbox("worker-one", 10, time.Minute)
+		if err != nil || len(claimed) != 1 || claimed[0].ID != undeliverable {
+			t.Fatalf("attempt %d: claimed=%+v err=%v", attempt, claimed, err)
+		}
+		if err := MarkOutboxFailed(undeliverable, "worker-one", "webhook refused", now-1); err != nil {
+			t.Fatal(err)
+		}
+	}
+	newer := insert("fixture")
+	claimed, err := ClaimOutbox("worker-one", 10, time.Minute)
+	if err != nil || len(claimed) != 1 || claimed[0].ID != newer {
+		t.Fatalf("claimed=%+v err=%v, want only the newer event", claimed, err)
+	}
+	listed, err := PendingOutbox(10)
+	if err != nil || len(listed) == 0 || listed[0].ID != undeliverable || listed[0].Status != "failed" ||
+		listed[0].Attempts != maxOutboxAttempts || listed[0].LastError != "webhook refused" {
+		t.Fatalf("listed=%+v err=%v, want the exhausted event with its last error", listed, err)
+	}
+}
+
 func TestKeyExpiryScheduledAlert(t *testing.T) {
 	t.Setenv("LLMGW_STATE_DIR", t.TempDir())
 	ResetForTests()

@@ -178,6 +178,20 @@ Quota and key-expiry rules create a durable, deduplicated outbox. The gateway
 does not send email or chat messages itself; an external worker such as the
 example under `deploy/windmill/` claims and settles outbox events.
 
+A quota rule fires at a share of the key or project limit for its period, so
+only metric and period combinations that such a limit covers are accepted;
+others are refused with `400`:
+
+| Metric | Periods |
+| --- | --- |
+| `requests` | `day`, `month` |
+| `input_tokens`, `output_tokens` | `day` |
+| `total_tokens` | `month` |
+| `cost_microusd`, `credits_milli` | `day`, `month` |
+
+An outbox event whose delivery has failed 10 times is no longer claimed; it
+stays in the outbox listing with its last error.
+
 ## Console and portal
 
 `/admin` redirects to the embedded `/console` administration SPA. `/portal`
