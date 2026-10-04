@@ -66,6 +66,9 @@ type BackupInspection struct {
 	Files         []string
 	SchemaVersion int
 	Counts        map[string]int
+	// CredentialKey is how the configured credential encryption key relates
+	// to the archived database, one of the iam.CredentialKey states.
+	CredentialKey string
 }
 
 func DefaultBackupPath(now time.Time) string {
@@ -698,6 +701,9 @@ func inspectExtracted(dir string, manifest BackupManifest) (BackupInspection, er
 			return BackupInspection{}, err
 		}
 		inspection.Counts[table] = count
+	}
+	if inspection.CredentialKey, err = iam.InspectCredentialKey(db); err != nil {
+		return BackupInspection{}, err
 	}
 	return inspection, nil
 }

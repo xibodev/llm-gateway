@@ -381,7 +381,14 @@ func backupCommand(args []string, output io.Writer) error {
 			return err
 		}
 		fmt.Fprintln(output, "backup restored")
-		return printInspection(output, inspection)
+		if err := printInspection(output, inspection); err != nil {
+			return err
+		}
+		if inspection.CredentialKey == iam.CredentialKeyMismatch {
+			fmt.Fprintln(output, "warning: LLMGW_CREDENTIAL_ENCRYPTION_KEY is not the key the restored "+
+				"database records; configure that key before starting the gateway")
+		}
+		return nil
 	default:
 		return fmt.Errorf("unknown backup command %q", args[0])
 	}
@@ -393,6 +400,7 @@ func printInspection(output io.Writer, inspection operations.BackupInspection) e
 	for _, name := range []string{"projects", "principals", "api_keys", "provider_connections"} {
 		fmt.Fprintf(output, "%s: %d\n", name, inspection.Counts[name])
 	}
+	fmt.Fprintf(output, "credential_key: %s\n", inspection.CredentialKey)
 	return nil
 }
 

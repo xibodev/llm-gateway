@@ -4,6 +4,7 @@ import (
 	"archive/tar"
 	"bytes"
 	"compress/gzip"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -216,6 +217,53 @@ func TestInspectDoesNotPrintStoredValues(t *testing.T) {
 	}
 	if strings.Contains(output.String(), secret) {
 		t.Fatal("inspection exposed stored secret")
+	}
+}
+
+// Inspection and restore report whether the configured credential
+// encryption key opens the archived database, which a gateway refuses to
+// start with otherwise.
+func TestInspectReportsWhetherTheCredentialKeyMatchesTheArchive(t *testing.T) {
+	state := t.TempDir()
+	t.Setenv("LLMGW_STATE_DIR", state)
+	t.Setenv("LLMGW_CONFIG", filepath.Join(state, "config.yaml"))
+	iam.ResetForTests()
+	old := *config.Get()
+	t.Cleanup(func() {
+		iam.ResetForTests()
+		config.Update(func(s *config.Settings) { *s = old })
+	})
+	useKey := func(seed byte) {
+		config.Update(func(s *config.Settings) {
+			s.CredentialEncryptionKey = base64.RawURLEncoding.EncodeToString(bytes.Repeat([]byte{seed}, 32))
+			s.Providers = map[string]*config.ProviderConfig{}
+		})
+	}
+	useKey(1)
+	if _, err := iam.Initialize(); err != nil {
+		t.Fatal(err)
+	}
+	archive := filepath.Join(t.TempDir(), "state.tar.gz")
+	created, err := CreateBackup(archive)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if created.CredentialKey != iam.CredentialKeyMatches {
+		t.Fatalf("created backup credential key %q, want %q", created.CredentialKey, iam.CredentialKeyMatches)
+	}
+	useKey(2)
+	inspected, err := InspectBackup(archive)
+	if err != nil || inspected.CredentialKey != iam.CredentialKeyMismatch {
+		t.Fatalf("inspect with another key: state=%q err=%v, want %q", inspected.CredentialKey, err, iam.CredentialKeyMismatch)
+	}
+	iam.ResetForTests()
+	restored, err := RestoreBackup(archive)
+	if err != nil || restored.CredentialKey != iam.CredentialKeyMismatch {
+		t.Fatalf("restore with another key: state=%q err=%v, want %q", restored.CredentialKey, err, iam.CredentialKeyMismatch)
+	}
+	config.Update(func(s *config.Settings) { s.CredentialEncryptionKey = "" })
+	if inspected, err := InspectBackup(archive); err != nil || inspected.CredentialKey != iam.CredentialKeyNotConfigured {
+		t.Fatalf("inspect without a key: state=%q err=%v", inspected.CredentialKey, err)
 	}
 }
 

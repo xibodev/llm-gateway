@@ -408,6 +408,10 @@ func decryptCredential(
 	if err != nil {
 		return nil, err
 	}
+	// Open panics on a nonce of another size, which only a damaged row holds.
+	if len(nonce) != gcm.NonceSize() {
+		return nil, errors.New("encrypted credential has a nonce of the wrong size")
+	}
 	return gcm.Open(nil, nonce, ciphertext, additionalData)
 }
 

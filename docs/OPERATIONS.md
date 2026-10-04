@@ -146,6 +146,24 @@ under-minimum environment values fall back to safe defaults.
 Only archives created in `<state>/backups` participate in
 `LLMGW_BACKUP_KEEP`. Explicit external archive paths are operator-managed.
 
+## Credential encryption key
+
+`LLMGW_CREDENTIAL_ENCRYPTION_KEY` encrypts the provider connections, legacy
+provider credentials, recoverable gateway keys and OAuth client profiles in
+`gateway.db`. The database records a check value sealed with that key, and every
+start verifies it before decrypting anything. A start with a different key
+fails:
+
+```text
+initialize IAM control plane: the configured credential encryption key does not match the key this database was encrypted with
+```
+
+Configure the key the database was encrypted with. A key that changed before
+anything was encrypted is recorded instead, because it protects nothing yet. A
+database an earlier release wrote has no check value; the first start whose key
+decrypts one of its credentials records it, and until then a start logs a
+warning when the key decrypts none.
+
 ## Backup contents
 
 Check the **installed** binary with `llmgw --help` first. Source documentation
@@ -213,6 +231,13 @@ After restore, provide the original credential-encryption key and verify:
 llmgw backup inspect <ARCHIVE>
 llmgw serve
 ```
+
+`backup create`, `backup inspect` and `backup restore` report `credential_key`:
+`matches` when the configured key opens the check value in the archived
+database, `does not match` when it does not, `not recorded` for an archive
+without one, `not configured` without a key, and `invalid` for a key that does
+not decode to 32 bytes. Configure the key the archive matches before starting
+the gateway on restored state.
 
 From another terminal, once the service is running:
 

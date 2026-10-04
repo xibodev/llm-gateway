@@ -42,7 +42,12 @@ type MigrationResult struct {
 // keys.json. The migration is transactional and removes the plaintext file only
 // after the database commit succeeds.
 func Initialize() (MigrationResult, error) {
-	if _, err := DB(); err != nil {
+	db, err := DB()
+	if err != nil {
+		return MigrationResult{}, err
+	}
+	// Before anything below decrypts or seals a credential with the key.
+	if err := verifyCredentialKey(db); err != nil {
 		return MigrationResult{}, err
 	}
 	result, err := MigrateLegacyKeys()
