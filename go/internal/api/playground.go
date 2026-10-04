@@ -56,8 +56,8 @@ func decodePlaygroundPayload(w http.ResponseWriter, r *http.Request) (map[string
 	var payload map[string]any
 	decoder := json.NewDecoder(r.Body)
 	decoder.UseNumber()
-	if decoder.Decode(&payload) != nil {
-		writeError(w, http.StatusBadRequest, "invalid playground request")
+	if err := decoder.Decode(&payload); err != nil {
+		writeBodyError(w, err, http.StatusBadRequest, "invalid playground request")
 		return nil, playgroundBody{}, false
 	}
 	raw, _ := json.Marshal(payload)

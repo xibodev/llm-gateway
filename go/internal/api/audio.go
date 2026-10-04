@@ -9,6 +9,8 @@ import (
 	"math"
 	"mime/multipart"
 	"net/http"
+	"net/url"
+	"slices"
 	"strings"
 	"time"
 
@@ -144,6 +146,90 @@ func writeAPIProxySuccess(w http.ResponseWriter, status int, contentType string,
 	_, _ = w.Write(body)
 }
 
+// transcriptionFields are the form fields forwarded upstream besides the
+// audio and the resolved model.
+var transcriptionFields = []string{"language", "prompt", "response_format", "temperature"}
+
+// transcriptionForm is a transcription request read part by part. The audio
+// is copied straight into the form sent upstream, so the gateway holds it once
+// rather than once parsed and again re-encoded.
+type transcriptionForm struct {
+	upstream *multipart.Writer
+	body     bytes.Buffer
+	hasFile  bool
+	fields   map[string]string
+	query    url.Values
+}
+
+func readTranscriptionForm(r *http.Request) (*transcriptionForm, error) {
+	reader, err := r.MultipartReader()
+	if err != nil {
+		return nil, err
+	}
+	form := &transcriptionForm{fields: map[string]string{}, query: r.URL.Query()}
+	form.upstream = multipart.NewWriter(&form.body)
+	for {
+		part, err := reader.NextPart()
+		// NextPart wraps io.EOF when the body ends before the closing
+		// boundary; only the bare value marks a complete form.
+		if err == io.EOF {
+			return form, nil
+		}
+		if err != nil {
+			return nil, err
+		}
+		name := part.FormName()
+		// Parts that are not forwarded are skipped unread rather than held.
+		switch {
+		case part.FileName() != "":
+			// As with r.FormFile, only the first audio part is sent.
+			if name != "file" || form.hasFile {
+				continue
+			}
+			audio, err := form.upstream.CreateFormFile("file", part.FileName())
+			if err == nil {
+				_, err = io.Copy(audio, part)
+			}
+			if err != nil {
+				return nil, err
+			}
+			form.hasFile = true
+		case name == "model" || slices.Contains(transcriptionFields, name):
+			if _, seen := form.fields[name]; seen {
+				continue
+			}
+			value, err := io.ReadAll(part)
+			if err != nil {
+				return nil, err
+			}
+			form.fields[name] = string(value)
+		}
+	}
+}
+
+// value keeps r.FormValue's precedence, a query parameter before the form's
+// first field of that name, so reading the form as a stream changes nothing a
+// client can see.
+func (f *transcriptionForm) value(name string) string {
+	if values := f.query[name]; len(values) > 0 {
+		return values[0]
+	}
+	return f.fields[name]
+}
+
+// finish appends the resolved model and the forwarded fields after the audio
+// and returns the upstream body.
+func (f *transcriptionForm) finish(model string) (*bytes.Buffer, string) {
+	_ = f.upstream.WriteField("model", model)
+	for _, name := range transcriptionFields {
+		if value := f.value(name); value != "" {
+			_ = f.upstream.WriteField(name, value)
+		}
+	}
+	_ = f.upstream.Close()
+	return &f.body, f.upstream.FormDataContentType()
+}
+
 // POST /v1/audio/transcriptions — multipart audio -> text (STT). Reverse-proxied
 // to the resolved OpenAI-compatible provider (e.g. LocalAI whisper).
 func handleTranscriptions(w http.ResponseWriter, r *http.Request) {
@@ -152,37 +238,25 @@ func handleTranscriptions(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	if err := r.ParseMultipartForm(128 << 20); err != nil {
-		recordFailureUsage("openai.transcriptions", "", principal, 400, "invalid_multipart", started)
-		writeError(w, 400, "invalid multipart form")
+	form, err := readTranscriptionForm(r)
+	if err != nil {
+		status := writeBodyError(w, err, 400, "invalid multipart form")
+		recordFailureUsage("openai.transcriptions", "", principal, status, "invalid_multipart", started)
 		return
 	}
-	provider, upstreamModel, status, msg := resolveAudioTarget(principal, r.FormValue("model"), core.ModelOperationAudioIn)
+	model := form.value("model")
+	provider, upstreamModel, status, msg := resolveAudioTarget(principal, model, core.ModelOperationAudioIn)
 	if status != 0 {
-		recordFailureUsage("openai.transcriptions", r.FormValue("model"), principal, status, "policy_or_route", started)
+		recordFailureUsage("openai.transcriptions", model, principal, status, "policy_or_route", started)
 		writeError(w, status, msg)
 		return
 	}
-	file, fh, err := r.FormFile("file")
-	if err != nil {
-		recordFailureUsage("openai.transcriptions", r.FormValue("model"), principal, 400, "missing_file", started)
+	if !form.hasFile {
+		recordFailureUsage("openai.transcriptions", model, principal, 400, "missing_file", started)
 		writeError(w, 400, "missing 'file' (the audio to transcribe)")
 		return
 	}
-	defer file.Close()
-
-	var buf bytes.Buffer
-	mw := multipart.NewWriter(&buf)
-	fw, _ := mw.CreateFormFile("file", fh.Filename)
-	_, _ = io.Copy(fw, file)
-	_ = mw.WriteField("model", upstreamModel)
-	for _, f := range []string{"language", "prompt", "response_format", "temperature"} {
-		if v := r.FormValue(f); v != "" {
-			_ = mw.WriteField(f, v)
-		}
-	}
-	_ = mw.Close()
-	contentType := mw.FormDataContentType()
+	buf, contentType := form.finish(upstreamModel)
 
 	coreResponse, handled, coreErr := providers.InvokeCoreSurfaceForPrincipal(
 		r.Context(), provider, callerOf(principal), core.Request{
@@ -213,17 +287,17 @@ func handleTranscriptions(w http.ResponseWriter, r *http.Request) {
 
 	base, headers, okp := providers.ProviderHTTPTarget(provider, callerOf(principal))
 	if !okp {
-		recordFailureUsage("openai.transcriptions", r.FormValue("model"), principal, 400, "audio_unsupported", started)
+		recordFailureUsage("openai.transcriptions", model, principal, 400, "audio_unsupported", started)
 		writeError(w, 400, "provider '"+provider+"' does not support audio (use an OpenAI-compatible provider such as LocalAI)")
 		return
 	}
 
-	req, _ := http.NewRequestWithContext(r.Context(), "POST", base+"/audio/transcriptions", &buf)
+	req, _ := http.NewRequestWithContext(r.Context(), "POST", base+"/audio/transcriptions", buf)
 	copyAuthHeaders(req, headers, true)
 	req.Header.Set("Content-Type", contentType)
 	resp, err := audioClient.Do(req)
 	if err != nil {
-		recordFailureUsage("openai.transcriptions", r.FormValue("model"), principal, 502, "upstream", started)
+		recordFailureUsage("openai.transcriptions", model, principal, 502, "upstream", started)
 		writeError(w, 502, "audio transcription upstream error")
 		return
 	}
@@ -252,8 +326,8 @@ func handleSpeech(w http.ResponseWriter, r *http.Request) {
 	}
 	var body map[string]any
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-		recordFailureUsage("openai.speech", "", principal, 422, "invalid_body", started)
-		writeError(w, 422, "invalid request body")
+		status := writeBodyError(w, err, 422, "invalid request body")
+		recordFailureUsage("openai.speech", "", principal, status, "invalid_body", started)
 		return
 	}
 	reqModel, _ := body["model"].(string)

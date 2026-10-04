@@ -75,8 +75,8 @@ func handleEmbeddings(w http.ResponseWriter, r *http.Request) {
 	}
 	var req embeddingsRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		recordFailureUsage("openai.embeddings", "", principal, 422, "invalid_body", started)
-		writeError(w, 422, "invalid request body")
+		status := writeBodyError(w, err, 422, "invalid request body")
+		recordFailureUsage("openai.embeddings", "", principal, status, "invalid_body", started)
 		return
 	}
 	if inputEmpty(req.Input) {

@@ -104,7 +104,8 @@ preserved.
 Native Anthropic counting uses the first eligible target. Other targets receive a
 compact-JSON estimate marked by `X-LLMGW-Token-Count: estimate` without an
 upstream inference call. Counting does not consume inference quotas or write a
-usage event. Request bodies are limited to 32 MiB.
+usage event. Its request bodies are limited to 32 MiB, or to the general
+[request size limit](#request-size) when that is lower.
 
 ## Embeddings
 
@@ -119,9 +120,8 @@ Transcription accepts multipart form data with `file` and `model`. Speech accept
 an OpenAI-shaped JSON body. OpenAI-compatible providers receive proxied requests;
 `edge_tts` synthesizes MP3 through its native provider implementation.
 
-Audio resolves one target. The gateway sets no size limit on transcription
-uploads; set a request-body limit in the reverse proxy in front of it if you
-need one.
+Audio resolves one target. Transcription uploads count against the
+[request size limit](#request-size).
 
 ## Images and video
 
@@ -132,6 +132,14 @@ implemented by capable Google AI Studio/Vertex providers.
 Video start returns `202` with an operation ID. Poll with the same model selector
 and the `operation` value. Canceling the HTTP request does not cancel an upstream
 job after the operation was created.
+
+## Request size
+
+Request bodies are limited to 64 MiB unless `LLMGW_MAX_REQUEST_BODY_BYTES`
+[changes the limit](CONFIGURATION.md#server-and-state). A larger body is refused
+with `413` in the standard error envelope: before it is read when it declares a
+`Content-Length`, and as soon as it crosses the limit otherwise. Multipart
+uploads count in full. The same limit bounds the management APIs.
 
 ## Errors and cancellation
 

@@ -151,8 +151,8 @@ func handleImageGenerations(w http.ResponseWriter, r *http.Request) {
 	}
 	var body imageRequest
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-		recordFailureUsage("openai.images", "", principal, 422, "invalid_body", started)
-		writeError(w, 422, "invalid request body")
+		status := writeBodyError(w, err, 422, "invalid request body")
+		recordFailureUsage("openai.images", "", principal, status, "invalid_body", started)
 		return
 	}
 	if strings.TrimSpace(body.Prompt) == "" {
@@ -253,8 +253,8 @@ func handleVideoGenerations(w http.ResponseWriter, r *http.Request) {
 	}
 	var body videoRequest
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-		recordFailureUsage("openai.videos", "", principal, 422, "invalid_body", started)
-		writeError(w, 422, "invalid request body")
+		status := writeBodyError(w, err, 422, "invalid request body")
+		recordFailureUsage("openai.videos", "", principal, status, "invalid_body", started)
 		return
 	}
 	providerID, upstreamModel, status, message := resolveMediaTarget(principal, body.Model, core.ModelOperationVideo)

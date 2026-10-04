@@ -148,7 +148,7 @@ func handleChat(w http.ResponseWriter, r *http.Request) {
 	}
 	var req chatRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, 422, "invalid request body")
+		writeBodyError(w, err, 422, "invalid request body")
 		return
 	}
 	if _, err := requestedTransportMode(r); err != nil {

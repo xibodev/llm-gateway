@@ -83,7 +83,7 @@ func handleMessages(w http.ResponseWriter, r *http.Request) {
 	decoder := json.NewDecoder(r.Body)
 	decoder.UseNumber()
 	if err := decoder.Decode(&raw); err != nil {
-		writeError(w, 422, "invalid request body")
+		writeBodyError(w, err, 422, "invalid request body")
 		return
 	}
 	encoded, _ := json.Marshal(raw)

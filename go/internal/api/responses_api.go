@@ -24,7 +24,7 @@ func handleResponsesAPI(w http.ResponseWriter, r *http.Request) {
 	}
 	var payload map[string]any
 	if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
-		writeError(w, http.StatusUnprocessableEntity, "invalid request body")
+		writeBodyError(w, err, http.StatusUnprocessableEntity, "invalid request body")
 		return
 	}
 	raw, _ := json.Marshal(payload)

@@ -428,7 +428,7 @@ func handleAdminPlaygroundTranscription(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	if err := r.ParseMultipartForm(64 << 20); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid multipart form")
+		writeBodyError(w, err, http.StatusBadRequest, "invalid multipart form")
 		return
 	}
 	principal, project, status, message := resolvePlaygroundActor(r, r.FormValue("principal_id"), r.FormValue("project_id"))
