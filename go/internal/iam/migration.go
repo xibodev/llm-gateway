@@ -58,6 +58,9 @@ func Initialize() (MigrationResult, error) {
 	if err != nil {
 		return result, err
 	}
+	if err := movePlaintextProviderSecrets(); err != nil {
+		return result, err
+	}
 	result.ProviderAccounts, err = BackfillProviderAccountOAuthMetadata()
 	return result, err
 }

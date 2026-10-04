@@ -107,10 +107,10 @@ Human API-key and OAuth connections are AES-256-GCM encrypted with
 values.
 
 Provider keys entered through the administrator provider form create an
-encrypted system connection when encryption is configured and can also remain in
-the owner-only plaintext `secrets.json` compatibility seed. Do not claim all
-provider credentials are encrypted at rest; protect the state directory and its
-backups.
+encrypted system connection when encryption is configured and are not written to
+`secrets.json`; without encryption they stay in the owner-only plaintext
+`secrets.json`. Do not claim all provider credentials are encrypted at rest;
+protect the state directory and its backups.
 
 ## Google integrations
 

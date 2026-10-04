@@ -500,8 +500,13 @@ func handleUpsertProvider(w http.ResponseWriter, r *http.Request) {
 			writeError(w, 400, "LLMGW_CREDENTIAL_ENCRYPTION_KEY is required to store an Anthropic setup token")
 			return
 		}
-		if credentialKind == "setup_token" {
+		// With the key in the encrypted store, a plaintext copy would only keep
+		// it on disk unencrypted, and an older copy would be served again once
+		// that connection is revoked.
+		if stored {
 			config.DeleteSecret(pid)
+		} else {
+			config.SaveSecret(pid, raw)
 		}
 	}
 	if _, err := config.UpdateAndSave(func(s *config.Settings) error {
@@ -530,9 +535,6 @@ func handleUpsertProvider(w http.ResponseWriter, r *http.Request) {
 	}); err != nil {
 		writeConfigSaveError(w, "Provider configuration could not be persisted.", err)
 		return
-	}
-	if strings.TrimSpace(body.APIKey) != "" && credentialKind != "setup_token" {
-		config.SaveSecret(pid, strings.TrimSpace(body.APIKey))
 	}
 	providers.ForgetProvider(pid)
 	providers.ForgetCatalog(pid)

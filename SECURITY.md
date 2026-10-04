@@ -65,9 +65,14 @@ Human provider API-key and OAuth connections use AES-256-GCM with
 `LLMGW_CREDENTIAL_ENCRYPTION_KEY`. List, audit, and playground responses expose
 metadata rather than provider token values.
 
-System provider keys entered through the administration path can also remain in
-owner-only plaintext `secrets.json` for compatibility. Therefore the project does
-not claim universal encryption at rest. Protect the entire state directory.
+With credential encryption configured, system provider keys entered through the
+administration path are stored only as encrypted system connections, and startup
+moves existing `secrets.json` entries into the encrypted store. An entry is kept
+only where the provider's system connection holds a different key or was revoked
+(see [persistence](docs/CONFIGURATION.md#persistence-and-console-saves)).
+Without encryption those keys stay in owner-only plaintext `secrets.json`, and a
+literal `api_key` in `config.yaml` is plaintext either way. Therefore the project
+does not claim universal encryption at rest. Protect the entire state directory.
 
 Generic API-key provider resolution can fall back to a system connection without
 a project binding. The supported exact project/provider/principal-kind binding

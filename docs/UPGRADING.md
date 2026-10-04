@@ -119,10 +119,14 @@ On startup, applicable old state is migrated:
   counters rebuilt;
 - older provider-credential structures migrate into named connections;
 - system credentials seed only missing encrypted connections and do not overwrite
-  an existing database connection.
+  an existing database connection;
+- with credential encryption configured, `secrets.json` entries move into
+  encrypted system connections as described in
+  [persistence](CONFIGURATION.md#persistence-and-console-saves), and the file is
+  deleted once empty.
 
-Legacy `secrets.json` remains a plaintext compatibility/config seed and must be
-protected.
+Without credential encryption, `secrets.json` remains a plaintext
+compatibility/config seed and must be protected.
 
 ## Console compatibility
 

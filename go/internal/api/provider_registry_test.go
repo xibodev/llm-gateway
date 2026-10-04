@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -31,9 +32,15 @@ func TestAdminCreatesProviderFromRegistry(t *testing.T) {
 	if _, err := iam.Initialize(); err != nil {
 		t.Fatal(err)
 	}
+	previousEncryptionKey := config.Get().CredentialEncryptionKey
+	t.Cleanup(func() {
+		config.Update(func(s *config.Settings) { s.CredentialEncryptionKey = previousEncryptionKey })
+	})
 	config.Update(func(s *config.Settings) {
 		s.APIKey = "admin-secret"
 		s.AllowUnauthenticatedAPI = false
+		// Without credential encryption the key is kept in secrets.json.
+		s.CredentialEncryptionKey = ""
 		s.Providers = map[string]*config.ProviderConfig{}
 		s.Endpoints = map[string]*config.EndpointConfig{}
 	})
@@ -358,6 +365,45 @@ func TestAdminSetupTokenRequiresEncryptedStorageAndRemovesLegacySecret(t *testin
 	}
 	if connection.Kind != "setup_token" || secret != token {
 		t.Fatalf("stored connection kind=%q secret matches=%v", connection.Kind, secret == token)
+	}
+}
+
+// With credential encryption the provider form keeps the key only in the
+// encrypted store, and drops the plaintext key an earlier save left behind.
+func TestAdminProviderKeyStaysOutOfSecretsFileWithEncryption(t *testing.T) {
+	state := t.TempDir()
+	t.Setenv("LLMGW_STATE_DIR", state)
+	iam.ResetForTests()
+	t.Cleanup(iam.ResetForTests)
+	old := *config.Get()
+	t.Cleanup(func() { config.Update(func(s *config.Settings) { *s = old }) })
+	config.Update(func(s *config.Settings) {
+		s.APIKey = "admin-secret"
+		s.CredentialEncryptionKey = base64.RawURLEncoding.EncodeToString(make([]byte, 32))
+		s.Providers = map[string]*config.ProviderConfig{}
+		s.Endpoints = map[string]*config.EndpointConfig{}
+	})
+	if _, err := iam.Initialize(); err != nil {
+		t.Fatal(err)
+	}
+	providers.ResetProviders()
+	t.Cleanup(providers.ResetProviders)
+	config.SaveSecret("gemini", "fixture-earlier-key")
+	server := httptest.NewServer(NewServer(Runtime{}))
+	defer server.Close()
+
+	status, body := jsonRequest(t, server.URL+"/admin/api/providers", http.MethodPost, "admin-secret", map[string]any{
+		"registry_id": "gemini", "api_key": "fixture-current-key",
+	})
+	if status != http.StatusOK {
+		t.Fatalf("create status=%d body=%+v", status, body)
+	}
+	secret, connection, found, err := iam.SystemProviderConnectionSecret("gemini")
+	if err != nil || !found || secret != "fixture-current-key" || connection.Source != iam.ConnectionSourceAdmin {
+		t.Fatalf("system connection=%+v matches=%v found=%v err=%v", connection, secret == "fixture-current-key", found, err)
+	}
+	if _, err := os.Stat(filepath.Join(state, "secrets.json")); !os.IsNotExist(err) {
+		t.Fatalf("secrets.json was kept beside the encrypted key: %v", err)
 	}
 }
 

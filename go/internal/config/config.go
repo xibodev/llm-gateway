@@ -518,6 +518,13 @@ func LoadSecrets() map[string]string {
 }
 
 func writeSecrets(data map[string]string) {
+	// An empty store is removed rather than kept as an empty file, so a state
+	// directory whose keys all moved into the encrypted store has no secrets
+	// file left.
+	if len(data) == 0 {
+		_ = os.Remove(secretsFilePath())
+		return
+	}
 	_ = os.MkdirAll(StateDir(), 0o755)
 	b, _ := json.MarshalIndent(data, "", "  ")
 	_ = os.WriteFile(secretsFilePath(), b, 0o600)

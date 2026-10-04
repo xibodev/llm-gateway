@@ -3,6 +3,9 @@ package iam
 import (
 	"encoding/base64"
 	"errors"
+	"os"
+	"path/filepath"
+	"reflect"
 	"testing"
 
 	"llmgw/internal/config"
@@ -148,6 +151,98 @@ func TestConfigSeedsSystemConnectionOnlyWhenAbsent(t *testing.T) {
 	if err != nil || !ok || secret != "admin-rotated" ||
 		connection.Source != ConnectionSourceAdmin {
 		t.Fatalf("rotated connection=%+v secret=%q ok=%v err=%v", connection, secret, ok, err)
+	}
+}
+
+func TestStartupMovesPlaintextProviderSecretsIntoEncryptedStore(t *testing.T) {
+	setupConnectionTest(t)
+	config.Update(func(s *config.Settings) {
+		s.Providers = map[string]*config.ProviderConfig{
+			"configured": {Type: "openai_compatible"},
+		}
+	})
+	config.SaveSecret("configured", "fixture-configured-key")
+	config.SaveSecret("unlisted", "fixture-unlisted-key")
+	if _, err := Initialize(); err != nil {
+		t.Fatal(err)
+	}
+	for providerID, want := range map[string]string{
+		"configured": "fixture-configured-key", "unlisted": "fixture-unlisted-key",
+	} {
+		secret, connection, ok, err := SystemProviderConnectionSecret(providerID)
+		if err != nil || !ok || secret != want || connection.Source != ConnectionSourceConfig {
+			t.Fatalf("%s: connection=%+v matches=%v ok=%v err=%v", providerID, connection, secret == want, ok, err)
+		}
+	}
+	if _, err := os.Stat(filepath.Join(config.StateDir(), "secrets.json")); !os.IsNotExist(err) {
+		t.Fatalf("secrets.json remains after every entry moved: %v", err)
+	}
+}
+
+// Moving plaintext keys must not change which key a provider resolves: a key
+// saved through the console stays, a revoked connection is not revived, and a
+// key configured in YAML keeps precedence. Only an entry the active system
+// connection already holds is removed.
+func TestStartupMoveKeepsResolutionPrecedence(t *testing.T) {
+	setupConnectionTest(t)
+	config.Update(func(s *config.Settings) {
+		s.Providers = map[string]*config.ProviderConfig{
+			"yaml": {Type: "openai_compatible", APIKey: "fixture-yaml-key"},
+		}
+	})
+	for providerID, secret := range map[string]string{
+		"console": "fixture-console-key", "duplicate": "fixture-duplicate-key",
+		"revoked": "fixture-revoked-key",
+	} {
+		if _, err := PutSystemProviderConnection(providerID, "api_key", secret); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := RevokeSystemProviderConnection("revoked"); err != nil {
+		t.Fatal(err)
+	}
+	plaintext := map[string]string{
+		"console": "fixture-earlier-key", "duplicate": "fixture-duplicate-key",
+		"revoked": "fixture-revoked-key", "yaml": "fixture-plaintext-key",
+	}
+	for providerID, secret := range plaintext {
+		config.SaveSecret(providerID, secret)
+	}
+	if _, err := Initialize(); err != nil {
+		t.Fatal(err)
+	}
+	delete(plaintext, "duplicate")
+	if remaining := config.LoadSecrets(); !reflect.DeepEqual(remaining, plaintext) {
+		t.Fatalf("secrets.json kept %d entries, want console, revoked and yaml", len(remaining))
+	}
+	for providerID, want := range map[string]string{
+		"console": "fixture-console-key", "duplicate": "fixture-duplicate-key", "yaml": "fixture-yaml-key",
+	} {
+		secret, _, ok, err := SystemProviderConnectionSecret(providerID)
+		if err != nil || !ok || secret != want {
+			t.Fatalf("%s: matches=%v ok=%v err=%v", providerID, secret == want, ok, err)
+		}
+	}
+	if _, _, ok, err := SystemProviderConnectionSecret("revoked"); err != nil || ok {
+		t.Fatalf("revoked connection was revived: ok=%v err=%v", ok, err)
+	}
+}
+
+func TestStartupKeepsPlaintextProviderSecretsWithoutEncryption(t *testing.T) {
+	setupConnectionTest(t)
+	config.Update(func(s *config.Settings) {
+		s.CredentialEncryptionKey = ""
+		s.Providers = map[string]*config.ProviderConfig{"plain": {Type: "openai_compatible"}}
+	})
+	config.SaveSecret("plain", "fixture-plain-key")
+	if _, err := Initialize(); err != nil {
+		t.Fatal(err)
+	}
+	if got := config.ResolveProviderAPIKey("plain", config.Get().Providers["plain"]); got != "fixture-plain-key" {
+		t.Fatal("plaintext key no longer resolves without encryption")
+	}
+	if exists, err := SystemProviderConnectionExists("plain"); err != nil || exists {
+		t.Fatalf("system connection exists=%v err=%v", exists, err)
 	}
 }
 

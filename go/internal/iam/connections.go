@@ -551,6 +551,57 @@ func SeedSystemProviderConnectionsFromConfig() (int, error) {
 	return seeded, nil
 }
 
+// movePlaintextProviderSecrets moves secrets.json entries into the encrypted
+// store when credential encryption is configured. An entry becomes a system
+// connection only for a provider that has none, active or revoked: a key saved
+// through the console or API is never replaced and a revoked connection is not
+// revived. Every entry the active system connection already holds is removed,
+// which also finishes a move interrupted between storing and removing. Any
+// other entry stays, because resolution still falls back to it.
+//
+// Run it after SeedSystemProviderConnectionsFromConfig. Like resolution, the
+// seed prefers a key set in YAML or the environment over a plaintext entry for
+// the same provider; a connection stored here first would win over that key.
+func movePlaintextProviderSecrets() error {
+	if strings.TrimSpace(config.Get().CredentialEncryptionKey) == "" {
+		return nil
+	}
+	principal, err := EnsureSystemPrincipal()
+	if err != nil {
+		return err
+	}
+	for providerID, secret := range config.LoadSecrets() {
+		secret = strings.TrimSpace(secret)
+		if strings.TrimSpace(providerID) == "" || secret == "" {
+			continue
+		}
+		stored, _, active, err := providerConnectionSecret(principal.ID, providerID, "", false)
+		if err != nil {
+			return err
+		}
+		if !active {
+			exists, err := anyProviderConnection(principal.ID, providerID)
+			if err != nil {
+				return err
+			}
+			if exists {
+				continue
+			}
+			if _, err := PutProviderConnection(ProviderConnectionCreate{
+				PrincipalID: principal.ID, ProviderID: providerID, Name: defaultConnectionName,
+				Kind: "api_key", Secret: secret, Source: ConnectionSourceConfig,
+				MakeDefault: true,
+			}); err != nil {
+				return err
+			}
+		} else if stored != secret {
+			continue
+		}
+		config.DeleteSecret(providerID)
+	}
+	return nil
+}
+
 // PutSystemProviderConnection is the explicit operator rotation path. Unlike
 // startup config seeding, it intentionally replaces the current system default.
 func PutSystemProviderConnection(providerID, kind, secret string) (bool, error) {

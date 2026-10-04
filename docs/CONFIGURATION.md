@@ -287,9 +287,16 @@ documents also require `count` equal to the number of keys. A key record require
 keys keep precedence and behavior.
 
 Provider keys entered in the administration UI create an encrypted authoritative
-connection when credential encryption is configured. The current compatibility
-path can also retain a plaintext `0600` `secrets.json` seed. Protect the state
-directory and its backups accordingly.
+connection when credential encryption is configured and are not written to
+`secrets.json`. Without credential encryption they are kept in plaintext in the
+owner-only `secrets.json`.
+
+At startup with credential encryption configured, a `secrets.json` entry for a
+provider without a system connection becomes an encrypted system connection,
+every entry whose key the active system connection already holds is removed, and
+the file is deleted once empty. An entry stays where the provider's system
+connection holds a different key or was revoked, because resolution can still
+fall back to it. Protect the state directory and its backups accordingly.
 
 ## State files
 
@@ -300,7 +307,7 @@ directory and its backups accordingly.
 | `catalog.json` | Regenerable provider/model catalog with schema versioning. |
 | `telemetry.db` | Interesting failover-chain events. |
 | `usage.db` | Optional legacy savings ledger. |
-| `secrets.json` | Plaintext compatibility/config seed; owner-only permissions. |
+| `secrets.json` | Plaintext provider keys saved without credential encryption; owner-only permissions. See [persistence](#persistence-and-console-saves) for how entries move into `gateway.db`. |
 | `cache/` | Copilot OAuth/session cache. |
 | `requests.jsonl` | Optional request metadata or unsafe body log. |
 | `backups/` | Built-in retention-managed backup directory. |

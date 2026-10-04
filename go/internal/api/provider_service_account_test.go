@@ -146,9 +146,9 @@ func TestAdminRejectsServiceAccountForNonGoogleProvider(t *testing.T) {
 	}
 }
 
-// The provider form stores a service-account key as the system connection
-// and in secrets.json. A key naming a token endpoint other than Google's is
-// refused, pasted or uploaded, before anything is stored.
+// The provider form stores a service-account key as the system connection.
+// A key naming a token endpoint other than Google's is refused, pasted or
+// uploaded, before anything is stored.
 func TestAdminProviderRefusesForeignTokenEndpoint(t *testing.T) {
 	env := newCredentialTestEnv(t)
 	defer env.server.Close()
