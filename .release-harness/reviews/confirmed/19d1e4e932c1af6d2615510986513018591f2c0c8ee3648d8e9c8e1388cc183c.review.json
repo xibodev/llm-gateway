@@ -1,0 +1,101 @@
+{
+  "schema_version": "1.0.0",
+  "mode": "change",
+  "contract": {
+    "digest": "31b393ab3e80162226619c441694573993ac618382d74642101484a0bf2e9c80"
+  },
+  "authoring_provenance": {
+    "status": "established",
+    "path": ".release-harness/drafts/llm-gateway.record.json",
+    "digest": "6732ddf3dc8236b974e2aae5f81b546d89c2a466b6fb0a368d76620955bf981e"
+  },
+  "sources": [
+    {
+      "source_id": "primary",
+      "status": "established",
+      "repository_identity": "https://github.com/xibodev/llm-gateway.git",
+      "base_ref": "27c68e9",
+      "base_commit": "27c68e970b5d358fce0eb9c6957f75c776570283",
+      "merge_base": "27c68e970b5d358fce0eb9c6957f75c776570283",
+      "head_commit": "a1bd4775a95fa29176c17338eaa28ac10a32a32a",
+      "head_tree": "9ca6b3ec4222de690e8cd31ac602d3c3cce53f82",
+      "reviewed_source_digest": "a6e0eed9915d473c6bfee005ad9cbfaa9590a755ffd660aaa8cdec81ac8c3d36",
+      "changed_paths": [
+        {
+          "status": "modified",
+          "path": ".github/dependabot.yml",
+          "old_blob": "51566ebd94022f7407bdbf15a9056f8f6ea342cb",
+          "new_blob": "f0fd9ce46eccc845b3840e374458590fd1282bee"
+        },
+        {
+          "status": "modified",
+          "path": "test/live-acceptance/run.mjs",
+          "old_blob": "8ee5c9b8a37586f115d502135e1bf6f3603fb343",
+          "new_blob": "9b17d7c153a13aed703925f08d286cf084e10b67"
+        }
+      ]
+    }
+  ],
+  "facts": [
+    {
+      "id": "acceptance-harness-only",
+      "claim": "The change since 27c68e970b5d358fce0eb9c6957f75c776570283 touches only test/live-acceptance/run.mjs and .github/dependabot.yml. The acceptance harness records why a fixture provider's catalog refresh failed and waits up to 30 seconds for each fixture server to answer before configuring it; Dependabot proposes monthly minor and patch updates only. No gateway source, build, configuration or release workflow file changes.",
+      "status": "observed",
+      "evidence": {
+        "source": "git diff 27c68e9..a1bd477"
+      }
+    },
+    {
+      "id": "ci-acceptance-passes",
+      "claim": "With the fixture wait in place, the CI deterministic Docker acceptance job passes on main at 03a404114da5; before it, the job failed because the gateway's catalog refresh reached the first fixture servers before they listened (catalog_transport_error).",
+      "status": "observed",
+      "evidence": {
+        "source": "GitHub Actions ci workflow runs on main for 0e24079 and 03a4041"
+      }
+    }
+  ],
+  "impact": {
+    "assertions": [
+      {
+        "id": "A1",
+        "impact": "unchanged",
+        "supported_by": [
+          "acceptance-harness-only"
+        ]
+      },
+      {
+        "id": "A2",
+        "impact": "unchanged",
+        "supported_by": [
+          "acceptance-harness-only"
+        ]
+      },
+      {
+        "id": "A3",
+        "impact": "unchanged",
+        "supported_by": [
+          "acceptance-harness-only"
+        ]
+      },
+      {
+        "id": "A4",
+        "impact": "unchanged",
+        "supported_by": [
+          "acceptance-harness-only"
+        ]
+      }
+    ],
+    "requires": [],
+    "possible_binding_changes": []
+  },
+  "questions": [],
+  "conclusion": {
+    "action": "reuse_contract",
+    "summary": "Only the acceptance harness and the dependency-update configuration changed; the accepted CLI identity, CLI health, HTTP health and model-list propositions are unaffected."
+  },
+  "proposed": {
+    "by": "release operator",
+    "at": "2026-10-04T09:21:56.001Z"
+  },
+  "digest": "19d1e4e932c1af6d2615510986513018591f2c0c8ee3648d8e9c8e1388cc183c"
+}
