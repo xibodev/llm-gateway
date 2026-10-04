@@ -72,6 +72,18 @@ func anthropicKwargs(req *anthropicRequest) providers.Kwargs {
 	return kw
 }
 
+// messagesFallbackContext is fallbackContext for a Messages body. Its
+// fallback_timeout_ms and affinity_key are the gateway's routing controls,
+// not Messages fields, so they leave the body here: a native target would
+// receive them, and the Chat adapter refuses a field it does not know.
+func messagesFallbackContext(r *http.Request, raw map[string]any) context.Context {
+	timeout := raw["fallback_timeout_ms"]
+	affinity, _ := raw["affinity_key"].(string)
+	delete(raw, "fallback_timeout_ms")
+	delete(raw, "affinity_key")
+	return fallbackContext(r, timeout, affinity)
+}
+
 func handleMessages(w http.ResponseWriter, r *http.Request) {
 	started := time.Now()
 	principal, ok := authed(w, r)
@@ -99,6 +111,7 @@ func handleMessages(w http.ResponseWriter, r *http.Request) {
 	if pre := config.Get().GatewayPreamble; pre != "" && transportMode != "transparent" {
 		raw["_llmgw_preamble"] = pre
 	}
+	ctx := messagesFallbackContext(r, raw)
 
 	resolution, err := resolveModel(r.Context(), req.Model, principal)
 	if err != nil {
@@ -161,11 +174,11 @@ func handleMessages(w http.ResponseWriter, r *http.Request) {
 		for i := range converted {
 			msgs[i] = providers.Message(converted[i])
 		}
-		streamMessagesSSE(w, r.Context(), targets, msgs, req.Model, principal, providers.Kwargs(kw), started)
+		streamMessagesSSE(w, ctx, targets, msgs, req.Model, principal, providers.Kwargs(kw), started)
 		return
 	}
 
-	response, served, err := router.ExecuteAnthropicMessagesContext(governed(r.Context(), principal), targets, raw, req.Model, callerOf(principal))
+	response, served, err := router.ExecuteAnthropicMessagesContext(governed(ctx, principal), targets, raw, req.Model, callerOf(principal))
 	if err != nil {
 		status := upstreamErrorStatus(err)
 		recordFailureUsage("anthropic.messages", req.Model, principal, status, "upstream", started)

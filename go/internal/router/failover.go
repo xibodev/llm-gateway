@@ -90,6 +90,12 @@ func WithFallbackOptions(ctx context.Context, timeout time.Duration, affinity st
 	return context.WithValue(ctx, fallbackOptionsKey{}, fallbackOptions{timeout: timeout, affinity: strings.TrimSpace(affinity)})
 }
 
+// prepareFallback returns the budget of a routed request (docs/ROUTING.md,
+// "Failover budget and affinity"), a context that ends at its deadline or
+// with the request, and the targets in the order the affinity key starts
+// them. The budget bounds choosing a target and waiting for its answer to
+// begin, never an answer that has begun: a chain checks it before each
+// target, and runs each target under attemptContext or streamAttempt.
 func prepareFallback(ctx context.Context, targets []Target, kw providers.Kwargs) (context.Context, context.CancelFunc, []Target) {
 	options, _ := ctx.Value(fallbackOptionsKey{}).(fallbackOptions)
 	if value, ok := kw["_fallback_timeout_ms"]; ok && options.timeout <= 0 {
@@ -109,6 +115,42 @@ func prepareFallback(ctx context.Context, targets []Target, kw providers.Kwargs)
 	}
 	bounded, cancel := context.WithTimeout(ctx, options.timeout)
 	return bounded, cancel, prepared
+}
+
+// attemptContext is the context a target's tries run under: the request's
+// own, so the budget never cuts a try under way. A non-streaming answer
+// arrives whole, so a try still waiting for one may be a target producing a
+// long answer. The context carries the budget's deadline, past which the
+// resilience wrapper starts no retry, so no new work starts once the budget
+// ends.
+func attemptContext(request, budget context.Context) context.Context {
+	if deadline, ok := budget.Deadline(); ok {
+		return providers.WithRetryDeadline(request, deadline)
+	}
+	return request
+}
+
+// streamAttempt returns the context a stream opens under: attemptContext,
+// which the budget also ends until opened is called, because a stream that
+// has not opened is still waiting for its answer to begin. opened detaches
+// the stream from the budget, leaving it to the request's own context, and
+// reports false when the budget ended first. release ends the context once
+// the stream is done or abandoned.
+func streamAttempt(request, budget context.Context) (ctx context.Context, opened func() bool, release func()) {
+	ctx, cancel := context.WithCancelCause(attemptContext(request, budget))
+	stop := context.AfterFunc(budget, func() { cancel(context.Cause(budget)) })
+	return ctx, stop, func() {
+		stop()
+		cancel(nil)
+	}
+}
+
+// abandon closes a stream the chain will not serve and ends its attempt.
+func abandon(stream providers.StreamIter, release func()) {
+	if stream != nil {
+		_ = stream.Close()
+	}
+	release()
 }
 
 // CompatibilityRequest describes only requirements that can be proven from the
@@ -192,13 +234,13 @@ func shouldAdvance(err error) bool {
 // differs by surface, and Execute reads the judgement as the failure's
 // classification.
 //
-// The chains end on the caller's context by their own rules, which try
-// applies. A complete chain checks the context before each target, so a
-// target that fails as the context ends is reported by its own failure
-// unless the chain moves on to another target; a stream chain also checks it
-// after each call and stops unrecorded. Execute's own checks would report the
-// context's error after any failure, so it walks under a context that never
-// ends while try reads the chain's.
+// The chains end on their budget (see prepareFallback) by their own rules,
+// which try applies. A complete chain checks the budget before each target,
+// so a target that fails after the budget ends is reported by its own failure
+// unless the chain had another target to move on to; a stream chain also
+// checks it after each call and stops unrecorded. Execute's own checks would
+// report the budget's error after any failure, so it walks under a context
+// that never ends while try reads the chain's.
 func walk[R any](ctx context.Context, targets []Target, try func(Target) (R, error)) (R, *Target) {
 	result, err := execution.Execute(context.WithoutCancel(ctx), execution.Executor[Target]{}, targets,
 		func(_ context.Context, target Target) (R, error) { return try(target) })
@@ -690,8 +732,10 @@ func (rt *Runtime) ExecuteResponsesContext(
 	if providers.ResponsesPayloadIsStateful(payload) && len(targets) > 1 {
 		targets = targets[:1]
 	}
+	request := ctx
 	ctx, cancel, targets := prepareFallback(ctx, targets, nil)
 	defer cancel()
+	attemptCtx := attemptContext(request, ctx)
 	fallback := translateResponsesFallback(payload)
 	var attempts []attempt
 	var lastErr error
@@ -711,7 +755,7 @@ func (rt *Runtime) ExecuteResponsesContext(
 			lastErr = err
 			return nil, judge(err, shouldAdvance(err))
 		}
-		result, _, err := providers.CompleteResponsesContext(ctx, provider, target.Model, payload)
+		result, _, err := providers.CompleteResponsesContext(attemptCtx, provider, target.Model, payload)
 		if errors.Is(err, providers.ErrResponsesUnsupported) {
 			if refusal := rt.responsesFallbackRefusal(target, caller, fallback); refusal != nil {
 				lastErr, lastStatus = refusal, 400
@@ -721,7 +765,7 @@ func (rt *Runtime) ExecuteResponsesContext(
 				})
 				return nil, stop(refusal)
 			}
-			chat, chatErr := providers.CompleteProviderContext(ctx, provider, target.Model, fallback.messages, fallback.kw)
+			chat, chatErr := providers.CompleteProviderContext(attemptCtx, provider, target.Model, fallback.messages, fallback.kw)
 			if chatErr == nil {
 				converted := translate.ChatResponseToResponsesWithRequestAndReport(target.Model, chat, payload)
 				if lossErr := providers.RejectMaterialLossExceptThoughtSignatures(converted.Report); lossErr != nil {
@@ -798,6 +842,10 @@ func (rt *Runtime) ExecuteAnthropicMessagesContext(
 			return nil, nil, &AllTargetsFailed{Msg: "Anthropic request requires a native Messages target: " + materialErr.Error(), Status: 400}
 		}
 	}
+	request := ctx
+	ctx, cancel, targets := prepareFallback(ctx, targets, nil)
+	defer cancel()
+	attemptCtx := attemptContext(request, ctx)
 	var attempts []attempt
 	var lastErr error
 	lastStatus := 0
@@ -807,6 +855,7 @@ func (rt *Runtime) ExecuteAnthropicMessagesContext(
 	result, served := walk(ctx, targets, func(target Target) (map[string]any, error) {
 		if ctx.Err() != nil {
 			lastErr = ctx.Err()
+			lastStatus = deadlineStatus(lastErr)
 			return nil, stop(lastErr)
 		}
 		provider, err := rt.providers().GetProviderForPrincipal(target.Provider, caller)
@@ -822,7 +871,7 @@ func (rt *Runtime) ExecuteAnthropicMessagesContext(
 			return nil, judge(errChatOnly, true)
 		} else if err = rt.anthropicFallbackCompatibility(target, caller, messages, kw); err == nil {
 			var chat map[string]any
-			chat, err = providers.CompleteProviderContext(ctx, provider, target.Model, messages, kw)
+			chat, err = providers.CompleteProviderContext(attemptCtx, provider, target.Model, messages, kw)
 			if err == nil {
 				converted := translate.OpenAIResponseToAnthropicWithReport(chat, target.Model)
 				if lossErr := providers.RejectMaterialLossExceptThoughtSignatures(converted.Report); lossErr != nil {
@@ -930,21 +979,23 @@ type ResponsesExecutionStream struct {
 	Native bool
 }
 
-type boundedStream struct {
+// attemptStream is a stream the chain served, which ends its attempt's
+// context, from streamAttempt, once it ends or is closed.
+type attemptStream struct {
 	providers.StreamIter
-	cancel context.CancelFunc
+	release func()
 }
 
-func (stream *boundedStream) Next() (string, bool) {
+func (stream *attemptStream) Next() (string, bool) {
 	chunk, ok := stream.StreamIter.Next()
 	if !ok {
-		stream.cancel()
+		stream.release()
 	}
 	return chunk, ok
 }
 
-func (stream *boundedStream) Close() error {
-	stream.cancel()
+func (stream *attemptStream) Close() error {
+	stream.release()
 	return stream.StreamIter.Close()
 }
 
@@ -967,7 +1018,9 @@ func (rt *Runtime) ExecuteResponsesStreamContext(
 	if providers.ResponsesPayloadIsStateful(payload) && len(targets) > 1 {
 		targets = targets[:1]
 	}
+	request := ctx
 	ctx, cancel, targets := prepareFallback(ctx, targets, nil)
+	defer cancel()
 	fallback := translateResponsesFallback(payload)
 	var attempts []attempt
 	var lastErr error
@@ -981,7 +1034,7 @@ func (rt *Runtime) ExecuteResponsesStreamContext(
 	}
 	// Like the Chat stream chain, this one commits to the first target whose
 	// stream opens; see executeStreamContext.
-	opened, served := walk(ctx, targets, func(target Target) (*ResponsesExecutionStream, error) {
+	result, served := walk(ctx, targets, func(target Target) (*ResponsesExecutionStream, error) {
 		if err := ended(); err != nil {
 			return nil, stop(err)
 		}
@@ -997,17 +1050,17 @@ func (rt *Runtime) ExecuteResponsesStreamContext(
 			lastErr = err
 			return nil, judge(err, shouldAdvance(err))
 		}
-		stream, _, err := providers.StreamResponsesContext(ctx, provider, target.Model, payload)
+		attemptCtx, opened, release := streamAttempt(request, ctx)
+		stream, _, err := providers.StreamResponsesContext(attemptCtx, provider, target.Model, payload)
 		if ctxErr := ended(); ctxErr != nil {
-			if stream != nil {
-				_ = stream.Close()
-			}
+			abandon(stream, release)
 			return nil, stop(ctxErr)
 		}
 		native := true
 		if errors.Is(err, providers.ErrResponsesUnsupported) {
 			native = false
 			if refusal := rt.responsesFallbackRefusal(target, caller, fallback); refusal != nil {
+				release()
 				lastErr, lastStatus = refusal, 400
 				attempts = append(attempts, attempt{
 					Provider: target.Provider, Model: target.Model,
@@ -1016,17 +1069,17 @@ func (rt *Runtime) ExecuteResponsesStreamContext(
 				return nil, stop(refusal)
 			}
 			if ctxErr := ended(); ctxErr != nil {
+				release()
 				return nil, stop(ctxErr)
 			}
-			stream, err = providers.StreamProviderContext(ctx, provider, target.Model, fallback.messages, fallback.kw)
+			stream, err = providers.StreamProviderContext(attemptCtx, provider, target.Model, fallback.messages, fallback.kw)
 			if ctxErr := ended(); ctxErr != nil {
-				if stream != nil {
-					_ = stream.Close()
-				}
+				abandon(stream, release)
 				return nil, stop(ctxErr)
 			}
 		}
 		if err != nil {
+			release()
 			attempts = append(attempts, attempt{
 				Provider: target.Provider, Model: target.Model,
 				Error: truncate(err.Error()), Throttled: providers.IsThrottle(err),
@@ -1035,17 +1088,20 @@ func (rt *Runtime) ExecuteResponsesStreamContext(
 			lastStatus = providers.UpstreamStatus(err)
 			return nil, judge(err, shouldAdvance(err))
 		}
+		if !opened() {
+			// The budget ended as the stream opened.
+			abandon(stream, release)
+			return nil, stop(ended())
+		}
 		attempts = append(attempts, attempt{
 			Provider: target.Provider, Model: target.Model, OK: true,
 		})
-		return &ResponsesExecutionStream{Iter: stream, Native: native}, nil
+		return &ResponsesExecutionStream{Iter: &attemptStream{StreamIter: stream, release: release}, Native: native}, nil
 	})
 	rt.recordChain(ctx, requested, attempts, served)
 	if served != nil {
-		opened.Iter = &boundedStream{StreamIter: opened.Iter, cancel: cancel}
-		return opened, served, nil
+		return result, served, nil
 	}
-	cancel()
 	if errors.Is(lastErr, context.Canceled) {
 		return nil, nil, context.Canceled
 	}
@@ -1188,8 +1244,10 @@ func (rt *Runtime) responsesFallbackCompatibility(
 }
 
 func (rt *Runtime) executeCompleteWithTrace(ctx context.Context, targets []Target, messages []providers.Message, requested string, caller core.Caller, kw providers.Kwargs) (map[string]any, *Target, []AttemptTrace, error) {
+	request := ctx
 	ctx, cancel, targets := prepareFallback(ctx, targets, kw)
 	defer cancel()
+	attemptCtx := attemptContext(request, ctx)
 	var attempts []attempt
 	trace := make([]AttemptTrace, 0, len(targets))
 	var lastErr error
@@ -1210,7 +1268,7 @@ func (rt *Runtime) executeCompleteWithTrace(ctx context.Context, targets []Targe
 		if err != nil {
 			return nil, failed(t, attemptStarted, err)
 		}
-		result, err := providers.CompleteProviderContext(ctx, prov, t.Model, messages, kw)
+		result, err := providers.CompleteProviderContext(attemptCtx, prov, t.Model, messages, kw)
 		if err != nil {
 			return nil, failed(t, attemptStarted, err)
 		}
@@ -1253,9 +1311,13 @@ func (rt *Runtime) ExecuteAnthropicStreamContext(ctx context.Context, targets []
 // status line and headers as soon as a stream is returned. So the chain walks
 // on Execute with a try that opens the stream, not on ExecuteStream, which
 // holds frames back until one carries output and would fail over a stream
-// that broke after its upstream answered.
+// that broke after its upstream answered. The budget bounds the wait for the
+// stream to open; once it opens, it runs under the request's own context
+// however long it lasts (see streamAttempt).
 func (rt *Runtime) executeStreamContext(ctx context.Context, targets []Target, messages []providers.Message, requested string, caller core.Caller, kw providers.Kwargs, validate func(Target) error) (providers.StreamIter, *Target, error) {
+	request := ctx
 	ctx, cancel, targets := prepareFallback(ctx, targets, kw)
+	defer cancel()
 	var attempts []attempt
 	var lastErr error
 	lastStatus := 0
@@ -1291,24 +1353,28 @@ func (rt *Runtime) executeStreamContext(ctx context.Context, targets []Target, m
 		if err != nil {
 			return nil, failed(t, err)
 		}
-		it, err := providers.StreamProviderContext(ctx, prov, t.Model, messages, kw)
+		attemptCtx, opened, release := streamAttempt(request, ctx)
+		it, err := providers.StreamProviderContext(attemptCtx, prov, t.Model, messages, kw)
 		if ctxErr := ended(); ctxErr != nil {
-			if it != nil {
-				_ = it.Close()
-			}
+			abandon(it, release)
 			return nil, stop(ctxErr)
 		}
 		if err != nil {
+			release()
 			return nil, failed(t, err)
 		}
+		if !opened() {
+			// The budget ended as the stream opened.
+			abandon(it, release)
+			return nil, stop(ended())
+		}
 		attempts = append(attempts, attempt{Provider: t.Provider, Model: t.Model, OK: true})
-		return it, nil
+		return &attemptStream{StreamIter: it, release: release}, nil
 	})
 	rt.recordChain(ctx, requested, attempts, served)
 	if served != nil {
-		return &boundedStream{StreamIter: it, cancel: cancel}, served, nil
+		return it, served, nil
 	}
-	cancel()
 	if errors.Is(lastErr, context.Canceled) {
 		return nil, nil, context.Canceled
 	}

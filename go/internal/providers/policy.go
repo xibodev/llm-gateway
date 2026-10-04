@@ -161,6 +161,35 @@ func (r *ResilientProvider) retryDelay(err error, attempt int) time.Duration {
 	return delay
 }
 
+type retryDeadlineKey struct{}
+
+// WithRetryDeadline returns ctx carrying the latest time the resilience
+// wrapper may start a retry: a failed try it would have to wait past that
+// for is not repeated, and its failure is returned at once, so a failover
+// chain moves on, or ends, within its budget. ctx itself does not end then,
+// so a try already under way is never cut by it.
+func WithRetryDeadline(ctx context.Context, deadline time.Time) context.Context {
+	return context.WithValue(ctx, retryDeadlineKey{}, deadline)
+}
+
+// repeat decides whether a failed try is repeated and waits until it is. It
+// returns nil when the try is to be repeated now, and otherwise the error the
+// operation ends with: err itself, or the context's error when the caller
+// left during the wait. A failure that is not repeated is the operation's
+// outcome, and it moves the circuit.
+func (r *ResilientProvider) repeat(ctx context.Context, err error, attempt, attempts int) error {
+	if !InvocationRetryable(err) || attempt >= attempts {
+		r.record(err)
+		return err
+	}
+	delay := r.retryDelay(err, attempt)
+	if deadline, ok := ctx.Value(retryDeadlineKey{}).(time.Time); ok && !time.Now().Add(delay).Before(deadline) {
+		r.record(err)
+		return err
+	}
+	return waitForRetry(ctx, delay)
+}
+
 func waitForRetry(ctx context.Context, delay time.Duration) error {
 	if err := ctx.Err(); err != nil {
 		return err
@@ -211,11 +240,11 @@ func (r *ResilientProvider) CompleteContextWithObservation(
 			r.record(nil)
 			return result, observation, nil
 		}
-		if !IsInvocation(err) || !r.retries(err, attempt, attempts) {
+		if !IsInvocation(err) {
 			return nil, observation, err
 		}
-		if waitErr := waitForRetry(ctx, r.retryDelay(err, attempt)); waitErr != nil {
-			return nil, observation, waitErr
+		if endErr := r.repeat(ctx, err, attempt, attempts); endErr != nil {
+			return nil, observation, endErr
 		}
 	}
 }
@@ -249,11 +278,11 @@ func (r *ResilientProvider) CompleteResponsesContext(
 			r.record(nil)
 			return result, observation, nil
 		}
-		if errors.Is(err, ErrResponsesUnsupported) || !IsInvocation(err) || !r.retries(err, attempt, attempts) {
+		if errors.Is(err, ErrResponsesUnsupported) || !IsInvocation(err) {
 			return nil, observation, err
 		}
-		if waitErr := waitForRetry(ctx, r.retryDelay(err, attempt)); waitErr != nil {
-			return nil, observation, waitErr
+		if endErr := r.repeat(ctx, err, attempt, attempts); endErr != nil {
+			return nil, observation, endErr
 		}
 	}
 }
@@ -293,11 +322,11 @@ func (r *ResilientProvider) StreamResponsesContext(
 			r.record(nil)
 			return stream, observation, nil
 		}
-		if errors.Is(err, ErrResponsesUnsupported) || !IsInvocation(err) || !r.retries(err, attempt, attempts) {
+		if errors.Is(err, ErrResponsesUnsupported) || !IsInvocation(err) {
 			return nil, observation, err
 		}
-		if waitErr := waitForRetry(ctx, r.retryDelay(err, attempt)); waitErr != nil {
-			return nil, observation, waitErr
+		if endErr := r.repeat(ctx, err, attempt, attempts); endErr != nil {
+			return nil, observation, endErr
 		}
 	}
 }
@@ -329,11 +358,11 @@ func (r *ResilientProvider) StreamContext(ctx context.Context, model string, mes
 			r.record(nil)
 			return it, nil
 		}
-		if !IsInvocation(err) || !r.retries(err, attempt, attempts) {
+		if !IsInvocation(err) {
 			return nil, err
 		}
-		if waitErr := waitForRetry(ctx, r.retryDelay(err, attempt)); waitErr != nil {
-			return nil, waitErr
+		if endErr := r.repeat(ctx, err, attempt, attempts); endErr != nil {
+			return nil, endErr
 		}
 	}
 }
@@ -373,11 +402,8 @@ func (r *ResilientProvider) SynthesizeContext(ctx context.Context, voice, text, 
 			r.record(nil)
 			return audio, format, nil
 		}
-		if !r.retries(err, attempt, attempts) {
-			return nil, "", err
-		}
-		if waitErr := waitForRetry(ctx, r.retryDelay(err, attempt)); waitErr != nil {
-			return nil, "", waitErr
+		if endErr := r.repeat(ctx, err, attempt, attempts); endErr != nil {
+			return nil, "", endErr
 		}
 	}
 }
@@ -472,24 +498,10 @@ func (r *ResilientProvider) PollVideoContext(ctx context.Context, operation stri
 			r.record(nil)
 			return job, nil
 		}
-		if !r.retries(err, attempt, attempts) {
-			return VideoJob{}, err
-		}
-		if waitErr := waitForRetry(ctx, r.retryDelay(err, attempt)); waitErr != nil {
-			return VideoJob{}, waitErr
+		if endErr := r.repeat(ctx, err, attempt, attempts); endErr != nil {
+			return VideoJob{}, endErr
 		}
 	}
-}
-
-// retries reports whether a failed try is repeated: a transient failure with
-// attempts left. Otherwise the failure is the operation's outcome, and it
-// moves the circuit.
-func (r *ResilientProvider) retries(err error, attempt, attempts int) bool {
-	if !InvocationRetryable(err) || attempt >= attempts {
-		r.record(err)
-		return false
-	}
-	return true
 }
 
 func max1(n int) int {

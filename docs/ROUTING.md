@@ -54,17 +54,27 @@ definitive client/request HTTP errors by trying another model.
 
 ## Failover budget and affinity
 
-Chat Completions and Responses run each routed request under one budget that
-covers every attempt in the chain, provider retries included, and the response
-stream once one opens. The budget defaults to 2 minutes. When it runs out, the
-gateway stops trying further members and the request fails; a stream that is
-still open is cut off.
+Chat Completions, Responses, and Messages run each routed request under a
+failover budget, 2 minutes by default. The budget covers choosing a target and
+waiting for its answer to begin, provider retries included. It never cuts an
+answer that has begun:
+
+- A stream begins when it opens. A stream that has not opened when the budget
+  runs out is abandoned, no further member is tried, and the request fails with
+  `504`. A stream that has opened runs until it ends or the client disconnects,
+  however long that takes.
+- A non-streaming answer arrives whole, so the gateway cannot tell a slow
+  target from one still producing a long answer. When the budget runs out, the
+  gateway starts no further member and no further provider retry, but it does
+  not cut the attempt under way; the provider's
+  [`timeout`](CONFIGURATION.md#providers) bounds that attempt instead. If it
+  then fails, the request fails with `504` when members were left to try, or
+  with that attempt's own error when it was the last.
 
 Set another budget per request, in whole milliseconds, with the
 `X-LLMGW-Fallback-Timeout-Ms` header or the `fallback_timeout_ms` body field.
 The header takes precedence. A zero, negative, or non-integer value keeps the
-default, and the body field currently also ignores JSON numbers of 1,000,000 or
-more; use the header for longer budgets.
+default.
 
 `X-LLMGW-Affinity-Key`, or the `affinity_key` body field, chooses where an
 endpoint chain starts; the header takes precedence. When more than one member
@@ -74,8 +84,8 @@ configured order, wrapping around. For the same eligible members, the same key
 always starts at the same member, while different keys spread across members.
 Without a key, the configured order applies.
 
-`/v1/messages` reads neither control. Its streaming chain always uses the
-default budget, and its non-streaming chain does not apply the budget.
+On `/v1/messages`, both body fields are gateway controls: they are removed from
+the request before it reaches a provider.
 
 ## Single-target surfaces
 
