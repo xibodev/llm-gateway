@@ -1,0 +1,516 @@
+{
+  "schema_version": "1.0.0",
+  "mode": "change",
+  "contract": {
+    "digest": "31b393ab3e80162226619c441694573993ac618382d74642101484a0bf2e9c80"
+  },
+  "authoring_provenance": {
+    "status": "established",
+    "path": ".release-harness/drafts/llm-gateway.record.json",
+    "digest": "6732ddf3dc8236b974e2aae5f81b546d89c2a466b6fb0a368d76620955bf981e"
+  },
+  "sources": [
+    {
+      "source_id": "primary",
+      "status": "established",
+      "repository_identity": "https://github.com/xibodev/llm-gateway.git",
+      "base_ref": "v1.2.0",
+      "base_commit": "57b6b8e13b8960f46fa78582ade90e35c7ee6884",
+      "merge_base": "57b6b8e13b8960f46fa78582ade90e35c7ee6884",
+      "head_commit": "c474899cc5b81b09c16f7abc6b7e765ad0421b31",
+      "head_tree": "4c8f8c77c5abd2f3e12cef9d8a7efe7674a21896",
+      "reviewed_source_digest": "9f7c66df1c5284a8871a7c0cd0989fb9a0bfcb82ffbaa146958c4d13e8924337",
+      "changed_paths": [
+        {
+          "status": "modified",
+          "path": "docs/API.md",
+          "old_blob": "be5dc6bf7d6ceec7d715f26b4167b6114d335986",
+          "new_blob": "3010bf46de12e0b649fa341b119e4e24d136b630"
+        },
+        {
+          "status": "modified",
+          "path": "docs/CONFIGURATION.md",
+          "old_blob": "269a42d1ed62d3e15d8bc745ec5992e9e22b4a4f",
+          "new_blob": "a5948cc370b6e1a0c29adf270d6bc2386dfe49dd"
+        },
+        {
+          "status": "modified",
+          "path": "docs/MULTI_USER.md",
+          "old_blob": "8ca9309beb63ff53b8732ffec938a0297d5107dc",
+          "new_blob": "3acd85f9aed2094377acaac184608b51bea69848"
+        },
+        {
+          "status": "modified",
+          "path": "docs/ROUTING.md",
+          "old_blob": "6041a83937b0c28c88c8224ec28062425696c8dc",
+          "new_blob": "60dd0f8d095f232a4da5be80d059673fb5301f72"
+        },
+        {
+          "status": "modified",
+          "path": "go/go.mod",
+          "old_blob": "f1aa9d243c36a88aabe7fa7664574e9d79d1d983",
+          "new_blob": "133193a26d1f6ba1152dfafd6ad002112390411c"
+        },
+        {
+          "status": "modified",
+          "path": "go/go.sum",
+          "old_blob": "981121b5be09749694d8876ff428823eda770517",
+          "new_blob": "f53551f810590af044e90bef834b89b6aa8ec419"
+        },
+        {
+          "status": "added",
+          "path": "go/internal/api/admission_test.go",
+          "old_blob": "0000000000000000000000000000000000000000",
+          "new_blob": "3c0a1b017c941b21e3e9d99b755f35999ad7bb60"
+        },
+        {
+          "status": "added",
+          "path": "go/internal/api/anthropic_errors_test.go",
+          "old_blob": "0000000000000000000000000000000000000000",
+          "new_blob": "80fe8b89ca256f141af6ab6dddd0afc81ca581b2"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/api/anthropic_test.go",
+          "old_blob": "ccb6f5e5e870df2556372a76fca3bd4fd6ceaf82",
+          "new_blob": "390d2690e611491bbe457bd39bb44400445924ae"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/api/anthropic.go",
+          "old_blob": "8e570c51cabb8e418fba671bdfc397966d8c1fad",
+          "new_blob": "16e7c704d5d8bcf749707ca38058723985151f72"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/api/audio.go",
+          "old_blob": "9b7c858a4448b131ae1d5eb21b739e4ef0e403dc",
+          "new_blob": "572c5d0e7b4ece9ead66d6022e6b748791138e05"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/api/body_limit_test.go",
+          "old_blob": "534a7b33f33ec575905b02bd81ea705d1f6704b5",
+          "new_blob": "dd5c9b7e37e02fba6ee4369602020ff183bce854"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/api/cancellation_test.go",
+          "old_blob": "765e16bf2af494d429a3c702d60e3bc89b4bfb15",
+          "new_blob": "4f2b6cc2b7c3aac5cbddbb31d2e3e08a7074de0f"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/api/cli_contract_test.go",
+          "old_blob": "c7f4433e20aadbc2d837a3432829e43fdef088fa",
+          "new_blob": "2f026de41073e0cf9ed973069ac534d6589f4b4f"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/api/embeddings.go",
+          "old_blob": "caf8714aa86165dc469dfb2460d628f1aa00219c",
+          "new_blob": "54df19242f584abe7a606876f53055915c2775f5"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/api/errors.go",
+          "old_blob": "894823f214a3ce8fc7a88cfb6f8863156e2b3c41",
+          "new_blob": "8f52c2c68973d0f1cac0c896c7865b83bbf3180e"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/api/keypolicy_test.go",
+          "old_blob": "a360a45479584ec79f0ee29afea3264610dcf689",
+          "new_blob": "e4f9bc9cf5df99931daad4892321090bbaa1d212"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/api/keypolicy.go",
+          "old_blob": "3cebab9d82f42fdac5fc40716d0f5ca085baa539",
+          "new_blob": "76eb126f293dc1bf71cfa7cf47ac5c1f65860c2a"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/api/media.go",
+          "old_blob": "159cab907b08542a18e0e2f91c43c2579693c8c2",
+          "new_blob": "c614085e1dcd2f0dc09bdfaed730e6cdb472d91b"
+        },
+        {
+          "status": "added",
+          "path": "go/internal/api/messages_fallback_test.go",
+          "old_blob": "0000000000000000000000000000000000000000",
+          "new_blob": "826efc3072e85ee3bd36e5fcea117e629b25174a"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/api/openai.go",
+          "old_blob": "6ee3b07267d37f7069e140cbffe8caf61577890e",
+          "new_blob": "4d701c9ec05c07e1b9005d5c24a1b22d52023c5b"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/api/responses_api.go",
+          "old_blob": "dab87a61174ff194d413679c7e51c86169a3f46d",
+          "new_blob": "ffa9f738635347b7138bf6569f824412a6bc5b74"
+        },
+        {
+          "status": "added",
+          "path": "go/internal/api/retry_after_test.go",
+          "old_blob": "0000000000000000000000000000000000000000",
+          "new_blob": "23503fc6c5dd20efdb718ace11b0f46c13cf43de"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/api/server.go",
+          "old_blob": "ac44c06602cabd619b8031fa07c31b72b7636a9d",
+          "new_blob": "809510be869397f386cb104d7070e79737f6b8b2"
+        },
+        {
+          "status": "added",
+          "path": "go/internal/api/stream_outcome_test.go",
+          "old_blob": "0000000000000000000000000000000000000000",
+          "new_blob": "8d1c11fb721f387c5760b8d5be7891316ecb2d31"
+        },
+        {
+          "status": "added",
+          "path": "go/internal/api/stream_usage_test.go",
+          "old_blob": "0000000000000000000000000000000000000000",
+          "new_blob": "30e687af4d3400efcf80db4acd0ecca91fd77127"
+        },
+        {
+          "status": "added",
+          "path": "go/internal/api/stream_usage.go",
+          "old_blob": "0000000000000000000000000000000000000000",
+          "new_blob": "a705ef899006d1123164160386e4337c192f04ff"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/api/testdata/characterization/failover-after-output-stream.golden",
+          "old_blob": "37a40eeea5a90e7f066b2ff8d41e0c3a6c95e795",
+          "new_blob": "bc9c45249d53ba9debbb6ff305425c6d0180dcaa"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/architecture/package_state_test.go",
+          "old_blob": "f58f9f0b769f6f5ea518220c33eed945fd6a0c18",
+          "new_blob": "4f25382beb76f0ea286990bd6b32837456caa01f"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/iam/quota_test.go",
+          "old_blob": "2a55f4d5131e4671c5e39787dd5609847ef1fccb",
+          "new_blob": "a770a61c408781f63e74069f397cb88d3a0e7c7f"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/iam/quota.go",
+          "old_blob": "e00ae62f0b947255a4a08efe54ac4442f35193ba",
+          "new_blob": "dd914089210d699ef4ce5c701743e3e8b1fd4fe6"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/providers/anthropic_failure.go",
+          "old_blob": "c3448e36cdf90568305d17cf037ece4834c1ff0b",
+          "new_blob": "eab90399711678bf1785b4c9929cb43c56561117"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/providers/anthropic_runtime_test.go",
+          "old_blob": "dffb92d84b30bdac8ab69602b7b7f3690d0b32e1",
+          "new_blob": "561131e0a2e9ad8542e03c12803744196f7a98e4"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/providers/anthropic_test.go",
+          "old_blob": "507bb74c8557af815c03e54dadf2c526fd350edb",
+          "new_blob": "f3e0c1f31b3fcdfed0a251afc9945d0de6026870"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/providers/anthropic_vertical.go",
+          "old_blob": "f7303a3013185d2bf2ee8aee3c43f47a451f87e4",
+          "new_blob": "86f36b6675ccb94c69ec64852570ed374388fe73"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/providers/anthropic.go",
+          "old_blob": "07a7f01dad11f7f6bf9e182b86c95820f62c0573",
+          "new_blob": "829de50415ea748439fc65cb806adb43fcb1843d"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/providers/audio_vertical.go",
+          "old_blob": "b5b37b516b33c43f18f9cde6767d353e0bdafa45",
+          "new_blob": "ec03f1e56b3d39ff3607ac18e4ca6e6c2f7c9d28"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/providers/azure_failure.go",
+          "old_blob": "53e3e977aa0506647c0a2e7c35c1a8ae4092d1d5",
+          "new_blob": "06177088128e4a1220021ca074101097069df292"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/providers/azure_runtime_test.go",
+          "old_blob": "c9a4996e225a4f1a2b8a2f1610e7e03611b508fb",
+          "new_blob": "f969d5d2a2d88981f07b0e9e1cc33cb34bffba0a"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/providers/azure_vertical.go",
+          "old_blob": "59ce867fbfcc40e9e9872cfae9b8aff1a2f14017",
+          "new_blob": "24f321ca810281d39a15c2f56b97e12ac8544460"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/providers/azureopenai.go",
+          "old_blob": "e3e03f18bd7530b1c9b78fa71eca5207f3e579da",
+          "new_blob": "45be2ca02852d7951b9f24e3800db17bf1c6df0f"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/providers/bedrock_vertical.go",
+          "old_blob": "aac0b7a8a2b2054c92498c267af0ed4ce9201c10",
+          "new_blob": "2a67c2c068ec6c92c505c4d2d5ef6a7e3b9cafdd"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/providers/core_stream.go",
+          "old_blob": "e053eb1802d952b35e1e27a141df8039c5beeb52",
+          "new_blob": "d691da71040b891c9ce86235f7e34ac36be4f8de"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/providers/error_classification_test.go",
+          "old_blob": "41ac400a19520fda081e997f92d9b3ce11d6a0f3",
+          "new_blob": "ffc03eed13a2e1c47d073aac45fd6cce643ad9f8"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/providers/error_classification.go",
+          "old_blob": "04c82657462093ce44633583667606f1d113c938",
+          "new_blob": "edbef170348fb232943342dc2c2d0d6e0c7ecd92"
+        },
+        {
+          "status": "added",
+          "path": "go/internal/providers/facade_cancellation_test.go",
+          "old_blob": "0000000000000000000000000000000000000000",
+          "new_blob": "41fe1702385fbd75b3ac608a5f335376a7f5dae4"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/providers/google_vertical.go",
+          "old_blob": "5f8a3d00165f48d9c5d2a646fa6b70a32779dc6f",
+          "new_blob": "7d71ce1c847fabe43913bfd40beff2903b217e4d"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/providers/httpstream.go",
+          "old_blob": "d34257ce540aef0b3b43d3a3b29e8df84916cfcc",
+          "new_blob": "b9632be00e815093393c4242b5752e39b3d92a07"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/providers/ollama_test.go",
+          "old_blob": "5dd79f78bd4ab6fe8613b9295884d24156f976da",
+          "new_blob": "f43891bb4a6f5d61e02025167f609fe3ac18713f"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/providers/ollama_vertical.go",
+          "old_blob": "6557d84548ab31df2a5eccd8af849a2b2d46cba6",
+          "new_blob": "70315793b6d303a3633a621ea5dc18172f5c9ce4"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/providers/openai_compatible_failure_test.go",
+          "old_blob": "79d108729d339013687b483ec82e7bd9f86b8277",
+          "new_blob": "a9222109b2b74f199b415105ae5ec7c4c905957d"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/providers/openai_compatible_failure.go",
+          "old_blob": "91fe605199e12036297beb524166e9e1529902c3",
+          "new_blob": "025ba271a322da3542adecfaacf26858b364ac9f"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/providers/openai_compatible_vertical.go",
+          "old_blob": "e1f9bfd31848b5b0947c5c969c3a7b8984854950",
+          "new_blob": "5737cd17c870e5175bce3a1de35ba754991614a7"
+        },
+        {
+          "status": "added",
+          "path": "go/internal/providers/policy_retry_test.go",
+          "old_blob": "0000000000000000000000000000000000000000",
+          "new_blob": "fad192b7f8914bfe4373e6edf3d6ecdac043d912"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/providers/policy_v043_test.go",
+          "old_blob": "59f9f0adb8e920f123c23af8cea7b8bdc33be7ae",
+          "new_blob": "710ffa636b15a8f832d50af1279164d4443dbea9"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/providers/policy.go",
+          "old_blob": "20f9f3a3587afa298cd713cd6e5d4ec7409bbea8",
+          "new_blob": "0a647818e6464abb9493e6b5eff719a36bb1e8c9"
+        },
+        {
+          "status": "added",
+          "path": "go/internal/providers/provider_timeouts_test.go",
+          "old_blob": "0000000000000000000000000000000000000000",
+          "new_blob": "bd14055ec1658de6c6626bbd6f7f27d9f2c54b7c"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/providers/provider.go",
+          "old_blob": "7be56b14da6052a068413de5f06c0761c2d686d1",
+          "new_blob": "4879b396dae03268907d8d014958373a3e5915f3"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/router/failover_boundary_test.go",
+          "old_blob": "083ad86fd36f77a5a3cc94486ef6495d1dbecc21",
+          "new_blob": "3bdfa51fb1931642147de7c5e0eceea720c41cd4"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/router/failover.go",
+          "old_blob": "dbf86ab84d5371515e3d9753b07760614b63fb1d",
+          "new_blob": "0b3ed160b5ebc3e8a37cbf03ccdf692f54018795"
+        },
+        {
+          "status": "added",
+          "path": "go/internal/router/savings_test.go",
+          "old_blob": "0000000000000000000000000000000000000000",
+          "new_blob": "403f558ca7ec8d4a648f2e983d1eb9adb49b0b84"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/router/savings.go",
+          "old_blob": "49e9718e32d6f5d0b6f3062cad58899a75bf1d06",
+          "new_blob": "4138acbbdcb3b95abb948b52de4748637675e334"
+        },
+        {
+          "status": "modified",
+          "path": "website/api.html",
+          "old_blob": "fe0873c56099ef90018f7563f29521f264b2f36b",
+          "new_blob": "708a19c598ac11ba0bf6637a3eb691461da1e0a3"
+        },
+        {
+          "status": "modified",
+          "path": "website/concepts.html",
+          "old_blob": "e267f2c5426bb4f50f3b67b82319c03f5da86f10",
+          "new_blob": "17ce37e9978b30048a659fd66825e3737f0c7640"
+        },
+        {
+          "status": "modified",
+          "path": "website/governance.html",
+          "old_blob": "55e52a04056077551091dc858580a2f86f187c44",
+          "new_blob": "f7a08c55234eb1453c26ef34b4d970ccb152fc3c"
+        }
+      ]
+    }
+  ],
+  "facts": [
+    {
+      "id": "cli-health-and-models-unchanged",
+      "claim": "The version and health subcommands, the /health handler and the GET /v1/models listing and filtering are unchanged; the changes are in the streaming, routing, provider, metering and admission paths of the data-plane completion routes.",
+      "status": "observed",
+      "evidence": {
+        "source": "git diff v1.2.0..HEAD for go/cmd/llmgw, go/internal/buildinfo, go/internal/api/models.go"
+      }
+    },
+    {
+      "id": "stream-outcomes",
+      "claim": "A stream succeeds only when the upstream ended it and the gateway wrote the surface's terminal event; after headers are sent a failure ends Chat with one error event and no [DONE], Messages with event: error and no message_stop, Responses with response.failed. Such streams are recorded as 502 upstream_stream.",
+      "status": "observed",
+      "evidence": {
+        "source": "go/internal/api/openai.go, anthropic.go, responses_api.go, go/internal/providers/anthropic_failure.go, core_stream.go and stream_outcome_test.go"
+      }
+    },
+    {
+      "id": "metering",
+      "claim": "Every stream records the tokens it consumed with the served provider and model on every exit (200, 499 client_cancelled, 502 upstream_stream), estimating them when the upstream reports none; failed requests that consumed tokens are charged; native Anthropic streams report exact usage through llm-translate v0.4.0; stream_options reaches the upstream on Chat streams.",
+      "status": "observed",
+      "evidence": {
+        "source": "go/internal/api/stream_usage.go, go/internal/router/savings.go, go/internal/providers/anthropic.go and their tests"
+      }
+    },
+    {
+      "id": "deadlines-and-cancellation",
+      "claim": "The failover budget covers target selection and the wait for an answer to begin, not the answer; provider timeouts bound the wait for response headers and each gap between body reads; client disconnects cancel native Anthropic and Azure requests; an upstream Retry-After is passed to clients and waited out for at most 5 seconds with full-jitter backoff.",
+      "status": "observed",
+      "evidence": {
+        "source": "go/internal/router/failover.go, go/internal/providers/policy.go, httpstream.go, anthropic.go, azureopenai.go, provider.go and their tests"
+      }
+    },
+    {
+      "id": "admission-and-errors",
+      "claim": "Request quota is consumed only for requests the gateway executes, after validation; externally managed keys count against project limits; /v1/messages and /v1/messages/count_tokens answer errors in Anthropic's envelope.",
+      "status": "observed",
+      "evidence": {
+        "source": "go/internal/api/keypolicy.go, go/internal/iam/quota.go, go/internal/api/errors.go and their tests"
+      }
+    },
+    {
+      "id": "release-gates",
+      "claim": "At source revision c474899cc5b81b09c16f7abc6b7e765ad0421b31: go build, go vet, go test for every package, govulncheck, go mod tidy -diff and go mod verify pass; console typecheck, tests and the dist rebuild check pass; the documentation check passes; go test -race over every package passes on linux/amd64 with Go 1.26.6; the deterministic Docker acceptance passes all 31 checks against an image built from that revision on a Linux engine, where its digest policy does not apply to a locally built candidate.",
+      "status": "observed",
+      "evidence": {
+        "source": "local release-gate execution for c474899cc5b81b09c16f7abc6b7e765ad0421b31"
+      }
+    }
+  ],
+  "impact": {
+    "assertions": [
+      {
+        "id": "A1",
+        "impact": "unchanged",
+        "supported_by": [
+          "cli-health-and-models-unchanged",
+          "release-gates"
+        ]
+      },
+      {
+        "id": "A2",
+        "impact": "unchanged",
+        "supported_by": [
+          "cli-health-and-models-unchanged",
+          "release-gates"
+        ]
+      },
+      {
+        "id": "A3",
+        "impact": "unchanged",
+        "supported_by": [
+          "cli-health-and-models-unchanged",
+          "release-gates"
+        ]
+      },
+      {
+        "id": "A4",
+        "impact": "unchanged",
+        "supported_by": [
+          "cli-health-and-models-unchanged",
+          "admission-and-errors",
+          "release-gates"
+        ]
+      }
+    ],
+    "requires": [],
+    "possible_binding_changes": []
+  },
+  "questions": [],
+  "conclusion": {
+    "action": "reuse_contract",
+    "summary": "The release makes stream outcomes, usage accounting, deadlines, cancellation, Retry-After and request admission truthful without changing the accepted CLI identity, CLI health, HTTP health or model-list propositions. The existing accepted contract and bindings remain appropriate."
+  },
+  "proposed": {
+    "by": "release operator",
+    "at": "2026-10-04T11:33:20.866Z"
+  },
+  "digest": "07b793c6e510cb33b4ae47fb6b02918cd5805658cf06bd9ef5af4a227e8c9e0a"
+}
