@@ -4,6 +4,9 @@ import (
 	"net/http"
 	"strconv"
 	"testing"
+
+	"llmgw/internal/config"
+	"llmgw/internal/providers"
 )
 
 // A chain that ends on a throttled or unavailable upstream answers with the
@@ -34,5 +37,43 @@ func TestChainFailurePassesRetryAfterOn(t *testing.T) {
 				})
 			}
 		}
+	}
+}
+
+// An Anthropic or Azure OpenAI refusal reaches the client with the
+// upstream's status and Retry-After, as an OpenAI-compatible one does:
+// on Messages and its token count for Anthropic, and on Chat for both,
+// streamed or not.
+func TestAnthropicAndAzureRefusalsPassRetryAfterOn(t *testing.T) {
+	for _, tc := range []struct {
+		providerType, path string
+		stream             bool
+	}{
+		{"anthropic", "/v1/messages", false},
+		{"anthropic", "/v1/messages", true},
+		{"anthropic", "/v1/messages/count_tokens", false},
+		{"anthropic", "/v1/chat/completions", false},
+		{"anthropic", "/v1/chat/completions", true},
+		{"azure_openai", "/v1/chat/completions", false},
+		{"azure_openai", "/v1/chat/completions", true},
+	} {
+		t.Run(tc.providerType+tc.path+map[bool]string{false: "", true: "/stream"}[tc.stream], func(t *testing.T) {
+			handler := setupAPISmokeFixture(t, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				w.Header().Set("Retry-After", "2")
+				writeJSON(w, http.StatusTooManyRequests, map[string]any{"error": map[string]any{"message": "slow down"}})
+			}))
+			config.Update(func(s *config.Settings) { s.Providers["fixture"].Type = tc.providerType })
+			providers.ResetProviders()
+			request := map[string]any{
+				"model": "fixture/model", "max_tokens": 16, "messages": []any{map[string]any{"role": "user", "content": "hi"}},
+			}
+			if tc.stream {
+				request["stream"] = true
+			}
+			response := apiSmokeRequest(handler, tc.path, request)
+			if response.Code != http.StatusTooManyRequests || response.Header().Get("Retry-After") != "2" {
+				t.Fatalf("status=%d Retry-After=%q body=%s", response.Code, response.Header().Get("Retry-After"), response.Body.String())
+			}
+		})
 	}
 }

@@ -5,9 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"strconv"
 	"strings"
-	"time"
 
 	core "github.com/xibodev/llmgw-core"
 	coreproviders "github.com/xibodev/llmgw-core/providers"
@@ -138,12 +136,8 @@ func (p *openAICompatibleProvider) failure(err error, words openAIWords) error {
 // bounded them, and the Retry-After the transport passed on, in seconds.
 func (p *openAICompatibleProvider) refusal(refused *coreproviders.InvocationError, words openAIWords) error {
 	upstream := strings.TrimPrefix(refused.Msg, fmt.Sprintf("%s: upstream returned %d: ", p.label, refused.Status))
-	retryAfter := ""
-	if refused.RetryAfter > 0 {
-		retryAfter = strconv.FormatInt(int64(refused.RetryAfter/time.Second), 10)
-	}
 	message := fmt.Sprintf("%s %d: %s", words.refusal, refused.Status, upstream)
-	return invocationStatusRetryAfter(message, refused.Status, retryAfter)
+	return invocationStatusRetryAfter(message, refused.Status, retryAfterSeconds(refused.RetryAfter))
 }
 
 // transportError is the transport's error for a failure core reports

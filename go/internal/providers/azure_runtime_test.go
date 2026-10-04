@@ -261,9 +261,9 @@ func TestAzureStreamRelaysDataEvents(t *testing.T) {
 	}
 }
 
-// Core's failures map back to the errors the transport returned: a refusal
-// keeps its status and message but not the Retry-After the transport never
-// read, and every other failure keeps the transport's message and
+// Core's failures map back to the errors the transport returned, with the
+// upstream's Retry-After added to a refusal: a refusal keeps its status and
+// message, and every other failure keeps the transport's message and
 // disposition.
 func TestAzureFailuresKeepTheTransportsErrors(t *testing.T) {
 	var status int
@@ -283,7 +283,7 @@ func TestAzureFailuresKeepTheTransportsErrors(t *testing.T) {
 	for name, call := range map[string]func() error{"complete": complete, "stream": stream} {
 		err := call()
 		if err == nil || err.Error() != "azure_openai: upstream returned 429: slow down" || UpstreamStatus(err) != 429 ||
-			InvocationRetryAfter(err) != "" || !InvocationRetryable(err) {
+			InvocationRetryAfter(err) != "7" || !InvocationRetryable(err) {
 			t.Fatalf("%s: err=%v retry-after=%q", name, err, InvocationRetryAfter(err))
 		}
 	}

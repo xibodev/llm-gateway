@@ -16,8 +16,11 @@ import (
 // stream. Core names each failure by its message.
 //
 // A refusal keeps its status and the transport's message, which core renders
-// the same way, but not its Retry-After: the transport never read one, and
-// the resilience wrapper would wait it out and the API layer pass it on.
+// the same way. It also keeps the upstream's Retry-After, which the transport
+// never read, so a client the refusal reaches learns when to retry. Keeping
+// it holds no request for long: the resilience wrapper waits out at most
+// maxRetryAfterWait of it and leaves a longer one to the router, which tries
+// the next target.
 func azureFailure(err error, transport, instance string) error {
 	var configErr *ConfigError
 	if errors.As(err, &configErr) {
@@ -25,7 +28,7 @@ func azureFailure(err error, transport, instance string) error {
 	}
 	var refused *coreproviders.InvocationError
 	if errors.As(err, &refused) {
-		return invocationStatus(refused.Msg, refused.Status)
+		return invocationStatusRetryAfter(refused.Msg, refused.Status, retryAfterSeconds(refused.RetryAfter))
 	}
 	var failure *core.ProviderError
 	if !errors.As(err, &failure) {

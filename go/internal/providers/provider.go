@@ -594,6 +594,15 @@ func invocationStatusRetryAfter(msg string, status int, retryAfter string) error
 	return &InvocationError{Msg: msg, Status: status, RetryAfter: strings.TrimSpace(retryAfter)}
 }
 
+// retryAfterSeconds is a Retry-After delay core read from an upstream answer
+// as the whole seconds an InvocationError carries, or "" for none.
+func retryAfterSeconds(delay time.Duration) string {
+	if delay <= 0 {
+		return ""
+	}
+	return strconv.FormatInt(int64(delay/time.Second), 10)
+}
+
 // UpstreamStatus returns the upstream HTTP status carried by err, or 0.
 func UpstreamStatus(err error) int {
 	var e *InvocationError
@@ -609,10 +618,7 @@ func InvocationRetryAfter(err error) string {
 	if asError(err, &e) {
 		return e.RetryAfter
 	}
-	if delay := core.ClassifyError(err).RetryAfter; delay > 0 {
-		return strconv.FormatInt(int64(delay/time.Second), 10)
-	}
-	return ""
+	return retryAfterSeconds(core.ClassifyError(err).RetryAfter)
 }
 
 // IsInvocation reports whether err is (or wraps) an InvocationError.

@@ -38,10 +38,10 @@ func anthropicCount(p AnthropicNativeProvider) error {
 }
 
 // Core's failures map back to the errors the gateway's transport returned,
-// so the router, the resilience wrapper and a client read them as before: a
-// refusal keeps its status and message but not the Retry-After the transport
-// never read, and every other failure keeps the transport's message and
-// disposition.
+// so the router, the resilience wrapper and a client read them as before,
+// with the upstream's Retry-After added to a refusal: a refusal keeps its
+// status and message, and every other failure keeps the transport's message
+// and disposition.
 func TestAnthropicFailuresKeepTheTransportsErrors(t *testing.T) {
 	var status atomic.Int32
 	var body atomic.Value
@@ -57,13 +57,13 @@ func TestAnthropicFailuresKeepTheTransportsErrors(t *testing.T) {
 	for name, call := range anthropicCalls {
 		err := call(provider)
 		if err == nil || err.Error() != "anthropic: upstream returned 429: slow down" || UpstreamStatus(err) != 429 ||
-			InvocationRetryAfter(err) != "" || !InvocationRetryable(err) || !IsThrottle(err) {
+			InvocationRetryAfter(err) != "7" || !InvocationRetryable(err) || !IsThrottle(err) {
 			t.Fatalf("%s: err=%v retry-after=%q", name, err, InvocationRetryAfter(err))
 		}
 	}
 	if err := anthropicCount(provider); err == nil || err.Error() != "anthropic: token count returned 429: slow down" ||
-		UpstreamStatus(err) != 429 || InvocationRetryAfter(err) != "" || !InvocationRetryable(err) {
-		t.Fatalf("count: err=%v", err)
+		UpstreamStatus(err) != 429 || InvocationRetryAfter(err) != "7" || !InvocationRetryable(err) {
+		t.Fatalf("count: err=%v retry-after=%q", err, InvocationRetryAfter(err))
 	}
 	respond(http.StatusBadRequest, "")
 	for name, call := range anthropicCalls {
