@@ -22,6 +22,9 @@ func auditAdminResult(
 		detail = map[string]any{}
 	}
 	detail["actor_source"] = actor.Source
+	if actor.KeyFingerprint != "" {
+		detail["actor_key_fingerprint"] = actor.KeyFingerprint
+	}
 	if err := iam.RecordAudit(iam.AuditEvent{
 		ActorPrincipalID: actor.PrincipalID, ActorKeyID: actor.KeyID,
 		Action: action, TargetType: targetType, TargetID: targetID,

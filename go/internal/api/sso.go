@@ -31,7 +31,10 @@ type ssoIdentity struct {
 type adminActor struct {
 	PrincipalID string
 	KeyID       string
-	Source      string
+	// KeyFingerprint tells the static administrator keys apart in audit
+	// records, which must never hold the key itself.
+	KeyFingerprint string
+	Source         string
 }
 
 type adminActorContextKey struct{}
@@ -42,7 +45,7 @@ type adminActorContextKey struct{}
 func requireAdmin(w http.ResponseWriter, r *http.Request) bool {
 	token := extractAPIKey(r)
 	if token != "" && matchesAnyKey(token, validKeys()) {
-		setAdminActor(r, adminActor{Source: "static-admin-key"})
+		setAdminActor(r, adminActor{Source: "static-admin-key", KeyFingerprint: staticKeyFingerprint(token)})
 		return true
 	}
 	if identity, ok, status, msg := verifiedSSOIdentity(r); ok {

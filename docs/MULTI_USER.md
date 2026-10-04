@@ -172,7 +172,10 @@ group by project, principal, key, provider, and model.
 
 Audit history is append-only during its configured retention window. Many
 security-sensitive and identity/credential mutations are audited, but the project
-does not claim every management mutation is currently covered.
+does not claim every management mutation is currently covered. An event whose
+administrator authenticated with a static key carries `actor_key_fingerprint`,
+the first 12 hexadecimal digits of that key's SHA-256, which tells the static
+keys apart without storing them.
 
 Quota and key-expiry rules create a durable, deduplicated outbox. The gateway
 does not send email or chat messages itself; an external worker such as the

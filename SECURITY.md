@@ -43,7 +43,11 @@ runtime configuration. Use synthetic reproduction data.
 - **Governance**: project/key allowlists and request, token, estimated-cost, and
   credit limits execute in the request path.
 
-Static admin-key comparison is constant-time.
+Static admin-key comparison is constant-time. Audit events of administrator
+actions authenticated by a static key record `actor_key_fingerprint`, the first
+12 hexadecimal digits of the key's SHA-256 (`printf '%s' "$KEY" | sha256sum`),
+so different keys can be told apart; the key itself is never stored. A startup
+warning reports how many keys `LLMGW_API_KEYS` holds.
 
 ## SSO boundary
 

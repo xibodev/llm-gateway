@@ -1,7 +1,9 @@
 package api
 
 import (
+	"crypto/sha256"
 	"crypto/subtle"
+	"encoding/hex"
 	"net/http"
 	"net/netip"
 	"net/url"
@@ -54,6 +56,14 @@ func matchesAnyKey(token string, keys []string) bool {
 		}
 	}
 	return matched
+}
+
+// staticKeyFingerprint names a static administrator key without revealing it:
+// a SHA-256 prefix cannot be turned back into a random key, and twelve hex
+// digits keep an operator's handful of keys apart.
+func staticKeyFingerprint(key string) string {
+	sum := sha256.Sum256([]byte(key))
+	return hex.EncodeToString(sum[:])[:12]
 }
 
 // requireAPIKey authenticates a request and returns its principal (or an error
