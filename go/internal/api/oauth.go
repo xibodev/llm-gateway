@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log"
 	"net/http"
 	"net/url"
 	"sort"
@@ -133,7 +134,47 @@ func ensureOAuthProviderConfig(providerID, providerRef string) error {
 		Type: entry.RuntimeType, RegistryID: entry.ID, BaseURL: entry.DefaultBaseURL, Region: entry.DefaultRegion,
 	})
 	if err != nil {
-		return fmt.Errorf("could not persist the OAuth provider configuration")
+		return configNotSaved("Could not persist the OAuth provider configuration.", err)
+	}
+	return nil
+}
+
+// configSaveError is an OAuth step that failed because the configuration
+// file did not take a change: a failure of the gateway rather than of the
+// request. Its message is what the client is told.
+type configSaveError struct{ message string }
+
+func (e *configSaveError) Error() string { return e.message }
+
+// configNotSaved logs cause, which names the file the operator has to fix,
+// and returns the error the client is told.
+func configNotSaved(message string, cause error) error {
+	log.Print(cause)
+	return &configSaveError{message: message}
+}
+
+// writeOAuthStartError answers a start that failed: 500 when the
+// configuration file did not take a change the start made, 400 otherwise.
+func writeOAuthStartError(w http.ResponseWriter, err error) {
+	status := http.StatusBadRequest
+	if saveErr := (*configSaveError)(nil); errors.As(err, &saveErr) {
+		status = http.StatusInternalServerError
+	}
+	writeError(w, status, oauthErrorText(err.Error()))
+}
+
+// restoreCodexClientID puts back the Codex client ID a start saved before it
+// failed. A start that saved none, or whose client ID a later change already
+// replaced, leaves the setting alone.
+func restoreCodexClientID(saved, previous string) error {
+	if config.Get().OpenAICodexClientID != strings.TrimSpace(saved) {
+		return nil
+	}
+	if _, err := config.UpdateAndSave(func(settings *config.Settings) error {
+		settings.OpenAICodexClientID = previous
+		return nil
+	}); err != nil {
+		return configNotSaved("Could not restore the previous Codex OAuth client ID.", err)
 	}
 	return nil
 }
@@ -157,15 +198,15 @@ func configureOAuthClientID(providerRef, clientID string, allowUpdate bool) erro
 		if !allowUpdate {
 			return fmt.Errorf("Only an administrator can configure the Codex OAuth client ID.")
 		}
-		previous := config.Get().OpenAICodexClientID
-		config.Update(func(settings *config.Settings) {
-			settings.OpenAICodexClientID = clientID
-		})
-		if err := config.Save(); err != nil {
-			config.Update(func(settings *config.Settings) {
-				settings.OpenAICodexClientID = previous
-			})
-			return fmt.Errorf("Could not persist the Codex OAuth client ID.")
+		// An unchanged client ID needs no write, which a read-only file
+		// would refuse.
+		if clientID != config.Get().OpenAICodexClientID {
+			if _, err := config.UpdateAndSave(func(settings *config.Settings) error {
+				settings.OpenAICodexClientID = clientID
+				return nil
+			}); err != nil {
+				return configNotSaved("Could not persist the Codex OAuth client ID.", err)
+			}
 		}
 	}
 	if strings.TrimSpace(providers.EffectiveCodexClientID()) == "" {
@@ -187,10 +228,9 @@ func (s *server) startOAuthFlow(
 		if !rollbackCodexClientID || flowStarted {
 			return
 		}
-		config.Update(func(settings *config.Settings) {
-			settings.OpenAICodexClientID = previousCodexClientID
-		})
-		_ = config.Save()
+		if rollbackErr := restoreCodexClientID(clientID, previousCodexClientID); rollbackErr != nil {
+			err = errors.Join(err, rollbackErr)
+		}
 	}()
 	if err := configureOAuthClientID(providerRef, clientID, allowClientIDUpdate); err != nil {
 		return nil, err
@@ -344,7 +384,7 @@ func (s *server) startManualOAuthFlow(
 	}, nil
 }
 
-func (s *server) startCodexBrowserFlow(principal iam.Principal, providerRef, clientID string, allowClientIDUpdate bool, connectionName, source string) (map[string]any, error) {
+func (s *server) startCodexBrowserFlow(principal iam.Principal, providerRef, clientID string, allowClientIDUpdate bool, connectionName, source string) (response map[string]any, err error) {
 	providerID, _, _, adapterErr := oauthAdapterFor(providerRef)
 	if adapterErr != nil {
 		return nil, adapterErr
@@ -358,8 +398,9 @@ func (s *server) startCodexBrowserFlow(principal iam.Principal, providerRef, cli
 	flowStarted := false
 	defer func() {
 		if rollbackClientID && !flowStarted {
-			config.Update(func(settings *config.Settings) { settings.OpenAICodexClientID = previousClientID })
-			_ = config.Save()
+			if rollbackErr := restoreCodexClientID(clientID, previousClientID); rollbackErr != nil {
+				err = errors.Join(err, rollbackErr)
+			}
 		}
 	}()
 	if err := configureOAuthClientID(providerRef, clientID, allowClientIDUpdate); err != nil {
@@ -785,7 +826,7 @@ func (s *server) handleUserOAuthStart(w http.ResponseWriter, r *http.Request) {
 		response, err = s.startOAuthFlow(principal, r.PathValue("provider_id"), "", false, r, input.ConnectionName, iam.ConnectionSourceUser, input.Flow)
 	}
 	if err != nil {
-		writeError(w, 400, oauthErrorText(err.Error()))
+		writeOAuthStartError(w, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, response)
@@ -855,7 +896,7 @@ func (s *server) handlePrincipalOAuthStart(w http.ResponseWriter, r *http.Reques
 		response, err = s.startOAuthFlow(principal, r.PathValue("provider_id"), input.ClientID, true, r, input.ConnectionName, iam.ConnectionSourceAdmin, input.Flow)
 	}
 	if err != nil {
-		writeError(w, 400, oauthErrorText(err.Error()))
+		writeOAuthStartError(w, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, response)

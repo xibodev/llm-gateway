@@ -3,8 +3,11 @@ package api
 import (
 	"encoding/base64"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -146,6 +149,65 @@ func TestOAuthProviderCreationRejectsEndpointNameCollision(t *testing.T) {
 	if _, exists := config.Provider("codex"); exists {
 		t.Fatal("OAuth setup created a provider colliding with an endpoint")
 	}
+}
+
+// An OAuth step whose configuration change the file does not take is the
+// gateway's failure: the start answers 500, and neither the change nor a
+// rollback of it is published.
+func TestOAuthStartReportsConfigurationSaveFailures(t *testing.T) {
+	t.Setenv("LLMGW_STATE_DIR", t.TempDir())
+	t.Setenv("LLMGW_CONFIG", filepath.Join(config.StateDir(), "missing", "config.yaml"))
+	iam.ResetForTests()
+	t.Cleanup(iam.ResetForTests)
+	if _, err := iam.Initialize(); err != nil {
+		t.Fatal(err)
+	}
+	old := *config.Get()
+	t.Cleanup(func() { config.Update(func(s *config.Settings) { *s = old }) })
+	config.Update(func(s *config.Settings) {
+		s.APIKey = "admin-secret"
+		s.Providers = map[string]*config.ProviderConfig{}
+		s.Endpoints = map[string]*config.EndpointConfig{}
+		s.OpenAICodexClientID = "fixture-previous-client"
+	})
+	owner, err := iam.CreatePrincipal("human", "fixture:oauth-save-failure", "", "OAuth save failure")
+	if err != nil {
+		t.Fatal(err)
+	}
+	server := httptest.NewServer(NewServer(Runtime{}))
+	defer server.Close()
+	unchanged := func(step string, change func() error) {
+		t.Helper()
+		before, generation := config.Snapshot()
+		if err := change(); err != nil {
+			t.Fatalf("%s: %v", step, err)
+		}
+		if current, currentGeneration := config.Snapshot(); current != before || currentGeneration != generation {
+			t.Fatalf("%s published a change the file did not take", step)
+		}
+	}
+
+	unchanged("client ID save", func() error {
+		status, body := jsonRequest(t, server.URL+"/admin/api/principals/"+owner.ID+"/connections/codex/oauth/start",
+			http.MethodPost, "admin-secret", map[string]any{"client_id": "fixture-new-client", "flow": "device_code"})
+		if status != http.StatusInternalServerError || !strings.Contains(fmt.Sprint(body["error"]), "Codex OAuth client ID") {
+			return fmt.Errorf("status=%d body=%+v", status, body)
+		}
+		return nil
+	})
+	unchanged("provider setup", func() error {
+		if err := ensureOAuthProviderConfig("codex", "openai_codex"); !errors.As(err, new(*configSaveError)) {
+			return fmt.Errorf("err=%v", err)
+		}
+		return nil
+	})
+	config.Update(func(s *config.Settings) { s.OpenAICodexClientID = "fixture-new-client" })
+	unchanged("client ID rollback", func() error {
+		if err := restoreCodexClientID("fixture-new-client", "fixture-previous-client"); !errors.As(err, new(*configSaveError)) {
+			return fmt.Errorf("err=%v", err)
+		}
+		return nil
+	})
 }
 
 func TestProviderUpsertAcceptsAndPreservesPublicOAuthClientID(t *testing.T) {

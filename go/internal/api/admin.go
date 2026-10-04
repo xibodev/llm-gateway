@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"strconv"
 	"strings"
@@ -20,9 +21,13 @@ import (
 	gcpauth "github.com/xibodev/llm-provider-auth/gcp"
 )
 
-func persist() {
-	_ = config.Save()
-	providers.ResetProviders()
+// writeConfigSaveError answers a change the configuration file did not take,
+// which left the published settings as they were. The client learns the
+// change was not saved; the cause, which names the file to fix, goes to the
+// log.
+func writeConfigSaveError(w http.ResponseWriter, message string, err error) {
+	log.Print(err)
+	writeError(w, http.StatusInternalServerError, message)
 }
 
 var endpointMutationMu sync.Mutex
@@ -499,7 +504,7 @@ func handleUpsertProvider(w http.ResponseWriter, r *http.Request) {
 			config.DeleteSecret(pid)
 		}
 	}
-	config.Update(func(s *config.Settings) {
+	if _, err := config.UpdateAndSave(func(s *config.Settings) error {
 		next := &config.ProviderConfig{
 			Type: body.Type, RegistryID: registryID, BaseURL: emptyNil(body.BaseURL),
 			Region: emptyNil(body.Region), Project: emptyNil(body.Project),
@@ -521,14 +526,18 @@ func handleUpsertProvider(w http.ResponseWriter, r *http.Request) {
 			next.VertexRequestType = *body.VertexRequestType
 		}
 		s.Providers[pid] = next
-	})
+		return nil
+	}); err != nil {
+		writeConfigSaveError(w, "Provider configuration could not be persisted.", err)
+		return
+	}
 	if strings.TrimSpace(body.APIKey) != "" && credentialKind != "setup_token" {
 		config.SaveSecret(pid, strings.TrimSpace(body.APIKey))
 	}
 	providers.ForgetProvider(pid)
 	providers.ForgetCatalog(pid)
 	_ = iam.InvalidateProviderChecks(pid)
-	persist()
+	providers.ResetProviders()
 	writeJSON(w, 200, map[string]any{"ok": true, "id": pid})
 }
 
@@ -607,11 +616,11 @@ func handleDeleteProvider(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		if wasAutomationManaged {
 			if markerErr := iam.MarkAnonymousProviderManaged(pid); markerErr != nil {
-				writeError(w, 500, "Provider configuration could not be persisted and automation ownership could not be restored.")
+				writeConfigSaveError(w, "Provider configuration could not be persisted and automation ownership could not be restored.", err)
 				return
 			}
 		}
-		writeError(w, 500, "Provider configuration could not be persisted.")
+		writeConfigSaveError(w, "Provider configuration could not be persisted.", err)
 		return
 	}
 	if err := iam.RevokeSystemProviderConnection(pid); err != nil {
@@ -653,15 +662,19 @@ func handleProviderEnabled(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	enabled := *body.Enabled
-	config.Update(func(s *config.Settings) {
+	if _, err := config.UpdateAndSave(func(s *config.Settings) error {
 		if providerConfig := s.Providers[pid]; providerConfig != nil {
 			providerConfig.Disabled = !enabled
 		}
-	})
+		return nil
+	}); err != nil {
+		writeConfigSaveError(w, "Provider configuration could not be persisted.", err)
+		return
+	}
 	providers.ForgetProvider(pid)
 	providers.ForgetCatalog(pid)
 	_ = iam.InvalidateProviderChecks(pid)
-	persist()
+	providers.ResetProviders()
 	auditAdmin(r, "provider.enabled", "provider", pid, map[string]any{"enabled": enabled})
 	writeJSON(w, 200, map[string]any{"ok": true, "provider_id": pid, "enabled": enabled})
 }
@@ -1040,7 +1053,7 @@ func handleUpsertEndpoint(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if _, err := storeEndpoint(name, members); err != nil {
-		writeError(w, 500, "Route configuration could not be persisted.")
+		writeConfigSaveError(w, "Route configuration could not be persisted.", err)
 		return
 	}
 	providers.ResetProviders()
@@ -1083,7 +1096,7 @@ func handleDeleteEndpoint(w http.ResponseWriter, r *http.Request) {
 		delete(s.Endpoints, name)
 		return nil
 	}); err != nil {
-		writeError(w, 500, "Endpoint configuration could not be persisted.")
+		writeConfigSaveError(w, "Endpoint configuration could not be persisted.", err)
 		return
 	}
 	providers.ResetProviders()

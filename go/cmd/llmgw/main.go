@@ -179,7 +179,9 @@ func serve() error {
 	if truthy(os.Getenv("LLMGW_AUTODISCOVER_LOCAL")) {
 		func() {
 			defer func() { _ = recover() }()
-			config.AutodetectProviders(true)
+			if _, err := config.AutodetectProviders(true); err != nil {
+				log.Printf("warning: local providers were not added: %v", err)
+			}
 		}()
 	}
 

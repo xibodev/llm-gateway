@@ -205,7 +205,7 @@ on loopback only.
 | `LLMGW_EXTENSION_SECRET` | unset | Shared secret sent to that daemon as a bearer token. Set it, and start the daemon with the same value: a daemon started without a secret accepts any caller. |
 | `LLMGW_ANTHROPIC_DISCOVERY_ALIASES` | `true` | `GET /v1/models` also lists chat models whose IDs start with `claude` or `anthropic` under their bare ID, so Claude Code's gateway model discovery shows them. Affects listing only, not routing. |
 | `LLMGW_ANTHROPIC_DISCOVERY_ALL_MODELS` | `false` | Lets every other model be requested as `claude-<model-id>`, and lists chat models that way while discovery aliases are on. |
-| `LLMGW_AUTODISCOVER_LOCAL` | `0` | When `1`, `true`, `yes`, or `on`, `serve` adds every reachable [local model server](PROVIDERS.md#local-detection) that is not configured yet and saves it to the configuration. |
+| `LLMGW_AUTODISCOVER_LOCAL` | `0` | When `1`, `true`, `yes`, or `on`, `serve` adds every reachable [local model server](PROVIDERS.md#local-detection) that is not configured yet and saves it to the configuration. When the configuration cannot be saved, `serve` adds none of them and logs a warning. |
 
 ### Provider roster
 

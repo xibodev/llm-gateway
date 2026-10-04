@@ -1404,7 +1404,7 @@ func writeDocument(path string, document *yaml.Node) error {
 		return fmt.Errorf("configuration not saved: %w", err)
 	}
 	if err := writeConfigFile(path, out.Bytes()); err != nil {
-		return fmt.Errorf("configuration not saved: %w", err)
+		return fmt.Errorf("configuration not saved: write %s: %w", path, err)
 	}
 	return nil
 }

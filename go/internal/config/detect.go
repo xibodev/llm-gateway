@@ -1,6 +1,7 @@
 package config
 
 import (
+	"errors"
 	"fmt"
 	"net/http"
 	"os"
@@ -156,13 +157,21 @@ func DiscoverLocalProviders() []LocalCandidate {
 // AutodetectProviders is the OPT-IN silent path: add every discovered local
 // provider not already configured. Off by default (surface-don't-hardwire);
 // used at startup only when LLMGW_AUTODISCOVER_LOCAL is truthy. Returns ids added.
-func AutodetectProviders(persist bool) []string {
-	candidates := DiscoverLocalProviders()
+func AutodetectProviders(persist bool) ([]string, error) {
+	return addLocalProviders(DiscoverLocalProviders(), persist)
+}
+
+// addLocalProviders adds the candidates that no configured provider covers
+// yet. With persist the additions are published only once the configuration
+// file holds them, and nothing is written when there is nothing to add.
+func addLocalProviders(candidates []LocalCandidate, persist bool) ([]string, error) {
 	if len(candidates) == 0 {
-		return nil
+		return nil, nil
 	}
 	var added []string
-	Update(func(s *Settings) {
+	errNothingToAdd := errors.New("every local provider is configured")
+	add := func(s *Settings) error {
+		added = nil
 		configured := map[string]bool{}
 		for _, pc := range s.Providers {
 			if pc.BaseURL != "" {
@@ -179,9 +188,20 @@ func AutodetectProviders(persist bool) []string {
 			s.Providers[c.ID] = &ProviderConfig{Type: c.Type, BaseURL: c.BaseURL}
 			added = append(added, c.ID)
 		}
-	})
-	if len(added) > 0 && persist {
-		_ = Save()
+		if len(added) == 0 {
+			return errNothingToAdd
+		}
+		return nil
 	}
-	return added
+	if !persist {
+		Update(func(s *Settings) { _ = add(s) })
+		return added, nil
+	}
+	if _, err := UpdateAndSave(add); err != nil {
+		if errors.Is(err, errNothingToAdd) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	return added, nil
 }

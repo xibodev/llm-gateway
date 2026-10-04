@@ -4,8 +4,10 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"path/filepath"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -903,6 +905,45 @@ func TestProviderEnabledToggleTakesProviderOutOfService(t *testing.T) {
 	status, verify = jsonRequest(t, server.URL+"/admin/api/providers/echo-toggle/verify", http.MethodPost, "admin-secret", map[string]any{})
 	if status != http.StatusOK || verify["success"] != true {
 		t.Fatalf("verify after re-enable: %d %+v", status, verify)
+	}
+}
+
+// A provider change the configuration file does not take answers 500 and
+// leaves the published settings as they were.
+func TestProviderChangesReportConfigurationSaveFailures(t *testing.T) {
+	t.Setenv("LLMGW_STATE_DIR", t.TempDir())
+	t.Setenv("LLMGW_CONFIG", filepath.Join(config.StateDir(), "missing", "config.yaml"))
+	iam.ResetForTests()
+	t.Cleanup(iam.ResetForTests)
+	if _, err := iam.Initialize(); err != nil {
+		t.Fatal(err)
+	}
+	old := *config.Get()
+	t.Cleanup(func() { config.Update(func(s *config.Settings) { *s = old }); providers.ResetProviders() })
+	config.Update(func(s *config.Settings) {
+		s.APIKey = "admin-secret"
+		s.AllowUnauthenticatedAPI = false
+		s.Providers = map[string]*config.ProviderConfig{"kept": {Type: "edge_tts"}}
+		s.Endpoints = map[string]*config.EndpointConfig{}
+	})
+	server := httptest.NewServer(NewServer(Runtime{}))
+	defer server.Close()
+
+	before, generation := config.Snapshot()
+	for _, change := range []struct {
+		path string
+		body map[string]any
+	}{
+		{"/admin/api/providers", map[string]any{"id": "added", "type": "edge_tts"}},
+		{"/admin/api/providers/kept/enabled", map[string]any{"enabled": false}},
+	} {
+		status, body := jsonRequest(t, server.URL+change.path, http.MethodPost, "admin-secret", change.body)
+		if status != http.StatusInternalServerError || !strings.Contains(fmt.Sprint(body["error"]), "could not be persisted") {
+			t.Fatalf("%s: status=%d body=%+v", change.path, status, body)
+		}
+	}
+	if current, currentGeneration := config.Snapshot(); current != before || currentGeneration != generation {
+		t.Fatal("a change the configuration file did not take was published")
 	}
 }
 
