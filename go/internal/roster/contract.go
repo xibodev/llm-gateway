@@ -124,10 +124,20 @@ func verify(raw []byte, keys map[string]ed25519.PublicKey, now time.Time) (Paylo
 // normal path when no signing keys are configured.
 func verifyPlain(raw []byte, now time.Time) (Payload, [32]byte, error) {
 	var p Payload
+	invalid := errors.New("Roster payload is invalid.")
 	if len(raw) > maxFeedBytes || !utf8.Valid(raw) || json.Unmarshal(raw, &p) != nil || !validPayload(&p, now) {
-		return Payload{}, [32]byte{}, errors.New("Roster payload is invalid.")
+		return Payload{}, [32]byte{}, invalid
 	}
-	return p, sha256.Sum256(raw), nil
+	// The cache keeps the feed as encoding/json writes a RawMessage:
+	// compacted, with HTML characters escaped. A fetched feed may be indented
+	// or leave those characters unescaped, so digesting its raw bytes would
+	// make a revision read back from the cache conflict with the same
+	// revision fetched again.
+	canonical, err := json.Marshal(json.RawMessage(raw))
+	if err != nil {
+		return Payload{}, [32]byte{}, invalid
+	}
+	return p, sha256.Sum256(canonical), nil
 }
 
 func oneOf(s string, values ...string) bool {

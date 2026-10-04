@@ -537,6 +537,65 @@ func TestPlainModeRollbackEquivocationAndUpgrade(t *testing.T) {
 	}
 }
 
+// The cache stores the feed compacted while the published feed is indented. A
+// store restarted from its cache must accept the same revision fetched again,
+// and must still reject different content published under that revision.
+func TestRestartedStoreAcceptsItsCachedRevision(t *testing.T) {
+	for _, mode := range []string{"plain", "signed"} {
+		t.Run(mode, func(t *testing.T) {
+			pub, key, p := fixture(t)
+			p.Revision = 2
+			p.Entries[0].Description = "Terms & conditions <apply>"
+			feed := func(p Payload) []byte {
+				var payload bytes.Buffer
+				encoder := json.NewEncoder(&payload)
+				encoder.SetEscapeHTML(false)
+				encoder.SetIndent("", "  ")
+				if err := encoder.Encode(p); err != nil {
+					t.Fatal(err)
+				}
+				if mode == "plain" {
+					return payload.Bytes()
+				}
+				var envelope bytes.Buffer
+				if err := json.Indent(&envelope, signedBytes(t, key, payload.Bytes()), "", "  "); err != nil {
+					t.Fatal(err)
+				}
+				return envelope.Bytes()
+			}
+			body := feed(p)
+			var calls atomic.Int32
+			o := Options{URL: "https://feed.example.com/roster.json", StateDir: t.TempDir(), Client: clientFor(&body, &calls)}
+			if mode == "signed" {
+				o.Keys = map[string]ed25519.PublicKey{"staging": pub}
+			}
+			first := New(o)
+			now := time.Now().Add(-time.Hour)
+			first.clock = func() time.Time { return now }
+			if got := first.Refresh(context.Background()); got.Revision != 2 || got.Error != "" {
+				t.Fatalf("feed rejected: %+v", got)
+			}
+
+			restarted := New(o)
+			if got := restarted.Refresh(context.Background()); got.Revision != 2 || got.Error != "" || calls.Load() != 2 {
+				t.Fatalf("restart rejected its cached revision: %+v calls=%d", got, calls.Load())
+			}
+
+			conflicting := p
+			conflicting.Entries = []Entry{p.Entries[0]}
+			conflicting.Entries[0].Name = "Changed"
+			body = feed(conflicting)
+			later := time.Now().Add(refreshCooldown + time.Second)
+			restarted.clock = func() time.Time { return later }
+			got := restarted.Refresh(context.Background())
+			if got.Error != "Roster rollback or conflicting revision rejected." || got.Revision != 2 ||
+				got.Entries[0].Name != "Example" || calls.Load() != 3 {
+				t.Fatalf("conflicting content for the cached revision accepted: %+v calls=%d", got, calls.Load())
+			}
+		})
+	}
+}
+
 func TestPlainModeCoalescingAndCooldown(t *testing.T) {
 	_, _, p := fixture(t)
 	body := plainBody(t, p)
