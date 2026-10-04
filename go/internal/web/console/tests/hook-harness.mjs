@@ -23,7 +23,10 @@ const hooks = [
   "export const useMemo = (factory, deps) => globalThis.__hooks.memo(factory, deps);",
   "export const useRef = (value) => globalThis.__hooks.ref(value);",
   "export const useCallback = (callback, deps) => globalThis.__hooks.memo(() => callback, deps);",
+  "export const useId = () => globalThis.__hooks.id();",
 ].join("\n");
+
+let ids = 0;
 
 // mount returns a render function for one component instance. Hook state lives
 // in call-order slots across renders, and effects whose dependencies changed
@@ -49,6 +52,7 @@ export function mount(component) {
       return slots[index].value;
     },
     ref(initial) { const index = cursor++; return slots[index] ??= { current: initial }; },
+    id() { const index = cursor++; return slots[index] ??= `test-id-${++ids}`; },
   };
   return () => {
     globalThis.__hooks = recorder;

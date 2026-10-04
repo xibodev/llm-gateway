@@ -1,4 +1,4 @@
-import { useMemo, useState } from "preact/hooks";
+import { useId, useMemo, useState } from "preact/hooks";
 import { Search } from "lucide-preact";
 import type { JSONRecord } from "../lib/api";
 import { asList, asRecord, stringValue } from "../lib/records";
@@ -202,17 +202,27 @@ export function ModelCombo({ models, filter, value, onChange, label = "Model", l
   const [query, setQuery] = useState("");
   const [open, setOpen] = useState(false);
   const [active, setActive] = useState(0);
+  // ARIA 1.2 combobox: focus stays on the input, which names the highlighted
+  // option through aria-activedescendant, so the listbox and options need ids.
+  const listID = useId();
   const pool = filterModels(models, filter).filter((model) => !model.disabled);
   const needle = query.trim().toLowerCase();
   const suggestions = (needle
     ? pool.filter((model) => `${model.id} ${model.label}`.toLowerCase().includes(needle))
     : pool).slice(0, limit);
+  const expanded = open && suggestions.length > 0;
+  const optionID = (index: number) => `${listID}-option-${index}`;
   const commit = (modelID: string) => { onChange(modelID); setQuery(""); setOpen(false); setActive(0); };
 
   return (
     <div class="model-combo">
       <label>{label}
         <input
+          role="combobox"
+          aria-autocomplete="list"
+          aria-expanded={expanded}
+          aria-controls={listID}
+          aria-activedescendant={expanded && suggestions[active] ? optionID(active) : undefined}
           value={open ? query : value}
           placeholder={pool.length ? "Type to search models…" : "No model matches these filters"}
           disabled={!pool.length}
@@ -220,36 +230,35 @@ export function ModelCombo({ models, filter, value, onChange, label = "Model", l
           onBlur={() => window.setTimeout(() => setOpen(false), 140)}
           onInput={(event) => { setQuery((event.currentTarget as HTMLInputElement).value); setOpen(true); setActive(0); }}
           onKeyDown={(event) => {
-            if (event.key === "ArrowDown") { event.preventDefault(); setActive((index) => Math.min(index + 1, suggestions.length - 1)); }
+            if (event.key === "ArrowDown") { event.preventDefault(); if (open) setActive((index) => Math.min(index + 1, suggestions.length - 1)); else { setOpen(true); setActive(0); } }
             else if (event.key === "ArrowUp") { event.preventDefault(); setActive((index) => Math.max(index - 1, 0)); }
-            else if (event.key === "Enter" && open && suggestions[active]) { event.preventDefault(); commit(suggestions[active].id); }
+            else if (event.key === "Enter" && expanded && suggestions[active]) { event.preventDefault(); commit(suggestions[active].id); }
             else if (event.key === "Escape") { setOpen(false); }
           }}
         />
       </label>
-      {open && suggestions.length ? <ul class="model-combo__list" role="listbox">
-        {suggestions.map((model, index) => {
+      <ul id={listID} class="model-combo__list" role="listbox" aria-label={label} hidden={!expanded}>
+        {expanded ? suggestions.map((model, index) => {
           const isFree = model.free;
           return (
-            <li key={model.id}>
-              <button
-                class={index === active ? "is-active" : ""}
-                type="button"
-                role="option"
-                aria-selected={index === active}
-                onMouseDown={(event) => { event.preventDefault(); commit(model.id); }}
-              >
-                <div style={{ display: "flex", alignItems: "center", gap: "6px", width: "100%" }}>
-                  <strong class="technical">{model.id}</strong>
-                  {isFree ? <span class="status-pill status-pill--success" style={{ fontSize: "10px", padding: "1px 5px", lineHeight: "14px" }}>Free</span> : null}
-                </div>
-                {model.label !== model.id && model.label.length <= 64 ? <small>{model.label}</small> : null}
-              </button>
+            <li
+              key={model.id}
+              id={optionID(index)}
+              class={index === active ? "is-active" : ""}
+              role="option"
+              aria-selected={index === active}
+              onMouseDown={(event) => { event.preventDefault(); commit(model.id); }}
+            >
+              <div style={{ display: "flex", alignItems: "center", gap: "6px", width: "100%" }}>
+                <strong class="technical">{model.id}</strong>
+                {isFree ? <span class="status-pill status-pill--success" style={{ fontSize: "10px", padding: "1px 5px", lineHeight: "14px" }}>Free</span> : null}
+              </div>
+              {model.label !== model.id && model.label.length <= 64 ? <small>{model.label}</small> : null}
             </li>
           );
-        })}
-        {pool.length > suggestions.length ? <li class="model-combo__more">{pool.length - suggestions.length} more — keep typing to narrow</li> : null}
-      </ul> : null}
+        }) : null}
+        {expanded && pool.length > suggestions.length ? <li class="model-combo__more" role="presentation">{pool.length - suggestions.length} more — keep typing to narrow</li> : null}
+      </ul>
     </div>
   );
 }

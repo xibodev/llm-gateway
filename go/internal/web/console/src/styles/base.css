@@ -18,7 +18,8 @@ body {
 
 button, input, select, textarea { font: inherit; }
 button { cursor: pointer; }
-button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-visible { outline: 3px solid rgba(47, 111, 237, 0.32); outline-offset: 2px; }
+/* Opaque rings: at least 3:1 against the page and surface colours in both themes. */
+button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-visible { outline: 3px solid #2f65aa; outline-offset: 2px; }
 
 .console-shell { min-height: 100vh; display: flex; }
 .sidebar { width: 260px; flex: 0 0 260px; min-height: 100vh; padding: 18px 12px; border-right: 1px solid #dde1e6; background: #fff; display: flex; flex-direction: column; position: sticky; top: 0; height: 100vh; overflow-y: auto; z-index: 20; }
@@ -192,6 +193,8 @@ tbody tr:last-child td { border-bottom: 0; }
 .provider-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 14px; padding: 14px; }
 .search-field { min-width: min(100%, 300px); display: flex; align-items: center; gap: 8px; border: 1px solid #cfd7e0; background: #fff; padding: 0 10px; border-radius: 5px; color: #687481; }
 .search-field input { width: 100%; min-height: 38px; border: 0; background: transparent; color: #2b3642; outline: 0; }
+/* The borderless input draws no ring of its own, so the field shows focus. */
+.search-field:focus-within { outline: 3px solid #2f65aa; outline-offset: 2px; }
 .filter-row { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
 .filter-chip { min-height: 32px; padding: 5px 9px; border: 1px solid #d6dce3; background: #fff; color: #61707d; border-radius: 999px; font-size: 0.72rem; font-weight: 650; }
 .filter-chip--active { border-color: #aac2e7; background: #edf3fc; color: #265a9e; }
@@ -552,6 +555,8 @@ tbody tr:last-child td { border-bottom: 0; }
   color: #e0e4e8;
 }
 :root[data-theme="dark"] .search-field input { color: #e0e4e8; }
+:root[data-theme="dark"] :is(button, input, select, textarea):focus-visible,
+:root[data-theme="dark"] .search-field:focus-within { outline-color: #6e91bd; }
 :root[data-theme="dark"] .surface--summary > div,
 :root[data-theme="dark"] .provider-card dl div,
 :root[data-theme="dark"] th,
@@ -709,8 +714,10 @@ tbody tr:last-child td { border-bottom: 0; }
 .model-combo { position: relative; }
 .model-combo label { display: flex; flex-direction: column; gap: 6px; color: #55606c; font-size: 0.72rem; font-weight: 650; }
 .model-combo__list { position: absolute; z-index: 30; left: 0; right: 0; margin: 4px 0 0; padding: 4px; max-height: 280px; overflow-y: auto; list-style: none; border: 1px solid #cbd4df; background: #fff; border-radius: 6px; box-shadow: 0 8px 22px rgba(25, 33, 43, 0.14); }
-.model-combo__list button { width: 100%; display: flex; flex-direction: column; align-items: flex-start; gap: 2px; padding: 8px 10px; border: 0; background: transparent; text-align: left; border-radius: 4px; }
-.model-combo__list button:hover, .model-combo__list button.is-active { background: #edf3fc; }
+.model-combo__list [role="option"] { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; padding: 8px 10px; text-align: left; border-radius: 4px; cursor: pointer; }
+.model-combo__list [role="option"]:hover, .model-combo__list [role="option"].is-active { background: #edf3fc; }
+/* The input keeps focus, so the active option needs its own visible marker. */
+.model-combo__list [role="option"].is-active { box-shadow: inset 3px 0 0 #2f65aa; }
 .model-combo__list strong { font-size: 0.78rem; color: #222a34; }
 .model-combo__list small { color: #75808d; font-size: 0.7rem; }
 .model-combo__more { padding: 7px 10px; color: #7b8490; font-size: 0.7rem; }
@@ -731,7 +738,8 @@ tbody tr:last-child td { border-bottom: 0; }
 :root[data-theme="dark"] .playground-settings__scope label,
 :root[data-theme="dark"] .model-combo label { color: #9aa4b1; }
 :root[data-theme="dark"] .model-combo__list { border-color: #2c323a; background: #171a1f; box-shadow: 0 8px 22px rgba(0, 0, 0, 0.5); }
-:root[data-theme="dark"] .model-combo__list button:hover, :root[data-theme="dark"] .model-combo__list button.is-active { background: #1a2230; }
+:root[data-theme="dark"] .model-combo__list [role="option"]:hover, :root[data-theme="dark"] .model-combo__list [role="option"].is-active { background: #1a2230; }
+:root[data-theme="dark"] .model-combo__list [role="option"].is-active { box-shadow: inset 3px 0 0 #6e91bd; }
 :root[data-theme="dark"] .model-combo__list strong { color: #e4e7eb; }
 /* Interaction left, payload + telemetry right — the panel keeps pace while you scroll. */
 .playground-work { display: grid; grid-template-columns: minmax(0, 1.45fr) minmax(320px, 0.85fr); gap: 14px; align-items: start; }
