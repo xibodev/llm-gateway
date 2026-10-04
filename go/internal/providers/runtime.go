@@ -49,6 +49,9 @@ type Runtime struct {
 	// extensions is the client of the extension daemon, kept here so every
 	// extension-served request shares its connection pool.
 	extensions extensionClients
+	// catalogRefreshes are the catalog refreshes requests leave to the
+	// background; see refreshCatalogInBackground.
+	catalogRefreshes catalogRefreshes
 }
 
 // NewRuntime returns a Runtime with empty caches and the built-in auth

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"strings"
+	"sync"
 	"time"
 
 	"llmgw/internal/config"
@@ -304,9 +305,9 @@ type catalogDiscovery struct {
 	initial, observation *CredentialObservation
 }
 
-// discover lists the catalog through the caller's provider. A legitimate
-// empty catalog is stored like any other.
-func (d *catalogDiscovery) discover(context.Context) ([]core.ModelInfo, error) {
+// discover lists the catalog through the caller's provider, within ctx. A
+// legitimate empty catalog is stored like any other.
+func (d *catalogDiscovery) discover(ctx context.Context) ([]core.ModelInfo, error) {
 	if d.caller.Kind == core.CallerHuman {
 		if observed, found, err := iam.ActiveProviderAccountObservation(
 			callerPrincipalID(d.caller), d.providerID,
@@ -314,7 +315,7 @@ func (d *catalogDiscovery) discover(context.Context) ([]core.ModelInfo, error) {
 			d.initial = credentialObservation(&observed)
 		}
 	}
-	models, observation, err := d.runtime.ListProviderModelsForPrincipalWithError(d.providerID, d.caller)
+	models, observation, err := d.runtime.listProviderModels(ctx, d.providerID, d.caller)
 	d.observation = observation
 	if err != nil {
 		return nil, err
@@ -373,6 +374,130 @@ func (rt *Runtime) CatalogCachedLookupForPrincipal(providerID, model string, cal
 		return ModelInfo{}, false
 	}
 	return gatewayModelInfo(row), true
+}
+
+// catalogDiscoveryTimeout bounds the discovery a request waits for and each
+// background refresh. Without it, a catalog upstream that never answers, such
+// as one with no configured timeout, would hold the request and the catalog's
+// discovery, which every later discovery of that catalog waits behind,
+// indefinitely.
+const catalogDiscoveryTimeout = 30 * time.Second
+
+// CatalogModelsForRequest returns the caller's catalog of providerID as a
+// request reads it. A stored catalog is served as it is, so a request never
+// waits on the upstream once the catalog exists, and one past its TTL is
+// refreshed in the background. Only a catalog never stored is discovered on
+// the request's path, and that discovery ends with ctx or after
+// catalogDiscoveryTimeout.
+func (rt *Runtime) CatalogModelsForRequest(ctx context.Context, providerID string, caller core.Caller) []ModelInfo {
+	record, _ := rt.requestCatalog(ctx, providerID, caller)
+	return gatewayRows(record.Evidence.Models)
+}
+
+// CatalogLookupForRequest returns the row of model in the catalog
+// CatalogModelsForRequest reads.
+func (rt *Runtime) CatalogLookupForRequest(ctx context.Context, providerID, model string, caller core.Caller) (ModelInfo, bool) {
+	record, _ := rt.requestCatalog(ctx, providerID, caller)
+	row, found := catalog.Find(record, model)
+	if !found {
+		return ModelInfo{}, false
+	}
+	return gatewayModelInfo(row), true
+}
+
+// requestCatalog is the catalog a request reads (see CatalogModelsForRequest),
+// and whether there is one.
+func (rt *Runtime) requestCatalog(ctx context.Context, providerID string, caller core.Caller) (core.CatalogRecord, bool) {
+	if catalogRead(providerID, caller).Err != nil {
+		return core.CatalogRecord{}, false
+	}
+	request, _ := rt.catalogRequest(providerID, caller)
+	cached := rt.catalogService.Cached(ctx, request.Key)
+	if storedCatalog(cached.Record) {
+		if cached.Diagnostics.Stale {
+			rt.refreshCatalogInBackground(request)
+		}
+		return cached.Record, true
+	}
+	if cached.Err != nil {
+		return core.CatalogRecord{}, false
+	}
+	read := rt.discoverCatalogForRequest(ctx, request)
+	return read.Record, storedCatalog(read.Record)
+}
+
+// storedCatalog reports a record that holds a catalog: core's catalog service
+// serves only those of a discovery, empty or not.
+func storedCatalog(record core.CatalogRecord) bool {
+	return record.Evidence.Status == core.CatalogDiscovered || record.Evidence.Status == core.CatalogEmpty
+}
+
+// discoverCatalogForRequest discovers the catalog request asks for while a
+// request waits, until ctx ends or catalogDiscoveryTimeout passes. Core's
+// catalog service runs the discoveries of a catalog one at a time, and a read
+// waiting for the one under way does not end with its context, so the read
+// runs on a goroutine of its own: the request stops waiting when ctx ends,
+// and the read, finding ctx ended, discovers nothing.
+func (rt *Runtime) discoverCatalogForRequest(ctx context.Context, request catalog.Request) catalog.Read {
+	if err := ctx.Err(); err != nil {
+		return catalog.Failed(err)
+	}
+	ctx, cancel := context.WithTimeout(ctx, catalogDiscoveryTimeout)
+	defer cancel()
+	read := make(chan catalog.Read, 1)
+	go func() { read <- rt.catalogService.Read(ctx, request) }()
+	select {
+	case result := <-read:
+		return result
+	case <-ctx.Done():
+		return catalog.Failed(ctx.Err())
+	}
+}
+
+// refreshCatalogInBackground refreshes the catalog request asks for after a
+// request has served it stale: at most one refresh of a catalog at a time,
+// each ending after catalogDiscoveryTimeout. The read discovers the catalog
+// only while it is still stale, so a refresh that ran meanwhile is not
+// repeated, and a refresh that fails keeps the stale catalog.
+func (rt *Runtime) refreshCatalogInBackground(request catalog.Request) {
+	key := catalogFileKey(request.Key)
+	if !rt.catalogRefreshes.begin(key) {
+		return
+	}
+	go func() {
+		defer rt.catalogRefreshes.end(key)
+		ctx, cancel := context.WithTimeout(context.Background(), catalogDiscoveryTimeout)
+		defer cancel()
+		_ = rt.catalogService.Read(ctx, request)
+	}()
+}
+
+// catalogRefreshes are the background catalog refreshes under way, by
+// catalog.json key. The zero value is ready for use.
+type catalogRefreshes struct {
+	mu      sync.Mutex
+	running map[string]bool
+}
+
+// begin claims the refresh of key, and reports false while one runs.
+func (r *catalogRefreshes) begin(key string) bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.running[key] {
+		return false
+	}
+	if r.running == nil {
+		r.running = map[string]bool{}
+	}
+	r.running[key] = true
+	return true
+}
+
+// end releases the refresh of key.
+func (r *catalogRefreshes) end(key string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	delete(r.running, key)
 }
 
 // CatalogRefreshedAt reports when a provider's catalog was last refreshed (zero

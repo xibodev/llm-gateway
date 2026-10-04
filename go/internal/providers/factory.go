@@ -1,6 +1,7 @@
 package providers
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"strings"
@@ -491,6 +492,14 @@ func (rt *Runtime) ListProviderModelsForPrincipal(
 func (rt *Runtime) ListProviderModelsForPrincipalWithError(
 	providerID string, caller core.Caller,
 ) ([]ModelInfo, *CredentialObservation, error) {
+	return rt.listProviderModels(context.Background(), providerID, caller)
+}
+
+// listProviderModels lists the catalog of providerID for caller within ctx
+// (see listModelsContext).
+func (rt *Runtime) listProviderModels(
+	ctx context.Context, providerID string, caller core.Caller,
+) ([]ModelInfo, *CredentialObservation, error) {
 	if issue := ProviderConfigurationIssue(providerID); issue != "" {
 		return nil, nil, catalogError(
 			"catalog_configuration_incomplete", issue, 0,
@@ -504,7 +513,7 @@ func (rt *Runtime) ListProviderModelsForPrincipalWithError(
 			0,
 		)
 	}
-	return listModelsWithError(p)
+	return listModelsContext(ctx, p)
 }
 
 // ResetProviders clears the instance cache (after a config change).

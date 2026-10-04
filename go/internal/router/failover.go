@@ -555,7 +555,10 @@ func (rt *Runtime) resolveNativeAlias(
 
 // NativeAliasCandidates returns policy- and credential-authorized catalog
 // targets grouped by the canonical key used for bare-name resolution. A
-// governed request also applies its project's policy.
+// governed request also applies its project's policy. Catalogs are read as a
+// request reads them (see providers.Runtime.CatalogModelsForRequest): a slow
+// catalog upstream holds up a resolution only while its catalog has never
+// been stored, and then no longer than ctx and the discovery timeout allow.
 func (rt *Runtime) NativeAliasCandidates(ctx context.Context, caller core.Caller) (map[string][]Target, error) {
 	governance := governanceFrom(ctx)
 	if governance != nil && governance.RoutesOnly {
@@ -590,7 +593,7 @@ func (rt *Runtime) NativeAliasCandidates(ctx context.Context, caller core.Caller
 		if !authorized {
 			continue
 		}
-		models := append([]providers.ModelInfo(nil), rt.providers().CatalogModelsForPrincipal(pid, caller)...)
+		models := append([]providers.ModelInfo(nil), rt.providers().CatalogModelsForRequest(ctx, pid, caller)...)
 		sort.Slice(models, func(i, j int) bool { return models[i].ID < models[j].ID })
 		for _, m := range models {
 			if _, published, evidenceErr := providers.AnonymousModelPublication(pid, m.ID); evidenceErr != nil || !published {
@@ -932,6 +935,14 @@ func (rt *Runtime) ExecuteAnthropicMessagesContext(
 // would lose part of the request.
 var errChatOnly = errors.New("router: target serves Messages only through the Chat adapter")
 
+// targetCatalogRow is the catalog row of target for caller, read as a request
+// reads it (see providers.Runtime.CatalogLookupForRequest). The checks that
+// read it take no request context, so a catalog never stored is discovered
+// within the discovery timeout alone.
+func (rt *Runtime) targetCatalogRow(target Target, caller core.Caller) (providers.ModelInfo, bool) {
+	return rt.providers().CatalogLookupForRequest(context.Background(), target.Provider, target.Model, caller)
+}
+
 func (rt *Runtime) anthropicFallbackCompatibility(target Target, caller core.Caller, messages []map[string]any, kw providers.Kwargs) error {
 	if err := rt.anthropicControlsCompatibility(target, caller, kw); err != nil {
 		return err
@@ -949,7 +960,7 @@ func (rt *Runtime) anthropicFallbackCompatibility(target Target, caller core.Cal
 	if !hasImages {
 		return nil
 	}
-	model, ok := rt.providers().CatalogLookupForPrincipal(target.Provider, target.Model, caller)
+	model, ok := rt.targetCatalogRow(target, caller)
 	if !ok {
 		return &providers.ConfigError{Msg: "Anthropic image adaptation requires verified model vision capability"}
 	}
@@ -973,7 +984,7 @@ func (rt *Runtime) anthropicControlsCompatibility(target Target, caller core.Cal
 			return &providers.ConfigError{Msg: "selected provider cannot preserve Anthropic thinking"}
 		}
 		if providerConfig.ForceApiSupport {
-			model, ok := rt.providers().CatalogLookupForPrincipal(target.Provider, target.Model, caller)
+			model, ok := rt.targetCatalogRow(target, caller)
 			if !ok || translate.PreferredEndpoint(model.SupportedSurfaces) != "chat" {
 				return &providers.ConfigError{Msg: "selected provider cannot preserve Anthropic thinking on a Responses-only model"}
 			}
@@ -1187,9 +1198,7 @@ func (rt *Runtime) responsesFallbackCompatibility(
 	if hasImages {
 		switch providerType {
 		case "openai_compatible", "openai", "github_copilot", "bedrock", "litellm":
-			model, ok := rt.providers().CatalogLookupForPrincipal(
-				target.Provider, target.Model, caller,
-			)
+			model, ok := rt.targetCatalogRow(target, caller)
 			if !ok {
 				return &providers.ConfigError{
 					Msg: "image fallback requires verified model capability metadata",

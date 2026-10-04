@@ -123,7 +123,14 @@ func (p *openAICompatibleProvider) ListModels() []ModelInfo {
 // ListModelsWithError lists the catalog on the gateway's path with the
 // factory's key, as the transport listed it.
 func (p *openAICompatibleProvider) ListModelsWithError() ([]ModelInfo, *CredentialObservation, error) {
-	return p.catalog.list()
+	return p.catalog.list(context.Background())
+}
+
+// ListModelsContext is ListModelsWithError ending with ctx. A Bedrock
+// instance without a configured timeout has no other bound on its catalog
+// request.
+func (p *openAICompatibleProvider) ListModelsContext(ctx context.Context) ([]ModelInfo, *CredentialObservation, error) {
+	return p.catalog.list(ctx)
 }
 
 // httpTarget is where the gateway proxies the instance's other endpoints,
@@ -153,7 +160,7 @@ func (p *openAICompatibleProvider) CompleteWithObservation(
 func (p *openAICompatibleProvider) CompleteContextWithObservation(
 	ctx context.Context, model string, messages []Message, kw Kwargs,
 ) (map[string]any, *CredentialObservation, error) {
-	request, operation, err := p.chat(model, messages, kw, openAIChatCompletion)
+	request, operation, err := p.chat(ctx, model, messages, kw, openAIChatCompletion)
 	if err != nil {
 		return nil, p.catalog.observation, err
 	}
@@ -166,7 +173,7 @@ func (p *openAICompatibleProvider) Stream(model string, messages []Message, kw K
 }
 
 func (p *openAICompatibleProvider) StreamContext(ctx context.Context, model string, messages []Message, kw Kwargs) (StreamIter, error) {
-	request, operation, err := p.chat(model, messages, kw, openAIChatStream)
+	request, operation, err := p.chat(ctx, model, messages, kw, openAIChatStream)
 	if err != nil {
 		return nil, err
 	}
@@ -178,7 +185,7 @@ func (p *openAICompatibleProvider) StreamContext(ctx context.Context, model stri
 // off for the request as the transport's plan was, so that core also marks
 // an answer it serves over Responses, as the transport marked every one.
 // The operation is native's, or Chat over Responses' when the plan serves
-// the model there, which it reads from the catalog it refreshes when stale.
+// the model there, which it reads from the request's catalog.
 //
 // Core sends every option an OpenAI-compatible instance hands it (see
 // openAICompatibleCore), so the options are chosen here: every field of a
@@ -187,7 +194,7 @@ func (p *openAICompatibleProvider) StreamContext(ctx context.Context, model stri
 // another vendor reads, such as Anthropic's output_config, never reaches
 // the upstream. Core's Bedrock still sends only the latter.
 func (p *openAICompatibleProvider) chat(
-	model string, messages []Message, kw Kwargs, native openAIOperation,
+	ctx context.Context, model string, messages []Message, kw Kwargs, native openAIOperation,
 ) (core.Request, openAIOperation, error) {
 	adapt := adaptEnabled(kw, p.forceAdapt)
 	asSent := kw[ChatFieldsAsSent] == true
@@ -199,10 +206,10 @@ func (p *openAICompatibleProvider) chat(
 	}
 	payload["model"], payload["messages"], payload["force_api_support"] = model, messages, adapt
 	request, err := openAIRequest(core.ModelSurfaceChatCompletions, model, payload)
-	if adapt && p.overResponses(model) {
+	if adapt && p.overResponses(ctx, model) {
 		// Core converts only the fields adaptation carries and drops the
 		// rest. Routing weighed the request against the cached catalog, so a
-		// row this lookup refreshed can still make it lose a field it set.
+		// row this lookup reads can still make it lose a field it set.
 		if asSent {
 			if field, unsent := unsentChatField(kw, responsesAdaptedChatField); unsent {
 				return core.Request{}, native, unsentChatFieldError(field)
@@ -213,12 +220,12 @@ func (p *openAICompatibleProvider) chat(
 	return request, native, err
 }
 
-// overResponses reports a model whose catalog row, which this refreshes when
-// stale as the transport's plan did, lists Responses but not Chat
-// Completions: one adaptation serves over Responses. Core reads the row the
-// refresh cached.
-func (p *openAICompatibleProvider) overResponses(model string) bool {
-	row, ok := p.runtime.CatalogLookupForPrincipal(p.instance, model, p.caller)
+// overResponses reports a model whose catalog row lists Responses but not
+// Chat Completions: one adaptation serves over Responses. The row is read as
+// a request reads it (see Runtime.CatalogLookupForRequest), and core's
+// provider reads the same cached row.
+func (p *openAICompatibleProvider) overResponses(ctx context.Context, model string) bool {
+	row, ok := p.runtime.CatalogLookupForRequest(ctx, p.instance, model, p.caller)
 	return ok && translate.PreferredEndpoint(row.SupportedSurfaces) == "responses"
 }
 
@@ -235,7 +242,7 @@ func (p *openAICompatibleProvider) CompleteResponses(
 func (p *openAICompatibleProvider) CompleteResponsesContext(
 	ctx context.Context, model string, payload map[string]any,
 ) (map[string]any, *CredentialObservation, error) {
-	if !p.nativeResponses(model) {
+	if !p.nativeResponses(ctx, model) {
 		return nil, nil, ErrResponsesUnsupported
 	}
 	request, err := openAIRequest(core.ModelSurfaceResponses, model, payload)
@@ -255,7 +262,7 @@ func (p *openAICompatibleProvider) StreamResponses(
 func (p *openAICompatibleProvider) StreamResponsesContext(
 	ctx context.Context, model string, payload map[string]any,
 ) (StreamIter, *CredentialObservation, error) {
-	if !p.nativeResponses(model) {
+	if !p.nativeResponses(ctx, model) {
 		return nil, nil, ErrResponsesUnsupported
 	}
 	request, err := openAIRequest(core.ModelSurfaceResponses, model, payload)
@@ -267,14 +274,13 @@ func (p *openAICompatibleProvider) StreamResponsesContext(
 }
 
 // nativeResponses reports a model with native Responses as the transport
-// read one: every model of the openai entry, and a model whose catalog row,
-// which this refreshes when stale, lists Responses. Core reads the row the
-// refresh cached.
-func (p *openAICompatibleProvider) nativeResponses(model string) bool {
+// read one: every model of the openai entry, and a model whose catalog row
+// lists Responses. The row is read as overResponses reads it.
+func (p *openAICompatibleProvider) nativeResponses(ctx context.Context, model string) bool {
 	if p.openAIEntry {
 		return true
 	}
-	row, ok := p.runtime.CatalogLookupForPrincipal(p.instance, model, p.caller)
+	row, ok := p.runtime.CatalogLookupForRequest(ctx, p.instance, model, p.caller)
 	return ok && listsResponses(row.SupportedSurfaces)
 }
 

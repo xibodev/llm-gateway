@@ -34,6 +34,14 @@ is advertised only when it resolves to one policy- and credential-eligible exact
 target. Aliases that collide across providers, with an endpoint, or with a
 provider namespace are omitted rather than guessed.
 
+Bare-alias resolution and the catalog checks of a routed request, such as
+whether an OpenAI-compatible model serves Responses natively, read the caller's
+stored catalog. A catalog past its one-hour lifetime still answers and is
+refreshed in the background, one refresh per catalog at a time, each limited to
+30 seconds. Only a catalog that was never stored is discovered while the
+request waits, and that discovery ends when the request ends or after 30
+seconds.
+
 ### Unknown selector
 
 Unknown IDs return `404`. Read `GET /v1/models` and select an advertised ID.

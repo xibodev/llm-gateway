@@ -1,6 +1,7 @@
 package providers
 
 import (
+	"context"
 	"fmt"
 	"net/http"
 	"strings"
@@ -78,13 +79,13 @@ type openAICatalog struct {
 	anonymous  bool
 }
 
-func (c openAICatalog) list() ([]ModelInfo, *CredentialObservation, error) {
+func (c openAICatalog) list(ctx context.Context) ([]ModelInfo, *CredentialObservation, error) {
 	observation := c.observation
 	timeout := c.timeout
 	if timeout > 10 {
 		timeout = 10
 	}
-	req, _ := http.NewRequest("GET", c.modelsURL(c.base), nil)
+	req, _ := http.NewRequestWithContext(ctx, "GET", c.modelsURL(c.base), nil)
 	if c.header != nil {
 		req.Header = c.header.Clone()
 	}

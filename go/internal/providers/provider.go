@@ -609,6 +609,56 @@ func listModelsWithError(
 	return nil, nil, catalogError("catalog_unavailable", "Provider catalog is unavailable.", 0)
 }
 
+// contextModelLister is a provider whose catalog request ends with its
+// context.
+type contextModelLister interface {
+	ListModelsContext(ctx context.Context) ([]ModelInfo, *CredentialObservation, error)
+}
+
+// listModelsContext is listModelsWithError within ctx. A provider that lists
+// with a context stops its request when ctx ends. Any other is left to finish
+// on its own and its result is dropped, so the caller, and the catalog
+// discovery it holds, still end with ctx.
+func listModelsContext(
+	ctx context.Context, provider Provider,
+) ([]ModelInfo, *CredentialObservation, error) {
+	for current := provider; current != nil; {
+		if lister, ok := current.(contextModelLister); ok {
+			return lister.ListModelsContext(ctx)
+		}
+		if _, ok := current.(detailedModelLister); ok {
+			break
+		}
+		unwrapper, ok := current.(interface{ Unwrap() Provider })
+		if !ok {
+			break
+		}
+		current = unwrapper.Unwrap()
+	}
+	if ctx.Done() == nil {
+		return listModelsWithError(provider)
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, nil, err
+	}
+	type listing struct {
+		models      []ModelInfo
+		observation *CredentialObservation
+		err         error
+	}
+	listed := make(chan listing, 1)
+	go func() {
+		models, observation, err := listModelsWithError(provider)
+		listed <- listing{models: models, observation: observation, err: err}
+	}()
+	select {
+	case result := <-listed:
+		return result.models, result.observation, result.err
+	case <-ctx.Done():
+		return nil, nil, ctx.Err()
+	}
+}
+
 // InvocationError is an upstream call failure. Status and Retryable determine
 // same-target retries; routing may still use it to advance an eligible chain.
 // Status carries the upstream HTTP status (0 if none) so the gateway can pass
