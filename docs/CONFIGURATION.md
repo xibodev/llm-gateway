@@ -124,7 +124,7 @@ backups and pruned with the usage-retention window.
 | `LLMGW_EXTERNAL_KEYS_REFRESH_INTERVAL` | `30s` | File/HTTP key snapshot refresh interval. |
 | `LLMGW_EXTERNAL_KEYS_HTTP_TIMEOUT` | `5s` | Per-request deadline for the external key endpoint. |
 | `LLMGW_EXTERNAL_KEYS_MAX_STALENESS` | `0` | Optional duration after which an unrefreshed source is excluded (fail closed); zero keeps last-known-good indefinitely. |
-| `LLMGW_ALLOW_UNAUTHENTICATED_API` | `0` | Disable data-plane authentication for deliberate local use only; never disables admin authentication. |
+| `LLMGW_ALLOW_UNAUTHENTICATED_API` | `0` | Disable data-plane authentication for deliberate local use only; never disables admin authentication. See [unauthenticated local mode](#unauthenticated-local-mode). |
 | `LLMGW_GATEWAY_PREAMBLE` | unset | Optional gateway-owned system preamble. |
 | `LLMGW_ANONYMOUS_PROVIDER_AUTOMATION` | `false` | Deployment default for connecting and checking reviewed no-key providers. Admin Settings can override it. |
 
@@ -149,6 +149,25 @@ OAuth dialog to store them encrypted. The gateway always generates PKCE, opens
 the authorization URL, and accepts a pasted code or full redirect URL. A full
 URL must carry the flow's matching state. The redirect URI is fixed by the
 configured profile and is reused exactly for exchange and refresh binding.
+
+### Unauthenticated local mode
+
+`LLMGW_ALLOW_UNAUTHENTICATED_API=1` serves `/v1/*` without a gateway key, as a
+local principal that can use every configured provider. Any token, or none, is
+accepted, because CLIs and SDKs often insist on sending a placeholder key. A
+token that is an active gateway-issued key is still served as that key, with its
+policy and quotas. Admin and portal APIs keep their own authentication.
+
+Browsers add an `Origin` header to the requests web pages make. In local mode a
+request whose `Origin` host is not `localhost`, a name under `.localhost`, an
+address in `127.0.0.0/8`, or `::1` is refused with `403` unless it carries a
+gateway-issued key, so a web page open in the operator's browser cannot use the
+gateway. Requests without `Origin`, as CLIs and SDKs send them, are unaffected.
+
+At startup the gateway logs a warning when local mode is on and `LLMGW_HOST` is
+not a loopback address, because every client that can reach the listener can
+then use the data plane. A container listens on `0.0.0.0`, so publish its port
+on loopback only.
 
 ### Credential and identity boundary
 

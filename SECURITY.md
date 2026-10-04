@@ -31,6 +31,11 @@ runtime configuration. Use synthetic reproduction data.
 - **Data plane**: active project key, unless deliberate unauthenticated local
   mode is enabled. Static administrator keys are also accepted there but bypass
   key and project allowlists and quotas, so never hand them to clients.
+- **Unauthenticated local mode**: accepts any token, or none, because clients
+  often send placeholder keys. Browser requests whose `Origin` is not a
+  loopback host are refused with `403` unless they carry a gateway-issued key,
+  and a warning is logged at startup when the listener is not a loopback
+  address. See [unauthenticated local mode](docs/CONFIGURATION.md#unauthenticated-local-mode).
 - **Gateway key**: assigned to one principal/project and authenticated against a
   SHA-256 hash.
 - **Recoverable key**: encrypted with AES-GCM only when credential encryption was

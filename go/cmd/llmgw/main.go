@@ -143,6 +143,9 @@ func serve() error {
 		port = "8787"
 	}
 	addr := host + ":" + port
+	for _, warning := range api.StartupWarnings(host) {
+		log.Printf("warning: %s", warning)
+	}
 	// Bound before any background worker starts, so a port already in use
 	// fails the start before a worker touches state.
 	listener, err := net.Listen("tcp", addr)

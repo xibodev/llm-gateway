@@ -3,11 +3,16 @@ package api
 import (
 	"crypto/subtle"
 	"net/http"
+	"net/netip"
+	"net/url"
 	"strings"
 
 	"llmgw/internal/config"
 	"llmgw/internal/iam"
 )
+
+const localModeOriginMessage = "Unauthenticated local mode serves browser requests only from a loopback origin. " +
+	"Send a gateway-issued API key to call the gateway from this origin."
 
 type principalKey struct{}
 
@@ -69,6 +74,13 @@ func requireAPIKey(r *http.Request) (*config.Principal, int, string) {
 				return withCaller(apiKeySource(p), p), 0, ""
 			}
 		}
+		// Any token, or none, is served because CLIs and SDKs send placeholder
+		// keys. Any web page can make the operator's browser send requests
+		// here as well; those carry the page's origin, so only pages served
+		// from this machine get the local principal.
+		if nonLoopbackOrigin(r) {
+			return nil, http.StatusForbidden, localModeOriginMessage
+		}
 		return withCaller(sourceLocal, &config.Principal{Project: "local", Key: "local"}), 0, ""
 	}
 
@@ -93,6 +105,31 @@ func requireAPIKey(r *http.Request) (*config.Principal, int, string) {
 			"mint a project key in /admin, or set LLMGW_ALLOW_UNAUTHENTICATED_API=1 for local use."
 	}
 	return nil, http.StatusUnauthorized, "Invalid API key"
+}
+
+// nonLoopbackOrigin reports whether r names an Origin other than this machine.
+// Browsers send Origin on every cross-origin request and on same-origin ones
+// other than GET and HEAD; an opaque origin is sent as "null", which names no
+// host. Clients other than browsers seldom send it at all.
+func nonLoopbackOrigin(r *http.Request) bool {
+	origin := strings.TrimSpace(r.Header.Get("Origin"))
+	if origin == "" {
+		return false
+	}
+	parsed, err := url.Parse(origin)
+	return err != nil || !loopbackHost(parsed.Hostname())
+}
+
+// loopbackHost reports whether host names this machine: localhost, a name
+// under .localhost, which browsers resolve to loopback themselves, or a
+// loopback address.
+func loopbackHost(host string) bool {
+	host = strings.ToLower(strings.TrimSuffix(strings.TrimPrefix(host, "["), "]"))
+	if host == "localhost" || strings.HasSuffix(host, ".localhost") {
+		return true
+	}
+	addr, err := netip.ParseAddr(host)
+	return err == nil && addr.IsLoopback()
 }
 
 // authed wraps a handler that needs a principal. On failure it writes the error
