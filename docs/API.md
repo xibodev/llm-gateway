@@ -81,6 +81,35 @@ Opt-in Chat-to-Responses adaptation uses `force_api_support` and catalog
 `supported_surfaces`. Adapted non-streaming responses include
 `X-LLMGW-Adapted`. Do not assume every streaming path includes that header.
 
+### Request fields
+
+A field the client sets is sent upstream or the request is refused; none is
+dropped. `fallback_timeout_ms`, `affinity_key`, and `force_api_support` are the
+gateway's own and never reach the upstream. Every other field, including
+`response_format`, `n`, `seed`, `logprobs`, `parallel_tool_calls`, `user`, and
+fields the gateway does not know, reaches an OpenAI-compatible, OpenAI, or
+LiteLLM target unchanged, in transparent mode too. Other targets send what their
+wire carries:
+
+| Target | Fields sent besides `model`, `messages`, `stream`, and `stream_options` |
+| --- | --- |
+| OpenAI-compatible, OpenAI, LiteLLM | Every field. |
+| Bedrock, Azure OpenAI, GitHub Copilot | `temperature`, `top_p`, `max_tokens`, `max_completion_tokens`, `stop`, `tools`, `tool_choice`, `reasoning_effort`, `metadata`, `parallel_tool_calls`, `thinking`. |
+| OpenAI Codex, Google Antigravity, anonymous OpenCode Zen, Anthropic setup token | The same, without `parallel_tool_calls` and `thinking`. |
+| Chat adapted to a Responses-only model (`force_api_support`) | `temperature`, `top_p`, `max_tokens`, `max_completion_tokens`, `tools`, `tool_choice`, `metadata`, `reasoning_effort`. |
+| Anthropic | `temperature`, `top_p`, `max_tokens`, `stop`, `tools`, `metadata`, `thinking`, `output_config`. |
+| Google AI Studio, Vertex AI | `temperature`, `max_tokens`. |
+| Ollama | `temperature`, `top_p`, `max_tokens`, `tools`. |
+
+A request that sets a field its target does not send fails with `400` naming
+the field before anything is sent. A value that asks for nothing does not count:
+`null`, `false`, an empty value, `n: 1`, a zero penalty or `top_logprobs`, a
+`response_format` of type `text`, text-only `modalities`, `tool_choice: "auto"`,
+and `parallel_tool_calls: true`. In an endpoint, a member that cannot send a
+field is skipped as capability filtering skips one, and the request fails only
+when no member can send it. Field names that begin with `_` are reserved and
+refused.
+
 ## Responses
 
 Native Responses targets preserve the Responses envelope and streaming events.

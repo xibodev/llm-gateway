@@ -64,12 +64,18 @@ func openAICompatibleInstance(settings *config.Settings, instance string, cfg *c
 // configured adaptation, and with requests that wait at most the instance's
 // timeout for each part of an answer (see providerClient). Core's catalog
 // client is never used, since the catalog stays on the gateway's path.
+//
+// Core forwards every Chat field the facade hands it: the upstream speaks
+// the client's wire, so a field the gateway does not know is the
+// upstream's to accept or refuse, and the facade chooses what to hand it
+// (see openAICompatibleProvider.chat).
 func openAICompatibleCore(settings *config.Settings, instance string, cfg *config.ProviderConfig) openAICoreSpec {
 	return openAICoreSpec{
 		instance: instance,
 		config: coreproviders.OpenAICompatibleConfig{
 			BaseURL: openAICompatibleBase(settings, cfg), RegistryID: EffectiveRegistryID(instance, cfg.RegistryID, cfg.Type),
 			ForceAPISupport: cfg.ForceApiSupport, Client: providerClient(cfg.TimeoutOr(settings.OpenAICompatibleTimeoutSeconds)),
+			ForwardAllFields: true,
 		},
 		build: func(config coreproviders.OpenAICompatibleConfig) (*coreproviders.OpenAICompatible, error) {
 			provider, err := coreproviders.NewOpenAICompatible(config)

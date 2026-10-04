@@ -15,21 +15,33 @@ import (
 // and adaptation helpers here.
 
 // buildOpenAIPayload is the Chat body the gateway sends over the OpenAI
-// wire: the model, the messages, the stream flag and the forwarded fields
-// that are set. Core's OpenAI-compatible providers build the same body, and
-// the Copilot facade hands core this one.
+// wire for a request translated from another surface: the model, the
+// messages, the stream flag and the forwarded fields that are set. Core's
+// OpenAI-compatible providers build the same body, and a client's own Chat
+// request keeps every field it set (see ChatFieldsAsSent).
 func buildOpenAIPayload(model string, messages []Message, stream bool, kw Kwargs) map[string]any {
 	payload := map[string]any{"model": model, "messages": messages, "stream": stream}
-	for _, key := range []string{
-		"temperature", "top_p", "max_tokens", "max_completion_tokens",
-		"stop", "tools", "tool_choice", "reasoning_effort", "stream_options",
-		"metadata", "parallel_tool_calls", "thinking",
-	} {
-		if v, ok := kw[key]; ok && v != nil {
-			payload[key] = v
+	for key, value := range kw {
+		if value != nil && openAITransportField(key) {
+			payload[key] = value
 		}
 	}
 	return payload
+}
+
+// openAITransportField reports a Chat field the OpenAI transport forwards
+// besides the model, the messages and the stream flag. Core's Azure OpenAI
+// provider forwards exactly these and drops the others, as core's
+// OpenAI-compatible provider does unless it is built to forward every field,
+// which only the gateway's OpenAI-compatible instances are, not Bedrock.
+func openAITransportField(field string) bool {
+	switch field {
+	case "temperature", "top_p", "max_tokens", "max_completion_tokens",
+		"stop", "tools", "tool_choice", "reasoning_effort", "stream_options",
+		"metadata", "parallel_tool_calls", "thinking":
+		return true
+	}
+	return false
 }
 
 func withOpenAIOutputLimit(kw Kwargs) Kwargs {

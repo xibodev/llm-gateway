@@ -179,17 +179,35 @@ func (p *openAICompatibleProvider) StreamContext(ctx context.Context, model stri
 // an answer it serves over Responses, as the transport marked every one.
 // The operation is native's, or Chat over Responses' when the plan serves
 // the model there, which it reads from the catalog it refreshes when stale.
+//
+// Core sends every option an OpenAI-compatible instance hands it (see
+// openAICompatibleCore), so the options are chosen here: every field of a
+// client's own Chat request, and for a request translated from another
+// surface the fields the OpenAI transport forwards, so that a field only
+// another vendor reads, such as Anthropic's output_config, never reaches
+// the upstream. Core's Bedrock still sends only the latter.
 func (p *openAICompatibleProvider) chat(
 	model string, messages []Message, kw Kwargs, native openAIOperation,
 ) (core.Request, openAIOperation, error) {
 	adapt := adaptEnabled(kw, p.forceAdapt)
+	asSent := kw[ChatFieldsAsSent] == true
 	payload := make(map[string]any, len(kw)+3)
 	for key, value := range kw {
-		payload[key] = value
+		if asSent || strings.HasPrefix(key, "_") || openAITransportField(key) {
+			payload[key] = value
+		}
 	}
 	payload["model"], payload["messages"], payload["force_api_support"] = model, messages, adapt
 	request, err := openAIRequest(core.ModelSurfaceChatCompletions, model, payload)
 	if adapt && p.overResponses(model) {
+		// Core converts only the fields adaptation carries and drops the
+		// rest. Routing weighed the request against the cached catalog, so a
+		// row this lookup refreshed can still make it lose a field it set.
+		if asSent {
+			if field, unsent := unsentChatField(kw, responsesAdaptedChatField); unsent {
+				return core.Request{}, native, unsentChatFieldError(field)
+			}
+		}
 		return request, openAIChatOverResponses, err
 	}
 	return request, native, err

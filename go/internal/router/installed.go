@@ -3,6 +3,7 @@ package router
 import (
 	"context"
 
+	"llmgw/internal/config"
 	"llmgw/internal/providers"
 
 	core "github.com/xibodev/llmgw-core"
@@ -14,6 +15,10 @@ import (
 
 func FilterCompatibleTargets(targets []Target, caller core.Caller, request CompatibilityRequest) ([]Target, error) {
 	return Current().FilterCompatibleTargets(targets, caller, request)
+}
+
+func FilterChatFieldTargets(targets []Target, settings *config.Settings, caller core.Caller, kw providers.Kwargs) ([]Target, error) {
+	return Current().FilterChatFieldTargets(targets, settings, caller, kw)
 }
 
 func ResolveTargets(model string) ([]Target, error) { return Current().ResolveTargets(model) }

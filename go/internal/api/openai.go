@@ -4,9 +4,13 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
+	"maps"
 	"math"
 	"net/http"
+	"reflect"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -38,6 +42,69 @@ type chatRequest struct {
 	// (e.g. reaching a Responses-only model over /chat/completions). A present
 	// value overrides the provider's config-level setting.
 	ForceApiSupport *bool `json:"force_api_support"`
+	// Extra holds every other member of a client's body, such as
+	// response_format or seed, which is forwarded as the client set it or
+	// refused; see chatRequestBody.
+	Extra map[string]any `json:"-"`
+}
+
+// chatRequestBody decodes a client's Chat Completions body: the members
+// chatRequest names into their fields, and every other member into Extra,
+// so a field the gateway does not read itself is not dropped.
+type chatRequestBody chatRequest
+
+func (body *chatRequestBody) UnmarshalJSON(data []byte) error {
+	if err := json.Unmarshal(data, (*chatRequest)(body)); err != nil {
+		return err
+	}
+	var members map[string]json.RawMessage
+	if err := json.Unmarshal(data, &members); err != nil {
+		return err
+	}
+	for name, raw := range members {
+		if chatRequestMember(name) {
+			continue
+		}
+		var value any
+		if err := json.Unmarshal(raw, &value); err != nil {
+			return err
+		}
+		if body.Extra == nil {
+			body.Extra = map[string]any{}
+		}
+		body.Extra[name] = value
+	}
+	return nil
+}
+
+// chatRequestMembers are the members chatRequest decodes, read from its
+// tags so that a gateway-only field added there is never forwarded as an
+// extra one.
+var chatRequestMembers = func() []string {
+	var names []string
+	for _, field := range reflect.VisibleFields(reflect.TypeFor[chatRequest]()) {
+		if name, _, _ := strings.Cut(field.Tag.Get("json"), ","); name != "" && name != "-" {
+			names = append(names, name)
+		}
+	}
+	return names
+}()
+
+// chatRequestMember reports a member chatRequest decodes, matched as
+// encoding/json matches a member to a field: exactly or ignoring case.
+func chatRequestMember(name string) bool {
+	return slices.ContainsFunc(chatRequestMembers, func(member string) bool { return strings.EqualFold(member, name) })
+}
+
+// reservedChatField returns a member of extra whose name begins with "_",
+// which names the gateway's own kwargs and so is never sent upstream.
+func reservedChatField(extra map[string]any) (string, bool) {
+	for _, name := range slices.Sorted(maps.Keys(extra)) {
+		if strings.HasPrefix(name, "_") {
+			return name, true
+		}
+	}
+	return "", false
 }
 
 type responsesRequest struct {
@@ -86,6 +153,17 @@ func chatKwargs(req *chatRequest) providers.Kwargs {
 	}
 	if req.ForceApiSupport != nil {
 		kw["_force_api_support"] = *req.ForceApiSupport
+	}
+	// Every member chatRequest reads is one the OpenAI transport forwards
+	// anyway, so the request is marked as sent only when it sets another,
+	// which an OpenAI-compatible target then forwards too. A facade that
+	// hands its kwargs on whole, as the companion daemon's does, sees the
+	// mark only beside such a field.
+	for name, value := range req.Extra {
+		if value != nil && !strings.HasPrefix(name, "_") {
+			kw[name] = value
+			kw[providers.ChatFieldsAsSent] = true
+		}
 	}
 	return kw
 }
@@ -155,12 +233,16 @@ func handleChat(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var req chatRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+	if err := json.NewDecoder(r.Body).Decode((*chatRequestBody)(&req)); err != nil {
 		writeBodyError(w, err, 422, "invalid request body")
 		return
 	}
 	if _, err := requestedTransportMode(r); err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	if name, reserved := reservedChatField(req.Extra); reserved {
+		writeError(w, http.StatusBadRequest, fmt.Sprintf("Chat Completions field %q cannot be sent: names that begin with an underscore are reserved", name))
 		return
 	}
 	chatDispatch(w, r, &req, principal, "openai.chat")
@@ -236,6 +318,9 @@ func chatDispatch(w http.ResponseWriter, r *http.Request, req *chatRequest, prin
 		for index := range req.Messages {
 			msgs[index] = providers.Message(req.Messages[index])
 		}
+		// Set before targets are weighed for the request's fields, so they
+		// are weighed as the target serves a transparent request.
+		kw["_force_api_support"] = false
 	}
 
 	targets, polStatus, polMsg := authorizeKeyPolicy(principal, req.Model, resolution.Category, targets)
@@ -248,6 +333,9 @@ func chatDispatch(w http.ResponseWriter, r *http.Request, req *chatRequest, prin
 		Surface: core.ModelSurfaceChatCompletions, Tools: requestHasTools(req.Tools),
 		Vision: requestIsMultimodal(req.Messages), Streaming: req.Stream,
 	})
+	if err == nil {
+		targets, err = router.FilterChatFieldTargets(targets, config.Get(), callerOf(principal), kw)
+	}
 	if err != nil {
 		recordFailureUsage(endpoint, req.Model, principal, 400, "compatibility", started)
 		writeError(w, 400, err.Error())
@@ -272,7 +360,6 @@ func chatDispatch(w http.ResponseWriter, r *http.Request, req *chatRequest, prin
 		if !admitRequest(w, endpoint, req.Model, principal, "policy", started) {
 			return
 		}
-		kw["_force_api_support"] = false
 		ctx := fallbackContext(r, req.FallbackTimeoutMS, req.AffinityKey)
 		response, providerErr := providers.CompleteProviderContext(ctx, provider, target.Model, msgs, kw)
 		if providerErr != nil {
