@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"io"
 	"math"
 	"net/http"
@@ -90,8 +89,7 @@ func fallbackContext(r *http.Request, timeout any, affinity string) context.Cont
 	if header := strings.TrimSpace(r.Header.Get("X-LLMGW-Affinity-Key")); header != "" {
 		affinity = header
 	}
-	milliseconds, _ := strconv.ParseInt(fmt.Sprint(timeout), 10, 64)
-	return router.WithFallbackOptions(r.Context(), time.Duration(milliseconds)*time.Millisecond, affinity)
+	return router.WithFallbackOptions(r.Context(), router.FallbackTimeout(timeout), affinity)
 }
 
 func providerMessages(messages []map[string]any) []providers.Message {

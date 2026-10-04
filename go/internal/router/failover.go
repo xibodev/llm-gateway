@@ -6,8 +6,10 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/binary"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"math"
 	"sort"
 	"strconv"
 	"strings"
@@ -31,6 +33,50 @@ type Resolution = core.Resolution
 
 const defaultFallbackTimeout = 2 * time.Minute
 
+// maxFallbackTimeoutMS is the most milliseconds a time.Duration holds.
+const maxFallbackTimeoutMS = int64(math.MaxInt64 / time.Millisecond)
+
+// FallbackTimeout reads a fallback_timeout_ms value. A JSON number arrives as
+// float64 or json.Number and is read as a number, not through fmt, whose text
+// for a float64 switches to exponent notation at one million. Text, as the
+// header carries it, must be a base-10 integer. Anything but a positive whole
+// number of milliseconds a Duration holds reads as 0, which
+// WithFallbackOptions replaces with the default.
+func FallbackTimeout(value any) time.Duration {
+	var milliseconds int64
+	switch typed := value.(type) {
+	case float64:
+		// Bounded before the conversion, which is unspecified for a value
+		// int64 cannot hold.
+		if math.IsNaN(typed) || math.IsInf(typed, 0) || math.Trunc(typed) != typed ||
+			typed <= 0 || typed > float64(maxFallbackTimeoutMS) {
+			return 0
+		}
+		milliseconds = int64(typed)
+	case json.Number:
+		// Every whole millisecond count a Duration holds is exact in a float64.
+		number, err := typed.Float64()
+		if err != nil {
+			return 0
+		}
+		return FallbackTimeout(number)
+	case int:
+		milliseconds = int64(typed)
+	case int64:
+		milliseconds = typed
+	case string:
+		parsed, err := strconv.ParseInt(typed, 10, 64)
+		if err != nil {
+			return 0
+		}
+		milliseconds = parsed
+	}
+	if milliseconds <= 0 || milliseconds > maxFallbackTimeoutMS {
+		return 0
+	}
+	return time.Duration(milliseconds) * time.Millisecond
+}
+
 type fallbackOptions struct {
 	timeout  time.Duration
 	affinity string
@@ -47,9 +93,7 @@ func WithFallbackOptions(ctx context.Context, timeout time.Duration, affinity st
 func prepareFallback(ctx context.Context, targets []Target, kw providers.Kwargs) (context.Context, context.CancelFunc, []Target) {
 	options, _ := ctx.Value(fallbackOptionsKey{}).(fallbackOptions)
 	if value, ok := kw["_fallback_timeout_ms"]; ok && options.timeout <= 0 {
-		if milliseconds, err := strconv.ParseInt(fmt.Sprint(value), 10, 64); err == nil && milliseconds > 0 {
-			options.timeout = time.Duration(milliseconds) * time.Millisecond
-		}
+		options.timeout = FallbackTimeout(value)
 	}
 	if value, ok := kw["_affinity_key"].(string); ok && options.affinity == "" && strings.TrimSpace(value) != "" {
 		options.affinity = strings.TrimSpace(value)

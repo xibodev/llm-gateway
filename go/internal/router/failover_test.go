@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"math"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -294,6 +295,66 @@ func TestFallbackTimeoutBoundsWholeChain(t *testing.T) {
 	_, _, err := ExecuteCompleteContext(ctx, []Target{{Provider: "slow", Model: "model"}, {Provider: "echo", Model: "echo-default"}}, nil, "route", anonymous, nil)
 	if err == nil || time.Since(started) > time.Second {
 		t.Fatalf("timeout err=%v elapsed=%v", err, time.Since(started))
+	}
+}
+
+// A JSON body's fallback_timeout_ms reaches the chain as float64, whose
+// default text form switches to exponent notation at one million.
+func TestLargeNumericFallbackTimeoutBoundsTheChain(t *testing.T) {
+	for _, test := range []struct {
+		name  string
+		value any
+		want  time.Duration
+	}{
+		{"one million", 1e6, 1000 * time.Second},
+		{"fractional mantissa", 2.5e6, 2500 * time.Second},
+		{"negative", -1.0, defaultFallbackTimeout},
+		{"NaN text", "NaN", defaultFallbackTimeout},
+	} {
+		ctx, cancel, _ := prepareFallback(context.Background(), nil, providers.Kwargs{"_fallback_timeout_ms": test.value})
+		deadline, ok := ctx.Deadline()
+		cancel()
+		if remaining := time.Until(deadline); !ok || remaining > test.want || remaining < test.want-time.Minute {
+			t.Errorf("%s: chain deadline in %v, want %v", test.name, remaining, test.want)
+		}
+	}
+}
+
+func TestFallbackTimeoutReadsEachFormExactly(t *testing.T) {
+	for _, test := range []struct {
+		name  string
+		value any
+		want  time.Duration
+	}{
+		{"one million", 1e6, 1000 * time.Second},
+		{"fractional mantissa", 2.5e6, 2500 * time.Second},
+		{"decoded number", json.Number("1e6"), 1000 * time.Second},
+		{"decoded integer", json.Number("1500"), 1500 * time.Millisecond},
+		{"integer", 1500, 1500 * time.Millisecond},
+		{"text", "1500", 1500 * time.Millisecond},
+		{"largest", float64(maxFallbackTimeoutMS), time.Duration(maxFallbackTimeoutMS) * time.Millisecond},
+		{"negative", -1.0, 0},
+		{"negative integer", -1, 0},
+		{"negative text", "-1", 0},
+		{"zero", 0.0, 0},
+		{"fraction", 1.5, 0},
+		{"exponent text", "1e6", 0},
+		{"NaN", math.NaN(), 0},
+		{"infinity", math.Inf(1), 0},
+		{"NaN text", "NaN", 0},
+		{"infinity text", "Inf", 0},
+		{"NaN number", json.Number("NaN"), 0},
+		{"infinite number", json.Number("Infinity"), 0},
+		{"overflowing number", json.Number("1e400"), 0},
+		{"beyond a Duration", float64(maxFallbackTimeoutMS + 1), 0},
+		{"beyond int64", 1e300, 0},
+		{"beyond a Duration text", "9223372036855", 0},
+		{"absent", nil, 0},
+		{"boolean", true, 0},
+	} {
+		if got := FallbackTimeout(test.value); got != test.want {
+			t.Errorf("%s: FallbackTimeout(%#v) = %v, want %v", test.name, test.value, got, test.want)
+		}
 	}
 }
 
