@@ -172,6 +172,8 @@ jobs:
           set -euo pipefail
           mkdir -p ../dist
           ldflags="-s -w -X=llmgw/internal/buildinfo.Version=$VERSION -X=llmgw/internal/buildinfo.Commit=$COMMIT -X=llmgw/internal/buildinfo.BuildTime=$BUILD_TIME"
+          # The cross-compile job in ci.yml builds these same targets on every
+          # pull request; keep the two lists in step.
           targets="windows/amd64 windows/arm64 linux/amd64 linux/arm64 darwin/amd64 darwin/arm64 freebsd/amd64 linux/riscv64"
           target_count=$(printf '%s' "$targets" | wc -w)
           for target in $targets; do

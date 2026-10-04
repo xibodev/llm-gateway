@@ -74,6 +74,65 @@ jobs:
           go install golang.org/x/vuln/cmd/govulncheck@v1.5.0
           govulncheck ./...
 
+  # The release also ships Windows and macOS binaries. These packages hold the
+  # code that differs by OS (state-file locking, private permissions and ACLs,
+  # durable renames, shutdown signals); the go job runs the whole suite on Linux.
+  go-platforms:
+    name: go test / ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
+        with:
+          go-version-file: go/go.mod
+          cache: false
+
+      - name: Test platform-specific packages
+        working-directory: go
+        # Hermetic, as in the go job: an unreachable proxy fails any test that
+        # reaches the internet.
+        env:
+          HTTP_PROXY: http://127.0.0.1:9
+          HTTPS_PROXY: http://127.0.0.1:9
+          NO_PROXY: ""
+        run: go test ./cmd/... ./internal/operations/... ./internal/config/... ./internal/iam/...
+
+  cross-compile:
+    name: go cross-compile / release targets
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
+        with:
+          go-version-file: go/go.mod
+          cache: false
+
+      - name: Build every release target
+        working-directory: go
+        # Every target the binaries job in release.yml ships; keep the two lists
+        # in step. A target that stops compiling then fails its pull request
+        # rather than the release.
+        env:
+          CGO_ENABLED: "0"
+        run: |
+          set -euo pipefail
+          for target in windows/amd64 windows/arm64 linux/amd64 linux/arm64 darwin/amd64 darwin/arm64 freebsd/amd64 linux/riscv64; do
+            echo "build $target"
+            GOOS="${target%/*}" GOARCH="${target#*/}" go build -o /dev/null ./cmd/llmgw
+          done
+
   console:
     name: console lint / test / dist
     runs-on: ubuntu-latest
