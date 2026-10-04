@@ -64,7 +64,7 @@ func TestCoreClassificationMatchesGatewayRouting(t *testing.T) {
 	// invocationStatusRetryAfter a Status, and failoverInvocationStatus a Status
 	// and FailoverEligible. Walking every combination covers them all, and the
 	// literals other code builds.
-	for _, status := range []int{0, 400, 401, 403, 404, 408, 409, 429, 500, 502, 503, 504} {
+	for _, status := range []int{0, 400, 401, 403, 404, 408, 409, 429, 500, 502, 503, 504, 520, 521, 522, 523, 524, 529} {
 		for flags := range 8 {
 			invocation := &providers.InvocationError{
 				Msg: "fixture", Status: status,

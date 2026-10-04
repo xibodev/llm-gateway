@@ -209,7 +209,9 @@ func SupportsAnthropicMessages(provider Provider) bool {
 }
 
 // InvocationRetryable selects the upstream failures safe to repeat: explicitly
-// retryable statusless failures, 408, 429, and transient 500/502/503/504 responses.
+// retryable statusless failures, 408, 429, and transient 500/502/503/504
+// responses, the 520-524 a CDN edge answers for an origin it cannot reach, and
+// the 529 Anthropic answers while overloaded.
 func InvocationRetryable(err error) bool {
 	var invocationError *InvocationError
 	if !asError(err, &invocationError) {
@@ -219,7 +221,7 @@ func InvocationRetryable(err error) bool {
 		return invocationError.Retryable
 	}
 	switch invocationError.Status {
-	case 408, 429, 500, 502, 503, 504:
+	case 408, 429, 500, 502, 503, 504, 520, 521, 522, 523, 524, 529:
 		return true
 	default:
 		return false

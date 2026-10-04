@@ -72,10 +72,11 @@ cooldowns remain process-local. See the
 [configuration reference](CONFIGURATION.md#provider-resilience).
 
 Retries happen inside one provider target. Endpoint failover moves between
-targets. Retryable transport failures, 408, 429, and transient 500/502/503/504
-responses can repeat; malformed responses, local credential-state failures, and
-definitive upstream 4xx responses do not repeat against the same target. Circuit
-state is process-local and resets on restart.
+targets. Retryable transport failures, 408, 429, and transient 500/502/503/504,
+520-524 (CDN edge) and 529 (overloaded) responses can repeat; malformed
+responses, local credential-state failures, and definitive upstream 4xx
+responses do not repeat against the same target. Circuit state is process-local
+and resets on restart.
 
 ## Policy and credentials
 

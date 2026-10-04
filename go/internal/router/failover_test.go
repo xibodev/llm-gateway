@@ -7,6 +7,7 @@ import (
 	"math"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -273,6 +274,36 @@ func TestGenericFailoverUsesInvocationEligibility(t *testing.T) {
 			}
 			if requests != 1 {
 				t.Fatalf("requests=%d want=1", requests)
+			}
+		})
+	}
+}
+
+// Anthropic answers 529 while it is overloaded, and a CDN edge answers
+// 520-524 for an origin it cannot reach. Another member may well serve.
+func TestOverloadedAndEdgeStatusesAdvanceTheChain(t *testing.T) {
+	for _, status := range []int{520, 521, 522, 523, 524, 529} {
+		t.Run(strconv.Itoa(status), func(t *testing.T) {
+			useStateDir(t)
+			ResetTelemetryState()
+			t.Cleanup(ResetTelemetryState)
+			upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				w.WriteHeader(status)
+				_, _ = w.Write([]byte(`{"error":{"message":"fixture"}}`))
+			}))
+			defer upstream.Close()
+			config.Update(func(settings *config.Settings) {
+				settings.Providers = map[string]*config.ProviderConfig{
+					"upstream": {Type: "openai_compatible", BaseURL: upstream.URL},
+					"echo":     {Type: "echo"},
+				}
+				settings.Policies.Defaults = config.ProviderPolicy{RetryMaxAttempts: 1}
+			})
+			providers.ResetProviders()
+			t.Cleanup(providers.ResetProviders)
+			_, served, err := ExecuteComplete([]Target{{Provider: "upstream", Model: "model"}, {Provider: "echo", Model: "echo-default"}}, []providers.Message{{"role": "user", "content": "hi"}}, "route", anonymous, nil)
+			if err != nil || served == nil || served.Provider != "echo" {
+				t.Fatalf("status %d ended the chain: served=%+v err=%v", status, served, err)
 			}
 		})
 	}

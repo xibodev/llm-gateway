@@ -458,7 +458,7 @@ func (p *messagesTestProvider) CompleteAnthropicMessages(string, map[string]any)
 }
 
 func TestResilientProviderAnthropicMessagesRetryEligibility(t *testing.T) {
-	for _, status := range []int{0, 408, 429, 500, 502, 503, 504, 400, 401, 403, 404} {
+	for _, status := range []int{0, 408, 429, 500, 502, 503, 504, 520, 521, 522, 523, 524, 529, 400, 401, 403, 404} {
 		t.Run(strconv.Itoa(status), func(t *testing.T) {
 			err := invocationStatus("failure", status)
 			if status == 0 {
@@ -471,7 +471,7 @@ func TestResilientProviderAnthropicMessagesRetryEligibility(t *testing.T) {
 			}
 			_, _ = wrapped.CompleteAnthropicMessages("model", map[string]any{})
 			want := 1
-			if status == 0 || status == 408 || status == 429 || status == 500 || status == 502 || status == 503 || status == 504 {
+			if status == 0 || status == 408 || status == 429 || status >= 500 {
 				want = 2
 			}
 			if inner.calls != want {
