@@ -163,6 +163,18 @@ func handleMessages(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if req.Stream {
+		// A stream whose every target serves Messages natively reaches its
+		// target as a request that does not stream does. Translation would
+		// refuse what it cannot carry, such as cache_control and enabled
+		// thinking, and drop what the stream returns, such as signatures and
+		// cache usage.
+		if router.ServesAnthropicMessagesNatively(targets, callerOf(principal)) {
+			if !admitRequest(w, "anthropic.messages", req.Model, principal, "policy", started) {
+				return
+			}
+			streamNativeMessagesSSE(w, ctx, targets, raw, req.Model, principal, started)
+			return
+		}
 		conversion := translate.AnthropicRequestToOpenAIWithReport(raw)
 		if lossErr := conversion.RejectMaterialLoss(); lossErr != nil {
 			recordFailureUsage("anthropic.messages", req.Model, principal, 400, "compatibility", started)
@@ -290,6 +302,113 @@ func anthropicStreamErrorEvent(err error) string {
 			"type": anthropicErrorType(upstreamErrorStatus(err)), "message": "Upstream provider stream failed.",
 		},
 	}) + "\n\n"
+}
+
+// streamNativeMessagesSSE serves a stream whose targets all serve Messages
+// natively: payload reaches the target that serves it as a request that does
+// not stream reaches it, and each record that target sends reaches the
+// client as it was sent. The stream succeeds only with the upstream's
+// message_stop; one that ends otherwise ends with an error event, the
+// upstream's own or, when it sent none, the gateway's.
+func streamNativeMessagesSSE(w http.ResponseWriter, ctx context.Context, targets []router.Target, payload map[string]any, requested string, principal *config.Principal, started time.Time) {
+	it, served, err := router.ExecuteAnthropicMessagesStreamContext(governed(ctx, principal), targets, payload, requested, callerOf(principal))
+	if err != nil {
+		if ctx.Err() != nil {
+			recordClientCancelled("anthropic.messages", requested, principal, started)
+			return
+		}
+		recordFailureUsage(
+			"anthropic.messages", requested, principal, upstreamErrorStatus(err),
+			"upstream", started,
+		)
+		writeUpstreamError(w, err)
+		return
+	}
+	defer it.Close()
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("Connection", "keep-alive")
+	w.WriteHeader(http.StatusOK)
+
+	meter := newStreamUsage("anthropic.messages", requested, principal, served, started, messagesPromptBytes(payload))
+	write := func(records string) error {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		return writeAndFlush(w, []byte(records))
+	}
+	// message_delta tells a client how the answer stopped, so from the first
+	// one on, records wait for message_stop: a stream that fails before it
+	// never carries a stop reason, as a translated one never does. Anthropic
+	// sends only further deltas and pings between the two; any other record
+	// goes out at once, with what waited.
+	var held strings.Builder
+	for {
+		record, more := it.Next()
+		if !more {
+			break
+		}
+		event := anthropicRecordEvent(record)
+		meter.anthropicEvent(event)
+		eventType, _ := event["type"].(string)
+		switch {
+		case eventType == "error":
+			// Anthropic ends a stream it cannot finish with an error event,
+			// which tells the client what failed, and sends nothing after it.
+			if write(record) != nil {
+				meter.cancelled()
+				return
+			}
+			meter.failed()
+			return
+		case eventType == "message_delta" || (eventType == "ping" && held.Len() > 0):
+			held.WriteString(record)
+			continue
+		}
+		if write(held.String()+record) != nil {
+			meter.cancelled()
+			return
+		}
+		held.Reset()
+		if eventType == "message_stop" {
+			meter.completed()
+			return
+		}
+	}
+	if ctx.Err() != nil {
+		meter.cancelled()
+		return
+	}
+	// The upstream ended the stream without message_stop or an error event,
+	// so the client learns of the failure from the gateway's.
+	if write(anthropicStreamErrorEvent(it.Err())) != nil {
+		meter.cancelled()
+		return
+	}
+	meter.failed()
+}
+
+// anthropicRecordEvent is the event a Messages stream record carries as its
+// data, read as core's Anthropic reads it, or nil when the data is not a
+// JSON object.
+func anthropicRecordEvent(record string) map[string]any {
+	var data []string
+	for _, line := range strings.Split(record, "\n") {
+		if field, value, _ := strings.Cut(strings.TrimSuffix(line, "\r"), ":"); field == "data" {
+			data = append(data, strings.TrimPrefix(value, " "))
+		}
+	}
+	var event map[string]any
+	if json.Unmarshal([]byte(strings.Join(data, "\n")), &event) != nil {
+		return nil
+	}
+	return event
+}
+
+// messagesPromptBytes is the size of what a Messages request sends as its
+// prompt: its system prompt and its messages.
+func messagesPromptBytes(payload map[string]any) int {
+	return payloadBytes(payload["system"]) + payloadBytes(payload["messages"])
 }
 
 func handleCountTokens(w http.ResponseWriter, r *http.Request) {

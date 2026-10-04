@@ -98,10 +98,15 @@ Native Anthropic targets receive non-streaming Messages payloads directly after
 resolved-model and gateway-preamble changes. Adapted targets reject unsupported
 or lossy fields before dispatch.
 
-Streaming uses a narrower compatibility profile. Adaptive/enabled thinking,
-`redacted_thinking`, cache controls, structured output, documents, unsupported
-images, error tool results, and unknown fields fail closed when they cannot be
-preserved.
+A stream whose every target is a native Anthropic target is sent the same way,
+with `stream: true`, and each record the target sends reaches the client
+unchanged, `ping` and thinking deltas included. Its usage is read from those
+records: input and cache tokens from `message_start`, output tokens from
+`message_delta`. A stream with any adapted target, such as an endpoint that
+mixes native and adapted members, is translated and uses a narrower
+compatibility profile: adaptive/enabled thinking, `redacted_thinking`, cache
+controls, structured output, documents, unsupported images, error tool results,
+and unknown fields fail closed when they cannot be preserved.
 
 ## Token counting
 
@@ -163,7 +168,9 @@ A stream whose upstream fails after the first byte, or closes the stream
 before its end, ends with the surface's error event and never with its success
 terminal: Chat Completions sends an `error` data event without `[DONE]`,
 Messages sends `event: error` without `message_delta` or `message_stop`, and
-Responses sends `response.failed`. Usage records such a stream as a `502`.
+Responses sends `response.failed`. A native Messages stream whose upstream
+sent its own `event: error` ends with that one. Usage records such a stream as
+a `502`.
 
 ## Management APIs
 

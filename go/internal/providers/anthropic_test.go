@@ -338,6 +338,61 @@ func TestAnthropicStreamCompleteCutShortAndOversizedRecords(t *testing.T) {
 	}
 }
 
+// A native Messages stream yields each record whole, as Anthropic sent it,
+// line endings included, an error event too. It ends as the Chat stream
+// does: without an error only after message_stop. Core's Anthropic shapes
+// its request as it shapes one that does not stream, with the stream flag
+// set.
+func TestAnthropicMessagesStreamYieldsRecordsAsSent(t *testing.T) {
+	const started = "event: message_start\r\ndata: {\"type\":\"message_start\",\"message\":{\"id\":\"msg_1\",\"content\":[],\"usage\":{\"input_tokens\":2}}}\r\n\r\n" +
+		"event: ping\ndata: {\"type\": \"ping\"}\n\n" +
+		"event: content_block_delta\ndata: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"thinking_delta\",\"thinking\":\"kept\"}}\n\n"
+	for _, tc := range []struct {
+		name, response string
+		complete       bool
+	}{
+		{name: "complete", response: started + "event: message_stop\ndata: {\"type\":\"message_stop\"}\n\n", complete: true},
+		{name: "cut short", response: started},
+		{name: "error event", response: started + "event: error\ndata: {\"type\":\"error\",\"error\":{\"type\":\"overloaded_error\",\"message\":\"Overloaded\"}}\n\n"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			requests := make(chan map[string]any, 1)
+			base := anthropicServer(t, func(w http.ResponseWriter, r *http.Request) {
+				requests <- anthropicTestBody(r)
+				w.Header().Set("Content-Type", "text/event-stream")
+				_, _ = fmt.Fprint(w, tc.response)
+			})
+			payload := map[string]any{
+				"model": "picker-alias", "max_tokens": 64, "messages": []any{map[string]any{"role": "user", "content": "hi"}},
+				"thinking": map[string]any{"type": "enabled", "budget_tokens": 32}, "_llmgw_preamble": "policy",
+			}
+			provider := anthropicFixture(t, &config.ProviderConfig{Type: "anthropic", BaseURL: base})
+			stream, err := provider.StreamAnthropicMessagesContext(context.Background(), "resolved-model", payload)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer stream.Close()
+			var records strings.Builder
+			for record, ok := stream.Next(); ok; record, ok = stream.Next() {
+				records.WriteString(record)
+			}
+			if records.String() != tc.response {
+				t.Fatalf("records=%q, want %q", records.String(), tc.response)
+			}
+			request := <-requests
+			if request["model"] != "resolved-model" || request["stream"] != true || request["thinking"] == nil ||
+				request["system"] != "policy" || request["_llmgw_preamble"] != nil {
+				t.Fatalf("request=%#v", request)
+			}
+			var invocation *InvocationError
+			cutShort := errors.As(stream.Err(), &invocation) && strings.Contains(invocation.Msg, "ended before message_stop")
+			if tc.complete && stream.Err() != nil || !tc.complete && !cutShort {
+				t.Fatalf("err=%v", stream.Err())
+			}
+		})
+	}
+}
+
 // A reader that stops reading and closes the stream releases the goroutine
 // that re-encodes it, which the transport's stream never did.
 func TestAnthropicStreamCloseReleasesTheReencoder(t *testing.T) {
@@ -528,6 +583,55 @@ func TestResilientProviderAnthropicMessagesDefinitiveFailureBreaksCircuitStreak(
 	_, err := wrapped.CompleteAnthropicMessages("model", map[string]any{})
 	if err != nil || inner.calls != 4 {
 		t.Fatalf("error=%v calls=%d want=4", err, inner.calls)
+	}
+}
+
+// messagesStreamTestProvider also streams Messages natively: each open fails
+// with the next of errs, and once they are spent opens a stream of one
+// record.
+type messagesStreamTestProvider struct {
+	messagesTestProvider
+	opens int
+	errs  []error
+}
+
+func (p *messagesStreamTestProvider) StreamAnthropicMessagesContext(context.Context, string, map[string]any) (StreamIter, error) {
+	p.opens++
+	if len(p.errs) > 0 {
+		err := p.errs[0]
+		p.errs = p.errs[1:]
+		return nil, err
+	}
+	return &sliceIter{chunks: []string{"record"}}, nil
+}
+
+// The resilience wrapper repeats opening a native Messages stream as it
+// repeats a request that does not stream, and hands an open stream to the
+// caller. A provider without the stream is not offered one.
+func TestResilientProviderAnthropicMessagesStreamRepeatsOnlyOpening(t *testing.T) {
+	policy := config.ProviderPolicy{RetryMaxAttempts: 2}
+	busy := &messagesStreamTestProvider{errs: []error{invocationStatus("busy", http.StatusServiceUnavailable)}}
+	wrapped := &ResilientProvider{inner: busy, name: t.Name() + "-busy", policy: policy}
+	if !SupportsAnthropicMessagesStream(wrapped) {
+		t.Fatal("wrapped native stream hidden")
+	}
+	stream, err := wrapped.StreamAnthropicMessagesContext(context.Background(), "model", map[string]any{})
+	if err != nil || busy.opens != 2 {
+		t.Fatalf("err=%v opens=%d, want an open stream on the second try", err, busy.opens)
+	}
+	if record, ok := stream.Next(); !ok || record != "record" {
+		t.Fatalf("record=%q ok=%v", record, ok)
+	}
+	invalid := &messagesStreamTestProvider{errs: []error{invocationStatus("bad request", http.StatusBadRequest)}}
+	wrapped = &ResilientProvider{inner: invalid, name: t.Name() + "-invalid", policy: policy}
+	if _, err := wrapped.StreamAnthropicMessagesContext(context.Background(), "model", map[string]any{}); UpstreamStatus(err) != http.StatusBadRequest || invalid.opens != 1 {
+		t.Fatalf("err=%v opens=%d, want the refusal after one try", err, invalid.opens)
+	}
+	completeOnly := &messagesTestProvider{}
+	wrapped = &ResilientProvider{inner: completeOnly, name: t.Name() + "-complete-only", policy: policy}
+	if _, err := StreamAnthropicMessagesContext(context.Background(), wrapped, "model", map[string]any{}); SupportsAnthropicMessagesStream(wrapped) ||
+		!errors.Is(err, ErrAnthropicMessagesUnsupported) || completeOnly.calls != 0 {
+		t.Fatalf("a provider without the stream was offered one: err=%v", err)
 	}
 }
 

@@ -221,6 +221,37 @@ func SupportsAnthropicMessages(provider Provider) bool {
 	return false
 }
 
+// AnthropicMessagesStreamProvider is the native Messages stream of a
+// provider. Unlike other streams, its StreamIter yields each record whole,
+// as the upstream sent it, event line and blank delimiter included, so the
+// stream can reach a Messages client unchanged.
+type AnthropicMessagesStreamProvider interface {
+	StreamAnthropicMessagesContext(ctx context.Context, model string, payload map[string]any) (StreamIter, error)
+}
+
+func StreamAnthropicMessagesContext(ctx context.Context, provider Provider, model string, payload map[string]any) (StreamIter, error) {
+	if messages, ok := provider.(AnthropicMessagesStreamProvider); ok {
+		return messages.StreamAnthropicMessagesContext(ctx, model, payload)
+	}
+	return nil, ErrAnthropicMessagesUnsupported
+}
+
+// SupportsAnthropicMessagesStream is SupportsAnthropicMessages for the
+// native Messages stream.
+func SupportsAnthropicMessagesStream(provider Provider) bool {
+	for provider != nil {
+		if _, ok := provider.(AnthropicMessagesStreamProvider); ok {
+			if unwrapper, wrapped := provider.(interface{ Unwrap() Provider }); wrapped {
+				provider = unwrapper.Unwrap()
+				continue
+			}
+			return true
+		}
+		return false
+	}
+	return false
+}
+
 // InvocationRetryable selects the upstream failures safe to repeat: explicitly
 // retryable statusless failures, 408, 429, and transient 500/502/503/504
 // responses, the 520-524 a CDN edge answers for an origin it cannot reach, and
@@ -373,6 +404,38 @@ func (r *ResilientProvider) CompleteAnthropicMessagesContext(ctx context.Context
 		if errors.Is(err, ErrAnthropicMessagesUnsupported) {
 			r.record(err)
 			return nil, err
+		}
+		if endErr := r.repeat(ctx, err, attempt, attempts); endErr != nil {
+			return nil, endErr
+		}
+	}
+}
+
+// StreamAnthropicMessagesContext opens a native Messages stream under the
+// provider's policy. As with every stream, only opening it is repeated: an
+// open stream is the caller's, and a later failure reaches the caller
+// through it.
+func (r *ResilientProvider) StreamAnthropicMessagesContext(ctx context.Context, model string, payload map[string]any) (StreamIter, error) {
+	if !SupportsAnthropicMessagesStream(r.inner) {
+		return nil, ErrAnthropicMessagesUnsupported
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	if err := r.checkCircuit(); err != nil {
+		return nil, err
+	}
+	for attempt, attempts := 1, max1(r.policy.RetryMaxAttempts); ; attempt++ {
+		stream, err := StreamAnthropicMessagesContext(ctx, r.inner, model, payload)
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			if stream != nil {
+				_ = stream.Close()
+			}
+			return nil, ctxErr
+		}
+		if err == nil {
+			r.record(nil)
+			return stream, nil
 		}
 		if endErr := r.repeat(ctx, err, attempt, attempts); endErr != nil {
 			return nil, endErr

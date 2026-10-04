@@ -99,6 +99,38 @@ func TestStreamUsageEstimatesTheStreamedText(t *testing.T) {
 	}
 }
 
+// A native Messages stream's prompt is its input with the input Anthropic
+// wrote to and read from its cache, each count replaced by a later report
+// of its kind. Its output is message_delta's; until one arrives, the text,
+// thinking and tool input streamed are estimated, but not a signature, and
+// not the output message_start reports as the answer starts.
+func TestStreamUsageReadsAnthropicEvents(t *testing.T) {
+	messages := newStreamUsage("anthropic.messages", "m", nil, nil, time.Now(), 40)
+	for _, event := range []map[string]any{
+		nil,
+		{"type": "message_start", "message": map[string]any{"usage": map[string]any{
+			"input_tokens": 12.0, "cache_creation_input_tokens": 200.0, "cache_read_input_tokens": 3000.0, "output_tokens": 1.0,
+		}}},
+		{"type": "ping"},
+		{"type": "content_block_delta", "delta": map[string]any{"type": "thinking_delta", "thinking": "abcdefgh"}},
+		{"type": "content_block_delta", "delta": map[string]any{"type": "signature_delta", "signature": strings.Repeat("s", 400)}},
+		{"type": "content_block_delta", "delta": map[string]any{"type": "text_delta", "text": "abcd"}},
+		{"type": "content_block_delta", "delta": map[string]any{"type": "input_json_delta", "partial_json": `{"q":1}`}},
+	} {
+		messages.anthropicEvent(event)
+	}
+	// 2 + 1 + 1 output tokens streamed.
+	if input, output := messages.tokens(); input != 3212 || output != 4 {
+		t.Fatalf("messages estimate=%d/%d, want 3212/4", input, output)
+	}
+	messages.anthropicEvent(map[string]any{"type": "message_delta", "usage": map[string]any{
+		"cache_read_input_tokens": 3500.0, "output_tokens": 42.0,
+	}})
+	if input, output := messages.tokens(); input != 3712 || output != 42 {
+		t.Fatalf("messages reported=%d/%d, want 3712/42", input, output)
+	}
+}
+
 // A Chat client that asks for its stream's usage gets it: stream_options
 // reaches the upstream, whose usage chunk reaches the client, and the
 // stream is recorded with exactly that usage. A request that does not

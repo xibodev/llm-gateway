@@ -607,6 +607,34 @@ func TestExecuteStreamEcho(t *testing.T) {
 	}
 }
 
+// A Messages stream reaches its targets natively only when every one serves
+// Messages natively: one target on another wire, or one whose provider
+// cannot be built, leaves the whole stream to translation.
+func TestServesAnthropicMessagesNativelyNeedsEveryTarget(t *testing.T) {
+	setupEcho(t)
+	config.Update(func(s *config.Settings) {
+		s.Providers["claude-a"] = &config.ProviderConfig{Type: "anthropic", BaseURL: "http://127.0.0.1:1"}
+		s.Providers["claude-b"] = &config.ProviderConfig{Type: "anthropic", BaseURL: "http://127.0.0.1:1"}
+		s.Providers["misconfigured"] = &config.ProviderConfig{Type: "unknown-fixture"}
+	})
+	providers.ResetProviders()
+	t.Cleanup(providers.ResetProviders)
+	claude := Target{Provider: "claude-a", Model: "model"}
+	for name, tc := range map[string]struct {
+		targets []Target
+		want    bool
+	}{
+		"native":      {[]Target{claude, {Provider: "claude-b", Model: "model"}}, true},
+		"adapted":     {[]Target{claude, {Provider: "echo", Model: "echo-default"}}, false},
+		"unbuildable": {[]Target{claude, {Provider: "misconfigured", Model: "model"}}, false},
+		"none":        {nil, false},
+	} {
+		if got := ServesAnthropicMessagesNatively(tc.targets, anonymous); got != tc.want {
+			t.Errorf("%s: native=%v, want %v", name, got, tc.want)
+		}
+	}
+}
+
 func TestResponsesFallbackRejectsUnsupportedToolConstraints(t *testing.T) {
 	setupEcho(t)
 	config.Update(func(settings *config.Settings) {

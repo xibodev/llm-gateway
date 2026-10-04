@@ -55,11 +55,15 @@ claude --bare \
 
 Claude uses `/v1/models`, `/v1/messages`, and
 `/v1/messages/count_tokens`; bare aliases are accepted. Native Anthropic targets
-receive the non-streaming Messages payload directly. Adapted targets use a strict
+receive the Messages payload directly, and Claude's streams from them arrive as
+the target sent them, thinking, signatures and cache usage included, so prompt
+caching and thinking work with Claude's defaults. A stream goes natively only
+when every target of the request is a native Anthropic target; on an endpoint
+with any adapted member it is translated. Adapted targets use a strict
 compatibility profile and reject fields that cannot be preserved.
 
-For a Chat-only target, disable thinking and prompt caching for a core-profile
-smoke:
+For a Chat-only target, or an endpoint with any adapted member, disable thinking
+and prompt caching for a core-profile smoke:
 
 ```json
 {

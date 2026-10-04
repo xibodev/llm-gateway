@@ -21,12 +21,13 @@ const (
 	anthropicCatalogTTL  = time.Hour
 )
 
-// AnthropicNativeProvider is the gateway's Anthropic facade. Messages, Chat
-// and the Chat stream go through the core Runtime, which resolves the
-// caller's credential through Anthropic's store on each request, and core's
-// Anthropic, which sends each Messages request and reads each answer as the
-// gateway's transport did, a setup token's completion assembled from its
-// stream included. Token counts go through core.CountTokens.
+// AnthropicNativeProvider is the gateway's Anthropic facade. Messages and
+// their stream, Chat and the Chat stream go through the core Runtime, which
+// resolves the caller's credential through Anthropic's store on each
+// request, and core's Anthropic, which sends each Messages request and reads
+// each answer as the gateway's transport did, a setup token's completion
+// assembled from its stream included. Token counts go through
+// core.CountTokens.
 //
 // What the gateway did above that transport stays here. Core has no route
 // from Chat to Messages, so a Chat request is converted to Messages with
@@ -203,6 +204,39 @@ func (p AnthropicNativeProvider) CompleteAnthropicMessagesContext(ctx context.Co
 	return result, nil
 }
 
+// StreamAnthropicMessagesContext passes a Messages payload through as a
+// stream: core's Anthropic shapes it as it shapes one
+// CompleteAnthropicMessagesContext passes through, with the stream flag set.
+// See anthropicRecordStream for what the stream yields.
+func (p AnthropicNativeProvider) StreamAnthropicMessagesContext(ctx context.Context, model string, payload map[string]any) (StreamIter, error) {
+	stream, err := p.stream(ctx, model, payload)
+	if err != nil {
+		return nil, err
+	}
+	return &anthropicRecordStream{inner: stream}, nil
+}
+
+// anthropicRecordStream yields the records core relays from a Messages
+// stream, each whole and as Anthropic sent it. It ends as anthropicStreamEnd
+// says, without an error only once Anthropic sent message_stop. An error
+// event is yielded as any other record, for the reader to act on.
+type anthropicRecordStream struct {
+	inner core.StreamIter
+	err   error
+}
+
+func (s *anthropicRecordStream) Next() (string, bool) {
+	frame, err := s.inner.Next()
+	if err != nil {
+		s.err = anthropicStreamEnd(err)
+		return "", false
+	}
+	return string(frame), true
+}
+
+func (s *anthropicRecordStream) Err() error   { return s.err }
+func (s *anthropicRecordStream) Close() error { return s.inner.Close() }
+
 // CountAnthropicTokens counts through core.CountTokens, which the core
 // Runtime does not perform, with the credential Anthropic's store resolves
 // for the caller, as a request would be sent. Core's Anthropic forwards the
@@ -252,6 +286,18 @@ func (p AnthropicNativeProvider) StreamContext(ctx context.Context, model string
 	if err != nil {
 		return nil, err
 	}
+	stream, err := p.stream(ctx, model, payload)
+	if err != nil {
+		return nil, err
+	}
+	return newAnthropicChatStream(stream, model), nil
+}
+
+// stream opens a Messages stream of payload through the core Runtime. A
+// stream that gets no answer keeps the transport's message for a stream,
+// and one whose caller left reports the caller's context error, which
+// nothing repeats or fails over.
+func (p AnthropicNativeProvider) stream(ctx context.Context, model string, payload map[string]any) (core.StreamIter, error) {
 	request, err := anthropicMessagesRequest(model, payload, "anthropic: invalid Messages request")
 	if err != nil {
 		return nil, err
@@ -263,7 +309,7 @@ func (p AnthropicNativeProvider) StreamContext(ctx context.Context, model string
 		}
 		return nil, anthropicFailure(err, "anthropic: streaming transport error: ", p.instance)
 	}
-	return newAnthropicChatStream(stream, model), nil
+	return stream, nil
 }
 
 // anthropicChatStream re-encodes core's Anthropic stream as Chat chunks, as

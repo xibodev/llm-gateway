@@ -82,6 +82,14 @@ func ExecuteAnthropicStreamContext(ctx context.Context, targets []Target, messag
 	return Current().ExecuteAnthropicStreamContext(ctx, targets, messages, requested, caller, kw)
 }
 
+func ServesAnthropicMessagesNatively(targets []Target, caller core.Caller) bool {
+	return Current().ServesAnthropicMessagesNatively(targets, caller)
+}
+
+func ExecuteAnthropicMessagesStreamContext(ctx context.Context, targets []Target, payload map[string]any, requested string, caller core.Caller) (providers.StreamIter, *Target, error) {
+	return Current().ExecuteAnthropicMessagesStreamContext(ctx, targets, payload, requested, caller)
+}
+
 func RecordUsage(r UsageRecord) { Current().RecordUsage(r) }
 
 func Totals(includeStubs bool) map[string]any { return Current().Totals(includeStubs) }

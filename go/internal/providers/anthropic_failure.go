@@ -132,15 +132,15 @@ func anthropicCountFailure(err error, instance string) error {
 	return anthropicFailure(err, "anthropic: token-count transport error: ", instance)
 }
 
-// anthropicStreamEnd is how a Chat stream ends for what core's stream
-// returned: without an error once Anthropic sent message_stop, with an
-// error when the stream ended before it, with the gateway's
-// StreamRecordTooLargeError for a record over the size limit, and with the
-// reader's own error when the stream broke. A stream core relays reports
-// only the missing message_stop as an upstream failure without a cause.
-// That failure is kept: a stream that ends early, after an error event or
-// when a connection closes cleanly mid-answer, must not reach a client as a
-// complete answer.
+// anthropicStreamEnd is how a Messages stream ends, relayed as Anthropic
+// sent it or re-encoded as a Chat stream, for what core's stream returned:
+// without an error once Anthropic sent message_stop, with an error when the
+// stream ended before it, with the gateway's StreamRecordTooLargeError for a
+// record over the size limit, and with the reader's own error when the
+// stream broke. A stream core relays reports only the missing message_stop
+// as an upstream failure without a cause. That failure is kept: a stream
+// that ends early, after an error event or when a connection closes cleanly
+// mid-answer, must not reach a client as a complete answer.
 func anthropicStreamEnd(err error) error {
 	var failure *core.ProviderError
 	switch {

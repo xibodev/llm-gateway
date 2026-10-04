@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -97,12 +98,15 @@ func TestAnthropicCallerCancellationEndsTheUpstreamRequest(t *testing.T) {
 		"stream": func(ctx context.Context, p AnthropicNativeProvider) error {
 			return drain(p.StreamContext(ctx, "model", messages, nil))
 		},
+		"messages stream": func(ctx context.Context, p AnthropicNativeProvider) error {
+			return drain(p.StreamAnthropicMessagesContext(ctx, "model", payload))
+		},
 	} {
 		t.Run(name, func(t *testing.T) {
 			started, left := make(chan struct{}, 1), make(chan struct{}, 1)
 			base := holdingUpstream(t, started, left, anthropicFrames(0)[0])
 			provider := anthropicFixture(t, &config.ProviderConfig{Type: "anthropic", BaseURL: base, APIKey: "fixture-key"})
-			cancelDuring(t, started, left, name == "stream", func(ctx context.Context) error { return call(ctx, provider) })
+			cancelDuring(t, started, left, strings.HasSuffix(name, "stream"), func(ctx context.Context) error { return call(ctx, provider) })
 		})
 	}
 }

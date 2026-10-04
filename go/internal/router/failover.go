@@ -1403,6 +1403,95 @@ func (rt *Runtime) executeStreamContext(ctx context.Context, targets []Target, m
 	return nil, nil, &AllTargetsFailed{Msg: msg, Status: lastStatus, Err: lastErr}
 }
 
+// ServesAnthropicMessagesNatively reports whether every target serves
+// Messages natively, as ExecuteAnthropicMessagesContext reads a target, and
+// streams them natively, so ExecuteAnthropicMessagesStreamContext can serve
+// a Messages stream on any of them. A target whose provider cannot be built
+// is not known to.
+func (rt *Runtime) ServesAnthropicMessagesNatively(targets []Target, caller core.Caller) bool {
+	for _, target := range targets {
+		provider, err := rt.providers().GetProviderForPrincipal(target.Provider, caller)
+		if err != nil || !providers.SupportsAnthropicMessages(provider) || !providers.SupportsAnthropicMessagesStream(provider) {
+			return false
+		}
+	}
+	return len(targets) > 0
+}
+
+// ExecuteAnthropicMessagesStreamContext is ExecuteAnthropicMessagesContext
+// for a stream whose targets all serve Messages natively (see
+// ServesAnthropicMessagesNatively): each target is sent the payload as that
+// chain sends it, and the chain moves past the failures that chain moves
+// past. Like every stream chain, it commits to the first target whose stream
+// opens (see executeStreamContext). The stream yields each record as that
+// target sent it.
+func (rt *Runtime) ExecuteAnthropicMessagesStreamContext(ctx context.Context, targets []Target, payload map[string]any, requested string, caller core.Caller) (providers.StreamIter, *Target, error) {
+	request := ctx
+	ctx, cancel, targets := prepareFallback(ctx, targets, nil)
+	defer cancel()
+	var attempts []attempt
+	var lastErr error
+	lastStatus := 0
+	ended := func() error {
+		err := ctx.Err()
+		if err != nil {
+			lastErr, lastStatus = err, deadlineStatus(err)
+		}
+		return err
+	}
+	it, served := walk(ctx, targets, func(target Target) (providers.StreamIter, error) {
+		if err := ended(); err != nil {
+			return nil, stop(err)
+		}
+		provider, err := rt.providers().GetProviderForPrincipal(target.Provider, caller)
+		if ctxErr := ended(); ctxErr != nil {
+			return nil, stop(ctxErr)
+		}
+		if err != nil {
+			lastErr = err
+			attempts = append(attempts, attempt{Provider: target.Provider, Model: target.Model, Error: truncate(err.Error())})
+			return nil, judge(err, true)
+		}
+		attemptCtx, opened, release := streamAttempt(request, ctx)
+		stream, err := providers.StreamAnthropicMessagesContext(attemptCtx, provider, target.Model, payload)
+		if ctxErr := ended(); ctxErr != nil {
+			abandon(stream, release)
+			return nil, stop(ctxErr)
+		}
+		if err != nil {
+			release()
+			lastErr, lastStatus = err, providers.UpstreamStatus(err)
+			if providers.IsConfig(err) {
+				lastStatus = 400
+			}
+			attempts = append(attempts, attempt{Provider: target.Provider, Model: target.Model, Error: truncate(err.Error()), Throttled: providers.IsThrottle(err)})
+			if providers.IsInvocation(err) && !providers.InvocationFailoverEligible(err) {
+				return nil, stop(err)
+			}
+			return nil, judge(err, true)
+		}
+		if !opened() {
+			// The budget ended as the stream opened.
+			abandon(stream, release)
+			return nil, stop(ended())
+		}
+		attempts = append(attempts, attempt{Provider: target.Provider, Model: target.Model, OK: true})
+		return &attemptStream{StreamIter: stream, release: release}, nil
+	})
+	rt.recordChain(ctx, requested, attempts, served)
+	if served != nil {
+		return it, served, nil
+	}
+	if errors.Is(lastErr, context.Canceled) || errors.Is(request.Err(), context.Canceled) {
+		return nil, nil, context.Canceled
+	}
+	message := "no compatible Anthropic Messages target"
+	if lastErr != nil {
+		message = lastErr.Error()
+	}
+	return nil, nil, &AllTargetsFailed{Msg: message, Status: lastStatus, Err: lastErr}
+}
+
 func truncate(s string) string {
 	return providers.SanitizeDiagnosticTextLimit(s, 200)
 }

@@ -24,6 +24,9 @@ type streamUsage struct {
 	// input and output are the last counts the upstream reported, zero
 	// until it reports one.
 	input, output int
+	// inputs are the counts of each of anthropicInputKinds an Anthropic
+	// stream last reported, which input sums.
+	inputs [len(anthropicInputKinds)]int
 	// streamed estimates the output tokens of the text streamed so far.
 	streamed int
 }
@@ -109,6 +112,50 @@ func (u *streamUsage) responsesEvent(event map[string]any) {
 	}
 	if eventType, _ := event["type"].(string); strings.HasSuffix(eventType, ".delta") && eventType != "response.audio.delta" {
 		u.streamedText(event["delta"])
+	}
+}
+
+// anthropicInputKinds are the counts Anthropic reports a prompt in: the
+// input it read, and apart from it the input it wrote to its cache and the
+// input it read from it.
+var anthropicInputKinds = [...]string{"input_tokens", "cache_creation_input_tokens", "cache_read_input_tokens"}
+
+// anthropicEvent reads one event of a Messages stream as Anthropic sent it:
+// the usage message_start and message_delta report, and the text, thinking
+// and tool input a content_block_delta streams. The prompt is the sum of
+// anthropicInputKinds. Each report is a running total, so a later count of a
+// kind replaces an earlier one and a kind left out keeps its count. The
+// output message_start reports is only where the answer starts, so the
+// output is message_delta's, and until one arrives the streamed estimate.
+func (u *streamUsage) anthropicEvent(event map[string]any) {
+	var usage map[string]any
+	switch event["type"] {
+	case "message_start":
+		message, _ := event["message"].(map[string]any)
+		usage, _ = message["usage"].(map[string]any)
+	case "message_delta":
+		usage, _ = event["usage"].(map[string]any)
+		if value := firstInt(usage, "output_tokens"); value > 0 {
+			u.output = value
+		}
+	case "content_block_delta":
+		delta, _ := event["delta"].(map[string]any)
+		u.streamedText(delta["text"])
+		u.streamedText(delta["thinking"])
+		u.streamedText(delta["partial_json"])
+		return
+	default:
+		return
+	}
+	prompt := 0
+	for index, kind := range anthropicInputKinds {
+		if usage[kind] != nil {
+			u.inputs[index] = firstInt(usage, kind)
+		}
+		prompt += u.inputs[index]
+	}
+	if prompt > 0 {
+		u.input = prompt
 	}
 }
 
