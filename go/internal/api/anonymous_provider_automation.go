@@ -120,7 +120,14 @@ func (s *server) handleAutoConnectFreeProviders(w http.ResponseWriter, r *http.R
 		return
 	}
 	w.Header().Set("Cache-Control", "no-store")
-	_ = iam.SetAnonymousProviderAutomationOverride("on")
+	previousOverride, overridden, _ := iam.AnonymousProviderAutomationOverride()
+	if err := iam.SetAnonymousProviderAutomationOverride("on"); err == nil && (!overridden || previousOverride != "on") {
+		// Connecting the free providers turns the automation on as well: the
+		// same setting change the settings route records.
+		auditAdmin(r, "provider_automation.update", "setting", "anonymous-providers", map[string]any{
+			"override": "on", "effective": true, "source": "auto_connect",
+		})
+	}
 
 	profiles := providers.AnonymousProviderProfiles()
 	orchestrator, err := newAnonymousOrchestrator(s.providers(), profiles)

@@ -77,6 +77,8 @@ func TestAdminRouteRejectsUnknownMembersAndPreservesOrder(t *testing.T) {
 
 func TestEndpointDeleteIsCaseInsensitive(t *testing.T) {
 	t.Setenv("LLMGW_STATE_DIR", t.TempDir())
+	iam.ResetForTests()
+	t.Cleanup(iam.ResetForTests)
 	old := *config.Get()
 	t.Cleanup(func() { config.Update(func(settings *config.Settings) { *settings = old }) })
 	config.Update(func(settings *config.Settings) {
@@ -96,6 +98,8 @@ func TestEndpointDeleteIsCaseInsensitive(t *testing.T) {
 
 func TestEndpointDeleteRejectsAmbiguousCaseFold(t *testing.T) {
 	t.Setenv("LLMGW_STATE_DIR", t.TempDir())
+	iam.ResetForTests()
+	t.Cleanup(iam.ResetForTests)
 	old := *config.Get()
 	t.Cleanup(func() { config.Update(func(settings *config.Settings) { *settings = old }) })
 	config.Update(func(settings *config.Settings) {

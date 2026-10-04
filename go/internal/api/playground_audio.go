@@ -193,7 +193,7 @@ func handleAdminPlaygroundSpeech(w http.ResponseWriter, r *http.Request) {
 			PrincipalID: principal.PrincipalID, StatusCode: upstreamStatus,
 			LatencyMS: latency, ErrorCode: "upstream",
 		})
-		_ = iam.RecordAudit(iam.AuditEvent{ActorPrincipalID: principal.PrincipalID, Action: "playground.speech", TargetType: "project", TargetID: project.ID, Result: "failure", Detail: map[string]any{"model": body.Model}})
+		auditAdminPlayground(r, "playground.speech", project.ID, principal.PrincipalID, "failure", map[string]any{"model": body.Model})
 		if upstreamStatus >= http.StatusBadRequest &&
 			upstreamStatus < http.StatusInternalServerError {
 			writeError(w, upstreamStatus, "speech provider rejected the request")
@@ -207,7 +207,7 @@ func handleAdminPlaygroundSpeech(w http.ResponseWriter, r *http.Request) {
 		Provider: providerID, Project: project.Slug, Key: "playground", ProjectID: project.ID,
 		PrincipalID: principal.PrincipalID, StatusCode: http.StatusOK, LatencyMS: latency,
 	})
-	_ = iam.RecordAudit(iam.AuditEvent{ActorPrincipalID: principal.PrincipalID, Action: "playground.speech", TargetType: "project", TargetID: project.ID, Result: "success", Detail: map[string]any{"model": body.Model, "voice": voice}})
+	auditAdminPlayground(r, "playground.speech", project.ID, principal.PrincipalID, "success", map[string]any{"model": body.Model, "voice": voice})
 	writeJSON(w, http.StatusOK, map[string]any{
 		"project_id": project.ID, "principal_id": principal.PrincipalID,
 		"served":       map[string]any{"provider": providerID, "model": voice},
@@ -306,7 +306,7 @@ func writePlaygroundEmbeddingResult(w http.ResponseWriter, r *http.Request, deco
 			}
 		}
 	}
-	auditAdmin(r, "playground.embeddings", "project", project.ID, map[string]any{"model": requestedModel, "principal_id": principal.PrincipalID})
+	auditAdminPlayground(r, "playground.embeddings", project.ID, principal.PrincipalID, "success", map[string]any{"model": requestedModel})
 	writeJSON(w, http.StatusOK, map[string]any{
 		"project_id": project.ID, "principal_id": principal.PrincipalID,
 		"served":     map[string]any{"provider": providerID, "model": upstreamModel},
@@ -476,7 +476,7 @@ func handleAdminPlaygroundTranscription(w http.ResponseWriter, r *http.Request) 
 		if coreErr != nil {
 			result = "failure"
 		}
-		_ = iam.RecordAudit(iam.AuditEvent{ActorPrincipalID: principal.PrincipalID, Action: "playground.transcription", TargetType: "project", TargetID: project.ID, Result: result, Detail: map[string]any{"model": r.FormValue("model")}})
+		auditAdminPlayground(r, "playground.transcription", project.ID, principal.PrincipalID, result, map[string]any{"model": r.FormValue("model")})
 		if coreErr != nil {
 			writeUpstreamError(w, coreErr)
 			return
@@ -521,7 +521,7 @@ func handleAdminPlaygroundTranscription(w http.ResponseWriter, r *http.Request) 
 		PrincipalID: principal.PrincipalID, StatusCode: response.StatusCode, LatencyMS: latency,
 		ErrorCode: audioErrorCode(response.StatusCode),
 	})
-	_ = iam.RecordAudit(iam.AuditEvent{ActorPrincipalID: principal.PrincipalID, Action: "playground.transcription", TargetType: "project", TargetID: project.ID, Result: map[bool]string{true: "success", false: "failure"}[response.StatusCode < 400], Detail: map[string]any{"model": r.FormValue("model")}})
+	auditAdminPlayground(r, "playground.transcription", project.ID, principal.PrincipalID, map[bool]string{true: "success", false: "failure"}[response.StatusCode < 400], map[string]any{"model": r.FormValue("model")})
 	if response.StatusCode >= 400 {
 		writeError(w, response.StatusCode, fmt.Sprintf("transcription failed: %s", strings.TrimSpace(string(payload))))
 		return
@@ -634,12 +634,12 @@ func executePlaygroundImage(w http.ResponseWriter, r *http.Request, body playgro
 	}
 	latency := time.Since(started).Milliseconds()
 	if err != nil {
-		recordPlaygroundMediaFailure("playground.image", "playground.image", body.Model, providerID, model, principal, project, started, err)
+		recordPlaygroundMediaFailure(r, "playground.image", "playground.image", body.Model, providerID, model, principal, project, started, err)
 		writeUpstreamError(w, err)
 		return
 	}
 	if err := validateGeneratedImages(images); err != nil {
-		recordPlaygroundMediaFailure("playground.image", "playground.image", body.Model, providerID, model, principal, project, started, err)
+		recordPlaygroundMediaFailure(r, "playground.image", "playground.image", body.Model, providerID, model, principal, project, started, err)
 		writeError(w, http.StatusBadGateway, err.Error())
 		return
 	}
@@ -650,7 +650,7 @@ func executePlaygroundImage(w http.ResponseWriter, r *http.Request, body playgro
 		PrincipalID: principal.PrincipalID, InputTokens: inputTokens, OutputTokens: outputTokens,
 		StatusCode: http.StatusOK, LatencyMS: latency,
 	})
-	_ = iam.RecordAudit(iam.AuditEvent{ActorPrincipalID: principal.PrincipalID, Action: "playground.image", TargetType: "project", TargetID: project.ID, Result: "success", Detail: map[string]any{"model": body.Model}})
+	auditAdminPlayground(r, "playground.image", project.ID, principal.PrincipalID, "success", map[string]any{"model": body.Model})
 	writeJSON(w, http.StatusOK, map[string]any{
 		"project_id": project.ID, "principal_id": principal.PrincipalID,
 		"served":       map[string]any{"provider": providerID, "model": model},
@@ -702,7 +702,7 @@ func handleAdminPlaygroundVideo(w http.ResponseWriter, r *http.Request) {
 			job, err = generator.PollVideo(operation)
 		}
 		if err != nil {
-			recordPlaygroundMediaFailure("playground.video", "playground.video", body.Model, providerID, model, principal, project, time.Now(), err)
+			recordPlaygroundMediaFailure(r, "playground.video", "playground.video", body.Model, providerID, model, principal, project, time.Now(), err)
 			writeUpstreamError(w, err)
 			return
 		}
@@ -722,7 +722,7 @@ func handleAdminPlaygroundVideo(w http.ResponseWriter, r *http.Request) {
 		job, err = generator.StartVideo(model, body.Prompt, body.Parameters)
 	}
 	if err != nil {
-		recordPlaygroundMediaFailure("playground.video", "playground.video", body.Model, providerID, model, principal, project, started, err)
+		recordPlaygroundMediaFailure(r, "playground.video", "playground.video", body.Model, providerID, model, principal, project, started, err)
 		writeUpstreamError(w, err)
 		return
 	}
@@ -732,18 +732,15 @@ func handleAdminPlaygroundVideo(w http.ResponseWriter, r *http.Request) {
 		PrincipalID: principal.PrincipalID, StatusCode: http.StatusAccepted,
 		LatencyMS: time.Since(started).Milliseconds(),
 	})
-	_ = iam.RecordAudit(iam.AuditEvent{ActorPrincipalID: principal.PrincipalID, Action: "playground.video", TargetType: "project", TargetID: project.ID, Result: "success", Detail: map[string]any{"model": body.Model, "operation": job.Operation}})
+	auditAdminPlayground(r, "playground.video", project.ID, principal.PrincipalID, "success", map[string]any{"model": body.Model, "operation": job.Operation})
 	writeJSON(w, http.StatusAccepted, videoJobPayload(providerID, model, job))
 }
 
-func recordPlaygroundMediaFailure(endpoint, action, requested, providerID, model string, principal *config.Principal, project iam.Project, started time.Time, err error) {
+func recordPlaygroundMediaFailure(r *http.Request, endpoint, action, requested, providerID, model string, principal *config.Principal, project iam.Project, started time.Time, err error) {
 	router.RecordUsage(router.UsageRecord{
 		Endpoint: endpoint, RequestedModel: requested, RoutedModel: model, Provider: providerID,
 		Project: project.Slug, Key: "playground", ProjectID: project.ID, PrincipalID: principal.PrincipalID,
 		StatusCode: upstreamErrorStatus(err), LatencyMS: time.Since(started).Milliseconds(), ErrorCode: "upstream",
 	})
-	_ = iam.RecordAudit(iam.AuditEvent{
-		ActorPrincipalID: principal.PrincipalID, Action: action, TargetType: "project", TargetID: project.ID,
-		Result: "failure", Detail: map[string]any{"model": requested},
-	})
+	auditAdminPlayground(r, action, project.ID, principal.PrincipalID, "failure", map[string]any{"model": requested})
 }

@@ -855,7 +855,9 @@ func (s *server) handleUserOAuthComplete(w http.ResponseWriter, r *http.Request)
 		writeError(w, 400, "flow_id and authorization_response required")
 		return
 	}
+	storedClient, clientStored := consumerManualClient(r.PathValue("provider_id"))
 	response := s.completeManualOAuthFlow(principal, r.PathValue("provider_id"), flowID, authorizationResponse)
+	auditConsumerManualClient(r, r.PathValue("provider_id"), storedClient, clientStored, &principal)
 	if response["status"] == "authorized" {
 		_ = iam.RecordAudit(iam.AuditEvent{ActorPrincipalID: principal.ID, Action: "oauth_connection.connect", TargetType: "principal", TargetID: principal.ID, Result: "success", Detail: map[string]any{"provider": r.PathValue("provider_id"), "source": "self-service", "profile": manualOAuthAuditProfile(r.PathValue("provider_id"))}})
 	}
@@ -897,6 +899,7 @@ func (s *server) handlePrincipalOAuthStart(w http.ResponseWriter, r *http.Reques
 		return
 	}
 	input := oauthStartInput(r)
+	previousCodexClientID := config.Get().OpenAICodexClientID
 	var response map[string]any
 	if input.Flow == "browser" && oauthRegistryIDForRef(r.PathValue("provider_id")) == "openai_codex" {
 		response, err = s.startCodexBrowserFlow(principal, r.PathValue("provider_id"), input.ClientID, true, input.ConnectionName, iam.ConnectionSourceAdmin)
@@ -908,6 +911,7 @@ func (s *server) handlePrincipalOAuthStart(w http.ResponseWriter, r *http.Reques
 	} else {
 		response, err = s.startOAuthFlow(principal, r.PathValue("provider_id"), input.ClientID, true, r, input.ConnectionName, iam.ConnectionSourceAdmin, input.Flow)
 	}
+	auditCodexClientID(r, previousCodexClientID)
 	if err != nil {
 		writeOAuthStartError(w, err)
 		return
@@ -929,7 +933,9 @@ func (s *server) handlePrincipalOAuthComplete(w http.ResponseWriter, r *http.Req
 		writeError(w, 400, "flow_id and authorization_response required")
 		return
 	}
+	storedClient, clientStored := consumerManualClient(r.PathValue("provider_id"))
 	response := s.completeManualOAuthFlow(principal, r.PathValue("provider_id"), flowID, authorizationResponse)
+	auditConsumerManualClient(r, r.PathValue("provider_id"), storedClient, clientStored, nil)
 	if response["status"] == "authorized" {
 		auditAdmin(r, "oauth_connection.connect", "principal", principal.ID, map[string]any{"provider": r.PathValue("provider_id"), "profile": manualOAuthAuditProfile(r.PathValue("provider_id"))})
 	}

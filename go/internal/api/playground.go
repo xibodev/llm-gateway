@@ -240,7 +240,7 @@ func executePlayground(w http.ResponseWriter, r *http.Request, body playgroundBo
 			Endpoint: "playground.chat", RequestedModel: body.Model, Project: project.Slug, Key: "playground",
 			ProjectID: project.ID, PrincipalID: principal.PrincipalID, StatusCode: upstreamErrorStatus(err), LatencyMS: latency, ErrorCode: "upstream",
 		})
-		_ = iam.RecordAudit(iam.AuditEvent{ActorPrincipalID: principal.PrincipalID, Action: "playground.execute", TargetType: "project", TargetID: project.ID, Result: "failure", Detail: map[string]any{"model": body.Model, "source": source}})
+		auditPlayground(r, source, "playground.execute", project.ID, principal.PrincipalID, "failure", map[string]any{"model": body.Model, "source": source})
 		writeUpstreamError(w, err)
 		return
 	}
@@ -250,7 +250,7 @@ func executePlayground(w http.ResponseWriter, r *http.Request, body playgroundBo
 		Project: project.Slug, Key: "playground", ProjectID: project.ID, PrincipalID: principal.PrincipalID,
 		InputTokens: inputTokens, OutputTokens: outputTokens, StatusCode: http.StatusOK, LatencyMS: latency, IsStub: playgroundStub(served.Provider, principal),
 	})
-	_ = iam.RecordAudit(iam.AuditEvent{ActorPrincipalID: principal.PrincipalID, Action: "playground.execute", TargetType: "project", TargetID: project.ID, Result: "success", Detail: map[string]any{"model": body.Model, "served_provider": served.Provider, "served_model": served.Model, "source": source}})
+	auditPlayground(r, source, "playground.execute", project.ID, principal.PrincipalID, "success", map[string]any{"model": body.Model, "served_provider": served.Provider, "served_model": served.Model, "source": source})
 	writeJSON(w, http.StatusOK, map[string]any{
 		"project_id": project.ID, "principal_id": principal.PrincipalID,
 		"served":     map[string]any{"provider": served.Provider, "model": served.Model},
@@ -339,13 +339,13 @@ func executePlaygroundSurface(w http.ResponseWriter, r *http.Request, payload ma
 			return
 		}
 		router.RecordUsage(router.UsageRecord{Endpoint: endpoint, RequestedModel: body.Model, Project: project.Slug, Key: "playground", ProjectID: project.ID, PrincipalID: principal.PrincipalID, StatusCode: upstreamErrorStatus(err), LatencyMS: latency, ErrorCode: "upstream"})
-		_ = iam.RecordAudit(iam.AuditEvent{ActorPrincipalID: principal.PrincipalID, Action: "playground.execute", TargetType: "project", TargetID: project.ID, Result: "failure", Detail: map[string]any{"model": body.Model, "surface": playgroundSurfacePath(surface), "source": source}})
+		auditPlayground(r, source, "playground.execute", project.ID, principal.PrincipalID, "failure", map[string]any{"model": body.Model, "surface": playgroundSurfacePath(surface), "source": source})
 		writeUpstreamError(w, err)
 		return
 	}
 	inputTokens, outputTokens := responseUsage(response)
 	router.RecordUsage(router.UsageRecord{Endpoint: endpoint, RequestedModel: body.Model, RoutedModel: served.Model, Provider: served.Provider, Project: project.Slug, Key: "playground", ProjectID: project.ID, PrincipalID: principal.PrincipalID, InputTokens: inputTokens, OutputTokens: outputTokens, StatusCode: http.StatusOK, LatencyMS: latency, IsStub: playgroundStub(served.Provider, principal)})
-	_ = iam.RecordAudit(iam.AuditEvent{ActorPrincipalID: principal.PrincipalID, Action: "playground.execute", TargetType: "project", TargetID: project.ID, Result: "success", Detail: map[string]any{"model": body.Model, "surface": playgroundSurfacePath(surface), "served_provider": served.Provider, "served_model": served.Model, "source": source}})
+	auditPlayground(r, source, "playground.execute", project.ID, principal.PrincipalID, "success", map[string]any{"model": body.Model, "surface": playgroundSurfacePath(surface), "served_provider": served.Provider, "served_model": served.Model, "source": source})
 	writeJSON(w, http.StatusOK, map[string]any{
 		"project_id": project.ID, "principal_id": principal.PrincipalID,
 		"served":     map[string]any{"provider": served.Provider, "model": served.Model},

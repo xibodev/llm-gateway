@@ -512,6 +512,7 @@ func handleUpsertProvider(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+	before := config.Get().Providers[pid]
 	if _, err := config.UpdateAndSave(func(s *config.Settings) error {
 		next := &config.ProviderConfig{
 			Type: body.Type, RegistryID: registryID, BaseURL: emptyNil(body.BaseURL),
@@ -548,6 +549,7 @@ func handleUpsertProvider(w http.ResponseWriter, r *http.Request) {
 	providers.ForgetCatalog(pid)
 	_ = iam.InvalidateProviderChecks(pid)
 	providers.ResetProviders()
+	auditProviderSaved(r, pid, before, strings.TrimSpace(body.APIKey) != "", credentialKind)
 	writeJSON(w, 200, map[string]any{"ok": true, "id": pid})
 }
 
@@ -615,6 +617,7 @@ func handleDeleteProvider(w http.ResponseWriter, r *http.Request) {
 		writeError(w, 500, "read provider automation ownership: "+err.Error())
 		return
 	}
+	_, configured := config.Get().Providers[pid]
 	if err := iam.ClearAnonymousProviderManaged(pid); err != nil {
 		writeError(w, 500, "clear provider automation ownership: "+err.Error())
 		return
@@ -650,6 +653,7 @@ func handleDeleteProvider(w http.ResponseWriter, r *http.Request) {
 	providers.ForgetProvider(pid)
 	providers.ForgetCatalog(pid)
 	_ = iam.DeleteProviderChecks(pid)
+	auditAdmin(r, "provider.delete", "provider", pid, map[string]any{"existed": configured})
 	if secretErr != nil {
 		writeError(w, 500, "Provider was deleted, but its key could not be removed from secrets.json.")
 		return
@@ -1066,11 +1070,13 @@ func handleUpsertEndpoint(w http.ResponseWriter, r *http.Request) {
 		writeError(w, 400, "a route requires at least one provider/model member")
 		return
 	}
+	_, existed := config.Get().Endpoints[name]
 	if _, err := storeEndpoint(name, members); err != nil {
 		writeConfigSaveError(w, "Route configuration could not be persisted.", err)
 		return
 	}
 	providers.ResetProviders()
+	auditEndpointSaved(r, name, existed, members)
 	writeJSON(w, 200, map[string]any{"ok": true, "name": name, "members": len(members)})
 }
 
@@ -1106,6 +1112,7 @@ func handleDeleteEndpoint(w http.ResponseWriter, r *http.Request) {
 			name = matches[0]
 		}
 	}
+	_, existed := config.Get().Endpoints[name]
 	if _, err := config.UpdateAndSave(func(s *config.Settings) error {
 		delete(s.Endpoints, name)
 		return nil
@@ -1114,6 +1121,7 @@ func handleDeleteEndpoint(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	providers.ResetProviders()
+	auditAdmin(r, "endpoint.delete", "endpoint", name, map[string]any{"existed": existed})
 	writeJSON(w, 200, map[string]any{"ok": true})
 }
 

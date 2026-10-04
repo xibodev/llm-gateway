@@ -194,6 +194,11 @@ administrator authenticated with a static key carries `actor_key_fingerprint`,
 the first 12 hexadecimal digits of that key's SHA-256, which tells the static
 keys apart without storing them.
 
+Provider, endpoint, and OAuth client changes name the fields that changed, never
+their values: a replaced provider credential or OAuth client secret appears only
+as a changed field. A playground request an administrator runs for a principal
+records the administrator as the actor and the principal under `on_behalf_of`.
+
 Quota and key-expiry rules create a durable, deduplicated outbox. The gateway
 does not send email or chat messages itself; an external worker such as the
 example under `deploy/windmill/` claims and settles outbox events.
