@@ -20,5 +20,3 @@ func SanitizeDiagnosticText(text string) string {
 func SanitizeDiagnosticTextLimit(text string, maxChars int) string {
 	return diagnostics.SanitizeTextLimit(text, maxChars)
 }
-
-func redact(text string) string { return SanitizeDiagnosticText(text) }

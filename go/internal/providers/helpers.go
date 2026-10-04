@@ -12,8 +12,6 @@ import (
 	core "github.com/xibodev/llmgw-core"
 )
 
-const maxProviderAuthDiagnosticChars = 512
-
 func isContextError(err error) bool {
 	return errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded)
 }

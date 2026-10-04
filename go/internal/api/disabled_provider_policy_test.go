@@ -150,7 +150,7 @@ func TestDisabledProviderMixedPolicyAndOrderedFallback(t *testing.T) {
 		model, _ := payload["model"].(string)
 		attempted = append(attempted, model)
 		if model == "first" {
-			http.Error(w, "fixture unavailable", 503)
+			http.Error(w, "fixture unavailable", http.StatusServiceUnavailable)
 			return
 		}
 		if stream, _ := payload["stream"].(bool); stream {

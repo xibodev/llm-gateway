@@ -297,6 +297,9 @@ func TestProviderUpsertAcceptsAndPreservesPublicOAuthClientID(t *testing.T) {
 		t.Fatalf("legacy bound clear status=%d body=%+v", status, body)
 	}
 	connections, err = iam.ListProviderConnections(owner.ID, "google-antigravity")
+	if err != nil || len(connections) != 1 {
+		t.Fatalf("connections after replace=%+v err=%v", connections, err)
+	}
 	if err := iam.RevokeProviderConnection(owner.ID, connections[0].ID); err != nil {
 		t.Fatal(err)
 	}

@@ -209,11 +209,6 @@ func extractCapabilities(raw any) map[string]any {
 
 // ---- API adaptation (opt-in via force_api_support) ---------------------- //
 
-type adaptPlan struct {
-	endpoint        string // "chat" | "responses"
-	renameMaxTokens bool   // chat path: send max_completion_tokens instead of max_tokens
-}
-
 func kwBool(v any) bool { b, _ := v.(bool); return b }
 
 // adaptEnabled resolves whether adaptation is on: a per-request force_api_support
@@ -223,24 +218,6 @@ func adaptEnabled(kw Kwargs, configured bool) bool {
 		return kwBool(v)
 	}
 	return configured
-}
-
-// adaptPlanFor is the plan for the catalog row mi, which ok says exists.
-func adaptPlanFor(mi ModelInfo, ok bool) adaptPlan {
-	if !ok {
-		return adaptPlan{endpoint: "chat"}
-	}
-	ep := translate.PreferredEndpoint(mi.SupportedSurfaces)
-	rename := ep == "chat" && hasCapability(mi, "reasoning_effort")
-	return adaptPlan{endpoint: ep, renameMaxTokens: rename}
-}
-
-func hasCapability(mi ModelInfo, key string) bool {
-	if mi.Capabilities == nil {
-		return false
-	}
-	_, ok := mi.Capabilities[key]
-	return ok
 }
 
 func withRenamedMaxTokens(kw Kwargs) Kwargs {

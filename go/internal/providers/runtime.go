@@ -1,7 +1,6 @@
 package providers
 
 import (
-	"sync"
 	"sync/atomic"
 
 	"llmgw/internal/config"
@@ -118,26 +117,4 @@ func InstallForTests(t interface{ Cleanup(func()) }) *Runtime {
 	previous := Install(runtime)
 	t.Cleanup(func() { Install(previous) })
 	return runtime
-}
-
-// seam holds a replacement a test installs for a production default. The
-// zero value holds none. The lock keeps a test's swap from racing requests a
-// background goroutine still serves.
-type seam[T any] struct {
-	mu    sync.RWMutex
-	value T
-}
-
-func (s *seam[T]) get() T {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	return s.value
-}
-
-// swap installs value and returns the previous one for the test to restore.
-func (s *seam[T]) swap(value T) (previous T) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	previous, s.value = s.value, value
-	return previous
 }

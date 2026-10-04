@@ -65,8 +65,6 @@ func anthropicServer(t *testing.T, handler http.HandlerFunc) string {
 	return server.URL
 }
 
-func anthropicSetupToken() string { return "sk-ant-oat01-" + strings.Repeat("a", 80) }
-
 // anthropicStreamFixture is a Messages stream that completes with "hello".
 const anthropicStreamFixture = "data: {\"type\":\"message_start\",\"message\":{\"id\":\"msg_1\",\"model\":\"model\",\"role\":\"assistant\",\"content\":[],\"usage\":{\"input_tokens\":2}}}\n\n" +
 	"data: {\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"text\",\"text\":\"\"}}\n\n" +

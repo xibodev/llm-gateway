@@ -16,8 +16,6 @@ import (
 const localModeOriginMessage = "Unauthenticated local mode serves browser requests only from a loopback origin. " +
 	"Send a gateway-issued API key to call the gateway from this origin."
 
-type principalKey struct{}
-
 // validKeys returns all admin API keys the gateway accepts.
 func validKeys() []string {
 	s := config.Get()

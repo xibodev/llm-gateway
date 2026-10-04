@@ -92,7 +92,7 @@ when adding a credential type.
 ## Before you push
 
 ```bash
-cd go && go build ./... && go vet ./... && go test ./... && govulncheck ./...
+cd go && go build ./... && go vet ./... && staticcheck ./... && go test ./... && govulncheck ./...
 cd internal/web/console && npm ci && npm audit --audit-level=high && npm run lint && npm test && npm run check:dist
 cd ../../../.. && node scripts/check-docs.mjs
 ```

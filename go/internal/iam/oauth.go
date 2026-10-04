@@ -35,6 +35,9 @@ type OAuthTokenEnvelope struct {
 	Metadata map[string]string `json:"-"`
 }
 
+// storedOAuthEnvelope is OAuthTokenEnvelope as the provider connection payload
+// stores it, token fields included. The two convert into each other, so a
+// field added to one and not the other fails to build instead of going unstored.
 type storedOAuthEnvelope struct {
 	AccessToken       string            `json:"access_token"`
 	RefreshToken      string            `json:"refresh_token,omitempty"`
@@ -401,14 +404,7 @@ func OAuthProviderConnectionSecretWithObservation(
 }
 
 func encodeOAuthEnvelope(envelope OAuthTokenEnvelope) (string, error) {
-	raw, err := json.Marshal(storedOAuthEnvelope{
-		AccessToken: envelope.AccessToken, RefreshToken: envelope.RefreshToken, IDToken: envelope.IDToken,
-		TokenType: envelope.TokenType, ExpiresAt: envelope.ExpiresAt, AccountID: envelope.AccountID,
-		AccountLabel: envelope.AccountLabel, ProjectID: envelope.ProjectID, Status: envelope.Status,
-		OAuthProfile: envelope.OAuthProfile, OAuthClientID: envelope.OAuthClientID,
-		OAuthClientMode: envelope.OAuthClientMode, OAuthRedirectURI: envelope.OAuthRedirectURI,
-		OAuthClientSecret: envelope.OAuthClientSecret, Metadata: envelope.Metadata,
-	})
+	raw, err := json.Marshal(storedOAuthEnvelope(envelope))
 	return string(raw), err
 }
 
@@ -419,14 +415,7 @@ func decodeOAuthEnvelope(raw string) (OAuthTokenEnvelope, error) {
 	}
 	var stored storedOAuthEnvelope
 	if json.Unmarshal([]byte(raw), &stored) == nil && strings.TrimSpace(stored.AccessToken) != "" {
-		return OAuthTokenEnvelope{
-			AccessToken: stored.AccessToken, RefreshToken: stored.RefreshToken, IDToken: stored.IDToken,
-			TokenType: stored.TokenType, ExpiresAt: stored.ExpiresAt, AccountID: stored.AccountID,
-			AccountLabel: stored.AccountLabel, ProjectID: stored.ProjectID, Status: stored.Status,
-			OAuthProfile: stored.OAuthProfile, OAuthClientID: stored.OAuthClientID,
-			OAuthClientMode: stored.OAuthClientMode, OAuthRedirectURI: stored.OAuthRedirectURI,
-			OAuthClientSecret: stored.OAuthClientSecret, Metadata: stored.Metadata,
-		}, nil
+		return OAuthTokenEnvelope(stored), nil
 	}
 	// v7 copied pre-envelope OAuth credentials as their original raw token. Keep
 	// them operational without a schema or forced reauthorization migration.

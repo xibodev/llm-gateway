@@ -44,6 +44,12 @@ jobs:
         working-directory: go
         run: go vet ./...
 
+      - name: Staticcheck
+        working-directory: go
+        # Pinned to release 2026.2.1, so a new release cannot fail an unchanged
+        # tree; go/staticcheck.conf selects the checks.
+        run: go run honnef.co/go/tools/cmd/staticcheck@v0.8.1 ./...
+
       - name: Test
         working-directory: go
         # The suite is hermetic: an unreachable proxy fails any test that

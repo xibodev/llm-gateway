@@ -71,9 +71,8 @@ func TestResolveTargets(t *testing.T) {
 	if err != nil || resolution.Category != "smart" || len(resolution.Targets) != 1 || resolution.Targets[0].Provider != "echo" {
 		t.Fatalf("category resolve wrong: %+v %v", resolution, err)
 	}
-	targets := resolution.Targets
 	// provider/model
-	targets, err = ResolveTargets("echo/echo-strong")
+	targets, err := ResolveTargets("echo/echo-strong")
 	if err != nil || len(targets) != 1 || targets[0].Model != "echo-strong" {
 		t.Fatalf("provider/model resolve wrong: %v %v", targets, err)
 	}

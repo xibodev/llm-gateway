@@ -77,7 +77,7 @@ type eventAttempt struct {
 func toEventAttempts(attempts []attempt) []eventAttempt {
 	out := make([]eventAttempt, len(attempts))
 	for i, a := range attempts {
-		out[i] = eventAttempt{Provider: a.Provider, Model: a.Model, OK: a.OK, Error: a.Error, Throttled: a.Throttled}
+		out[i] = eventAttempt(a)
 	}
 	return out
 }

@@ -199,7 +199,7 @@ func readStreamUsageRow(t *testing.T) streamUsageRow {
 func TestStreamOutcomesFollowTheUpstreamsEnd(t *testing.T) {
 	upstream := newStreamOutcomeUpstream(t)
 	type surface struct {
-		path, provider string
+		path string
 		// success is the terminal a complete stream ends with, failure what
 		// a failed one ends with instead; never are what a failed stream
 		// must not carry.

@@ -2,14 +2,9 @@ package providers
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"strings"
-	"time"
 
-	"llmgw/internal/diagnostics"
-
-	"github.com/xibodev/llm-provider-auth/tokenstore"
 	"github.com/xibodev/llmgw-core/oauthflow"
 )
 
@@ -109,36 +104,3 @@ func WithOAuthPollNote(ctx context.Context) (context.Context, *OAuthPollNote) {
 	note := &OAuthPollNote{}
 	return context.WithValue(ctx, oauthPollNoteKey{}, note), note
 }
-
-// devicePollResult notes a provider's answer to one device poll and maps it
-// onto oauthflow's. The providers answer nothing else; any other status, a
-// transport error above all, is transient and keeps the flow pending.
-func devicePollResult(ctx context.Context, status, detail string, record tokenstore.Record) (oauthflow.PollResult, error) {
-	detail = diagnostics.SanitizeTextLimit(detail, maxProviderAuthDiagnosticChars)
-	if note, ok := ctx.Value(oauthPollNoteKey{}).(*OAuthPollNote); ok {
-		*note = OAuthPollNote{Polled: true, Status: status, Detail: detail}
-	}
-	switch status {
-	case "pending":
-		return oauthflow.PollResult{Status: oauthflow.PollPending}, nil
-	case "slow_down":
-		return oauthflow.PollResult{Status: oauthflow.PollSlowDown}, nil
-	case "authorized":
-		return oauthflow.PollResult{Status: oauthflow.PollApproved, Record: record}, nil
-	case "denied":
-		return oauthflow.PollResult{Status: oauthflow.PollDenied}, nil
-	case "expired":
-		return oauthflow.PollResult{Status: oauthflow.PollExpired}, nil
-	}
-	if detail == "" {
-		detail = "device authorization poll failed"
-	}
-	return oauthflow.PollResult{}, errors.New(detail)
-}
-
-// seconds converts a provider's whole seconds.
-func seconds(value int) time.Duration { return time.Duration(value) * time.Second }
-
-// errIncompleteDeviceStart is what the console has always said of a device
-// start that lacks a code the owner or the poll needs.
-var errIncompleteDeviceStart = errors.New("official OAuth device flow returned incomplete authorization data")

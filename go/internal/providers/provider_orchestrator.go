@@ -92,6 +92,7 @@ type anonymousProbe func(ctx context.Context, caller core.Caller, instance, mode
 // a circuit. Core deprecates the client as the orchestrator's adapter, which
 // it no longer is; it remains the probe of the profiles whose API it speaks.
 func keylessProbe(baseURL string) anonymousProbe {
+	//lint:ignore SA1019 still the keyless probe of the profiles whose API it speaks; internal/architecture confines this use to this file
 	client := coreproviders.NewAnonymousOpenAICompatibleAdapter(baseURL, nil)
 	return func(ctx context.Context, _ core.Caller, instance, model string, payload map[string]any) (map[string]any, error) {
 		connection := core.ProviderConnection{
