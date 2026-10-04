@@ -411,6 +411,79 @@ func TestAdminProviderKeyStaysOutOfSecretsFileWithEncryption(t *testing.T) {
 	}
 }
 
+// When provider keys are stored in plaintext, the key a config file sets is
+// resolved before secrets.json. Editing the provider without a key keeps the
+// configured one; a key entered in the console replaces it and, after a
+// restart, is still the key in use.
+func TestConsoleKeyReplacesTheConfiguredKeyAcrossRestarts(t *testing.T) {
+	state := t.TempDir()
+	t.Setenv("LLMGW_STATE_DIR", state)
+	t.Setenv("LLMGW_CONFIG", filepath.Join(state, "config.yaml"))
+	iam.ResetForTests()
+	t.Cleanup(iam.ResetForTests)
+	old := *config.Get()
+	t.Cleanup(func() { config.Update(func(s *config.Settings) { *s = old }) })
+	const file = `providers:
+  compat:
+    type: openai_compatible
+    base_url: https://compat.example.test/v1
+    api_key: fixture-file-secret
+`
+	if err := os.WriteFile(config.ConfigFilePath(), []byte(file), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	restart := func() {
+		t.Helper()
+		if _, err := config.Load(); err != nil {
+			t.Fatal(err)
+		}
+		config.Update(func(s *config.Settings) {
+			s.APIKey = "admin-secret"
+			s.AllowUnauthenticatedAPI = false
+			s.CredentialEncryptionKey = ""
+		})
+	}
+	restart()
+	if _, err := iam.Initialize(); err != nil {
+		t.Fatal(err)
+	}
+	providers.ResetProviders()
+	t.Cleanup(providers.ResetProviders)
+	server := httptest.NewServer(NewServer(Runtime{}))
+	defer server.Close()
+	upsert := func(fields map[string]any) {
+		t.Helper()
+		body := map[string]any{"id": "compat", "type": "openai_compatible"}
+		for key, value := range fields {
+			body[key] = value
+		}
+		if status, response := jsonRequest(t, server.URL+"/admin/api/providers", http.MethodPost, "admin-secret", body); status != http.StatusOK {
+			t.Fatalf("upsert status=%d body=%+v", status, response)
+		}
+	}
+	resolved := func() string {
+		return config.ResolveProviderAPIKey("compat", config.Get().Providers["compat"])
+	}
+
+	upsert(map[string]any{"base_url": "https://compat-moved.example.test/v1"})
+	if got := resolved(); got != "fixture-file-secret" {
+		t.Fatalf("editing without a key lost the configured key: %q", got)
+	}
+	restart()
+	if got := resolved(); got != "fixture-file-secret" {
+		t.Fatalf("after a restart the configured key is gone: %q", got)
+	}
+
+	upsert(map[string]any{"base_url": "https://compat-moved.example.test/v1", "api_key": "fixture-console-secret"})
+	if got := resolved(); got != "fixture-console-secret" {
+		t.Fatalf("the console key is not in use: %q", got)
+	}
+	restart()
+	if got := resolved(); got != "fixture-console-secret" {
+		t.Fatalf("after a restart the configured key replaced the console key: %q", got)
+	}
+}
+
 // When secrets.json cannot be updated, saving a provider key fails, with or
 // without credential encryption, and deleting a provider reports the key it
 // left behind instead of claiming success.

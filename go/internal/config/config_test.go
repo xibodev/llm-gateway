@@ -392,13 +392,15 @@ func TestSavesKeepWhatTheyDoNotManage(t *testing.T) {
 			t.Fatalf("save: %v", err)
 		}
 	}
-	// Shaped like the provider upsert, which rebuilds an entry without its key.
+	// Shaped like the provider upsert without a new key, which rebuilds an
+	// entry and carries over the key its file entry configures.
 	console(func(s *Settings) {
 		previous := s.Providers["vertex"]
 		s.Providers["vertex"] = &ProviderConfig{
 			Type: previous.Type, Project: previous.Project, Location: previous.Location, Region: "changed-region",
 			PublicOAuthClientID: previous.PublicOAuthClientID, VertexRequestType: previous.VertexRequestType,
 			DefaultVoice: previous.DefaultVoice, Timeout: previous.Timeout, Disabled: previous.Disabled,
+			APIKey: previous.APIKey, FileAPIKey: previous.FileAPIKey,
 		}
 		s.Providers["moved"].BaseURL = "https://moved-new.example.test/v1"
 	})
@@ -467,6 +469,62 @@ func TestSavesKeepWhatTheyDoNotManage(t *testing.T) {
 	if after.Providers["retired"] != nil || after.Endpoints["retired-route"] != nil || after.Endpoints["shadowed"] != nil ||
 		after.Endpoints["smart"] == nil || after.Endpoints["fast"] == nil {
 		t.Fatalf("providers=%v endpoints=%v", slices.Sorted(maps.Keys(after.Providers)), slices.Sorted(maps.Keys(after.Endpoints)))
+	}
+}
+
+// A key entered in the console goes to the credential store, and the console
+// rebuilds the provider without the key its file entry configured. The save
+// has to drop that api_key: the configured key is resolved first, so keeping
+// it would serve the old key again after the next restart.
+func TestSaveDropsTheFileKeyAProviderNoLongerCarries(t *testing.T) {
+	keepSettings(t)
+	useTempConfig(t)
+	t.Setenv("FIXTURE_ROTATED_KEY", "fixture-env-secret")
+	const file = `providers:
+  literal:
+    type: openai_compatible
+    base_url: https://literal.example.test/v1
+    api_key: fixture-file-secret
+  referenced:
+    type: openai_compatible
+    base_url: https://referenced.example.test/v1
+    api_key: ${ENV:FIXTURE_ROTATED_KEY}
+  unset:
+    type: openai_compatible
+    base_url: https://unset.example.test/v1
+    api_key: ${ENV:FIXTURE_UNSET_KEY}
+`
+	if err := os.WriteFile(ConfigFilePath(), []byte(file), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	before := mustLoad(t)
+	if before.Providers["unset"].APIKey != "" || before.Providers["unset"].FileAPIKey != "${ENV:FIXTURE_UNSET_KEY}" {
+		t.Fatalf("an unset reference must load empty and keep its reference: %+v", before.Providers["unset"])
+	}
+	if _, err := UpdateAndSave(func(s *Settings) error {
+		for _, id := range []string{"literal", "referenced"} {
+			previous := s.Providers[id]
+			s.Providers[id] = &ProviderConfig{Type: previous.Type, BaseURL: previous.BaseURL}
+		}
+		s.Providers["unset"].BaseURL = "https://unset-moved.example.test/v1"
+		return nil
+	}); err != nil {
+		t.Fatalf("save: %v", err)
+	}
+	raw, err := os.ReadFile(ConfigFilePath())
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(raw)
+	if strings.Contains(text, "fixture-file-secret") || strings.Contains(text, "FIXTURE_ROTATED_KEY") {
+		t.Fatalf("a replaced key stayed in the file:\n%s", text)
+	}
+	if !strings.Contains(text, "api_key: ${ENV:FIXTURE_UNSET_KEY}") {
+		t.Fatalf("a key the provider still carries was dropped:\n%s", text)
+	}
+	after := mustLoad(t)
+	if after.Providers["literal"].APIKey != "" || after.Providers["referenced"].APIKey != "" {
+		t.Fatalf("replaced keys came back: literal=%+v referenced=%+v", after.Providers["literal"], after.Providers["referenced"])
 	}
 }
 

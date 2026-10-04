@@ -29,10 +29,15 @@ import (
 
 // ProviderConfig is one connected upstream.
 type ProviderConfig struct {
-	Type                string   `yaml:"type" json:"type"`
-	RegistryID          string   `yaml:"registry_id,omitempty" json:"registry_id,omitempty"`
-	BaseURL             string   `yaml:"base_url,omitempty" json:"base_url,omitempty"`
-	APIKey              string   `yaml:"api_key,omitempty" json:"-"`
+	Type       string `yaml:"type" json:"type"`
+	RegistryID string `yaml:"registry_id,omitempty" json:"registry_id,omitempty"`
+	BaseURL    string `yaml:"base_url,omitempty" json:"base_url,omitempty"`
+	APIKey     string `yaml:"api_key,omitempty" json:"-"`
+	// FileAPIKey is api_key as the configuration file writes it, a literal
+	// or an ${ENV:NAME} reference. A save keeps the file's api_key only while
+	// this is set, so clearing it, as a key entered in the console does,
+	// removes the configured key instead of letting it win after a restart.
+	FileAPIKey          string   `yaml:"-" json:"-"`
 	Region              string   `yaml:"region,omitempty" json:"region,omitempty"`
 	Timeout             *float64 `yaml:"timeout,omitempty" json:"timeout,omitempty"`
 	PublicOAuthClientID string   `yaml:"public_oauth_client_id,omitempty" json:"public_oauth_client_id,omitempty"`
@@ -880,6 +885,7 @@ func applyConfig(s *Settings, payload map[string]any) error {
 			}
 			if v, ok := m["api_key"].(string); ok {
 				cfg.APIKey = resolveEnv(v)
+				cfg.FileAPIKey = v
 			}
 			if v, ok := m["region"].(string); ok {
 				cfg.Region = v
@@ -1213,8 +1219,10 @@ type providerField struct {
 }
 
 // providerFields lists every provider key a save manages. api_key is not
-// among them: a save leaves it as the file has it, ${ENV:NAME} reference or
-// literal, because a key entered in the console goes to the credential store.
+// among them: a save never writes one, and keeps the file's as written,
+// ${ENV:NAME} reference or literal, while the provider still carries it (see
+// FileAPIKey), because a key entered in the console goes to the credential
+// store.
 func providerFields(pc *ProviderConfig) []providerField {
 	var timeout any
 	if pc.Timeout != nil {
@@ -1321,6 +1329,9 @@ func mergeProviders(existing *yaml.Node, configured map[string]*ProviderConfig) 
 				return nil, err
 			}
 			setMappingValue(entry, field.key, merged)
+		}
+		if provider.FileAPIKey == "" {
+			deleteMappingKey(entry, "api_key")
 		}
 		return entry, nil
 	})

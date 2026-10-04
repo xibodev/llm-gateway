@@ -524,6 +524,11 @@ func handleUpsertProvider(w http.ResponseWriter, r *http.Request) {
 			next.Timeout = previous.Timeout
 			next.DefaultVoice = previous.DefaultVoice
 			next.Disabled = previous.Disabled
+			if strings.TrimSpace(body.APIKey) == "" {
+				// Without a new key the provider keeps the one its file entry
+				// configures; a new key replaces it, so the save drops it.
+				next.APIKey, next.FileAPIKey = previous.APIKey, previous.FileAPIKey
+			}
 			if next.PublicOAuthClientID == "" && (body.ClearPublicOAuthID == nil || !*body.ClearPublicOAuthID) {
 				next.PublicOAuthClientID = previous.PublicOAuthClientID
 			}
