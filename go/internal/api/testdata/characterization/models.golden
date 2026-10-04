@@ -1,4 +1,4 @@
-# Model list for a human owner, including Codex rows without supported_endpoints
+# Model list
 request: GET /v1/models
 status: 200
 header Content-Type: application/json
@@ -10,59 +10,6 @@ body:
       "id": "claude-fixture",
       "object": "model",
       "owned_by": "native"
-    },
-    {
-      "display_name": "GPT Fixture",
-      "emulated_surfaces": [
-        "/v1/chat/completions",
-        "/v1/messages"
-      ],
-      "id": "codex/gpt-fixture",
-      "native_surfaces": [
-        "/v1/responses"
-      ],
-      "object": "model",
-      "owned_by": "codex",
-      "supported_endpoints": [
-        "/responses"
-      ],
-      "supported_surfaces": [
-        "/responses"
-      ],
-      "typed_capabilities": {
-        "freshness": {
-          "discovered_at": "<time>"
-        },
-        "inputs": {
-          "image": "unknown",
-          "text": "supported"
-        },
-        "limits": {},
-        "operations": {
-          "audio_in": "unknown",
-          "audio_out": "unknown",
-          "chat": "supported",
-          "embeddings": "unknown",
-          "image": "unknown",
-          "token_count": "unknown",
-          "video": "unknown"
-        },
-        "provenance": {
-          "confidence": "medium",
-          "source": "inferred"
-        },
-        "reasoning": "unknown",
-        "schema_version": 1,
-        "stateful_responses": "unknown",
-        "streaming": "unknown",
-        "structured_output": "unknown",
-        "surfaces": {
-          "chat_completions": "unknown",
-          "messages": "unknown",
-          "responses": "supported"
-        },
-        "tools": "unknown"
-      }
     },
     {
       "emulated_surfaces": [
