@@ -7,7 +7,7 @@
     "run": "node run.mjs"
   },
   "dependencies": {
-    "@anthropic-ai/claude-code": "2.1.270",
+    "@anthropic-ai/claude-code": "2.1.286",
     "playwright": "1.63.0"
   }
 }
