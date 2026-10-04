@@ -147,7 +147,7 @@ func handleMessages(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusBadRequest, "provider does not implement its catalog-declared native Messages surface")
 			return
 		}
-		response, providerErr := providers.CompleteAnthropicMessages(provider, target.Model, raw)
+		response, providerErr := providers.CompleteAnthropicMessagesContext(ctx, provider, target.Model, raw)
 		if providerErr != nil {
 			writeUpstreamError(w, providerErr)
 			return
@@ -337,7 +337,7 @@ func handleCountTokens(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if providers.SupportsAnthropicTokenCount(provider) {
-		count, err := providers.CountAnthropicTokens(provider, target.Model, raw, r.Header.Get("anthropic-version"), r.Header.Values("anthropic-beta"))
+		count, err := providers.CountAnthropicTokensContext(r.Context(), provider, target.Model, raw, r.Header.Get("anthropic-version"), r.Header.Values("anthropic-beta"))
 		if err != nil {
 			if errors.Is(err, providers.ErrInvalidAnthropicTokenCount) {
 				writeError(w, http.StatusBadGateway, "Upstream provider returned an invalid token count.")

@@ -54,13 +54,11 @@ func (AnthropicNativeProvider) PreservesWireNativeSurface(_ string, surface core
 	return surface == core.ModelSurfaceMessages
 }
 
-// operation returns the context of an operation, naming Anthropic and the
-// facade's caller for the store and the provider the core Runtime calls. It
-// derives from no caller's context, because the transport took none: a
-// request runs until its HTTP client times out, whatever the router's
-// deadline.
-func (p AnthropicNativeProvider) operation() context.Context {
-	return withCoreOperation(context.Background(), anthropicCoreType, p.caller)
+// operation returns the context of an operation on ctx, the caller's,
+// naming Anthropic and the facade's caller for the store and the provider
+// the core Runtime calls. A caller that leaves ends the upstream request.
+func (p AnthropicNativeProvider) operation(ctx context.Context) context.Context {
+	return withCoreOperation(ctx, anthropicCoreType, p.caller)
 }
 
 // anthropicMessagesRequest is the core request of a Messages payload. Core's
@@ -76,14 +74,19 @@ func anthropicMessagesRequest(model string, payload map[string]any, invalid stri
 
 // invoke sends a Messages payload through the core Runtime. A request that
 // gets no answer keeps the transport's message, which named how it was sent:
-// a setup token's completion is requested as a stream.
-func (p AnthropicNativeProvider) invoke(model string, payload map[string]any) (core.Response, error) {
+// a setup token's completion is requested as a stream. A request whose
+// caller left reports the caller's context error, which nothing repeats or
+// fails over.
+func (p AnthropicNativeProvider) invoke(ctx context.Context, model string, payload map[string]any) (core.Response, error) {
 	request, err := anthropicMessagesRequest(model, payload, "anthropic: invalid Messages request")
 	if err != nil {
 		return core.Response{}, err
 	}
-	response, err := p.runtime.core.Invoke(p.operation(), p.caller, p.instance, request)
+	response, err := p.runtime.core.Invoke(p.operation(ctx), p.caller, p.instance, request)
 	if err != nil {
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			return core.Response{}, ctxErr
+		}
 		transport := "anthropic: upstream transport error: "
 		return core.Response{}, anthropicFailure(err, transport, p.instance)
 	}
@@ -154,11 +157,15 @@ func (p AnthropicNativeProvider) payload(model string, messages []Message, strea
 // Complete sends a Chat request as Messages and converts the answer back,
 // decoded as the transport decoded the answers it converted.
 func (p AnthropicNativeProvider) Complete(model string, messages []Message, kw Kwargs) (map[string]any, error) {
+	return p.CompleteContext(context.Background(), model, messages, kw)
+}
+
+func (p AnthropicNativeProvider) CompleteContext(ctx context.Context, model string, messages []Message, kw Kwargs) (map[string]any, error) {
 	payload, err := p.payload(model, messages, false, kw)
 	if err != nil {
 		return nil, err
 	}
-	response, err := p.invoke(model, payload)
+	response, err := p.invoke(ctx, model, payload)
 	if err != nil {
 		return nil, err
 	}
@@ -178,7 +185,11 @@ func (p AnthropicNativeProvider) Complete(model string, messages []Message, kw K
 // API layer set into the system prompt, as the transport did, and the answer
 // is decoded with its numbers kept as Anthropic wrote them.
 func (p AnthropicNativeProvider) CompleteAnthropicMessages(model string, payload map[string]any) (map[string]any, error) {
-	response, err := p.invoke(model, payload)
+	return p.CompleteAnthropicMessagesContext(context.Background(), model, payload)
+}
+
+func (p AnthropicNativeProvider) CompleteAnthropicMessagesContext(ctx context.Context, model string, payload map[string]any) (map[string]any, error) {
+	response, err := p.invoke(ctx, model, payload)
 	if err != nil {
 		return nil, err
 	}
@@ -196,6 +207,10 @@ func (p AnthropicNativeProvider) CompleteAnthropicMessages(model string, payload
 // for the caller, as a request would be sent. Core's Anthropic forwards the
 // anthropic-version and anthropic-beta values the transport forwarded.
 func (p AnthropicNativeProvider) CountAnthropicTokens(model string, payload map[string]any, version string, beta []string) (json.Number, error) {
+	return p.CountAnthropicTokensContext(context.Background(), model, payload, version, beta)
+}
+
+func (p AnthropicNativeProvider) CountAnthropicTokensContext(ctx context.Context, model string, payload map[string]any, version string, beta []string) (json.Number, error) {
 	request, err := anthropicMessagesRequest(model, payload, "anthropic: invalid token-count request")
 	if err != nil {
 		return "", err
@@ -206,7 +221,7 @@ func (p AnthropicNativeProvider) CountAnthropicTokens(model string, payload map[
 	if err != nil {
 		return "", err
 	}
-	ctx := p.operation()
+	ctx = p.operation(ctx)
 	if request.Credential, err = p.runtime.coreCredential(ctx, anthropicCoreType, p.caller, p.instance); err != nil {
 		return "", anthropicCredentialFailure(err, p.instance)
 	}
@@ -217,6 +232,9 @@ func (p AnthropicNativeProvider) CountAnthropicTokens(model string, payload map[
 	}
 	count, err := core.CountTokens(ctx, counter, core.TokenCountRequest{Request: request, Header: header})
 	if err != nil {
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			return "", ctxErr
+		}
 		return "", anthropicCountFailure(err, p.instance)
 	}
 	return json.Number(strconv.FormatInt(count.InputTokens, 10)), nil
@@ -225,6 +243,10 @@ func (p AnthropicNativeProvider) CountAnthropicTokens(model string, payload map[
 // Stream sends a Chat request as a Messages stream and re-encodes the stream
 // core relays as Chat chunks.
 func (p AnthropicNativeProvider) Stream(model string, messages []Message, kw Kwargs) (StreamIter, error) {
+	return p.StreamContext(context.Background(), model, messages, kw)
+}
+
+func (p AnthropicNativeProvider) StreamContext(ctx context.Context, model string, messages []Message, kw Kwargs) (StreamIter, error) {
 	payload, err := p.payload(model, messages, true, kw)
 	if err != nil {
 		return nil, err
@@ -233,8 +255,11 @@ func (p AnthropicNativeProvider) Stream(model string, messages []Message, kw Kwa
 	if err != nil {
 		return nil, err
 	}
-	stream, err := p.runtime.core.Stream(p.operation(), p.caller, p.instance, request)
+	stream, err := p.runtime.core.Stream(p.operation(ctx), p.caller, p.instance, request)
 	if err != nil {
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			return nil, ctxErr
+		}
 		return nil, anthropicFailure(err, "anthropic: streaming transport error: ", p.instance)
 	}
 	return newAnthropicChatStream(stream, model), nil

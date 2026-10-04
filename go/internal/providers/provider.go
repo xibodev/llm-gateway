@@ -187,7 +187,20 @@ type AnthropicMessagesProvider interface {
 	CompleteAnthropicMessages(model string, payload map[string]any) (map[string]any, error)
 }
 
+// ContextAnthropicMessagesProvider is the native Messages surface of a
+// provider that ends the upstream request when the caller leaves.
+type ContextAnthropicMessagesProvider interface {
+	CompleteAnthropicMessagesContext(ctx context.Context, model string, payload map[string]any) (map[string]any, error)
+}
+
 func CompleteAnthropicMessages(provider Provider, model string, payload map[string]any) (map[string]any, error) {
+	return CompleteAnthropicMessagesContext(context.Background(), provider, model, payload)
+}
+
+func CompleteAnthropicMessagesContext(ctx context.Context, provider Provider, model string, payload map[string]any) (map[string]any, error) {
+	if messages, ok := provider.(ContextAnthropicMessagesProvider); ok {
+		return messages.CompleteAnthropicMessagesContext(ctx, model, payload)
+	}
 	if messages, ok := provider.(AnthropicMessagesProvider); ok {
 		return messages.CompleteAnthropicMessages(model, payload)
 	}
@@ -267,7 +280,20 @@ type AnthropicTokenCounter interface {
 	CountAnthropicTokens(model string, payload map[string]any, version string, beta []string) (json.Number, error)
 }
 
+// ContextAnthropicTokenCounter is the count_tokens surface of a provider that
+// ends the upstream request when the caller leaves.
+type ContextAnthropicTokenCounter interface {
+	CountAnthropicTokensContext(ctx context.Context, model string, payload map[string]any, version string, beta []string) (json.Number, error)
+}
+
 func CountAnthropicTokens(provider Provider, model string, payload map[string]any, version string, beta []string) (json.Number, error) {
+	return CountAnthropicTokensContext(context.Background(), provider, model, payload, version, beta)
+}
+
+func CountAnthropicTokensContext(ctx context.Context, provider Provider, model string, payload map[string]any, version string, beta []string) (json.Number, error) {
+	if counter, ok := provider.(ContextAnthropicTokenCounter); ok {
+		return counter.CountAnthropicTokensContext(ctx, model, payload, version, beta)
+	}
 	if counter, ok := provider.(AnthropicTokenCounter); ok {
 		return counter.CountAnthropicTokens(model, payload, version, beta)
 	}
@@ -293,6 +319,10 @@ func SupportsAnthropicTokenCount(provider Provider) bool {
 }
 
 func (r *ResilientProvider) CountAnthropicTokens(model string, payload map[string]any, version string, beta []string) (json.Number, error) {
+	return r.CountAnthropicTokensContext(context.Background(), model, payload, version, beta)
+}
+
+func (r *ResilientProvider) CountAnthropicTokensContext(ctx context.Context, model string, payload map[string]any, version string, beta []string) (json.Number, error) {
 	if !SupportsAnthropicTokenCount(r.inner) {
 		return "", ErrAnthropicTokenCountUnsupported
 	}
@@ -300,7 +330,10 @@ func (r *ResilientProvider) CountAnthropicTokens(model string, payload map[strin
 		return "", err
 	}
 	for attempt, attempts := 1, max1(r.policy.RetryMaxAttempts); ; attempt++ {
-		result, err := CountAnthropicTokens(r.inner, model, payload, version, beta)
+		result, err := CountAnthropicTokensContext(ctx, r.inner, model, payload, version, beta)
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			return "", ctxErr
+		}
 		if err == nil {
 			r.record(nil)
 			return result, nil
@@ -311,15 +344,17 @@ func (r *ResilientProvider) CountAnthropicTokens(model string, payload map[strin
 			}
 			return "", err
 		}
-		if !AnthropicMessagesRetryable(err) || attempt >= attempts {
-			r.record(err)
-			return "", err
+		if endErr := r.repeat(ctx, err, attempt, attempts); endErr != nil {
+			return "", endErr
 		}
-		time.Sleep(time.Duration(r.nextBackoff(attempt) * float64(time.Second)))
 	}
 }
 
 func (r *ResilientProvider) CompleteAnthropicMessages(model string, payload map[string]any) (map[string]any, error) {
+	return r.CompleteAnthropicMessagesContext(context.Background(), model, payload)
+}
+
+func (r *ResilientProvider) CompleteAnthropicMessagesContext(ctx context.Context, model string, payload map[string]any) (map[string]any, error) {
 	if !SupportsAnthropicMessages(r.inner) {
 		return nil, ErrAnthropicMessagesUnsupported
 	}
@@ -327,16 +362,21 @@ func (r *ResilientProvider) CompleteAnthropicMessages(model string, payload map[
 		return nil, err
 	}
 	for attempt, attempts := 1, max1(r.policy.RetryMaxAttempts); ; attempt++ {
-		result, err := CompleteAnthropicMessages(r.inner, model, payload)
+		result, err := CompleteAnthropicMessagesContext(ctx, r.inner, model, payload)
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			return nil, ctxErr
+		}
 		if err == nil {
 			r.record(nil)
 			return result, nil
 		}
-		if errors.Is(err, ErrAnthropicMessagesUnsupported) || !AnthropicMessagesRetryable(err) || attempt >= attempts {
+		if errors.Is(err, ErrAnthropicMessagesUnsupported) {
 			r.record(err)
 			return nil, err
 		}
-		time.Sleep(time.Duration(r.nextBackoff(attempt) * float64(time.Second)))
+		if endErr := r.repeat(ctx, err, attempt, attempts); endErr != nil {
+			return nil, endErr
+		}
 	}
 }
 

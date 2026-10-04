@@ -866,7 +866,7 @@ func (rt *Runtime) ExecuteAnthropicMessagesContext(
 		}
 		var result map[string]any
 		if providers.SupportsAnthropicMessages(provider) {
-			result, err = providers.CompleteAnthropicMessages(provider, target.Model, payload)
+			result, err = providers.CompleteAnthropicMessagesContext(attemptCtx, provider, target.Model, payload)
 		} else if requiresNative {
 			return nil, judge(errChatOnly, true)
 		} else if err = rt.anthropicFallbackCompatibility(target, caller, messages, kw); err == nil {
@@ -901,6 +901,11 @@ func (rt *Runtime) ExecuteAnthropicMessagesContext(
 	rt.recordChain(ctx, requested, attempts, served)
 	if served != nil {
 		return result, served, nil
+	}
+	// A request whose client left ends as the other chains end it, whichever
+	// target's failure the cancellation surfaced as.
+	if errors.Is(lastErr, context.Canceled) || errors.Is(request.Err(), context.Canceled) {
+		return nil, nil, context.Canceled
 	}
 	message := "no compatible Anthropic Messages target"
 	if lastErr != nil {

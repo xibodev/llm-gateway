@@ -276,3 +276,55 @@ func TestBudgetDoesNotCutANonStreamingAnswer(t *testing.T) {
 		t.Fatalf("served=%+v err=%v, want the answer the budget outlasted", served, err)
 	}
 }
+
+// A native Messages request whose client leaves closes the upstream request
+// and ends with the cancellation, not as a chain whose targets failed.
+func TestNativeMessagesChainEndsWithItsRequest(t *testing.T) {
+	setupEcho(t)
+	started, left := make(chan struct{}, 1), make(chan struct{}, 1)
+	upstream := httptest.NewServer(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
+		// The server notices the caller leave only once it has read the body.
+		_, _ = io.Copy(io.Discard, r.Body)
+		started <- struct{}{}
+		select {
+		case <-r.Context().Done():
+			left <- struct{}{}
+		case <-time.After(5 * time.Second):
+		}
+	}))
+	defer upstream.Close()
+	config.Update(func(s *config.Settings) {
+		s.Providers["native"] = &config.ProviderConfig{Type: "anthropic", BaseURL: upstream.URL, APIKey: "fixture-key"}
+		s.Policies.Defaults = config.ProviderPolicy{RetryMaxAttempts: 2}
+	})
+	providers.ResetProviders()
+	t.Cleanup(providers.ResetProviders)
+	request, leave := context.WithCancel(context.Background())
+	defer leave()
+	payload := map[string]any{"max_tokens": 1, "messages": []any{map[string]any{"role": "user", "content": "hi"}}}
+	done := make(chan error, 1)
+	go func() {
+		_, _, err := ExecuteAnthropicMessagesContext(request, []Target{{Provider: "native", Model: "model"}}, payload, "route", anonymous)
+		done <- err
+	}()
+	select {
+	case <-started:
+	case <-time.After(5 * time.Second):
+		t.Fatal("the upstream never received the request")
+	}
+	leave()
+	select {
+	case err := <-done:
+		var failed *AllTargetsFailed
+		if !errors.Is(err, context.Canceled) || errors.As(err, &failed) {
+			t.Fatalf("err=%v, want the cancellation", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("the chain outlived its request")
+	}
+	select {
+	case <-left:
+	case <-time.After(5 * time.Second):
+		t.Fatal("the upstream request outlived its caller")
+	}
+}

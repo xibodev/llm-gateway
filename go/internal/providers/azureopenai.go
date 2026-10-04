@@ -90,12 +90,11 @@ func (p AzureOpenAIProvider) headers() http.Header {
 	return h
 }
 
-// operation returns the context of an operation, naming Azure and the
-// facade's caller for the store the core Runtime calls. It derives from no
-// caller's context, because the transport took none: a request runs until
-// its HTTP client times out, whatever the router's deadline.
-func (p AzureOpenAIProvider) operation() context.Context {
-	return withCoreOperation(context.Background(), azureCoreType, p.caller)
+// operation returns the context of an operation on ctx, the caller's,
+// naming Azure and the facade's caller for the store the core Runtime calls.
+// A caller that leaves ends the upstream request.
+func (p AzureOpenAIProvider) operation(ctx context.Context) context.Context {
+	return withCoreOperation(ctx, azureCoreType, p.caller)
 }
 
 // azureChatRequest is the core request of a Chat call: the options with the
@@ -118,21 +117,35 @@ func azureChatRequest(model string, messages []Message, kw Kwargs) (core.Request
 }
 
 func (p AzureOpenAIProvider) Complete(model string, messages []Message, kw Kwargs) (map[string]any, error) {
-	response, _, err := p.CompleteWithObservation(model, messages, kw)
+	return p.CompleteContext(context.Background(), model, messages, kw)
+}
+
+func (p AzureOpenAIProvider) CompleteContext(ctx context.Context, model string, messages []Message, kw Kwargs) (map[string]any, error) {
+	response, _, err := p.CompleteContextWithObservation(ctx, model, messages, kw)
 	return response, err
 }
 
-// CompleteWithObservation reports the factory's observation, as the
-// transport reported the credential it held.
 func (p AzureOpenAIProvider) CompleteWithObservation(
 	model string, messages []Message, kw Kwargs,
+) (map[string]any, *CredentialObservation, error) {
+	return p.CompleteContextWithObservation(context.Background(), model, messages, kw)
+}
+
+// CompleteContextWithObservation reports the factory's observation, as the
+// transport reported the credential it held. A request whose caller left
+// reports the caller's context error, which nothing repeats or fails over.
+func (p AzureOpenAIProvider) CompleteContextWithObservation(
+	ctx context.Context, model string, messages []Message, kw Kwargs,
 ) (map[string]any, *CredentialObservation, error) {
 	request, err := azureChatRequest(model, messages, kw)
 	if err != nil {
 		return nil, p.observation, err
 	}
-	response, err := p.runtime.core.Invoke(p.operation(), p.caller, p.instance, request)
+	response, err := p.runtime.core.Invoke(p.operation(ctx), p.caller, p.instance, request)
 	if err != nil {
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			return nil, p.observation, ctxErr
+		}
 		return nil, p.observation, azureFailure(err, "azure_openai: upstream transport error: ", p.instance)
 	}
 	// Decoded into a plain map, not a fixed struct, so Azure-only fields
@@ -147,12 +160,19 @@ func (p AzureOpenAIProvider) CompleteWithObservation(
 }
 
 func (p AzureOpenAIProvider) Stream(model string, messages []Message, kw Kwargs) (StreamIter, error) {
+	return p.StreamContext(context.Background(), model, messages, kw)
+}
+
+func (p AzureOpenAIProvider) StreamContext(ctx context.Context, model string, messages []Message, kw Kwargs) (StreamIter, error) {
 	request, err := azureChatRequest(model, messages, kw)
 	if err != nil {
 		return nil, err
 	}
-	stream, err := p.runtime.core.Stream(p.operation(), p.caller, p.instance, request)
+	stream, err := p.runtime.core.Stream(p.operation(ctx), p.caller, p.instance, request)
 	if err != nil {
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			return nil, ctxErr
+		}
 		return nil, azureFailure(err, "azure_openai: streaming transport error: ", p.instance)
 	}
 	return &relayedStream{inner: stream, prefix: "azure_openai"}, nil
