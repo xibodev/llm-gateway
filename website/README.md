@@ -91,6 +91,12 @@ Remove build output with `node scripts/build-website.mjs --clean` after validati
 and deployment only on `main` push or main-targeted manual dispatch. Deployment
 alone has `pages: write` and `id-token: write`.
 
+Installations fetch the provider roster feed from this site, so a deployment
+also publishes `roster/payload.json` from the newest successful
+`provider-roster.yml` run on `main`. Without one it deploys the site alone and
+warns. The roster workflow redeploys the site with each new roster; both
+deployment jobs share the `pages` concurrency group.
+
 Publishing requires a separately authorized merge/push and GitHub Pages configured
 to use GitHub Actions. The workflow does not enable Pages or alter repository
 settings. Before that authorization, preview and validate locally only. Retain

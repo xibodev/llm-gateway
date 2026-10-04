@@ -14,6 +14,8 @@ on:
       - scripts/check-docs.mjs
       - scripts/build-website.mjs
       - scripts/render-brand-assets.mjs
+      - scripts/provider-roster-community/baseline.mjs
+      - scripts/provider-roster-community/github.mjs
       - .github/workflows/pages.yml
   pull_request:
     paths:
@@ -38,6 +40,10 @@ concurrency:
 jobs:
   validate:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      # Reads the provider roster workflow's runs and downloads its artifact.
+      actions: read
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
@@ -56,6 +62,34 @@ jobs:
           node scripts/render-brand-assets.mjs --check
           node scripts/build-website.mjs
 
+      # Every installation fetches roster/payload.json from this site, so a
+      # website deployment republishes the newest roster instead of wiping it.
+      # Without one it deploys anyway, with a warning; a lookup error fails.
+      - name: Find the newest published provider roster
+        id: roster
+        if: github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: node scripts/provider-roster-community/baseline.mjs --published
+
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        if: steps.roster.outputs.found == 'true'
+        with:
+          name: provider-roster-staging
+          path: published-roster
+          github-token: ${{ github.token }}
+          run-id: ${{ steps.roster.outputs.run_id }}
+
+      - name: Include the provider roster
+        if: steps.roster.outputs.found == 'true'
+        run: |
+          mkdir -p .website-dist/roster
+          cp published-roster/payload.json .website-dist/roster/payload.json
+          # Optional, as in the roster workflow's own deployment.
+          if [ -f published-roster/report.json ]; then
+            cp published-roster/report.json .website-dist/roster/report.json
+          fi
+
       - uses: actions/upload-pages-artifact@56afc609e74202658d3ffba0e8f6dda462b719fa # v3
         if: github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
         with:
@@ -65,6 +99,10 @@ jobs:
     needs: validate
     if: github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
     runs-on: ubuntu-latest
+    # Shared with the roster workflow's deployment so the two never interleave.
+    concurrency:
+      group: pages
+      cancel-in-progress: false
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}

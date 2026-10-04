@@ -7,7 +7,7 @@ import { GitHub, fetchReports, issueEntryID, repositoryPath } from './github.mjs
 import { reconcile, validateState } from './reconcile.mjs';
 import { signStaging, verifyEnvelope, MAX_ENTRIES, MAX_ENVELOPE_BYTES } from './sign.mjs';
 import { serializeJSON } from './io.mjs';
-import { findBaseline } from './baseline.mjs';
+import { findBaseline, findPublished } from './baseline.mjs';
 
 const id = `endpoint-${createHash('sha256').update('openai\nhttps://api.example.com/v1').digest('hex').slice(0, 16)}`;
 const before = '2026-01-01T00:00:00Z';
@@ -221,6 +221,31 @@ test('baseline requires explicit manual bootstrap and never skips a lost latest 
   await assert.rejects(findBaseline(api, env), /unavailable/);
   assert.ok(calls[1].endsWith('/runs/50/artifacts'));
   assert.equal(calls.length, 2);
+});
+
+test('published roster is only the newest run and its absence warns instead of failing', async () => {
+  const env = { GITHUB_REPOSITORY: 'example/roster', GITHUB_REF_NAME: 'main', GITHUB_RUN_ID: '99', GITHUB_EVENT_NAME: 'push' };
+  const warnings = [];
+  const warn = message => warnings.push(message);
+  assert.equal(await findPublished({ list: async () => [] }, env, warn), 'found=false\n');
+  assert.equal(warnings.length, 1);
+  const calls = [];
+  const api = artifacts => ({ list: async path => {
+    calls.push(path);
+    return path.endsWith('/artifacts') ? artifacts : [
+      { id: 40, run_number: 4, head_branch: 'main', event: 'schedule' },
+      { id: 50, run_number: 5, head_branch: 'main', event: 'workflow_dispatch' },
+      { id: 60, run_number: 6, head_branch: 'feature', event: 'schedule' },
+      { id: 70, run_number: 7, head_branch: 'main', event: 'push' },
+    ];
+  } });
+  assert.equal(await findPublished(api([{ name: 'provider-roster-staging', expired: false }]), env, warn), 'found=true\nrun_id=50\n');
+  assert.ok(calls[1].endsWith('/runs/50/artifacts'));
+  assert.equal(warnings.length, 1);
+  // An expired newest artifact is never replaced by an older run's roster.
+  assert.equal(await findPublished(api([{ name: 'provider-roster-staging', expired: true }]), env, warn), 'found=false\n');
+  assert.equal(calls.length, 4);
+  assert.match(warnings[1], /run 50/);
 });
 
 test('GitHub pagination and retries are bounded and auth is not redirected', async () => {
