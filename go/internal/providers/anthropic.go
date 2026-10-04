@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"strconv"
 	"sync"
@@ -281,9 +282,55 @@ func newAnthropicChatStream(inner core.StreamIter, model string) *anthropicChatS
 	s := &anthropicChatStream{inner: inner, chunks: make(chan string, 16), done: make(chan struct{})}
 	go func() {
 		defer close(s.chunks)
-		translate.AnthropicSSEToOpenAIChunks(s.line, model, s.emit)
+		// Anthropic reports a stream's usage in its own events, which plain
+		// translation drops; the usage chunk carries it to the gateway's
+		// metering as Chat's stream_options.include_usage would.
+		report := translate.AnthropicSSEToOpenAIChunksWithOptions(s.line, model, s.emit, translate.StreamOptions{IncludeUsage: true})
+		var event *translate.StreamError
+		if errors.As(report.Err, &event) {
+			// The error event says what failed; core's failure for the
+			// stream that then ends without message_stop does not.
+			s.err = anthropicStreamEventFailure(event)
+		}
 	}()
 	return s
+}
+
+// anthropicStreamEventStatus is the HTTP status Anthropic answers with for an
+// error type, so a failure reported mid-stream is classified as the same
+// error would be before a stream starts.
+func anthropicStreamEventStatus(errorType string) int {
+	switch errorType {
+	case "invalid_request_error":
+		return http.StatusBadRequest
+	case "authentication_error":
+		return http.StatusUnauthorized
+	case "permission_error":
+		return http.StatusForbidden
+	case "not_found_error":
+		return http.StatusNotFound
+	case "request_too_large":
+		return http.StatusRequestEntityTooLarge
+	case "rate_limit_error":
+		return http.StatusTooManyRequests
+	case "api_error":
+		return http.StatusInternalServerError
+	case "overloaded_error":
+		return 529
+	}
+	return http.StatusBadGateway
+}
+
+func anthropicStreamEventFailure(event *translate.StreamError) error {
+	status := anthropicStreamEventStatus(event.Type)
+	detail := event.Type
+	if detail == "" {
+		detail = "an error"
+	}
+	if event.Message != "" {
+		detail += ": " + event.Message
+	}
+	return invocationStatus("anthropic: streamed Messages response reported "+detail, status)
 }
 
 // line is the data line llm-translate reads next, as the transport fed it.

@@ -30,6 +30,8 @@ func TestStreamUsageIsReportedOrEstimated(t *testing.T) {
 	}{
 		{"Chat", "/v1/chat/completions", "chat", 10},
 		{"Messages", "/v1/messages", "chat", 10},
+		{"Chat from Anthropic", "/v1/chat/completions", "claude", 10},
+		{"Messages from Anthropic", "/v1/messages", "claude", 10},
 		{"native Responses", "/v1/responses", "native", 3},
 		{"Responses from Chat", "/v1/responses", "chat", 3},
 	} {

@@ -288,6 +288,13 @@ func TestAnthropicStreamCompleteCutShortAndOversizedRecords(t *testing.T) {
 		var sizeErr *StreamRecordTooLargeError
 		return errors.As(err, &sizeErr)
 	}
+	// An error event names what failed; the stream fails as that error,
+	// classified by the status Anthropic gives the same error type.
+	overloaded := func(err error) bool {
+		var invocation *InvocationError
+		return errors.As(err, &invocation) && invocation.Status == 529 &&
+			strings.Contains(invocation.Msg, "overloaded_error: Overloaded")
+	}
 	for _, tc := range []struct {
 		name     string
 		response string
@@ -296,7 +303,7 @@ func TestAnthropicStreamCompleteCutShortAndOversizedRecords(t *testing.T) {
 	}{
 		{name: "complete", response: started + "event: message_stop\ndata: {\"type\":\"message_stop\"}\n\n", wantText: "hello"},
 		{name: "cut short", response: started, wantText: "hello", wantErr: cutShort},
-		{name: "error event", response: started + "event: error\ndata: {\"type\":\"error\",\"error\":{\"type\":\"overloaded_error\",\"message\":\"Overloaded\"}}\n\n", wantText: "hello", wantErr: cutShort},
+		{name: "error event", response: started + "event: error\ndata: {\"type\":\"error\",\"error\":{\"type\":\"overloaded_error\",\"message\":\"Overloaded\"}}\n\n", wantText: "hello", wantErr: overloaded},
 		{name: "oversized", response: "data: " + strings.Repeat("x", maxStreamRecordWireSize) + "\n\n", wantErr: oversized},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

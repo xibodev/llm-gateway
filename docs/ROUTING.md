@@ -118,7 +118,8 @@ backoff (full jitter), so requests that failed together do not retry together.
 An upstream `Retry-After` lengthens that wait to at most 5 seconds; a target
 that asks for longer is not retried, and the request moves on to the next
 member. When the request fails on such a response, the gateway answers with the
-upstream's status and passes on the `Retry-After` the provider reported.
+upstream's status and passes on the `Retry-After` the provider reported, for
+OpenAI-compatible, Anthropic and Azure OpenAI providers.
 
 ## Policy and credentials
 
