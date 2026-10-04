@@ -9,7 +9,6 @@ import (
 )
 
 func TestInstantiateUsesExtensionForCodexRegistry(t *testing.T) {
-	t.Setenv("LLMGW_EXTENSION_ENABLED", "1")
 	t.Setenv("LLMGW_EXTENSION_URL", "http://extension.example.test:18888")
 	runtime := newRuntime(func(bool) (core.CredentialStore, error) {
 		return core.NewMemoryCredentialStore(), nil

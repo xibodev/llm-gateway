@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"slices"
 	"strings"
 	"sync"
 
@@ -52,12 +53,31 @@ func isExtensionType(ptype string) bool {
 	}
 }
 
-func (rt *Runtime) isExtensionEnabled() bool {
-	val := strings.ToLower(strings.TrimSpace(os.Getenv("LLMGW_EXTENSION_ENABLED")))
-	if val == "1" || val == "true" || val == "yes" || val == "on" {
-		return true
+// CompanionDaemonProviders returns, sorted, the IDs of the providers
+// settings configures that the companion daemon serves: those of its types,
+// and Codex by its registry entry, as the provider factory chooses them.
+func CompanionDaemonProviders(settings *config.Settings) []string {
+	if settings == nil {
+		return nil
 	}
-	return strings.TrimSpace(os.Getenv("LLMGW_EXTENSION_URL")) != ""
+	var served []string
+	for id, cfg := range settings.Providers {
+		if cfg != nil && (isExtensionType(cfg.Type) || strings.EqualFold(strings.TrimSpace(cfg.RegistryID), ExtensionTypeCodex)) {
+			served = append(served, id)
+		}
+	}
+	slices.Sort(served)
+	return served
+}
+
+// CompanionDaemonSecretSet reports whether LLMGW_EXTENSION_SECRET names the
+// shared secret the gateway sends the companion daemon.
+func CompanionDaemonSecretSet() bool {
+	return extensionSecret() != ""
+}
+
+func extensionSecret() string {
+	return strings.TrimSpace(os.Getenv("LLMGW_EXTENSION_SECRET"))
 }
 
 // extensionClients holds the client of the extension daemon the environment
@@ -80,7 +100,7 @@ func (rt *Runtime) extensionClient() (*extension.Client, error) {
 	if url == "" {
 		url = defaultExtensionURL
 	}
-	secret := strings.TrimSpace(os.Getenv("LLMGW_EXTENSION_SECRET"))
+	secret := extensionSecret()
 
 	cache := &rt.extensions
 	cache.mu.Lock()

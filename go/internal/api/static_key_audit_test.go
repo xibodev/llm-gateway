@@ -92,6 +92,7 @@ func TestStartupWarningCountsAdditionalStaticKeysWithoutNamingThem(t *testing.T)
 	config.Update(func(s *config.Settings) {
 		s.AllowUnauthenticatedAPI = false
 		s.APIKey, s.APIKeys = keys[0], []string{keys[1], "", keys[2]}
+		s.Providers = nil
 	})
 	warnings := StartupWarnings("127.0.0.1")
 	if len(warnings) != 1 || !strings.Contains(warnings[0], "LLMGW_API_KEYS holds 2 static key") ||
