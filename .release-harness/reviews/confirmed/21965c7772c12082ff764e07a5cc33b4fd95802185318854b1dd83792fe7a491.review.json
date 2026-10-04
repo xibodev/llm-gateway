@@ -1,0 +1,95 @@
+{
+  "schema_version": "1.0.0",
+  "mode": "change",
+  "contract": {
+    "digest": "31b393ab3e80162226619c441694573993ac618382d74642101484a0bf2e9c80"
+  },
+  "authoring_provenance": {
+    "status": "established",
+    "path": ".release-harness/drafts/llm-gateway.record.json",
+    "digest": "6732ddf3dc8236b974e2aae5f81b546d89c2a466b6fb0a368d76620955bf981e"
+  },
+  "sources": [
+    {
+      "source_id": "primary",
+      "status": "established",
+      "repository_identity": "https://github.com/xibodev/llm-gateway.git",
+      "base_ref": "eec01b2",
+      "base_commit": "eec01b2df6399b36f4f4dab3338641954aee0585",
+      "merge_base": "eec01b2df6399b36f4f4dab3338641954aee0585",
+      "head_commit": "f07ec5967a4a998d89f4fa6d239e27ab9af1e348",
+      "head_tree": "3885ce65a3d84d53fa43b5a60793ed8a802ebf55",
+      "reviewed_source_digest": "45cc043ef9025d6e9a1242313aa81a8eede5df93dd12ecc326419ca5c28ecdf3",
+      "changed_paths": [
+        {
+          "status": "modified",
+          "path": ".github/workflows/ci.yml",
+          "old_blob": "440b488643f286e25231f8c6a6cf344b1a5f2258",
+          "new_blob": "1c6b790765a386a889e487be42c12cf7cb53c926"
+        }
+      ]
+    }
+  ],
+  "facts": [
+    {
+      "id": "ci-workflow-only",
+      "claim": "The change since eec01b2bb touches only .github/workflows/ci.yml: the Windows and macOS platform test job downloads Go modules before its network-blocked test step. No gateway source, build, configuration or release workflow file changes.",
+      "status": "observed",
+      "evidence": {
+        "source": "git diff eec01b2..HEAD"
+      }
+    },
+    {
+      "id": "platform-tests-pass",
+      "claim": "With an empty module cache and the network blocked, the platform packages fail to set up; after go mod download they pass on Windows (cmd, operations, config, iam).",
+      "status": "observed",
+      "evidence": {
+        "source": "local reproduction of the CI condition"
+      }
+    }
+  ],
+  "impact": {
+    "assertions": [
+      {
+        "id": "A1",
+        "impact": "unchanged",
+        "supported_by": [
+          "ci-workflow-only"
+        ]
+      },
+      {
+        "id": "A2",
+        "impact": "unchanged",
+        "supported_by": [
+          "ci-workflow-only"
+        ]
+      },
+      {
+        "id": "A3",
+        "impact": "unchanged",
+        "supported_by": [
+          "ci-workflow-only"
+        ]
+      },
+      {
+        "id": "A4",
+        "impact": "unchanged",
+        "supported_by": [
+          "ci-workflow-only"
+        ]
+      }
+    ],
+    "requires": [],
+    "possible_binding_changes": []
+  },
+  "questions": [],
+  "conclusion": {
+    "action": "reuse_contract",
+    "summary": "Only the CI workflow changed; the accepted CLI identity, CLI health, HTTP health and model-list propositions are unaffected."
+  },
+  "proposed": {
+    "by": "release operator",
+    "at": "2026-10-04T15:51:09.756Z"
+  },
+  "digest": "21965c7772c12082ff764e07a5cc33b4fd95802185318854b1dd83792fe7a491"
+}
