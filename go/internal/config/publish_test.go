@@ -228,7 +228,7 @@ func TestWritersNeverChangePublishedSettings(t *testing.T) {
 	if err := Save(); err != nil {
 		t.Fatalf("save: %v", err)
 	}
-	Load()
+	mustLoad(t)
 
 	if Get() == published {
 		t.Fatal("writers did not publish a new value")
@@ -294,9 +294,9 @@ func TestEveryPublicationAdvancesTheGeneration(t *testing.T) {
 		t.Fatalf("save: %v", err)
 	}
 	check("Save", false)
-	Load()
+	mustLoad(t)
 	check("Load", true)
-	Load()
+	mustLoad(t)
 	check("repeated Load", true)
 }
 

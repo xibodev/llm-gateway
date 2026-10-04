@@ -10,6 +10,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -409,13 +410,11 @@ func AddProviderIfMissing(id string, provider *ProviderConfig) (bool, error) {
 	if current.Providers[id] != nil {
 		return false, nil
 	}
-	payload := readYAML(ConfigFilePath())
+	payload, err := readYAML(ConfigFilePath())
+	if err != nil {
+		return false, fmt.Errorf("configuration not saved: %w", err)
+	}
 	if payload == nil {
-		if _, err := os.Stat(ConfigFilePath()); err == nil {
-			return false, fmt.Errorf("existing configuration could not be parsed")
-		} else if !os.IsNotExist(err) {
-			return false, err
-		}
 		payload = map[string]any{}
 	}
 	providersPayload, providersPresent := payload["providers"].(map[string]any)
@@ -536,79 +535,132 @@ func ResolveProviderAPIKey(providerID string, cfg *ProviderConfig) string {
 
 // ---- YAML load / save --------------------------------------------------- //
 
-func readYAML(path string) map[string]any {
-	b, err := os.ReadFile(path)
+// readYAML reads and parses one configuration file. A missing file yields
+// no payload and no error, because the gateway then runs on its defaults; a
+// file that exists but cannot be read or parsed is an error.
+func readYAML(path string) (map[string]any, error) {
+	raw, err := os.ReadFile(path)
+	if errors.Is(err, fs.ErrNotExist) {
+		return nil, nil
+	}
 	if err != nil {
-		return nil
+		return nil, fmt.Errorf("read configuration: %w", err)
+	}
+	return parseYAML(path, raw)
+}
+
+// parseYAML parses configuration content read from path. An empty or null
+// document is the defaults. Errors name the file and the position, and never
+// quote a value: a configuration file can hold credentials, and yaml's own
+// message for a document that is not a mapping quotes its start.
+func parseYAML(path string, raw []byte) (map[string]any, error) {
+	var document yaml.Node
+	if err := yaml.Unmarshal(raw, &document); err != nil {
+		return nil, fmt.Errorf("parse configuration %s: %w", path, err)
+	}
+	if len(document.Content) == 0 || document.Content[0].Tag == "!!null" {
+		return nil, nil
+	}
+	if root := document.Content[0]; root.Kind != yaml.MappingNode {
+		return nil, fmt.Errorf("parse configuration %s: line %d, column %d: settings must be a mapping", path, root.Line, root.Column)
 	}
 	var payload map[string]any
-	if yaml.Unmarshal(b, &payload) != nil {
-		return nil
+	if err := document.Decode(&payload); err != nil {
+		return nil, fmt.Errorf("parse configuration %s: %w", path, err)
 	}
-	return payload
+	return payload, nil
 }
 
 // Load reads config.yaml over the defaults, applies ${ENV:} resolution to
 // provider base_url/api_key, layers LLMGW_* env overrides on top, and
-// publishes the result under a new generation. It holds the writer mutex
+// publishes the result under a new generation. A missing file means the
+// defaults. A file that cannot be read or parsed, or a configured seed that
+// cannot be used, is returned as an error and nothing is published: running
+// on the defaults instead would look like a healthy start while every
+// configured provider and endpoint is missing. It holds the writer mutex
 // while it reads, so a concurrent UpdateAndSave cannot land between the read
 // and the publish and be lost. The returned value is the published one and
 // is as read-only as Get's.
-func Load() *Settings {
+func Load() (*Settings, error) {
 	writerMu.Lock()
 	defer writerMu.Unlock()
+	if err := seedConfigIfMissing(); err != nil {
+		return nil, err
+	}
+	payload, err := readYAML(ConfigFilePath())
+	if err != nil {
+		return nil, err
+	}
 	s := Defaults()
-	seedConfigIfMissing()
-	payload := readYAML(ConfigFilePath())
 	applyConfig(s, payload)
 	applyEnv(s)
 	publishLocked(s)
-	return s
+	return s, nil
 }
 
-func seedConfigIfMissing() {
+// seedConfigIfMissing copies LLMGW_CONFIG_SEED to the configuration path
+// when that path does not exist yet. A seed that cannot be read or parsed is
+// refused before anything is copied, so it never becomes a configuration
+// file that every later start refuses as well.
+func seedConfigIfMissing() error {
 	seed := strings.TrimSpace(os.Getenv("LLMGW_CONFIG_SEED"))
 	target := ConfigFilePath()
 	if seed == "" || filepath.Clean(expandUser(seed)) == filepath.Clean(target) {
-		return
+		return nil
 	}
 	if _, err := os.Stat(target); err == nil || !os.IsNotExist(err) {
-		return
+		return nil
 	}
 	raw, err := os.ReadFile(expandUser(seed))
 	if err != nil {
-		return
+		return fmt.Errorf("read configuration seed: %w", err)
+	}
+	if _, err := parseYAML(expandUser(seed), raw); err != nil {
+		return err
+	}
+	copyFailed := func(err error) error {
+		return fmt.Errorf("copy configuration seed to %s: %w", target, err)
 	}
 	if err := os.MkdirAll(filepath.Dir(target), 0o700); err != nil {
-		return
+		return copyFailed(err)
 	}
 	temp, err := os.CreateTemp(filepath.Dir(target), ".config-seed-*.tmp")
 	if err != nil {
-		return
+		return copyFailed(err)
 	}
 	tempPath := temp.Name()
 	defer os.Remove(tempPath)
 	if _, err := temp.Write(raw); err != nil {
 		_ = temp.Close()
-		return
+		return copyFailed(err)
 	}
 	if err := temp.Sync(); err != nil {
 		_ = temp.Close()
-		return
+		return copyFailed(err)
 	}
 	if err := temp.Close(); err != nil {
-		return
+		return copyFailed(err)
 	}
-	_ = os.Rename(tempPath, target)
+	if err := os.Rename(tempPath, target); err != nil {
+		return copyFailed(err)
+	}
+	return nil
 }
 
 // ReadFile parses one configuration file without changing the process-wide
 // settings or applying environment overrides. Maintenance uses it to derive
-// destinations from the configuration stored inside a backup archive.
-func ReadFile(path string) *Settings {
+// destinations from the configuration stored inside a backup archive. A
+// file that cannot be parsed is an error rather than the defaults, because
+// default destinations would quietly put restored state where the restored
+// configuration does not look for it.
+func ReadFile(path string) (*Settings, error) {
+	payload, err := readYAML(path)
+	if err != nil {
+		return nil, err
+	}
 	s := Defaults()
-	applyConfig(s, readYAML(path))
-	return s
+	applyConfig(s, payload)
+	return s, nil
 }
 
 func envBool(key string, dst *bool) {
@@ -1024,6 +1076,12 @@ func providerConfigPayload(pc *ProviderConfig) map[string]any {
 }
 
 func writeConfigPayload(payload map[string]any) error {
+	path := ConfigFilePath()
+	// A file the loader cannot parse holds an edit the operator has yet to
+	// fix; replacing it would discard that edit along with the rest.
+	if _, err := readYAML(path); err != nil {
+		return fmt.Errorf("configuration not saved: %w", err)
+	}
 	if err := os.MkdirAll(StateDir(), 0o700); err != nil {
 		return err
 	}
@@ -1031,7 +1089,6 @@ func writeConfigPayload(payload map[string]any) error {
 	if err != nil {
 		return err
 	}
-	path := ConfigFilePath()
 	tmp, err := os.CreateTemp(filepath.Dir(path), ".config-*.tmp")
 	if err != nil {
 		return err

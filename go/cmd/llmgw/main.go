@@ -69,7 +69,10 @@ func main() {
 	case "version", "--version":
 		printVersion(os.Stdout)
 	case "backup":
-		config.Load()
+		if _, err := config.Load(); err != nil {
+			fmt.Fprintln(os.Stderr, "backup:", err)
+			os.Exit(1)
+		}
 		if err := backupCommand(os.Args[2:], os.Stdout); err != nil {
 			fmt.Fprintln(os.Stderr, "backup:", err)
 			os.Exit(1)
@@ -113,7 +116,9 @@ func serve() error {
 		_ = os.Setenv("LLMGW_PROVIDER_ROSTER_URL", defaultRosterURL)
 	}
 
-	config.Load()
+	if _, err := config.Load(); err != nil {
+		return err
+	}
 	if migrated, err := iam.Initialize(); err != nil {
 		return fmt.Errorf("initialize IAM control plane: %w", err)
 	} else if migrated.Keys > 0 {

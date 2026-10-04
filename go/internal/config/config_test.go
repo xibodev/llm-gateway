@@ -93,6 +93,16 @@ func ptr(b bool) *bool        { return &b }
 func ptrInt(i int) *int       { return &i }
 func ptrInt64(i int64) *int64 { return &i }
 
+// mustLoad loads the configuration and fails the test when it cannot.
+func mustLoad(t *testing.T) *Settings {
+	t.Helper()
+	settings, err := Load()
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	return settings
+}
+
 func TestLoadSeedsWritableConfigOnce(t *testing.T) {
 	dir := t.TempDir()
 	target := filepath.Join(dir, "state", "config.yaml")
@@ -103,16 +113,133 @@ func TestLoadSeedsWritableConfigOnce(t *testing.T) {
 	if err := os.WriteFile(seed, []byte("providers:\n  seeded:\n    type: echo\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	loaded := Load()
+	loaded := mustLoad(t)
 	if loaded.Providers["seeded"] == nil {
 		t.Fatal("seeded provider was not loaded")
 	}
 	if err := os.WriteFile(seed, []byte("providers:\n  replaced:\n    type: echo\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	loaded = Load()
+	loaded = mustLoad(t)
 	if loaded.Providers["seeded"] == nil || loaded.Providers["replaced"] != nil {
 		t.Fatalf("existing writable config was overwritten: %+v", loaded.Providers)
+	}
+}
+
+func TestLoadRefusesAConfigurationItCannotParse(t *testing.T) {
+	keepSettings(t)
+	useTempConfig(t)
+	if _, err := Load(); err != nil {
+		t.Fatalf("a missing configuration is the defaults, got %v", err)
+	}
+	for _, test := range []struct{ name, content, position string }{
+		{"syntax", "gateway_preamble: kept\nproviders:\n  a: 1\n b: 2\n", "line 3:"},
+		{"duplicate key", "gateway_preamble: one\ngateway_preamble: two\n", "line 2:"},
+		{"sequence", "- fixture-secret-value\n", "line 1, column 1:"},
+		{"scalar", "\n  fixture-secret-value\n", "line 2, column 3:"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			if err := os.WriteFile(ConfigFilePath(), []byte(test.content), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			before, generation := Snapshot()
+			_, err := Load()
+			if err == nil || !strings.Contains(err.Error(), ConfigFilePath()) || !strings.Contains(err.Error(), test.position) {
+				t.Fatalf("err=%v, want the path and %q", err, test.position)
+			}
+			if strings.Contains(err.Error(), "fixture-secret") {
+				t.Fatalf("the error quotes the file: %v", err)
+			}
+			if current, currentGeneration := Snapshot(); current != before || currentGeneration != generation {
+				t.Fatal("a configuration that does not parse was published")
+			}
+			if _, err := ReadFile(ConfigFilePath()); err == nil {
+				t.Fatal("ReadFile accepted a configuration that does not parse")
+			}
+		})
+	}
+}
+
+func TestLoadRefusesAConfigurationItCannotRead(t *testing.T) {
+	keepSettings(t)
+	useTempConfig(t)
+	// No platform reads a directory as a file.
+	if err := os.Mkdir(ConfigFilePath(), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	generation := Generation()
+	if _, err := Load(); err == nil || !strings.Contains(err.Error(), ConfigFilePath()) {
+		t.Fatalf("err=%v, want the path", err)
+	}
+	if Generation() != generation {
+		t.Fatal("an unreadable configuration was published")
+	}
+}
+
+func TestLoadRefusesAConfiguredSeedItCannotUse(t *testing.T) {
+	keepSettings(t)
+	dir := t.TempDir()
+	t.Setenv("LLMGW_STATE_DIR", filepath.Join(dir, "state"))
+	target := filepath.Join(dir, "state", "config.yaml")
+	valid := filepath.Join(dir, "valid.yaml")
+	broken := filepath.Join(dir, "broken.yaml")
+	blocker := filepath.Join(dir, "blocker")
+	for path, content := range map[string]string{
+		valid: "providers:\n  seeded:\n    type: echo\n", broken: "providers: [\n", blocker: "",
+	} {
+		if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, test := range []struct{ name, seed, target, mention string }{
+		{"missing", filepath.Join(dir, "missing.yaml"), target, "missing.yaml"},
+		{"unparseable", broken, target, broken},
+		// A regular file stands where the target's directory belongs.
+		{"uncopyable", valid, filepath.Join(blocker, "config.yaml"), "config.yaml"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			t.Setenv("LLMGW_CONFIG_SEED", test.seed)
+			t.Setenv("LLMGW_CONFIG", test.target)
+			generation := Generation()
+			if _, err := Load(); err == nil || !strings.Contains(err.Error(), test.mention) {
+				t.Fatalf("err=%v, want it to name %q", err, test.mention)
+			}
+			if Generation() != generation {
+				t.Fatal("an unusable seed published settings")
+			}
+			if _, err := os.Stat(test.target); err == nil {
+				t.Fatal("an unusable seed was copied")
+			}
+		})
+	}
+}
+
+func TestWritersRefuseToReplaceAConfigurationTheyCannotParse(t *testing.T) {
+	keepSettings(t)
+	useTempConfig(t)
+	Update(func(s *Settings) { s.Providers = map[string]*ProviderConfig{"kept": {Type: "echo"}} })
+	broken := "gateway_preamble: an edit in progress\nproviders: [\n"
+	if err := os.WriteFile(ConfigFilePath(), []byte(broken), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	before, generation := Snapshot()
+	if err := Save(); err == nil {
+		t.Fatal("Save replaced a configuration that does not parse")
+	}
+	if _, err := UpdateAndSave(func(s *Settings) error {
+		s.Providers["new"] = &ProviderConfig{Type: "echo"}
+		return nil
+	}); err == nil {
+		t.Fatal("UpdateAndSave replaced a configuration that does not parse")
+	}
+	if added, err := AddProviderIfMissing("added", &ProviderConfig{Type: "echo"}); err == nil || added {
+		t.Fatalf("AddProviderIfMissing added=%v err=%v", added, err)
+	}
+	if current, currentGeneration := Snapshot(); current != before || currentGeneration != generation {
+		t.Fatal("a refused save changed the published settings")
+	}
+	if after, err := os.ReadFile(ConfigFilePath()); err != nil || string(after) != broken {
+		t.Fatalf("the configuration changed: err=%v\n%s", err, after)
 	}
 }
 
@@ -138,7 +265,7 @@ func TestSaveLoadRoundTrip(t *testing.T) {
 	if err := Save(); err != nil {
 		t.Fatalf("save: %v", err)
 	}
-	reloaded := Load()
+	reloaded := mustLoad(t)
 	br, ok := reloaded.Providers["br"]
 	if !ok || br.Type != "bedrock" || br.Region != "eu-central-1" {
 		t.Fatalf("provider round-trip wrong: %+v", br)
@@ -210,14 +337,14 @@ func TestPublicOAuthClientIDLoadsAndRoundTrips(t *testing.T) {
 	if err := os.WriteFile(ConfigFilePath(), []byte("providers:\n  antigravity:\n    type: google_antigravity\n    public_oauth_client_id: fixture-public-client\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	loaded := Load()
+	loaded := mustLoad(t)
 	if loaded.Providers["antigravity"].PublicOAuthClientID != "fixture-public-client" {
 		t.Fatalf("loaded provider=%+v", loaded.Providers["antigravity"])
 	}
 	if err := Save(); err != nil {
 		t.Fatal(err)
 	}
-	reloaded := Load()
+	reloaded := mustLoad(t)
 	if reloaded.Providers["antigravity"].PublicOAuthClientID != "fixture-public-client" {
 		t.Fatalf("reloaded provider=%+v", reloaded.Providers["antigravity"])
 	}
@@ -230,7 +357,7 @@ func TestAddProviderIfMissingPersistsWithoutOverwrite(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, "config.yaml"), []byte("gateway_preamble: keep-me\ncustom_future_setting: keep-too\nproviders:\n  existing:\n    type: openai_compatible\n    api_key: ${ENV:EXISTING_KEY}\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	Load()
+	mustLoad(t)
 	added, err := AddProviderIfMissing("anonymous", &ProviderConfig{Type: "openai_compatible", RegistryID: "fixture", BaseURL: "https://example.com/v1"})
 	if err != nil || !added {
 		t.Fatalf("added=%v err=%v", added, err)
@@ -239,7 +366,7 @@ func TestAddProviderIfMissingPersistsWithoutOverwrite(t *testing.T) {
 	if err != nil || added {
 		t.Fatalf("overwrite added=%v err=%v", added, err)
 	}
-	reloaded := Load()
+	reloaded := mustLoad(t)
 	if got := reloaded.Providers["anonymous"]; got == nil || got.RegistryID != "fixture" || got.Type != "openai_compatible" {
 		t.Fatalf("provider=%+v", got)
 	}

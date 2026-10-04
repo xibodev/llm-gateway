@@ -240,3 +240,21 @@ func TestServeFailsOnABusyPortBeforeStartingWorkers(t *testing.T) {
 		t.Fatalf("serve on a busy port returned %v", err)
 	}
 }
+
+// A configuration file that does not parse stops the start, naming the file,
+// rather than serving with no providers or endpoints.
+func TestServeRefusesAConfigurationItCannotParse(t *testing.T) {
+	state := t.TempDir()
+	configPath := filepath.Join(state, "config.yaml")
+	if err := os.WriteFile(configPath, []byte("providers: [\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("LLMGW_STATE_DIR", state)
+	t.Setenv("LLMGW_CONFIG", configPath)
+	t.Setenv("LLMGW_CONFIG_SEED", "")
+	t.Setenv("LLMGW_PROVIDER_ROSTER_DISABLE", "1")
+
+	if err := serve(); err == nil || !strings.Contains(err.Error(), configPath) {
+		t.Fatalf("serve with an unparseable configuration returned %v", err)
+	}
+}

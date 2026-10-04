@@ -20,6 +20,11 @@ override.
 configured path only when that path does not yet exist. Local Compose uses this
 to turn a read-only repository example into writable volume state.
 
+A missing configuration file means the built-in defaults, while a file that
+cannot be read or parsed, or a seed that cannot be read, parsed, or copied, stops
+startup with an error naming the file and YAML line, and administration saves
+refuse to overwrite such a file.
+
 ## YAML structure
 
 ### Providers

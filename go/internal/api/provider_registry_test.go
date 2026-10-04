@@ -180,8 +180,12 @@ func TestProviderUpsertAcceptsAndPreservesPublicOAuthClientID(t *testing.T) {
 	if provider == nil || provider.PublicOAuthClientID != "public-client" || provider.Region != "updated-region" {
 		t.Fatalf("provider=%+v", provider)
 	}
-	if reloaded := config.Load().Providers["google-antigravity"]; reloaded == nil || reloaded.PublicOAuthClientID != "public-client" {
-		t.Fatalf("reloaded provider=%+v", reloaded)
+	reloaded, err := config.Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if provider := reloaded.Providers["google-antigravity"]; provider == nil || provider.PublicOAuthClientID != "public-client" {
+		t.Fatalf("reloaded provider=%+v", provider)
 	}
 	owner, err := iam.CreatePrincipal("human", "fixture:oauth-client-clear", "", "OAuth client clear")
 	if err != nil {

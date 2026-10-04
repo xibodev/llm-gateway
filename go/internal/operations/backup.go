@@ -181,7 +181,11 @@ func backupDestinationFiles(extracted string, manifest BackupManifest) (map[stri
 	current := config.Get()
 	settings := current
 	if _, err := os.Stat(filepath.Join(extracted, "config.yaml")); err == nil {
-		settings = config.ReadFile(filepath.Join(extracted, "config.yaml"))
+		archived, err := config.ReadFile(filepath.Join(extracted, "config.yaml"))
+		if err != nil {
+			return nil, fmt.Errorf("archived configuration: %w", err)
+		}
+		settings = archived
 	}
 	destinations := map[string]string{}
 	for name, destinationFn := range coreBackupFiles {

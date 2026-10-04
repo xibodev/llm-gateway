@@ -91,7 +91,9 @@ func TestBackupInspectRestoreRoundTrip(t *testing.T) {
 	if err != nil || !found || resolved.ProjectID != project.ID {
 		t.Fatalf("restored key: found=%v principal=%+v err=%v", found, resolved, err)
 	}
-	config.Load()
+	if _, err := config.Load(); err != nil {
+		t.Fatal(err)
+	}
 	targets, err := router.ResolveTargets("safe")
 	if err != nil || len(targets) != 1 || targets[0].Provider != "echo" || targets[0].Model != "echo-default" {
 		t.Fatalf("restored route: targets=%+v err=%v", targets, err)
@@ -121,6 +123,38 @@ func TestBackupRejectsCorruptPayload(t *testing.T) {
 	}
 	if _, err := InspectBackup(archive); err == nil {
 		t.Fatal("corrupt backup passed inspection")
+	}
+}
+
+// Restore derives the savings database and Copilot cache destinations from
+// the archived configuration, so one that does not parse is refused before
+// any state is replaced.
+func TestRestoreRefusesAnArchivedConfigurationThatDoesNotParse(t *testing.T) {
+	state := t.TempDir()
+	configPath := filepath.Join(state, "config.yaml")
+	t.Setenv("LLMGW_STATE_DIR", state)
+	t.Setenv("LLMGW_CONFIG", configPath)
+	iam.ResetForTests()
+	t.Cleanup(iam.ResetForTests)
+	if _, err := iam.Initialize(); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(configPath, []byte("savings:\n  db_path: [\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	archive := filepath.Join(t.TempDir(), "state.tar.gz")
+	if _, err := CreateBackup(archive); err != nil {
+		t.Fatal(err)
+	}
+	current := []byte("providers: {}\n")
+	if err := os.WriteFile(configPath, current, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := RestoreBackup(archive); err == nil || !strings.Contains(err.Error(), "archived configuration") {
+		t.Fatalf("restore err=%v", err)
+	}
+	if got, err := os.ReadFile(configPath); err != nil || !bytes.Equal(got, current) {
+		t.Fatalf("a refused restore replaced the configuration: err=%v %q", err, got)
 	}
 }
 
