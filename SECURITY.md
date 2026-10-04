@@ -100,6 +100,10 @@ replacement. Protect backups from disclosure and tampering. Keep
 - Runtime image: static binary in a non-root distroless container with no shell
   or package manager.
 - Console: local embedded assets; Node.js is build-time only.
+- Response headers: every response carries `X-Content-Type-Options: nosniff`
+  and `Referrer-Policy: same-origin`; admin and portal API responses carry
+  `Cache-Control: no-store`; the console, portal and OAuth callback pages carry
+  a Content-Security-Policy and `X-Frame-Options: DENY`.
 - Release inputs: GitHub action revisions, Node, Syft, Buildx, BuildKit,
   Dockerfile frontend, and base images are pinned in the workflow. GitHub-hosted
   runner images remain platform-managed.

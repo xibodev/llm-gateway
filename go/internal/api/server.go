@@ -125,17 +125,30 @@ func (s *server) handler() http.Handler {
 	mux.HandleFunc("GET /admin", redirectConsole)
 	mux.HandleFunc("GET /admin/{$}", redirectConsole)
 
+	consolePolicy := consoleContentSecurityPolicy(web.ConsoleIndex())
 	serveConsole := func(w http.ResponseWriter, r *http.Request) {
 		asset := strings.TrimPrefix(r.URL.Path, "/console/")
-		if asset != "" && r.URL.Path != "/console" {
+		if asset != "" && asset != "index.html" && r.URL.Path != "/console" {
+			built := strings.HasPrefix(asset, "assets/")
 			if data, err := web.ConsoleAsset(asset); err == nil {
+				if built {
+					// Build asset names carry a hash of their content, so a
+					// changed asset is a new URL and a cached one never
+					// goes stale.
+					w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
+				}
 				http.ServeContent(w, r, asset, time.Time{}, bytes.NewReader(data))
 				return
 			}
+			if built {
+				// A missing build asset is a stale or mistyped reference,
+				// not a console route: the document would reach the
+				// browser as a script or stylesheet.
+				http.NotFound(w, r)
+				return
+			}
 		}
-		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		w.Header().Set("Cache-Control", "no-cache")
-		_, _ = w.Write(web.ConsoleIndex())
+		writeConsoleDocument(w, consolePolicy)
 	}
 	mux.HandleFunc("GET /console", serveConsole)
 	mux.HandleFunc("GET /console/{$}", serveConsole)
@@ -144,9 +157,7 @@ func (s *server) handler() http.Handler {
 	// Portal mode serves the same local bundle. Its client selects only user API
 	// routes from the location, keeping the admin API boundary on the server.
 	servePortal := func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		w.Header().Set("Cache-Control", "no-cache")
-		_, _ = w.Write(web.ConsoleIndex())
+		writeConsoleDocument(w, consolePolicy)
 	}
 	mux.HandleFunc("GET /portal", servePortal)
 	mux.HandleFunc("GET /portal/{$}", servePortal)
@@ -255,7 +266,7 @@ func (s *server) handler() http.Handler {
 	mux.HandleFunc("POST /admin/api/copilot/login/poll", s.handleCopilotLoginPoll)
 	mux.HandleFunc("POST /admin/api/copilot/logout", s.handleCopilotLogout)
 
-	return aliasMiddleware(requestLogMiddleware(limitRequestBodies(mux)))
+	return securityHeaders(aliasMiddleware(requestLogMiddleware(limitRequestBodies(mux))))
 }
 
 // aliasMiddleware rewrites bare paths before routing.

@@ -498,11 +498,22 @@ func (s *server) pollBrowserOAuthFlow(ctx context.Context, caller core.Caller, p
 	return safeOAuthPollResponse("expired", "Device authorization is no longer active. Start again.")
 }
 
+// oauthConnectedPage is what the browser shows once the provider's redirect
+// completed its flow.
+const oauthConnectedPage = "<!doctype html><title>Provider connected</title><p>Authorization received. You can close this window and return to the gateway.</p>"
+
+// oauthCallbackContentSecurityPolicy fits what the OAuth callback answers:
+// oauthConnectedPage or a plain-text error, neither of which runs or loads
+// anything, so the policy admits nothing.
+const oauthCallbackContentSecurityPolicy = "default-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'"
+
 // handleOAuthBrowserCallback finishes a browser flow from the provider's
 // redirect. The redirect carries no session: its state finds the flow and
 // its owner, and a redirect that arrived anywhere but the flow's own
 // callback spends nothing.
 func (s *server) handleOAuthBrowserCallback(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Security-Policy", oauthCallbackContentSecurityPolicy)
+	w.Header().Set("X-Frame-Options", "DENY")
 	redirectURI, err := oauthCallbackURL(r, r.PathValue("provider_id"))
 	if err != nil {
 		http.Error(w, "OAuth authorization is no longer active.", http.StatusBadRequest)
@@ -516,7 +527,7 @@ func (s *server) handleOAuthBrowserCallback(w http.ResponseWriter, r *http.Reque
 	switch {
 	case err == nil && completion.connection != nil:
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		_, _ = w.Write([]byte("<!doctype html><title>Provider connected</title><p>Authorization received. You can close this window and return to the gateway.</p>"))
+		_, _ = w.Write([]byte(oauthConnectedPage))
 	case errors.Is(err, oauthflow.ErrFlowNotFound), errors.Is(err, oauthflow.ErrFlowExpired), errors.Is(err, oauthflow.ErrWrongMethod):
 		http.Error(w, "OAuth authorization is no longer active.", http.StatusBadRequest)
 	default:
