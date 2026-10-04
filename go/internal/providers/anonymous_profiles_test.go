@@ -25,29 +25,37 @@ func TestAnonymousCatalogProfilesFilterClaimedModels(t *testing.T) {
 	for _, testCase := range []struct {
 		registry string
 		items    []any
-		want     string
+		want     []string
 	}{
 		{"kilo_code", []any{
 			map[string]any{"id": "free", "isFree": true, "pricing": map[string]any{"prompt": "0", "completion": "0"}, "architecture": map[string]any{"output_modalities": []any{"text"}}},
 			map[string]any{"id": "paid", "isFree": false, "pricing": map[string]any{"prompt": "1", "completion": "1"}, "architecture": map[string]any{"output_modalities": []any{"text"}}},
 			map[string]any{"id": "media", "isFree": true, "pricing": map[string]any{"prompt": "0", "completion": "0"}, "architecture": map[string]any{"output_modalities": []any{"image"}}},
-		}, "free"},
+		}, []string{"free"}},
 		{"llm7", []any{
 			map[string]any{"id": "free", "tier": "turbo", "usage_based_only": false, "model_type": "chat", "schema_endpoints": []any{"openai"}},
 			map[string]any{"id": "paid", "tier": "pro", "usage_based_only": true, "model_type": "chat", "schema_endpoints": []any{"openai"}},
 			map[string]any{"id": "media", "tier": "turbo", "usage_based_only": false, "model_type": "image", "schema_endpoints": []any{"openai"}},
-		}, "free"},
+		}, []string{"free"}},
+		// OVH AI Endpoints serves its chat models without a key whatever
+		// price its catalog lists, which is the paid tier's, so a priced row
+		// is admitted too; a row without both token limits is no chat model.
 		{"ovh_ai_endpoints", []any{
 			map[string]any{"id": "free", "context_length": float64(1024), "max_completion_tokens": float64(128), "pricing": map[string]any{"prompt": "0", "completion": "0"}},
 			map[string]any{"id": "paid", "context_length": float64(1024), "max_completion_tokens": float64(128), "pricing": map[string]any{"prompt": "1", "completion": "1"}},
 			map[string]any{"id": "media", "context_length": float64(0), "max_completion_tokens": float64(0), "pricing": map[string]any{"prompt": "0", "completion": "0"}},
-		}, "free"},
+		}, []string{"free", "paid"}},
 	} {
 		t.Run(testCase.registry, func(t *testing.T) {
 			catalog := openAICatalog{registryID: testCase.registry, anonymous: true}
 			got, err := catalog.normalizeAnonymousCatalog(rows, testCase.items)
-			if err != nil || len(got) != 1 || got[0].ID != testCase.want || !got[0].Free {
+			if err != nil || len(got) != len(testCase.want) {
 				t.Fatalf("rows=%+v err=%v", got, err)
+			}
+			for index, row := range got {
+				if row.ID != testCase.want[index] || !row.Free {
+					t.Fatalf("rows=%+v err=%v", got, err)
+				}
 			}
 		})
 	}

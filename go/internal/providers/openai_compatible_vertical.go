@@ -3,6 +3,7 @@ package providers
 import (
 	"context"
 	"fmt"
+	"slices"
 	"strings"
 
 	"llmgw/internal/config"
@@ -135,12 +136,19 @@ func (p openAICoreProvider) bind(ctx context.Context) (*coreproviders.OpenAIComp
 
 // NativeSurfaces implements core.Provider over the shared catalog. An
 // operation's provider reads its caller's.
+//
+// Core's OpenAICompatible also lists the audio surfaces for every model,
+// which this leaves out: the gateway proxies an instance's audio itself
+// (see ProviderHTTPTarget), with a client that follows no redirect, so the
+// audio handlers, which ask core first, keep that path.
 func (p openAICoreProvider) NativeSurfaces(model string) []core.ModelSurface {
 	provider, err := p.bind(context.Background())
 	if err != nil {
 		return nil
 	}
-	return provider.NativeSurfaces(model)
+	return slices.DeleteFunc(slices.Clone(provider.NativeSurfaces(model)), func(surface core.ModelSurface) bool {
+		return surface == core.ModelSurfaceAudioTranscriptions || surface == core.ModelSurfaceAudioSpeech
+	})
 }
 
 func (p openAICoreProvider) Invoke(ctx context.Context, request core.Request) (core.Response, error) {
