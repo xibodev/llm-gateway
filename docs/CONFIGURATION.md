@@ -63,6 +63,14 @@ Supported fields depend on the runtime type:
 | `disabled` | Keep the instance configured while removing it from routing. |
 | `force_api_support` | Opt the instance into experimental catalog-driven API adaptation. |
 
+With credential encryption configured, startup copies a provider's `api_key`
+into an encrypted system connection, which resolution then prefers. When the
+value changes, in YAML or in the variable an `${ENV:NAME}` reference names, the
+next start replaces that copy, so a rotated key takes effect after a restart.
+Removing the value leaves the copy in place. A key saved for the provider through
+the console or API is never replaced from configuration, and a revoked system
+connection is not restored.
+
 The curated integration matrix is in [`PROVIDERS.md`](PROVIDERS.md).
 
 ### Endpoints

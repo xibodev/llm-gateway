@@ -121,36 +121,79 @@ func TestResolvablePrivateConnectionFailsClosedWithoutEncryptionKey(t *testing.T
 	}
 }
 
-func TestConfigSeedsSystemConnectionOnlyWhenAbsent(t *testing.T) {
+func TestConfigSeedRefreshesOnlyConnectionsItStored(t *testing.T) {
 	setupConnectionTest(t)
-	config.Update(func(s *config.Settings) {
-		s.Providers = map[string]*config.ProviderConfig{
-			"gemini": {Type: "openai_compatible", APIKey: "config-first"},
-		}
-	})
+	configure := func(key string) {
+		config.Update(func(s *config.Settings) {
+			s.Providers = map[string]*config.ProviderConfig{
+				"gemini":  {Type: "openai_compatible", APIKey: key},
+				"revoked": {Type: "openai_compatible", APIKey: key},
+			}
+		})
+	}
+	configure("config-first")
 	seeded, err := SeedSystemProviderConnectionsFromConfig()
-	if err != nil || seeded != 1 {
+	if err != nil || seeded != 2 {
 		t.Fatalf("first seed=%d err=%v", seeded, err)
 	}
-	config.Update(func(s *config.Settings) {
-		s.Providers["gemini"].APIKey = "config-second"
-	})
+	if err := RevokeSystemProviderConnection("revoked"); err != nil {
+		t.Fatal(err)
+	}
 	seeded, err = SeedSystemProviderConnectionsFromConfig()
 	if err != nil || seeded != 0 {
-		t.Fatalf("second seed=%d err=%v", seeded, err)
+		t.Fatalf("unchanged seed=%d err=%v", seeded, err)
+	}
+	configure("config-second")
+	seeded, err = SeedSystemProviderConnectionsFromConfig()
+	if err != nil || seeded != 1 {
+		t.Fatalf("rotated seed=%d err=%v", seeded, err)
 	}
 	secret, connection, ok, err := SystemProviderConnectionSecret("gemini")
-	if err != nil || !ok || secret != "config-first" ||
+	if err != nil || !ok || secret != "config-second" ||
 		connection.Source != ConnectionSourceConfig {
-		t.Fatalf("seeded connection=%+v secret=%q ok=%v err=%v", connection, secret, ok, err)
+		t.Fatalf("refreshed connection=%+v secret=%q ok=%v err=%v", connection, secret, ok, err)
+	}
+	if _, _, ok, err := SystemProviderConnectionSecret("revoked"); err != nil || ok {
+		t.Fatalf("revoked connection was revived: ok=%v err=%v", ok, err)
 	}
 	if updated, err := PutSystemProviderConnection("gemini", "api_key", "admin-rotated"); err != nil || !updated {
 		t.Fatalf("explicit rotation updated=%v err=%v", updated, err)
+	}
+	configure("config-third")
+	seeded, err = SeedSystemProviderConnectionsFromConfig()
+	if err != nil || seeded != 0 {
+		t.Fatalf("seed after explicit rotation=%d err=%v", seeded, err)
 	}
 	secret, connection, ok, err = SystemProviderConnectionSecret("gemini")
 	if err != nil || !ok || secret != "admin-rotated" ||
 		connection.Source != ConnectionSourceAdmin {
 		t.Fatalf("rotated connection=%+v secret=%q ok=%v err=%v", connection, secret, ok, err)
+	}
+}
+
+// Rotating a key that the configuration references as ${ENV:NAME} takes
+// effect at the next start.
+func TestStartupAppliesARotatedEnvironmentKey(t *testing.T) {
+	setupConnectionTest(t)
+	old := *config.Get()
+	t.Cleanup(func() { config.Update(func(s *config.Settings) { *s = old }) })
+	t.Setenv("LLMGW_CREDENTIAL_ENCRYPTION_KEY", config.Get().CredentialEncryptionKey)
+	path := filepath.Join(config.StateDir(), "config.yaml")
+	t.Setenv("LLMGW_CONFIG", path)
+	yaml := "providers:\n  hosted:\n    type: openai_compatible\n    api_key: ${ENV:FIXTURE_HOSTED_KEY}\n"
+	if err := os.WriteFile(path, []byte(yaml), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	for _, key := range []string{"fixture-first-key", "fixture-rotated-key"} {
+		t.Setenv("FIXTURE_HOSTED_KEY", key)
+		config.Load()
+		if _, err := Initialize(); err != nil {
+			t.Fatal(err)
+		}
+		secret, _, ok, err := SystemProviderConnectionSecret("hosted")
+		if err != nil || !ok || secret != key {
+			t.Fatalf("start with %s: matches=%v ok=%v err=%v", key, secret == key, ok, err)
+		}
 	}
 }
 

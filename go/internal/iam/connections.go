@@ -516,8 +516,12 @@ func EnsureSystemPrincipal() (Principal, error) {
 }
 
 // SeedSystemProviderConnectionsFromConfig copies configured system credentials
-// into the encrypted store only when no connection exists. Once seeded, the DB
-// is authoritative and later config reloads never overwrite it.
+// into the encrypted store when a provider has no system connection. A
+// connection stored here keeps following the configuration: when the
+// configured key changes, the next start replaces the stored copy, so rotating
+// a key in YAML or the environment takes effect. A key saved through the
+// console or API stays authoritative and is never overwritten, and a revoked
+// connection is never revived.
 func SeedSystemProviderConnectionsFromConfig() (int, error) {
 	if strings.TrimSpace(config.Get().CredentialEncryptionKey) == "" {
 		return 0, nil
@@ -536,11 +540,21 @@ func SeedSystemProviderConnectionsFromConfig() (int, error) {
 		if err != nil {
 			return seeded, err
 		}
+		name := defaultConnectionName
 		if exists {
-			continue
+			stored, connection, active, err := providerConnectionSecret(principal.ID, providerID, "", false)
+			if err != nil {
+				return seeded, err
+			}
+			// Rewriting an unchanged key would still reset the connection's
+			// health and quota state, as any rotation does.
+			if !active || connection.Source != ConnectionSourceConfig || stored == secret {
+				continue
+			}
+			name = connection.Name
 		}
 		if _, err := PutProviderConnection(ProviderConnectionCreate{
-			PrincipalID: principal.ID, ProviderID: providerID, Name: defaultConnectionName,
+			PrincipalID: principal.ID, ProviderID: providerID, Name: name,
 			Kind: "api_key", Secret: secret, Source: ConnectionSourceConfig,
 			MakeDefault: true,
 		}); err != nil {
@@ -604,8 +618,10 @@ func movePlaintextProviderSecrets() error {
 	return nil
 }
 
-// PutSystemProviderConnection is the explicit operator rotation path. Unlike
-// startup config seeding, it intentionally replaces the current system default.
+// PutSystemProviderConnection is the explicit operator rotation path. It
+// replaces the current system default whatever stored it, and records the key
+// as saved through the console or API, which startup config seeding never
+// overwrites.
 func PutSystemProviderConnection(providerID, kind, secret string) (bool, error) {
 	if strings.TrimSpace(config.Get().CredentialEncryptionKey) == "" {
 		return false, nil

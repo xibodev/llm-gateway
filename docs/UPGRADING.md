@@ -118,8 +118,9 @@ On startup, applicable old state is migrated:
 - legacy `usage.db` history can be copied into `gateway.db` and current quota
   counters rebuilt;
 - older provider-credential structures migrate into named connections;
-- system credentials seed only missing encrypted connections and do not overwrite
-  an existing database connection;
+- configured system credentials seed missing encrypted connections and replace
+  the connections they seeded when the configured key changes; a connection
+  saved through the console or API is never overwritten;
 - with credential encryption configured, `secrets.json` entries move into
   encrypted system connections as described in
   [persistence](CONFIGURATION.md#persistence-and-console-saves), and the file is
