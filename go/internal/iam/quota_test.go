@@ -153,3 +153,74 @@ func TestProjectQuotaAggregatesAcrossKeys(t *testing.T) {
 		t.Fatalf("err=%v, want aggregate project quota", err)
 	}
 }
+
+// externalKeyPrincipal publishes document as the only external key source and
+// resolves token through it.
+func externalKeyPrincipal(t *testing.T, document, token string) *config.Principal {
+	t.Helper()
+	keys, err := decodeExternalKeys([]byte(document), false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	store := &externalKeyStore{sources: []*externalKeySource{{name: "file", keys: keys}}, now: time.Now}
+	store.publish()
+	activeExternalKeys.Store(store)
+	t.Cleanup(func() { activeExternalKeys.Store(nil) })
+	principal, found, err := ResolveAPIKey(token)
+	if err != nil || !found || principal.KeyID != "" || principal.ProjectID == "" {
+		t.Fatalf("external principal=%+v found=%v err=%v", principal, found, err)
+	}
+	return principal
+}
+
+func TestExternalKeysConsumeProjectQuota(t *testing.T) {
+	t.Setenv("LLMGW_STATE_DIR", t.TempDir())
+	ResetForTests()
+	t.Cleanup(ResetForTests)
+	project, err := CreateProject("external-budget", "External Budget")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := SetProjectPolicy(project.ID, KeyPolicy{RPM: 1, DailyInputTokens: 100}); err != nil {
+		t.Fatal(err)
+	}
+	p := externalKeyPrincipal(t, `{"version":1,"keys":[{"name":"ci","project":"external-budget","key":"ci-secret"}]}`, "ci-secret")
+	now := time.Date(2026, 7, 10, 4, 0, 0, 0, time.UTC)
+	if err := CheckAndConsumeRequest(p, now); err != nil {
+		t.Fatal(err)
+	}
+	var exceeded *QuotaExceeded
+	if err := CheckAndConsumeRequest(p, now); !errors.As(err, &exceeded) ||
+		exceeded.Metric != "project requests/minute" {
+		t.Fatalf("second request err=%v, want project RPM quota", err)
+	}
+	if err := RecordUsageEvent(UsageEvent{
+		Timestamp: now.Unix(), Endpoint: "openai.chat", StatusCode: 200,
+		ProjectID: p.ProjectID, InputTokens: 100, OutputTokens: 5,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	err = CheckAndConsumeRequest(p, now.Add(time.Minute))
+	if !errors.As(err, &exceeded) || exceeded.Metric != "project input tokens/day" {
+		t.Fatalf("err=%v, want the project token budget spent by external-key usage", err)
+	}
+
+	for _, unmetered := range []*config.Principal{
+		{Project: "admin", Key: "admin"}, {Project: "local", Key: "local"},
+	} {
+		if err := CheckAndConsumeRequest(unmetered, now); err != nil {
+			t.Fatalf("%s: %v", unmetered.Key, err)
+		}
+	}
+	db, err := DB()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var foreign int
+	if err := db.QueryRow(`
+SELECT (SELECT COUNT(*) FROM quota_counters)+
+       (SELECT COUNT(*) FROM project_quota_counters WHERE project_id<>?)`, project.ID,
+	).Scan(&foreign); err != nil || foreign != 0 {
+		t.Fatalf("unmetered principals wrote %d counter rows, err=%v", foreign, err)
+	}
+}

@@ -31,8 +31,13 @@ type quotaCounter struct {
 // limits, then consumes one request slot in the current minute/day/month. Token,
 // cost and credit counters are reconciled after the provider response.
 func CheckAndConsumeRequest(p *config.Principal, now time.Time) error {
-	if p == nil || p.KeyID == "" {
+	if p == nil || (p.KeyID == "" && p.ProjectID == "") {
 		return nil // static admin key / unauthenticated local mode
+	}
+	if p.KeyID == "" {
+		// An externally managed key has no stored policy or counters, but its
+		// usage settles against its project, so the project's limits apply.
+		return CheckAndConsumeProjectRequest(p.ProjectID, now)
 	}
 	db, err := DB()
 	if err != nil {
@@ -212,9 +217,10 @@ func quotaPeriods(now time.Time) (minute, day, month int64) {
 	return
 }
 
-// CheckAndConsumeProjectRequest enforces a project policy for keyless internal
-// traffic such as the owner playground. It consumes only project counters and
-// never mints, stores, or exposes a browser API key.
+// CheckAndConsumeProjectRequest enforces a project policy for traffic without a
+// gateway-issued key: externally managed keys and keyless internal traffic
+// such as the owner playground. It consumes only project counters and never
+// mints, stores, or exposes a browser API key.
 func CheckAndConsumeProjectRequest(projectID string, now time.Time) error {
 	projectID = strings.TrimSpace(projectID)
 	if projectID == "" {
