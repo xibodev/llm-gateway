@@ -438,13 +438,16 @@ test("routes render as clickable tiles with a detail page and end-to-end test ru
 
 test("routes vocabulary matches the API's endpoint terminology and writes to the canonical route", () => {
   const routes = readFileSync(resolve(root, "src/pages/Routes.tsx"), "utf8");
+  const routeWrites = readFileSync(resolve(root, "src/lib/routes.ts"), "utf8");
   const detail = readFileSync(resolve(root, "src/pages/RouteDetail.tsx"), "utf8");
   const picker = readFileSync(resolve(root, "src/components/ModelPicker.tsx"), "utf8");
   assert.match(routes, /Endpoint route/);
   assert.match(detail, /Endpoint route/);
   assert.doesNotMatch(routes, /Category route/);
   assert.doesNotMatch(detail, /Category route/);
-  assert.match(routes, /`\/endpoints\$\{principalQuery\}`/);
+  assert.match(routeWrites, /`\/endpoints\$\{principalQuery\}`/);
+  assert.match(routeWrites, /`\/endpoints\/\$\{encodeURIComponent\(plan\.from\)\}`/);
+  assert.doesNotMatch(routeWrites, /\/categories/);
   assert.match(routes, /`\/endpoints\/\$\{encodeURIComponent\(routeName\)\}`/);
   assert.match(detail, /`\/endpoints\/\$\{encodeURIComponent\(routeName\)\}`/);
   assert.doesNotMatch(routes, /"admin", `\/categories/);

@@ -3,6 +3,7 @@ import { ArrowDown, ArrowUp, Pencil, Plus, Save, Trash2, X } from "lucide-preact
 import { getJSON, sendJSON, type JSONRecord } from "../lib/api";
 import type { ConsoleMode } from "../lib/mode";
 import { asList, asRecord, endpointsOf, stringValue } from "../lib/records";
+import { commitRouteSave, planRouteSave, renameConfirmation } from "../lib/routes";
 import { EmptyState, ErrorState, PageHeading } from "../components/PageState";
 import { RouteDetail } from "./RouteDetail";
 import { ModelFilters, catalogModels, filterModels, modelOptionLabel, useModelFilter } from "../components/ModelPicker";
@@ -33,6 +34,9 @@ export function Routes({ data, mode, detail, onChanged, onNavigate }: { data: JS
   const [catalog, setCatalog] = useState<JSONRecord>({});
   const [catalogError, setCatalogError] = useState("");
   const [editing, setEditing] = useState(false);
+  // The name the open editor started from: empty for a new route. Saving under
+  // a different name is a rename, never an edit of whatever the name now hits.
+  const [originalName, setOriginalName] = useState("");
   const [name, setName] = useState("");
   const [members, setMembers] = useState<RouteMember[]>([]);
   const [busy, setBusy] = useState(false);
@@ -85,6 +89,7 @@ export function Routes({ data, mode, detail, onChanged, onNavigate }: { data: JS
 
   const startCreate = () => {
     setEditing(true);
+    setOriginalName("");
     setName("");
     const pick = defaultChoice();
     setMembers(pick ? [{ provider: pick.provider, model: pick.model, allow_unverified: pick.allow_unverified }] : []);
@@ -92,6 +97,7 @@ export function Routes({ data, mode, detail, onChanged, onNavigate }: { data: JS
   };
   const startEdit = (route: { name: string; members: RouteMember[] }) => {
     setEditing(true);
+    setOriginalName(route.name);
     setName(route.name);
     setMembers(route.members);
     setMessage("");
@@ -118,21 +124,30 @@ export function Routes({ data, mode, detail, onChanged, onNavigate }: { data: JS
       setMessage("A route name and at least one catalog-backed provider/model member are required.");
       return;
     }
+    const plan = planRouteSave(originalName, name, routes.map((route) => route.name), asList(data.keys).map(asRecord));
+    if (plan.kind === "refused") {
+      setMessage(plan.message);
+      return;
+    }
     const unverified = members.filter(isUnverifiedMember);
     if (unverified.length && !window.confirm(`Publish ${unverified.map((member) => `${member.provider}/${member.model}`).join(", ")} without successful verification? This admin override makes the target publicly runnable until evidence changes.`)) return;
-    if (routes.some((route) => route.name === name.trim()) && !window.confirm(`Save changes to route ${name.trim()}? Route-bound and inherited keys may be affected; an exact count requires project policies. Existing route grants follow edits to this failover chain. Deleting the route denies existing route-bound clients; recreating the same name grants access to the new chain.`)) return;
+    if (plan.kind === "update" && !window.confirm(`Save changes to route ${plan.name}? Route-bound and inherited keys may be affected; an exact count requires project policies. Existing route grants follow edits to this failover chain. Deleting the route denies existing route-bound clients; recreating the same name grants access to the new chain.`)) return;
+    if (plan.kind === "rename" && !window.confirm(renameConfirmation(plan))) return;
     setBusy(true);
+    let outcome = "";
     try {
       const failover = members.map((member) => {
         const choice = choices.find((candidate) => candidate.provider === member.provider && candidate.model === member.model);
         return { ...member, allow_unverified: choice?.allow_unverified === true };
       });
-      await sendJSON<JSONRecord>("admin", `/endpoints${principalQuery}`, "POST", { name: name.trim(), failover });
-      await onChanged();
+      outcome = await commitRouteSave(plan, failover, principalQuery, (path, method, body) => sendJSON<JSONRecord>("admin", path, method, body));
       setEditing(false);
-      setMessage("Route saved in the selected failover order.");
+      setMessage(outcome);
+      await onChanged();
     } catch (cause) {
-      setMessage(cause instanceof Error ? cause.message : "Route could not be saved.");
+      const detail = cause instanceof Error ? cause.message : "Route could not be saved.";
+      // Once the write landed only the refresh can fail; keep its outcome in view.
+      setMessage(outcome ? `${outcome} ${detail}` : detail);
     } finally { setBusy(false); }
   };
   const remove = async (routeName: string) => {
@@ -165,7 +180,7 @@ export function Routes({ data, mode, detail, onChanged, onNavigate }: { data: JS
       {catalogError ? <ErrorState title="Model catalog is unavailable" detail={catalogError} action={<button class="button button--secondary" type="button" onClick={() => void loadCatalog()}>Retry catalog</button>} /> : null}
       {message ? <p class="route-message" role="status">{message}</p> : null}
       {editing && members.some(isUnverifiedMember) ? <p class="form-error" role="alert"><strong>Unverified target selected.</strong> Saving explicitly publishes it for public routing without a successful probe. Failed and stale targets cannot be selected.</p> : null}
-      {editing ? <form class="surface route-editor" onSubmit={save}><header><div><p class="eyebrow">Route editor</p><h2>{name ? `Edit ${name}` : "Create route"}</h2></div><button class="icon-button" type="button" aria-label="Close route editor" onClick={() => setEditing(false)}><X size={17} /></button></header><label>Route name<input value={name} onInput={(event) => setName((event.currentTarget as HTMLInputElement).value)} placeholder="for example, coding" /></label><div class="route-editor__members"><ModelFilters models={memberModels} filter={memberFilter} onChange={setMemberFilter} includeCategories={false} /><div class="section-heading"><div><p class="eyebrow">Failover order</p><h3>Provider and model members</h3></div><button class="button button--secondary" type="button" disabled={!choices.length} onClick={addMember}><Plus size={15} /> Add member</button></div>{members.map((member, index) => <div class="route-editor__member" key={`${index}-${member.provider}-${member.model}`}><span class="route-order">{index + 1}</span><select value={`${member.provider}::${member.model}`} onInput={(event) => updateMember(index, (event.currentTarget as HTMLSelectElement).value)}>{(visibleChoices.some((choice) => choice.provider === member.provider && choice.model === member.model) ? visibleChoices : [...visibleChoices, { provider: member.provider, model: member.model, label: `${member.provider}/${member.model}`, publicationState: "" }]).map((choice) => <option value={`${choice.provider}::${choice.model}`} key={`${choice.provider}::${choice.model}`}>{choice.label}</option>)}</select><div class="route-editor__member-actions"><button class="icon-button" type="button" disabled={index === 0} aria-label="Move member up" onClick={() => moveMember(index, -1)}><ArrowUp size={15} /></button><button class="icon-button" type="button" disabled={index === members.length - 1} aria-label="Move member down" onClick={() => moveMember(index, 1)}><ArrowDown size={15} /></button><button class="icon-button" type="button" aria-label="Remove member" onClick={() => setMembers((current) => current.filter((_, memberIndex) => memberIndex !== index))}><Trash2 size={15} /></button></div></div>)}</div><footer><button class="button button--secondary" type="button" onClick={() => setEditing(false)}>Cancel</button><button class="button button--primary" type="submit" disabled={busy}><Save size={16} /> Save ordered route</button></footer></form> : null}
+      {editing ? <form class="surface route-editor" onSubmit={save}><header><div><p class="eyebrow">Route editor</p><h2>{originalName ? `Edit ${originalName}` : "Create route"}</h2></div><button class="icon-button" type="button" aria-label="Close route editor" onClick={() => setEditing(false)}><X size={17} /></button></header><label>Route name<input value={name} onInput={(event) => setName((event.currentTarget as HTMLInputElement).value)} placeholder="for example, coding" /></label>{originalName && name.trim() && name.trim() !== originalName ? <p class="form-help">Saving renames {originalName} to {name.trim()}: the new route is created, then {originalName} is deleted.</p> : null}<div class="route-editor__members"><ModelFilters models={memberModels} filter={memberFilter} onChange={setMemberFilter} includeCategories={false} /><div class="section-heading"><div><p class="eyebrow">Failover order</p><h3>Provider and model members</h3></div><button class="button button--secondary" type="button" disabled={!choices.length} onClick={addMember}><Plus size={15} /> Add member</button></div>{members.map((member, index) => <div class="route-editor__member" key={`${index}-${member.provider}-${member.model}`}><span class="route-order">{index + 1}</span><select value={`${member.provider}::${member.model}`} onInput={(event) => updateMember(index, (event.currentTarget as HTMLSelectElement).value)}>{(visibleChoices.some((choice) => choice.provider === member.provider && choice.model === member.model) ? visibleChoices : [...visibleChoices, { provider: member.provider, model: member.model, label: `${member.provider}/${member.model}`, publicationState: "" }]).map((choice) => <option value={`${choice.provider}::${choice.model}`} key={`${choice.provider}::${choice.model}`}>{choice.label}</option>)}</select><div class="route-editor__member-actions"><button class="icon-button" type="button" disabled={index === 0} aria-label="Move member up" onClick={() => moveMember(index, -1)}><ArrowUp size={15} /></button><button class="icon-button" type="button" disabled={index === members.length - 1} aria-label="Move member down" onClick={() => moveMember(index, 1)}><ArrowDown size={15} /></button><button class="icon-button" type="button" aria-label="Remove member" onClick={() => setMembers((current) => current.filter((_, memberIndex) => memberIndex !== index))}><Trash2 size={15} /></button></div></div>)}</div><footer><button class="button button--secondary" type="button" onClick={() => setEditing(false)}>Cancel</button><button class="button button--primary" type="submit" disabled={busy}><Save size={16} /> Save ordered route</button></footer></form> : null}
       {routes.length === 0 ? <EmptyState title="No fallback routes yet" detail="Create a route after provider catalogs contain the models you want to order." action={!editing ? <button class="button button--primary" type="button" disabled={!choices.length} onClick={startCreate}>Create route</button> : undefined} /> : null}
       <section class="route-list route-list--grid">
         {routes.map((route) => <article class="route-card provider-card--clickable" key={route.name} role="link" tabIndex={0} aria-label={`Open ${route.name} route details`} onClick={(event) => openDetail(event, route.name)} onKeyDown={(event) => { if (event.target === event.currentTarget && (event.key === "Enter" || event.key === " ")) { event.preventDefault(); onNavigate("routes", route.name); } }}><header><div><p class="eyebrow">Endpoint route</p><h2>{route.name}</h2></div><div class="route-card__actions"><span class="route-count">{route.members.length} member{route.members.length === 1 ? "" : "s"}</span><button class="icon-button" type="button" aria-label={`Edit ${route.name}`} onClick={() => startEdit(route)}><Pencil size={16} /></button><button class="icon-button" type="button" aria-label={`Delete ${route.name}`} onClick={() => void remove(route.name)}><Trash2 size={16} /></button></div></header><ol>{route.members.map((member, index) => <li key={`${route.name}-${index}`}><span class="route-order">{index + 1}</span><span class="technical">{member.provider}/{member.model}</span>{index < route.members.length - 1 ? <ArrowDown size={16} aria-label="then" /> : <span class="route-terminal">served</span>}</li>)}</ol><button class="button button--secondary" type="button" onClick={() => onNavigate("keys", `route=${encodeURIComponent(route.name)}`)}>Create key for this route</button></article>)}
