@@ -346,7 +346,9 @@ func TestAdminSetupTokenRequiresEncryptedStorageAndRemovesLegacySecret(t *testin
 	if status != http.StatusBadRequest || config.Get().Providers["anthropic"] != nil {
 		t.Fatalf("setup token without encryption status=%d provider=%v", status, config.Get().Providers["anthropic"])
 	}
-	config.SaveSecret("anthropic", "legacy-api-key")
+	if err := config.SaveSecret("anthropic", "legacy-api-key"); err != nil {
+		t.Fatal(err)
+	}
 	config.Update(func(s *config.Settings) {
 		s.CredentialEncryptionKey = base64.RawURLEncoding.EncodeToString(make([]byte, 32))
 	})
@@ -388,7 +390,9 @@ func TestAdminProviderKeyStaysOutOfSecretsFileWithEncryption(t *testing.T) {
 	}
 	providers.ResetProviders()
 	t.Cleanup(providers.ResetProviders)
-	config.SaveSecret("gemini", "fixture-earlier-key")
+	if err := config.SaveSecret("gemini", "fixture-earlier-key"); err != nil {
+		t.Fatal(err)
+	}
 	server := httptest.NewServer(NewServer(Runtime{}))
 	defer server.Close()
 
@@ -404,6 +408,37 @@ func TestAdminProviderKeyStaysOutOfSecretsFileWithEncryption(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(state, "secrets.json")); !os.IsNotExist(err) {
 		t.Fatalf("secrets.json was kept beside the encrypted key: %v", err)
+	}
+}
+
+// When secrets.json cannot be updated, saving a provider key fails, with or
+// without credential encryption, and deleting a provider reports the key it
+// left behind instead of claiming success.
+func TestProviderKeyStorageFailuresAreReported(t *testing.T) {
+	old := *config.Get()
+	t.Cleanup(func() { config.Update(func(s *config.Settings) { *s = old }) })
+	env := newCredentialTestEnv(t)
+	defer env.server.Close()
+	// A directory where secrets.json belongs can be neither read nor replaced.
+	if err := os.Mkdir(filepath.Join(config.StateDir(), "secrets.json"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	route := env.server.URL + "/admin/api/providers"
+	for _, encryptionKey := range []string{config.Get().CredentialEncryptionKey, ""} {
+		config.Update(func(s *config.Settings) { s.CredentialEncryptionKey = encryptionKey })
+		status, body := jsonRequest(t, route, http.MethodPost, "admin-secret", map[string]any{
+			"registry_id": "gemini", "api_key": "fixture-unsaved-key",
+		})
+		if status != http.StatusInternalServerError || config.Get().Providers["gemini"] != nil {
+			t.Fatalf("encrypted=%v: status=%d provider=%+v", encryptionKey != "", status, config.Get().Providers["gemini"])
+		}
+		if strings.Contains(stringifyAny(body), "fixture-unsaved-key") {
+			t.Fatal("the failure response repeats the key")
+		}
+	}
+	status, _ := jsonRequest(t, route+"/vertex-prod", http.MethodDelete, "admin-secret", nil)
+	if status != http.StatusInternalServerError || config.Get().Providers["vertex-prod"] != nil {
+		t.Fatalf("delete status=%d provider=%+v", status, config.Get().Providers["vertex-prod"])
 	}
 }
 

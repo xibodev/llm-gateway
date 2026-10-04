@@ -597,7 +597,9 @@ func movePlaintextProviderSecrets() error {
 		} else if stored != secret {
 			continue
 		}
-		config.DeleteSecret(providerID)
+		if err := config.DeleteSecret(providerID); err != nil {
+			return fmt.Errorf("remove moved provider key from secrets.json: %w", err)
+		}
 	}
 	return nil
 }

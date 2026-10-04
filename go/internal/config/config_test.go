@@ -1,6 +1,7 @@
 package config
 
 import (
+	"fmt"
 	"maps"
 	"os"
 	"path/filepath"
@@ -8,6 +9,7 @@ import (
 	"runtime"
 	"slices"
 	"strings"
+	"sync"
 	"testing"
 
 	"gopkg.in/yaml.v3"
@@ -740,13 +742,109 @@ func TestLoadRefusesAnInvalidPriceCatalog(t *testing.T) {
 func TestSecretsIsolation(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("LLMGW_STATE_DIR", dir)
-	SaveSecret("prov", "sk-secret")
+	if err := SaveSecret("prov", "sk-secret"); err != nil {
+		t.Fatal(err)
+	}
 	if LoadSecrets()["prov"] != "sk-secret" {
 		t.Error("secret not stored")
 	}
-	DeleteSecret("prov")
+	if err := DeleteSecret("prov"); err != nil {
+		t.Fatal(err)
+	}
 	if LoadSecrets()["prov"] != "" {
 		t.Error("secret not deleted")
+	}
+}
+
+func TestSecretWritesAreOwnerOnlyAndLeaveNoTempFiles(t *testing.T) {
+	state := filepath.Join(t.TempDir(), "state")
+	t.Setenv("LLMGW_STATE_DIR", state)
+	for _, providerID := range []string{"first", "second"} {
+		if err := SaveSecret(providerID, "fixture-key"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	entries, err := os.ReadDir(state)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 1 || entries[0].Name() != "secrets.json" {
+		t.Fatalf("state directory holds %d entries, want only secrets.json", len(entries))
+	}
+	if runtime.GOOS != "windows" {
+		for path, want := range map[string]os.FileMode{
+			state: 0o700, filepath.Join(state, "secrets.json"): 0o600,
+		} {
+			info, err := os.Stat(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if info.Mode().Perm() != want {
+				t.Fatalf("%s mode=%v, want %v", path, info.Mode().Perm(), want)
+			}
+		}
+	}
+	if got := LoadSecrets(); len(got) != 2 {
+		t.Fatalf("secrets.json holds %d keys, want 2", len(got))
+	}
+}
+
+func TestConcurrentSecretSavesKeepEveryKey(t *testing.T) {
+	t.Setenv("LLMGW_STATE_DIR", t.TempDir())
+	const writers = 16
+	errs := make(chan error, writers)
+	var wg sync.WaitGroup
+	for index := 0; index < writers; index++ {
+		wg.Add(1)
+		go func(providerID string) {
+			defer wg.Done()
+			errs <- SaveSecret(providerID, "fixture-key")
+		}(fmt.Sprintf("provider-%d", index))
+	}
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	if got := len(LoadSecrets()); got != writers {
+		t.Fatalf("secrets.json kept %d of %d keys saved concurrently", got, writers)
+	}
+}
+
+func TestSecretWriteFailureIsReported(t *testing.T) {
+	blocker := filepath.Join(t.TempDir(), "file")
+	if err := os.WriteFile(blocker, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	// No directory can be created below a regular file, whoever runs the test.
+	t.Setenv("LLMGW_STATE_DIR", filepath.Join(blocker, "state"))
+	err := SaveSecret("prov", "fixture-unwritten-key")
+	if err == nil {
+		t.Fatal("a key that could not be written was reported as saved")
+	}
+	if strings.Contains(err.Error(), "fixture-unwritten-key") {
+		t.Fatal("the write error repeats the key")
+	}
+}
+
+func TestSecretSaveLeavesAnUnparsableFileUntouched(t *testing.T) {
+	state := t.TempDir()
+	t.Setenv("LLMGW_STATE_DIR", state)
+	path := filepath.Join(state, "secrets.json")
+	if err := os.WriteFile(path, []byte(`{"kept": "fixture-kept-key"`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	err := SaveSecret("prov", "fixture-new-key")
+	if err == nil {
+		t.Fatal("a save replaced a secrets.json it could not read")
+	}
+	if strings.Contains(err.Error(), "fixture-kept-key") {
+		t.Fatal("the read error repeats a stored key")
+	}
+	if raw, err := os.ReadFile(path); err != nil || string(raw) != `{"kept": "fixture-kept-key"` {
+		t.Fatalf("secrets.json changed after a failed save: err=%v", err)
 	}
 }
 

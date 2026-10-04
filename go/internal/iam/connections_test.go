@@ -161,8 +161,13 @@ func TestStartupMovesPlaintextProviderSecretsIntoEncryptedStore(t *testing.T) {
 			"configured": {Type: "openai_compatible"},
 		}
 	})
-	config.SaveSecret("configured", "fixture-configured-key")
-	config.SaveSecret("unlisted", "fixture-unlisted-key")
+	for providerID, secret := range map[string]string{
+		"configured": "fixture-configured-key", "unlisted": "fixture-unlisted-key",
+	} {
+		if err := config.SaveSecret(providerID, secret); err != nil {
+			t.Fatal(err)
+		}
+	}
 	if _, err := Initialize(); err != nil {
 		t.Fatal(err)
 	}
@@ -206,7 +211,9 @@ func TestStartupMoveKeepsResolutionPrecedence(t *testing.T) {
 		"revoked": "fixture-revoked-key", "yaml": "fixture-plaintext-key",
 	}
 	for providerID, secret := range plaintext {
-		config.SaveSecret(providerID, secret)
+		if err := config.SaveSecret(providerID, secret); err != nil {
+			t.Fatal(err)
+		}
 	}
 	if _, err := Initialize(); err != nil {
 		t.Fatal(err)
@@ -234,7 +241,9 @@ func TestStartupKeepsPlaintextProviderSecretsWithoutEncryption(t *testing.T) {
 		s.CredentialEncryptionKey = ""
 		s.Providers = map[string]*config.ProviderConfig{"plain": {Type: "openai_compatible"}}
 	})
-	config.SaveSecret("plain", "fixture-plain-key")
+	if err := config.SaveSecret("plain", "fixture-plain-key"); err != nil {
+		t.Fatal(err)
+	}
 	if _, err := Initialize(); err != nil {
 		t.Fatal(err)
 	}

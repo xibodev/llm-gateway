@@ -504,9 +504,13 @@ func handleUpsertProvider(w http.ResponseWriter, r *http.Request) {
 		// it on disk unencrypted, and an older copy would be served again once
 		// that connection is revoked.
 		if stored {
-			config.DeleteSecret(pid)
+			err = config.DeleteSecret(pid)
 		} else {
-			config.SaveSecret(pid, raw)
+			err = config.SaveSecret(pid, raw)
+		}
+		if err != nil {
+			writeError(w, 500, "secrets.json could not be updated.")
+			return
 		}
 	}
 	if _, err := config.UpdateAndSave(func(s *config.Settings) error {
@@ -638,10 +642,14 @@ func handleDeleteProvider(w http.ResponseWriter, r *http.Request) {
 		writeError(w, 500, "revoke system connection: "+err.Error())
 		return
 	}
-	config.DeleteSecret(pid)
+	secretErr := config.DeleteSecret(pid)
 	providers.ForgetProvider(pid)
 	providers.ForgetCatalog(pid)
 	_ = iam.DeleteProviderChecks(pid)
+	if secretErr != nil {
+		writeError(w, 500, "Provider was deleted, but its key could not be removed from secrets.json.")
+		return
+	}
 	writeJSON(w, 200, map[string]any{"ok": true})
 }
 

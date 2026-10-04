@@ -499,53 +499,121 @@ func expandUser(p string) string {
 
 // ---- secrets store ------------------------------------------------------ //
 
+// secretsMu serializes the read-modify-write cycles on secrets.json, so two
+// concurrent saves cannot each write back a copy that lacks the other's key.
+// Readers need no lock: a write replaces the file in one rename.
+var secretsMu sync.Mutex
+
+// LoadSecrets returns the stored plaintext keys; a missing or unreadable file
+// reads as empty.
 func LoadSecrets() map[string]string {
+	out, err := readSecrets()
+	if err != nil {
+		return map[string]string{}
+	}
+	return out
+}
+
+// readSecrets is LoadSecrets that reports why a present file could not be
+// read, so a writer never replaces a file whose keys it did not see.
+func readSecrets() (map[string]string, error) {
 	out := map[string]string{}
 	b, err := os.ReadFile(secretsFilePath())
+	if errors.Is(err, os.ErrNotExist) {
+		return out, nil
+	}
 	if err != nil {
-		return out
+		return nil, err
 	}
 	var raw map[string]any
 	if json.Unmarshal(b, &raw) != nil {
-		return out
+		// The decoder's message can quote the file, and the file holds keys.
+		return nil, errors.New("secrets.json is not a JSON object")
 	}
 	for k, v := range raw {
 		if s, ok := v.(string); ok {
 			out[k] = s
 		}
 	}
-	return out
+	return out, nil
 }
 
-func writeSecrets(data map[string]string) {
+// writeSecrets replaces secrets.json through a synced temporary file in the
+// same directory, so a crash or a full disk leaves the previous file or the
+// new one, never a truncated mix of both.
+func writeSecrets(data map[string]string) error {
+	path := secretsFilePath()
 	// An empty store is removed rather than kept as an empty file, so a state
 	// directory whose keys all moved into the encrypted store has no secrets
 	// file left.
 	if len(data) == 0 {
-		_ = os.Remove(secretsFilePath())
-		return
+		if err := os.Remove(path); err != nil && !errors.Is(err, os.ErrNotExist) {
+			return err
+		}
+		return nil
 	}
-	_ = os.MkdirAll(StateDir(), 0o755)
-	b, _ := json.MarshalIndent(data, "", "  ")
-	_ = os.WriteFile(secretsFilePath(), b, 0o600)
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		return err
+	}
+	b, err := json.MarshalIndent(data, "", "  ")
+	if err != nil {
+		return err
+	}
+	tmp, err := os.CreateTemp(filepath.Dir(path), ".secrets-*.tmp")
+	if err != nil {
+		return err
+	}
+	tmpPath := tmp.Name()
+	defer os.Remove(tmpPath)
+	if err := tmp.Chmod(0o600); err != nil {
+		_ = tmp.Close()
+		return err
+	}
+	if _, err := tmp.Write(b); err != nil {
+		_ = tmp.Close()
+		return err
+	}
+	if err := tmp.Sync(); err != nil {
+		_ = tmp.Close()
+		return err
+	}
+	if err := tmp.Close(); err != nil {
+		return err
+	}
+	return os.Rename(tmpPath, path)
 }
 
-func SaveSecret(providerID, apiKey string) {
-	data := LoadSecrets()
+// SaveSecret stores a provider's plaintext key, or removes it when apiKey is
+// empty.
+func SaveSecret(providerID, apiKey string) error {
+	secretsMu.Lock()
+	defer secretsMu.Unlock()
+	data, err := readSecrets()
+	if err != nil {
+		return err
+	}
 	if apiKey != "" {
 		data[providerID] = apiKey
 	} else {
 		delete(data, providerID)
 	}
-	writeSecrets(data)
+	return writeSecrets(data)
 }
 
-func DeleteSecret(providerID string) {
-	data := LoadSecrets()
-	if _, ok := data[providerID]; ok {
-		delete(data, providerID)
-		writeSecrets(data)
+// DeleteSecret removes a provider's plaintext key; a missing key is not an
+// error.
+func DeleteSecret(providerID string) error {
+	secretsMu.Lock()
+	defer secretsMu.Unlock()
+	data, err := readSecrets()
+	if err != nil {
+		return err
 	}
+	if _, ok := data[providerID]; !ok {
+		return nil
+	}
+	delete(data, providerID)
+	return writeSecrets(data)
 }
 
 var envRef = regexp.MustCompile(`^\$\{ENV:([A-Z][A-Z0-9_]*)\}$`)
