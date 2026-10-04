@@ -113,6 +113,13 @@ responses, local credential-state failures, and definitive upstream 4xx
 responses do not repeat against the same target. Circuit state is process-local
 and resets on restart.
 
+Each retry waits a random time between zero and the policy's exponential
+backoff (full jitter), so requests that failed together do not retry together.
+An upstream `Retry-After` lengthens that wait to at most 5 seconds; a target
+that asks for longer is not retried, and the request moves on to the next
+member. When the request fails on such a response, the gateway answers with the
+upstream's status and passes on the `Retry-After` the provider reported.
+
 ## Policy and credentials
 
 Resolution applies configured-provider status, principal/project membership,

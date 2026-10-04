@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -274,6 +275,57 @@ func TestBudgetDoesNotCutANonStreamingAnswer(t *testing.T) {
 	response, served, err := ExecuteCompleteContext(ctx, []Target{{Provider: "slow", Model: "model"}}, []providers.Message{{"role": "user", "content": "hi"}}, "route", anonymous, nil)
 	if err != nil || served == nil || served.Provider != "slow" || response == nil {
 		t.Fatalf("served=%+v err=%v, want the answer the budget outlasted", served, err)
+	}
+}
+
+// A target that asks to be retried later than the resilience wrapper waits
+// is left at once, and the chain moves on. A chain that ends on it unwraps to
+// that failure, so its status and Retry-After reach the client.
+func TestChainMovesOnPastALongRetryAfterAndReportsIt(t *testing.T) {
+	setupEcho(t)
+	var calls atomic.Int32
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		calls.Add(1)
+		w.Header().Set("Retry-After", "30")
+		http.Error(w, `{"error":{"message":"slow down"}}`, http.StatusTooManyRequests)
+	}))
+	defer upstream.Close()
+	config.Update(func(s *config.Settings) {
+		s.Providers["throttled"] = &config.ProviderConfig{Type: "openai_compatible", BaseURL: upstream.URL}
+		s.Policies.Defaults = config.ProviderPolicy{
+			RetryMaxAttempts: 3, RetryInitialBackoffSeconds: 0.001, RetryBackoffMultiplier: 1, RetryMaxBackoffSeconds: 0.001,
+		}
+	})
+	providers.ResetProviders()
+	t.Cleanup(providers.ResetProviders)
+	messages := []providers.Message{{"role": "user", "content": "hi"}}
+	throttled := Target{Provider: "throttled", Model: "model"}
+	started := time.Now()
+	_, served, err := ExecuteCompleteContext(context.Background(), []Target{throttled, {Provider: "echo", Model: "echo-default"}}, messages, "route", anonymous, nil)
+	if err != nil || served == nil || served.Provider != "echo" || calls.Load() != 1 {
+		t.Fatalf("served=%+v err=%v calls=%d, want the next target after one try", served, err, calls.Load())
+	}
+	if elapsed := time.Since(started); elapsed > 3*time.Second {
+		t.Fatalf("the chain waited %v on the throttled target", elapsed)
+	}
+	_, _, err = ExecuteCompleteContext(context.Background(), []Target{throttled}, messages, "route", anonymous, nil)
+	var failed *AllTargetsFailed
+	var refusal *providers.InvocationError
+	if !errors.As(err, &failed) || failed.Status != http.StatusTooManyRequests || !errors.As(err, &refusal) || providers.InvocationRetryAfter(err) != "30" {
+		t.Fatalf("err=%v, want the throttle and its Retry-After", err)
+	}
+}
+
+// A chain that ended on a configuration failure does not unwrap to it, so it
+// keeps answering as a failed chain rather than as a misconfigured gateway.
+func TestAllTargetsFailedHidesAConfigurationFailure(t *testing.T) {
+	configuration := &AllTargetsFailed{Msg: "unknown type", Err: &providers.ConfigError{Msg: "unknown type"}}
+	if errors.Unwrap(configuration) != nil || providers.IsConfig(configuration) {
+		t.Fatalf("a configuration failure unwrapped: %v", errors.Unwrap(configuration))
+	}
+	upstream := &providers.InvocationError{Msg: "busy", Status: http.StatusServiceUnavailable, RetryAfter: "3"}
+	if failed := (&AllTargetsFailed{Msg: "busy", Status: http.StatusServiceUnavailable, Err: upstream}); errors.Unwrap(failed) != upstream {
+		t.Fatalf("an upstream failure did not unwrap: %v", errors.Unwrap(failed))
 	}
 }
 

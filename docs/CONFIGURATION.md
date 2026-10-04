@@ -94,7 +94,8 @@ The configuration loader applies the YAML `policies` block at startup. Defaults
 apply to every provider unless an exact provider ID has an entry under
 `policies.overrides`. Administration saves persist these values without exposing
 credentials. Supported fields include `retry_max_attempts`, retry backoff values,
-`circuit_failure_threshold`, and `circuit_cooldown_seconds`. Circuit counters and
+`circuit_failure_threshold`, and `circuit_cooldown_seconds`. Each retry waits a
+random time up to the configured exponential backoff. Circuit counters and
 cooldown state remain process-local and reset on restart.
 
 Use the supported provider and endpoint fields in the

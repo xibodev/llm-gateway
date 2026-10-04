@@ -16,11 +16,11 @@ func TestRetryDelayHonorsLongerRetryAfter(t *testing.T) {
 		RetryBackoffMultiplier:     2,
 		RetryMaxBackoffSeconds:     1,
 	}}
-	if delay := provider.retryDelay(invocationStatusRetryAfter("throttled", 429, "2"), 1); delay != 2*time.Second {
-		t.Fatalf("retry delay=%v, want 2s", delay)
+	if delay, ok := provider.retryDelay(invocationStatusRetryAfter("throttled", 429, "2"), 1); !ok || delay != 2*time.Second {
+		t.Fatalf("retry delay=%v (%v), want 2s", delay, ok)
 	}
-	if delay := provider.retryDelay(invocationStatusRetryAfter("throttled", 429, "invalid"), 1); delay != 10*time.Millisecond {
-		t.Fatalf("invalid Retry-After delay=%v, want policy backoff", delay)
+	if delay, ok := provider.retryDelay(invocationStatusRetryAfter("throttled", 429, "invalid"), 1); !ok || delay > 10*time.Millisecond {
+		t.Fatalf("invalid Retry-After delay=%v (%v), want the jittered policy backoff", delay, ok)
 	}
 }
 

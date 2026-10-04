@@ -4,9 +4,7 @@ import (
 	"context"
 	"errors"
 	"math"
-	"net/http"
-	"strconv"
-	"strings"
+	"math/rand/v2"
 	"sync"
 	"time"
 
@@ -141,24 +139,41 @@ func (r *ResilientProvider) nextBackoff(attempt int) float64 {
 	return math.Min(raw, r.policy.RetryMaxBackoffSeconds)
 }
 
-func (r *ResilientProvider) retryDelay(err error, attempt int) time.Duration {
-	delay := time.Duration(r.nextBackoff(attempt) * float64(time.Second))
-	retryAfter := strings.TrimSpace(InvocationRetryAfter(err))
-	if retryAfter == "" {
-		return delay
+// maxRetryAfterWait is the longest Retry-After the resilience wrapper waits
+// out before repeating a try. An upstream that asks for longer gets no retry
+// from it: the failure goes back to the router, which can try another
+// target, so one throttled target cannot hold a request for as long as it
+// asks.
+const maxRetryAfterWait = 5 * time.Second
+
+// retryDelay is how long to wait before repeating a failed try, and false
+// when the try is not to be repeated; see waitBeforeRetry. The backoff is
+// drawn with full jitter, uniformly up to the policy's exponential backoff,
+// so callers that failed together do not retry together.
+func (r *ResilientProvider) retryDelay(err error, attempt int) (time.Duration, bool) {
+	return waitBeforeRetry(err, fullJitter(time.Duration(r.nextBackoff(attempt)*float64(time.Second))))
+}
+
+// waitBeforeRetry is the wait before repeating a try that failed with err
+// after backoff: backoff, or the upstream's Retry-After when it asks for
+// longer, up to maxRetryAfterWait. A longer Retry-After reports false.
+func waitBeforeRetry(err error, backoff time.Duration) (time.Duration, bool) {
+	retryAfter := retryAfterDelay(InvocationRetryAfter(err), time.Now())
+	switch {
+	case retryAfter <= backoff:
+		return backoff, true
+	case retryAfter > maxRetryAfterWait:
+		return 0, false
 	}
-	if seconds, parseErr := strconv.ParseInt(retryAfter, 10, 64); parseErr == nil {
-		if serverDelay := time.Duration(seconds) * time.Second; serverDelay > delay {
-			return serverDelay
-		}
-		return delay
+	return retryAfter, true
+}
+
+// fullJitter draws a wait uniformly between zero and backoff.
+func fullJitter(backoff time.Duration) time.Duration {
+	if backoff <= 0 {
+		return 0
 	}
-	if retryAt, parseErr := http.ParseTime(retryAfter); parseErr == nil {
-		if serverDelay := time.Until(retryAt); serverDelay > delay {
-			return serverDelay
-		}
-	}
-	return delay
+	return rand.N(backoff + 1)
 }
 
 type retryDeadlineKey struct{}
@@ -182,8 +197,11 @@ func (r *ResilientProvider) repeat(ctx context.Context, err error, attempt, atte
 		r.record(err)
 		return err
 	}
-	delay := r.retryDelay(err, attempt)
-	if deadline, ok := ctx.Value(retryDeadlineKey{}).(time.Time); ok && !time.Now().Add(delay).Before(deadline) {
+	delay, ok := r.retryDelay(err, attempt)
+	if deadline, bounded := ctx.Value(retryDeadlineKey{}).(time.Time); bounded && !time.Now().Add(delay).Before(deadline) {
+		ok = false
+	}
+	if !ok {
 		r.record(err)
 		return err
 	}

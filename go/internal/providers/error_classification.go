@@ -29,7 +29,7 @@ import (
 // counts InvocationCircuitFailure against the circuit; the router moves to the
 // next candidate while InvocationFailoverEligible holds. StatusCode is the
 // status the router reports, and RetryAfter the upstream delay the wrapper
-// waits out when it exceeds the backoff.
+// waits out when it exceeds the backoff, up to maxRetryAfterWait.
 //
 // One error reads differently from the wrapper's control flow: the wrapper's
 // own circuit-open error is a plain 503, so it classifies as retryable, but the

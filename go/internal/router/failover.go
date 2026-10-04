@@ -304,14 +304,27 @@ func (e *ModelNotFoundError) Error() string {
 
 // AllTargetsFailed means every failover target for a category failed. Status
 // carries the last upstream HTTP status (0 if none) so the API layer can pass
-// the real status through instead of masking it.
+// the real status through instead of masking it, and Err the failure that
+// ended the chain.
 type AllTargetsFailed struct {
 	Msg    string
 	Status int
+	Err    error
 }
 
 func (e *AllTargetsFailed) Error() string {
 	return providers.SanitizeDiagnosticTextLimit(e.Msg, 2048)
+}
+
+// Unwrap returns the failure that ended the chain, from which the API layer
+// reads the upstream's Retry-After. A configuration failure is left out: Msg
+// reports it already, and read through it the chain would answer as a
+// misconfigured gateway rather than as the failed request it is.
+func (e *AllTargetsFailed) Unwrap() error {
+	if providers.IsConfig(e.Err) {
+		return nil
+	}
+	return e.Err
 }
 
 // AmbiguousCategoryError reports an invalid configuration containing endpoint
@@ -803,7 +816,7 @@ func (rt *Runtime) ExecuteResponsesContext(
 		message = lastErr.Error()
 	}
 	return nil, nil, &AllTargetsFailed{
-		Msg: message, Status: lastStatus,
+		Msg: message, Status: lastStatus, Err: lastErr,
 	}
 }
 
@@ -911,7 +924,7 @@ func (rt *Runtime) ExecuteAnthropicMessagesContext(
 	if lastErr != nil {
 		message = lastErr.Error()
 	}
-	return nil, nil, &AllTargetsFailed{Msg: message, Status: lastStatus}
+	return nil, nil, &AllTargetsFailed{Msg: message, Status: lastStatus, Err: lastErr}
 }
 
 // errChatOnly is the failure of a target that a request needing native
@@ -1115,7 +1128,7 @@ func (rt *Runtime) ExecuteResponsesStreamContext(
 		message = lastErr.Error()
 	}
 	return nil, nil, &AllTargetsFailed{
-		Msg: message, Status: lastStatus,
+		Msg: message, Status: lastStatus, Err: lastErr,
 	}
 }
 
@@ -1292,7 +1305,7 @@ func (rt *Runtime) executeCompleteWithTrace(ctx context.Context, targets []Targe
 	if lastErr != nil {
 		msg = lastErr.Error()
 	}
-	return nil, nil, trace, &AllTargetsFailed{Msg: msg, Status: deadlineStatus(lastErr)}
+	return nil, nil, trace, &AllTargetsFailed{Msg: msg, Status: deadlineStatus(lastErr), Err: lastErr}
 }
 
 // ExecuteStream runs the chain for a streaming request, failing over pre-first-byte.
@@ -1387,7 +1400,7 @@ func (rt *Runtime) executeStreamContext(ctx context.Context, targets []Target, m
 	if lastErr != nil {
 		msg = lastErr.Error()
 	}
-	return nil, nil, &AllTargetsFailed{Msg: msg, Status: lastStatus}
+	return nil, nil, &AllTargetsFailed{Msg: msg, Status: lastStatus, Err: lastErr}
 }
 
 func truncate(s string) string {

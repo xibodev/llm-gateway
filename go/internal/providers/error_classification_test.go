@@ -8,8 +8,6 @@ import (
 	"testing"
 	"time"
 
-	"llmgw/internal/config"
-
 	core "github.com/xibodev/llmgw-core"
 )
 
@@ -140,14 +138,11 @@ func TestRetryAfterDelay(t *testing.T) {
 // The wrapper waits the longer of its backoff and the upstream's delay, so the
 // delay core reads must be the one the wrapper honours.
 func TestRetryAfterIsTheDelayTheWrapperHonours(t *testing.T) {
-	provider := &ResilientProvider{policy: config.ProviderPolicy{
-		RetryInitialBackoffSeconds: 0.01, RetryBackoffMultiplier: 2, RetryMaxBackoffSeconds: 1,
-	}}
-	backoff := provider.retryDelay(invocationStatus("fixture", 503), 1)
+	const backoff = 10 * time.Millisecond
 	for _, value := range []string{"2", " 3 ", "0", "-4", "later"} {
 		err := invocationStatusRetryAfter("fixture", 503, value)
-		if got, want := provider.retryDelay(err, 1), max(backoff, core.ClassifyError(err).RetryAfter); got != want {
-			t.Errorf("Retry-After %q: the wrapper waits %v, core's delay implies %v", value, got, want)
+		if got, ok := waitBeforeRetry(err, backoff); !ok || got != max(backoff, core.ClassifyError(err).RetryAfter) {
+			t.Errorf("Retry-After %q: the wrapper waits %v (%v), core's delay implies %v", value, got, ok, core.ClassifyError(err).RetryAfter)
 		}
 	}
 }
