@@ -20,15 +20,23 @@ export function keyQuotaDraftsFor(policy: JSONRecord): Record<string, string> {
   return Object.fromEntries(keyQuotaFields.map((field) => [field, String(numberValue(policy[field]))]));
 }
 
+// quotaValueFromDraft reads one limit field for key and project policies alike.
+// Blank means 0, no limit; anything else must be plain digits within the safe
+// integer range, so signs, decimals, exponents and hex never reach the server.
+export function quotaValueFromDraft(draft: string | undefined): number | null {
+  const raw = (draft ?? "").trim() || "0";
+  const value = Number(raw);
+  return /^\d+$/.test(raw) && Number.isSafeInteger(value) ? value : null;
+}
+
 export function keyQuotaPolicyFromDrafts(drafts: Record<string, string>): {
   policy: JSONRecord | null;
   error: string;
 } {
   const policy: JSONRecord = {};
   for (const field of keyQuotaFields) {
-    const raw = (drafts[field] ?? "").trim() || "0";
-    const value = Number(raw);
-    if (!/^\d+$/.test(raw) || !Number.isSafeInteger(value)) {
+    const value = quotaValueFromDraft(drafts[field]);
+    if (value === null) {
       return { policy: null, error: `${keyQuotaLabels[field]} must be a nonnegative whole number.` };
     }
     policy[field] = value;

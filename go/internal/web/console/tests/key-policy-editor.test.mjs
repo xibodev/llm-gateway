@@ -9,7 +9,7 @@ const root = resolve(import.meta.dirname, "..");
 const { outputFiles } = await build({
   stdin: {
     contents: `
-      export { keyQuotaDraftsFor, keyQuotaFields, keyQuotaPolicyFromDrafts } from "./src/lib/key-policy.ts";
+      export { keyQuotaDraftsFor, keyQuotaFields, keyQuotaPolicyFromDrafts, quotaValueFromDraft } from "./src/lib/key-policy.ts";
     `,
     resolveDir: new URL("..", import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, "$1"),
     sourcefile: "key-policy-test-entry.ts",
@@ -50,6 +50,15 @@ test("negative and unsafe quota values are rejected", () => {
   const unsafe = subject.keyQuotaPolicyFromDrafts({ rpm: "9007199254740992" });
   assert.equal(unsafe.policy, null);
   assert.match(unsafe.error, /nonnegative whole number/);
+});
+
+test("a limit draft is blank or plain digits within the safe integer range", () => {
+  assert.equal(subject.quotaValueFromDraft(undefined), 0);
+  assert.equal(subject.quotaValueFromDraft("  "), 0);
+  assert.equal(subject.quotaValueFromDraft(" 42 "), 42);
+  for (const draft of ["1.5", "-1", "+1", "1e3", "0x10", "Infinity", "9007199254740992"]) {
+    assert.equal(subject.quotaValueFromDraft(draft), null, draft);
+  }
 });
 
 test("the existing-key editor renders and submits every quota field", () => {

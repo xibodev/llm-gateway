@@ -1,6 +1,7 @@
-import { useEffect, useState } from "preact/hooks";
+import { useEffect, useRef, useState } from "preact/hooks";
 import { LoaderCircle, RefreshCw, Save, ShieldCheck, Users } from "lucide-preact";
 import { getJSON, sendJSON, type JSONRecord } from "../lib/api";
+import { quotaValueFromDraft } from "../lib/key-policy";
 import type { ConsoleMode } from "../lib/mode";
 import type { PageID } from "../lib/navigation";
 import { asList, asRecord, numberValue, stringValue } from "../lib/records";
@@ -32,7 +33,7 @@ const policyFields: { key: string; label: string; help: string }[] = [
   { key: "monthly_credits_milli", label: "Monthly model credits (milli-credits)", help: "Model-credit budget per calendar month; 1,000 milli-credits = 1 credit" },
 ];
 
-function ProjectPolicyEditor({ projects, onSaved }: { projects: JSONRecord[]; onSaved: (message: string) => void }) {
+export function ProjectPolicyEditor({ projects, onSaved }: { projects: JSONRecord[]; onSaved: (message: string) => void }) {
   const [projectID, setProjectID] = useState(stringValue(projects[0]?.id));
   const [policy, setPolicy] = useState<JSONRecord | null>(null);
   const [allowedModels, setAllowedModels] = useState("");
@@ -40,13 +41,19 @@ function ProjectPolicyEditor({ projects, onSaved }: { projects: JSONRecord[]; on
   const [numbers, setNumbers] = useState<Record<string, string>>({});
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
+  // Each load supersedes the one before. A late response for a project the
+  // operator already left must not fill the form shown for the next project,
+  // where saving would write the first project's limits to the second.
+  const loadRequest = useRef(0);
 
   const load = async (targetID: string) => {
+    const request = ++loadRequest.current;
     if (!targetID) { setPolicy(null); return; }
     setError("");
     setPolicy(null);
     try {
       const payload = await getJSON<JSONRecord>("admin", `/projects/${encodeURIComponent(targetID)}/policy`);
+      if (request !== loadRequest.current) return;
       setPolicy(payload);
       setAllowedModels(asList(payload.allowed_models).map(String).join(", "));
       setAllowedProviders(asList(payload.allowed_providers).map(String).join(", "));
@@ -57,6 +64,7 @@ function ProjectPolicyEditor({ projects, onSaved }: { projects: JSONRecord[]; on
       }
       setNumbers(next);
     } catch (cause) {
+      if (request !== loadRequest.current) return;
       setError(cause instanceof Error ? cause.message : "Project policy could not load.");
     }
   };
@@ -64,23 +72,21 @@ function ProjectPolicyEditor({ projects, onSaved }: { projects: JSONRecord[]; on
 
   const save = async (event: Event) => {
     event.preventDefault();
+    const body: JSONRecord = {
+      allowed_models: allowedModels.split(",").map((value) => value.trim()).filter(Boolean),
+      allowed_providers: allowedProviders.split(",").map((value) => value.trim()).filter(Boolean),
+    };
+    for (const field of policyFields) {
+      const value = quotaValueFromDraft(numbers[field.key]);
+      if (value === null) {
+        setError(`${field.label} must be a nonnegative whole number.`);
+        return;
+      }
+      body[field.key] = value;
+    }
     setBusy(true);
     setError("");
     try {
-      const body: JSONRecord = {
-        allowed_models: allowedModels.split(",").map((value) => value.trim()).filter(Boolean),
-        allowed_providers: allowedProviders.split(",").map((value) => value.trim()).filter(Boolean),
-      };
-      for (const field of policyFields) {
-        const raw = (numbers[field.key] ?? "").trim();
-        const value = raw ? Number(raw) : 0;
-        if (raw && (!Number.isFinite(value) || value < 0)) {
-          setError(`${field.label} must be a non-negative number.`);
-          setBusy(false);
-          return;
-        }
-        body[field.key] = value;
-      }
       await sendJSON<JSONRecord>("admin", `/projects/${encodeURIComponent(projectID)}/policy`, "POST", body);
       onSaved("Project policy saved. Empty fields mean no limit.");
       await load(projectID);
@@ -94,7 +100,7 @@ function ProjectPolicyEditor({ projects, onSaved }: { projects: JSONRecord[]; on
   }
   return (
     <form class="policy-editor" onSubmit={save}>
-      <label>Project<select value={projectID} onInput={(event) => setProjectID((event.currentTarget as HTMLSelectElement).value)}>{projects.map((project) => <option value={stringValue(project.id)} key={stringValue(project.id)}>{stringValue(project.name, stringValue(project.slug))}</option>)}</select></label>
+      <label>Project<select value={projectID} disabled={busy} onInput={(event) => setProjectID((event.currentTarget as HTMLSelectElement).value)}>{projects.map((project) => <option value={stringValue(project.id)} key={stringValue(project.id)}>{stringValue(project.name, stringValue(project.slug))}</option>)}</select></label>
       {error ? <p class="form-error" role="alert">{error}</p> : null}
       {policy === null && !error ? <p class="muted-copy"><LoaderCircle class="spin" size={15} /> Loading policy…</p> : policy !== null ? <>
         <label>Allowed models (comma-separated, empty = all)<input value={allowedModels} onInput={(event) => setAllowedModels((event.currentTarget as HTMLInputElement).value)} placeholder="cat-coding, copilot/gpt-4o-mini" /></label>
