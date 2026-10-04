@@ -2,7 +2,10 @@ package iam
 
 import (
 	"bytes"
+	"context"
 	"database/sql"
+	"database/sql/driver"
+	"errors"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -83,6 +86,77 @@ func TestDBCreatesControlPlaneSchema(t *testing.T) {
 		t.Fatalf("database file: %v", err)
 	} else if runtime.GOOS != "windows" && info.Mode().Perm()&0o077 != 0 {
 		t.Fatalf("database permissions = %o, want no group/other bits", info.Mode().Perm())
+	}
+}
+
+// database/sql opens a replacement when a connection fails or expires, and a
+// pragma run once through Exec configures only the connection it ran on.
+func TestPragmasApplyToReplacementConnections(t *testing.T) {
+	db, err := openDB(filepath.Join(t.TempDir(), "gateway.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	ctx := context.Background()
+	conn, err := db.Conn(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var discarded any
+	// The pool closes a connection that reports ErrBadConn, as it does after
+	// a real failure, and opens another for the next caller.
+	_ = conn.Raw(func(driverConn any) error {
+		discarded = driverConn
+		return driver.ErrBadConn
+	})
+	conn, err = db.Conn(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close()
+	if err := conn.Raw(func(driverConn any) error {
+		if driverConn == discarded {
+			return errors.New("the pool kept the discarded connection")
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	for _, pragma := range []struct {
+		name string
+		want int
+	}{{"foreign_keys", 1}, {"busy_timeout", 5000}, {"synchronous", 1}} {
+		var got int
+		if err := conn.QueryRowContext(ctx, "PRAGMA "+pragma.name).Scan(&got); err != nil {
+			t.Fatal(err)
+		}
+		if got != pragma.want {
+			t.Errorf("PRAGMA %s = %d on a replacement connection, want %d", pragma.name, got, pragma.want)
+		}
+	}
+}
+
+// The database is named by a URI, whose path SQLite ends at ? or # and whose
+// %HH escapes it decodes, and where a relative path's first segment would read
+// as the authority. Each of those must still open the file it names.
+func TestOpenDBOpensTheNamedFile(t *testing.T) {
+	t.Chdir(t.TempDir())
+	special := "state #1 %41 é"
+	if runtime.GOOS != "windows" { // ? cannot appear in a Windows file name
+		special += " ?"
+	}
+	for _, path := range []string{
+		filepath.Join("relative", "gateway.db"),
+		filepath.Join(t.TempDir(), special, "gateway.db"),
+	} {
+		db, err := openDB(path)
+		if err != nil {
+			t.Fatalf("open %q: %v", path, err)
+		}
+		_ = db.Close()
+		if _, err := os.Stat(path); err != nil {
+			t.Errorf("the database opened for %q is not there: %v", path, err)
+		}
 	}
 }
 

@@ -7,8 +7,10 @@ package iam
 import (
 	"database/sql"
 	"fmt"
+	"net/url"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 
 	"llmgw/internal/config"
@@ -51,7 +53,16 @@ func openDB(path string) (*sql.DB, error) {
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return nil, fmt.Errorf("create IAM state directory: %w", err)
 	}
-	db, err := sql.Open("sqlite", path)
+	// The driver runs these on every connection it opens. database/sql
+	// replaces a connection that fails, and a pragma run once through Exec
+	// would leave the replacement without foreign keys or a busy timeout.
+	dsn, err := sqliteDSN(path,
+		"foreign_keys(1)", "journal_mode(WAL)", "synchronous(NORMAL)", "busy_timeout(5000)",
+	)
+	if err != nil {
+		return nil, fmt.Errorf("resolve IAM database path: %w", err)
+	}
+	db, err := sql.Open("sqlite", dsn)
 	if err != nil {
 		return nil, fmt.Errorf("open IAM database: %w", err)
 	}
@@ -60,16 +71,9 @@ func openDB(path string) (*sql.DB, error) {
 	db.SetMaxOpenConns(1)
 	db.SetMaxIdleConns(1)
 
-	for _, pragma := range []string{
-		"PRAGMA foreign_keys = ON",
-		"PRAGMA journal_mode = WAL",
-		"PRAGMA synchronous = NORMAL",
-		"PRAGMA busy_timeout = 5000",
-	} {
-		if _, err := db.Exec(pragma); err != nil {
-			_ = db.Close()
-			return nil, fmt.Errorf("%s: %w", pragma, err)
-		}
+	if err := db.Ping(); err != nil {
+		_ = db.Close()
+		return nil, fmt.Errorf("open IAM database: %w", err)
 	}
 	if err := applyMigrations(db); err != nil {
 		_ = db.Close()
@@ -77,6 +81,24 @@ func openDB(path string) (*sql.DB, error) {
 	}
 	_ = os.Chmod(path, 0o600)
 	return db, nil
+}
+
+// sqliteDSN names the database at path as a SQLite URI whose _pragma
+// parameters the driver runs on each new connection. SQLite ends a URI path
+// at ? or # and decodes %HH escapes in it, so the path travels URL-escaped.
+// It is made absolute, since a relative path's first segment would read as
+// the URI's authority, and SQLite reads "/C:/..." as a Windows drive.
+func sqliteDSN(path string, pragmas ...string) (string, error) {
+	absolute, err := filepath.Abs(path)
+	if err != nil {
+		return "", err
+	}
+	slashed := filepath.ToSlash(absolute)
+	if !strings.HasPrefix(slashed, "/") {
+		slashed = "/" + slashed
+	}
+	uri := url.URL{Scheme: "file", Path: slashed, RawQuery: url.Values{"_pragma": pragmas}.Encode()}
+	return uri.String(), nil
 }
 
 // ResetForTests closes the cached database handle.
