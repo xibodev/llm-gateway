@@ -107,7 +107,11 @@ func (rt *Runtime) RecordUsage(r UsageRecord) {
 		status = 200
 	}
 	credits := r.CreditsMilli
-	if credits == 0 && !r.IsStub && status < 400 {
+	// A request that consumed tokens used a model whatever its status, as a
+	// stream that failed or lost its client midway did. One that consumed
+	// none and failed never reached a model, and costs nothing.
+	consumed := r.InputTokens > 0 || r.OutputTokens > 0
+	if credits == 0 && !r.IsStub && (status < 400 || consumed) {
 		credits = 1000 // one neutral model-credit; weighted policies can override later
 	}
 	if err := iam.RecordUsageEvent(iam.UsageEvent{

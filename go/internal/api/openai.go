@@ -425,49 +425,43 @@ func streamChatSSE(w http.ResponseWriter, ctx context.Context, targets []router.
 	w.Header().Set("X-LLMGW-Tool-Schema-Bytes", strconv.Itoa(payloadBytes(kw["tools"])))
 	w.WriteHeader(200)
 
-	usageAcc := map[string]int{"prompt_tokens": 0, "completion_tokens": 0}
+	meter := newStreamUsage(endpoint, requested, principal, served, started, payloadBytes(msgs))
 	toolState := chatToolStream{choices: map[int]*chatToolChoice{}}
 	for {
 		chunk, more := it.Next()
 		if !more {
 			break
 		}
-		accumulateStreamUsage(chunk, usageAcc)
+		meter.chatChunk(chunk)
 		if ctx.Err() != nil {
-			recordClientCancelled(endpoint, requested, principal, started)
+			meter.cancelled()
 			return
 		}
 		if err := writeChatSSE(w, toolState.normalize(chunk)); err != nil {
-			recordClientCancelled(endpoint, requested, principal, started)
+			meter.cancelled()
 			return
 		}
 	}
 	if ctx.Err() != nil {
-		recordClientCancelled(endpoint, requested, principal, started)
+		meter.cancelled()
 		return
 	}
-	status, errorCode := http.StatusOK, ""
 	if it.Err() != nil {
 		// The status line went out with the first byte, so the failure
 		// travels as one error event. [DONE] is what tells a client the
 		// answer is complete; a failed stream never sends it.
 		if err := writeSSE(w, jsonStr(providerErrorPayloadOpenAI())); err != nil {
-			recordClientCancelled(endpoint, requested, principal, started)
+			meter.cancelled()
 			return
 		}
-		status, errorCode = http.StatusBadGateway, "upstream_stream"
-	} else if err := writeSSE(w, "[DONE]"); err != nil {
-		recordClientCancelled(endpoint, requested, principal, started)
+		meter.failed()
 		return
 	}
-	router.RecordUsage(router.UsageRecord{
-		Endpoint: endpoint, RequestedModel: requested, RoutedModel: served.Model,
-		Provider: served.Provider, Project: principal.Project, Key: principal.Key,
-		ProjectID: principal.ProjectID, PrincipalID: principal.PrincipalID, KeyID: principal.KeyID,
-		InputTokens: usageAcc["prompt_tokens"], OutputTokens: usageAcc["completion_tokens"],
-		StatusCode: status, ErrorCode: errorCode,
-		LatencyMS: time.Since(started).Milliseconds(), IsStub: isStub(served.Provider),
-	})
+	if err := writeSSE(w, "[DONE]"); err != nil {
+		meter.cancelled()
+		return
+	}
+	meter.completed()
 }
 
 func writeAndFlush(w http.ResponseWriter, payload []byte) error {
@@ -661,23 +655,6 @@ func providerErrorPayloadOpenAI() map[string]any {
 func jsonStr(v any) string {
 	b, _ := json.Marshal(v)
 	return string(b)
-}
-
-func accumulateStreamUsage(chunk string, acc map[string]int) {
-	var obj map[string]any
-	if json.Unmarshal([]byte(chunk), &obj) != nil {
-		return
-	}
-	usage, ok := obj["usage"].(map[string]any)
-	if !ok {
-		return
-	}
-	if v := firstInt(usage, "prompt_tokens", "input_tokens"); v != 0 {
-		acc["prompt_tokens"] = v
-	}
-	if v := firstInt(usage, "completion_tokens", "output_tokens"); v != 0 {
-		acc["completion_tokens"] = v
-	}
 }
 
 func firstInt(m map[string]any, keys ...string) int {

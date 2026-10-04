@@ -5,6 +5,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"regexp"
 	"strings"
 	"testing"
 
@@ -43,10 +44,14 @@ var streamFixtures = map[string]streamFixture{
 	}},
 }
 
+// usageField is the usage an upstream reports in a record of the fixtures.
+var usageField = regexp.MustCompile(`,"usage":\{[^}]*\}`)
+
 // newStreamOutcomeUpstream streams each request as its model names: model
-// "complete" ends the stream as the upstream's wire ends one, "broken" drops
-// the connection after the first records, and "cut" closes the body cleanly
-// after them, as a proxy timing a connection out does.
+// "complete" ends the stream as the upstream's wire ends one, "unmetered"
+// does too without reporting usage, "broken" drops the connection after the
+// first records, and "cut" closes the body cleanly after them, as a proxy
+// timing a connection out does.
 func newStreamOutcomeUpstream(t *testing.T) *httptest.Server {
 	t.Helper()
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -63,11 +68,14 @@ func newStreamOutcomeUpstream(t *testing.T) *httptest.Server {
 			return
 		}
 		records := fixture.records
-		if body.Model != "complete" {
+		if body.Model != "complete" && body.Model != "unmetered" {
 			records = records[:fixture.cut]
 		}
 		w.Header().Set("Content-Type", "text/event-stream")
 		for _, record := range records {
+			if body.Model == "unmetered" {
+				record = usageField.ReplaceAllString(record, "")
+			}
 			_, _ = io.WriteString(w, record)
 		}
 		w.(http.Flusher).Flush()
@@ -226,6 +234,11 @@ func TestStreamOutcomesFollowTheUpstreamsEnd(t *testing.T) {
 					t.Fatalf("the streamed text was lost: %q", body)
 				}
 				row := readStreamUsageRow(t)
+				// Whatever the end, the stream consumed a model: its row
+				// names what served it and charges the tokens consumed.
+				if row.provider != tc.provider || row.model != outcome || row.input <= 0 || row.output <= 0 || row.credits != 1000 {
+					t.Fatalf("usage=%+v", row)
+				}
 				if outcome == "complete" {
 					if !strings.Contains(body, tc.surface.success) || strings.Contains(body, tc.surface.failure) ||
 						row.status != http.StatusOK || row.code != "" {

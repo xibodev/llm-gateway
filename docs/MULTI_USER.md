@@ -162,6 +162,12 @@ before provider dispatch. Token, estimated-cost, and credit counters reconcile
 after response completion, so those limits may exceed by one in-flight request;
 request-count limits are strict.
 
+A stream that ends early, because its client left (`499`) or its upstream failed
+(`502`), still counts the tokens it consumed against the model that served it.
+When the upstream reported no usage, they are estimated at about one token per
+four bytes of the prompt sent and of the text streamed. A failed request is
+charged a credit only when it consumed tokens.
+
 These are downstream gateway limits, not provider subscription quotas. The
 gateway does not currently perform quota-aware account scheduling. Unknown
 upstream quota remains unknown.

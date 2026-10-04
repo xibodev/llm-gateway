@@ -300,15 +300,22 @@ func streamResponsesSSE(
 	w.Header().Set("Connection", "keep-alive")
 	w.WriteHeader(http.StatusOK)
 	defer execution.Iter.Close()
+	meter := newStreamUsage("openai.responses", requested, principal, served, started, responsesPromptBytes(payload))
 	if execution.Native {
-		if err := streamNativeResponseEventsContext(w, ctx, execution.Iter, publicPayload, requested, served, principal, started); err != nil {
-			recordClientCancelled("openai.responses", requested, principal, started)
+		if err := streamNativeResponseEventsContext(w, ctx, execution.Iter, publicPayload, meter); err != nil {
+			meter.cancelled()
 		}
 		return
 	}
-	if err := streamChatAsResponseEventsContext(w, ctx, execution.Iter, publicPayload, requested, served, principal, started); err != nil {
-		recordClientCancelled("openai.responses", requested, principal, started)
+	if err := streamChatAsResponseEventsContext(w, ctx, execution.Iter, publicPayload, meter); err != nil {
+		meter.cancelled()
 	}
+}
+
+// responsesPromptBytes is the size of what a Responses request sends as its
+// prompt: its instructions and its input.
+func responsesPromptBytes(payload map[string]any) int {
+	return payloadBytes(payload["instructions"]) + payloadBytes(payload["input"])
 }
 
 func writeResponseEvent(
@@ -322,20 +329,20 @@ func writeResponseEvent(
 }
 
 func streamNativeResponseEvents(w http.ResponseWriter, _ http.Flusher, iterator providers.StreamIter, request map[string]any, requested string, served *router.Target, principal *config.Principal, started time.Time) {
-	_ = streamNativeResponseEventsContext(w, context.Background(), iterator, request, requested, served, principal, started)
+	meter := newStreamUsage("openai.responses", requested, principal, served, started, responsesPromptBytes(request))
+	_ = streamNativeResponseEventsContext(w, context.Background(), iterator, request, meter)
 }
 
+// streamNativeResponseEventsContext relays a native Responses stream and
+// records how it ended in meter, unless its client went away: that it
+// returns as an error, for the caller to record.
 func streamNativeResponseEventsContext(
 	w http.ResponseWriter,
 	ctx context.Context,
 	iterator providers.StreamIter,
 	request map[string]any,
-	requested string,
-	served *router.Target,
-	principal *config.Principal,
-	started time.Time,
+	meter *streamUsage,
 ) error {
-	var finalResponse map[string]any
 	responseID := ""
 	sequence := 0
 	for {
@@ -351,6 +358,7 @@ func streamNativeResponseEventsContext(
 		if eventType == "" {
 			continue
 		}
+		meter.responsesEvent(event)
 		if response, _ := event["response"].(map[string]any); response != nil {
 			sanitizeResponsesForCaller(response, request)
 		}
@@ -360,24 +368,20 @@ func streamNativeResponseEventsContext(
 			}
 		}
 		if eventType == "response.completed" || eventType == "response.incomplete" {
-			finalResponse, _ = event["response"].(map[string]any)
 			if err := ctx.Err(); err != nil {
 				return err
 			}
 			if err := writeResponseEvent(ctx, w, eventType, event); err != nil {
 				return err
 			}
-			recordFromResponses(
-				requested, served, principal, finalResponse,
-				time.Since(started).Milliseconds(),
-			)
+			meter.completed()
 			return nil
 		}
 		if eventType == "response.failed" {
 			if err := writeResponseEvent(ctx, w, eventType, event); err != nil {
 				return err
 			}
-			recordFailureUsage("openai.responses", requested, principal, 502, "upstream_stream", started)
+			meter.failed()
 			return nil
 		}
 		if value := firstInt(event, "sequence_number"); value >= sequence {
@@ -395,29 +399,31 @@ func streamNativeResponseEventsContext(
 	if err := writeResponseEvent(ctx, w, "response.failed", map[string]any{
 		"type": "response.failed", "sequence_number": sequence,
 		"response": translate.FailedResponseEnvelope(
-			served.Model, responseID, "server_error", message, request,
+			meter.served.Model, responseID, "server_error", message, request,
 		),
 	}); err != nil {
 		return err
 	}
-	recordFailureUsage("openai.responses", requested, principal, 502, "upstream_stream", started)
+	meter.failed()
 	return nil
 }
 
 func streamChatAsResponseEvents(w http.ResponseWriter, _ http.Flusher, iterator providers.StreamIter, request map[string]any, requested string, served *router.Target, principal *config.Principal, started time.Time) {
-	_ = streamChatAsResponseEventsContext(w, context.Background(), iterator, request, requested, served, principal, started)
+	meter := newStreamUsage("openai.responses", requested, principal, served, started, responsesPromptBytes(request))
+	_ = streamChatAsResponseEventsContext(w, context.Background(), iterator, request, meter)
 }
 
+// streamChatAsResponseEventsContext renders a Chat stream as Responses
+// events and records how it ended in meter, unless its client went away:
+// that it returns as an error, for the caller to record.
 func streamChatAsResponseEventsContext(
 	w http.ResponseWriter,
 	ctx context.Context,
 	iterator providers.StreamIter,
 	request map[string]any,
-	requested string,
-	served *router.Target,
-	principal *config.Principal,
-	started time.Time,
+	meter *streamUsage,
 ) error {
+	served := meter.served
 	responseID := fmt.Sprintf("resp_%d", time.Now().UnixNano())
 	messageID := "msg_" + strings.TrimPrefix(responseID, "resp_")
 	sequence := 0
@@ -468,6 +474,7 @@ func streamChatAsResponseEventsContext(
 		if json.Unmarshal([]byte(chunk), &parsed) != nil {
 			continue
 		}
+		meter.chat(parsed)
 		if chunkUsage, ok := parsed["usage"].(map[string]any); ok {
 			usage = chunkUsage
 		}
@@ -606,7 +613,7 @@ func streamChatAsResponseEventsContext(
 		}); err != nil {
 			return err
 		}
-		recordFailureUsage("openai.responses", requested, principal, 502, "upstream_stream", started)
+		meter.failed()
 		return nil
 	}
 	incomplete := finishReason == "length" || finishReason == "content_filter"
@@ -732,10 +739,7 @@ func streamChatAsResponseEventsContext(
 	}); err != nil {
 		return err
 	}
-	recordFromResponses(
-		requested, served, principal, converted,
-		time.Since(started).Milliseconds(),
-	)
+	meter.completed()
 	return nil
 }
 

@@ -200,7 +200,7 @@ func streamMessagesSSE(w http.ResponseWriter, ctx context.Context, targets []rou
 	w.Header().Set("Connection", "keep-alive")
 	w.WriteHeader(http.StatusOK)
 
-	usageAcc := map[string]int{"prompt_tokens": 0, "completion_tokens": 0}
+	meter := newStreamUsage("anthropic.messages", requested, principal, served, started, payloadBytes(msgs))
 	var writeErr error
 	write := func(event string) error {
 		if err := ctx.Err(); err != nil {
@@ -219,14 +219,14 @@ func streamMessagesSSE(w http.ResponseWriter, ctx context.Context, targets []rou
 			return "", false
 		}
 		chunk, more := it.Next()
+		if !more {
+			ended = ctx.Err() == nil
+			return "", false
+		}
+		meter.chatChunk(chunk)
 		if ctx.Err() != nil {
 			return "", false
 		}
-		if !more {
-			ended = true
-			return "", false
-		}
-		accumulateStreamUsage(chunk, usageAcc)
 		return chunk, true
 	}
 	translate.OpenAIStreamToAnthropicSSE(pull, served.Model, func(event string) {
@@ -238,34 +238,26 @@ func streamMessagesSSE(w http.ResponseWriter, ctx context.Context, targets []rou
 		}
 	})
 	if writeErr != nil || !ended || ctx.Err() != nil {
-		recordClientCancelled("anthropic.messages", requested, principal, started)
+		meter.cancelled()
 		return
 	}
-	status, errorCode := http.StatusOK, ""
 	if err := it.Err(); err != nil {
 		// Anthropic ends a stream it cannot finish with an error event and
 		// no message_stop, so a client never reads it as complete.
 		if write(anthropicStreamErrorEvent(err)) != nil {
-			recordClientCancelled("anthropic.messages", requested, principal, started)
+			meter.cancelled()
 			return
 		}
-		status, errorCode = http.StatusBadGateway, "upstream_stream"
-	} else {
-		for _, event := range closing {
-			if write(event) != nil {
-				recordClientCancelled("anthropic.messages", requested, principal, started)
-				return
-			}
+		meter.failed()
+		return
+	}
+	for _, event := range closing {
+		if write(event) != nil {
+			meter.cancelled()
+			return
 		}
 	}
-	router.RecordUsage(router.UsageRecord{
-		Endpoint: "anthropic.messages", RequestedModel: requested, RoutedModel: served.Model,
-		Provider: served.Provider, Project: principal.Project, Key: principal.Key,
-		ProjectID: principal.ProjectID, PrincipalID: principal.PrincipalID, KeyID: principal.KeyID,
-		InputTokens: usageAcc["prompt_tokens"], OutputTokens: usageAcc["completion_tokens"],
-		StatusCode: status, ErrorCode: errorCode,
-		LatencyMS: time.Since(started).Milliseconds(), IsStub: isStub(served.Provider),
-	})
+	meter.completed()
 }
 
 // anthropicStreamErrorEvent is the Messages error event for a stream its
@@ -351,13 +343,7 @@ func handleCountTokens(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	compact, _ := json.Marshal(countPayload)
-	tokens := len(compact) / 4
-	if len(compact)%4 != 0 {
-		tokens++
-	}
-	if tokens < 1 {
-		tokens = 1
-	}
+	tokens := max(1, estimatedTokens(len(compact)))
 	w.Header().Set("X-LLMGW-Token-Count", "estimate")
 	writeJSON(w, 200, map[string]any{"input_tokens": tokens})
 }

@@ -137,11 +137,21 @@ func usageOutcome(t *testing.T) (count, status, credits int, code string) {
 	return count, int(statusValue.Int64), int(creditsValue.Int64), codeValue.String
 }
 
-func assertCancelledUsage(t *testing.T) {
+// assertCancelledUsage checks the one usage event of a request its client
+// left. Once the stream's first byte went out, it carries what the stream
+// consumed so far, charged against the provider and model that served it;
+// a request that left before its stream opened consumed nothing.
+func assertCancelledUsage(t *testing.T, served bool) {
 	t.Helper()
-	count, status, credits, code := usageOutcome(t)
-	if count != 1 || status != 499 || code != "client_cancelled" || credits != 0 {
-		t.Fatalf("usage count=%d status=%d code=%q credits=%d", count, status, code, credits)
+	row := readStreamUsageRow(t)
+	if row.status != 499 || row.code != "client_cancelled" {
+		t.Fatalf("usage=%+v", row)
+	}
+	if served && (row.input == 0 || row.credits != 1000 || row.provider != "first" || row.model != "model") {
+		t.Fatalf("a served stream its client left recorded %+v", row)
+	}
+	if !served && (row.input != 0 || row.output != 0 || row.credits != 0 || row.provider != "") {
+		t.Fatalf("a request that left before its stream opened recorded %+v", row)
 	}
 }
 
@@ -199,7 +209,7 @@ func TestCodingStreamsCancelAfterFirstEvent(t *testing.T) {
 			if firstCalls.Load() != 1 || secondCalls.Load() != 0 || strings.Contains(writer.body.String(), testCase.terminal) {
 				t.Fatalf("calls=%d/%d body=%q", firstCalls.Load(), secondCalls.Load(), writer.body.String())
 			}
-			assertCancelledUsage(t)
+			assertCancelledUsage(t, true)
 		})
 	}
 }
@@ -208,6 +218,9 @@ func TestAdaptedCodingStreamsCancelWithoutFailover(t *testing.T) {
 	tests := []struct {
 		name, path, body, upstreamPath, surface, partial string
 		terminals                                        []string
+		// served is a stream that opened before the client left: Chat over
+		// Responses opens only once the whole Responses answer arrived.
+		served bool
 	}{
 		{
 			name: "Chat to Responses", path: "/v1/chat/completions",
@@ -222,6 +235,7 @@ func TestAdaptedCodingStreamsCancelWithoutFailover(t *testing.T) {
 			upstreamPath: "/chat/completions", surface: "/chat/completions",
 			partial:   `data: {"id":"chat_1","object":"chat.completion.chunk","model":"model","choices":[{"index":0,"delta":{"content":"partial"},"finish_reason":null}]}` + "\n\n",
 			terminals: []string{"response.completed", "response.incomplete"},
+			served:    true,
 		},
 	}
 	for _, testCase := range tests {
@@ -266,7 +280,13 @@ func TestAdaptedCodingStreamsCancelWithoutFailover(t *testing.T) {
 				t.Fatalf("catalog=%+v", models)
 			}
 			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
 			writer := &streamTestWriter{}
+			if testCase.served {
+				// The client leaves once the stream's first event reached it,
+				// so the stream has opened however fast the upstream answers.
+				writer.cancel, writer.cancelAfter = cancel, 1
+			}
 			request := httptest.NewRequest(http.MethodPost, testCase.path, strings.NewReader(testCase.body)).WithContext(ctx)
 			request.Header.Set("Content-Type", "application/json")
 			done := make(chan struct{})
@@ -282,7 +302,9 @@ func TestAdaptedCodingStreamsCancelWithoutFailover(t *testing.T) {
 			case <-time.After(5 * time.Second):
 				t.Fatal("upstream request did not start")
 			}
-			cancel()
+			if !testCase.served {
+				cancel()
+			}
 			select {
 			case <-upstreamDone:
 			case <-time.After(5 * time.Second):
@@ -301,7 +323,7 @@ func TestAdaptedCodingStreamsCancelWithoutFailover(t *testing.T) {
 					t.Fatalf("terminal %q written in %q", terminal, writer.body.String())
 				}
 			}
-			assertCancelledUsage(t)
+			assertCancelledUsage(t, testCase.served)
 		})
 	}
 }
@@ -362,7 +384,7 @@ func TestCodingStreamWriteAndFlushFailuresCloseUpstream(t *testing.T) {
 			if strings.Contains(writer.body.String(), testCase.terminal) {
 				t.Fatalf("terminal written: %q", writer.body.String())
 			}
-			assertCancelledUsage(t)
+			assertCancelledUsage(t, true)
 		})
 	}
 }
@@ -372,7 +394,8 @@ func TestTerminalWriteWinsOverLaterContextClose(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	writer := &streamTestWriter{cancel: cancel, cancelAfter: 1}
 	iterator := &blockingStreamIter{chunks: []string{`{"type":"response.completed","response":{"id":"resp_1","status":"completed","model":"model","output":[],"usage":{"input_tokens":1,"output_tokens":1}}}`}, closed: make(chan struct{})}
-	if err := streamNativeResponseEventsContext(writer, ctx, iterator, map[string]any{"input": "hi"}, "cancel-route", &router.Target{Provider: "first", Model: "model"}, principal, time.Now()); err != nil {
+	meter := newStreamUsage("openai.responses", "cancel-route", principal, &router.Target{Provider: "first", Model: "model"}, time.Now(), len(`"hi"`))
+	if err := streamNativeResponseEventsContext(writer, ctx, iterator, map[string]any{"input": "hi"}, meter); err != nil {
 		t.Fatal(err)
 	}
 	_ = iterator.Close()
