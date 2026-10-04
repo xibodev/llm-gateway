@@ -1,0 +1,67 @@
+# Weekly version updates. Minor and patch bumps are grouped into one pull
+# request per directory; major bumps stay separate so each gets a review.
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 3
+    groups:
+      minor-and-patch:
+        patterns: ["*"]
+        update-types: [minor, patch]
+
+  - package-ecosystem: gomod
+    directory: /go
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 3
+    groups:
+      minor-and-patch:
+        patterns: ["*"]
+        update-types: [minor, patch]
+
+  # dist/ is committed and embedded; CI's check:dist fails until an update
+  # that changes the bundle is rebuilt and committed with it.
+  - package-ecosystem: npm
+    directory: /go/internal/web/console
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 3
+    groups:
+      minor-and-patch:
+        patterns: ["*"]
+        update-types: [minor, patch]
+
+  - package-ecosystem: npm
+    directory: /test/live-acceptance
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 2
+    groups:
+      minor-and-patch:
+        patterns: ["*"]
+        update-types: [minor, patch]
+
+  - package-ecosystem: npm
+    directory: /.github/release-harness
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 2
+    groups:
+      minor-and-patch:
+        patterns: ["*"]
+        update-types: [minor, patch]
+
+  # The Node and Go base images match the versions the workflows set up;
+  # move them together.
+  - package-ecosystem: docker
+    directory: /go
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 2
+    groups:
+      minor-and-patch:
+        patterns: ["*"]
+        update-types: [minor, patch]
