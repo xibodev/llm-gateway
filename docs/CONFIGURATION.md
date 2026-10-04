@@ -314,7 +314,8 @@ fall back to it. Protect the state directory and its backups accordingly.
 | --- | --- |
 | `config.yaml` | Provider instances, endpoints, resilience policies, and operational configuration. Real runtime config is private and must not be committed. |
 | `gateway.db` | IAM, hashed/recoverable keys, encrypted connections, usage, quotas, audit, alerts, and outbox. |
-| `catalog.json` | Regenerable provider/model catalog with schema versioning. |
+| `catalog.json` | Regenerable provider/model catalog with schema versioning. Each change replaces the file whole through a temporary file in the same directory. |
+| `catalog.json.corrupt-<timestamp>` | A `catalog.json` that could not be read or parsed when the gateway loaded it, moved aside with a logged warning instead of being overwritten. The gateway discovers its catalogs again; remove the copy once inspected. |
 | `telemetry.db` | Interesting failover-chain events. |
 | `usage.db` | Optional legacy savings ledger. |
 | `secrets.json` | Plaintext provider keys saved without credential encryption; owner-only permissions. See [persistence](#persistence-and-console-saves) for how entries move into `gateway.db`. |
