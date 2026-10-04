@@ -3,7 +3,6 @@ package providers
 import (
 	"context"
 	"fmt"
-	"net/http"
 	"strings"
 
 	"llmgw/internal/config"
@@ -63,7 +62,7 @@ func newCoreGoogle(instance string, cfg *config.ProviderConfig) (*coreproviders.
 	deployment, _ := googleDeployment(cfg)
 	options := coreproviders.GoogleConfig{
 		Deployment: deployment, BaseURL: cfg.BaseURL,
-		Client: &http.Client{Timeout: googleTimeout(cfg.TimeoutOr(120))},
+		Client: providerClient(googleTimeout(cfg.TimeoutOr(120)).Seconds()),
 	}
 	if deployment == coreproviders.GoogleVertexAI {
 		options.Project, options.Location, options.RequestType = cfg.Project, cfg.Location, cfg.VertexRequestType

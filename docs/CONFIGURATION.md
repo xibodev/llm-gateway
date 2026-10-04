@@ -54,7 +54,7 @@ Supported fields depend on the runtime type:
 | `registry_id` | Optional curated integration whose defaults and onboarding metadata describe this instance. |
 | `base_url` | Provider API base URL. Private/LAN addresses are allowed by design. |
 | `api_key` | Literal or `${ENV:NAME}` reference. Environment references are recommended; never commit literal secrets. |
-| `timeout` | Provider request timeout in seconds. |
+| `timeout` | Seconds a provider request waits for its response to begin, and then between two reads of the response. An answer that keeps arriving is never cut, however long it runs; one that sends nothing for this long fails. |
 | `region` | Provider region, used by Bedrock. |
 | `project` | Cloud project, used by Vertex AI. |
 | `location` | Cloud location, used by Vertex AI. |
@@ -222,9 +222,9 @@ on loopback only.
 | Variable | Default | Purpose |
 | --- | --- | --- |
 | `LLMGW_OPENAI_COMPATIBLE_BASE_URL` | `https://api.openai.com/v1` | Base URL for `openai_compatible`, `openai`, and `litellm` providers that set no `base_url`. |
-| `LLMGW_OPENAI_COMPATIBLE_TIMEOUT_SECONDS` | `300` | Request timeout for `openai_compatible`, `openai`, `litellm`, `azure_openai`, `elevenlabs`, and `mimo` providers that set no `timeout`. |
+| `LLMGW_OPENAI_COMPATIBLE_TIMEOUT_SECONDS` | `300` | Default `timeout` for `openai_compatible`, `openai`, `litellm`, `azure_openai`, `elevenlabs`, and `mimo` providers that set none. |
 | `LLMGW_OLLAMA_BASE_URL` | `http://127.0.0.1:11434` | Base URL for `ollama` providers that set no `base_url`. |
-| `LLMGW_OLLAMA_TIMEOUT_SECONDS` | `30` | Request timeout for `ollama` providers that set no `timeout`. |
+| `LLMGW_OLLAMA_TIMEOUT_SECONDS` | `30` | Default `timeout` for `ollama` providers that set none. |
 | `LLMGW_EXTENSION_URL` | `http://127.0.0.1:18888` | Address of the optional companion daemon, distributed separately, that serves the GitHub Copilot, OpenAI Codex, Google Antigravity, Edge TTS, anonymous OpenCode Zen, and Anthropic setup-token provider types. Must be an absolute `http` or `https` URL without credentials, query, or fragment. |
 | `LLMGW_EXTENSION_SECRET` | unset | Shared secret sent to that daemon as a bearer token. Set it, and start the daemon with the same value: a daemon started without a secret accepts any caller. |
 | `LLMGW_ANTHROPIC_DISCOVERY_ALIASES` | `true` | `GET /v1/models` also lists chat models whose IDs start with `claude` or `anthropic` under their bare ID, so Claude Code's gateway model discovery shows them. Affects listing only, not routing. |

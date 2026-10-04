@@ -50,13 +50,14 @@ func ollamaBase(settings *config.Settings, cfg *config.ProviderConfig) string {
 	return cfg.BaseURL
 }
 
-// newCoreOllama builds core's Ollama at base. Its requests time out after
-// timeout seconds and its catalog after at most ten, as the gateway's
+// newCoreOllama builds core's Ollama at base. Its requests wait at most
+// timeout seconds for each part of an answer (see providerClient), and its
+// catalog requests take at most ten seconds in all, as the gateway's
 // transport timed them. A base that is not a daemon root is a configuration
 // error, whose message is the issue core found and never the base.
 func newCoreOllama(instance, base string, timeout float64) (*coreproviders.Ollama, error) {
 	ollama, err := coreproviders.NewOllama(coreproviders.OllamaConfig{
-		BaseURL: base, Client: httpClient(timeout), CatalogClient: httpClient(min(timeout, 10)),
+		BaseURL: base, Client: providerClient(timeout), CatalogClient: httpClient(min(timeout, 10)),
 	})
 	if err != nil {
 		return nil, &ConfigError{Msg: fmt.Sprintf("provider '%s': %v", instance, err)}

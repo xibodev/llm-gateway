@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/http"
 	"strings"
 
 	"llmgw/internal/config"
@@ -37,7 +38,7 @@ func (rt *Runtime) anthropicCoreVertical() coreVertical {
 		},
 		provider: func(settings *config.Settings, instance string) (core.Provider, error) {
 			cfg := settings.Providers[instance]
-			return newCoreAnthropic(instance, cfg.BaseURL, cfg.TimeoutOr(0))
+			return newCoreAnthropic(instance, cfg.BaseURL, providerClient(anthropicTimeout(cfg.TimeoutOr(0))))
 		},
 		credentials: connectionStore{
 			open:       func() (core.CredentialStore, error) { return rt.openCredentials(false) },
@@ -47,13 +48,12 @@ func (rt *Runtime) anthropicCoreVertical() coreVertical {
 	}
 }
 
-// newCoreAnthropic builds core's Anthropic at baseURL, whose requests time
-// out as the transport's did: after timeout, or a minute when it is not
-// positive. Core's catalog client is never used, since the catalog stays on
-// the gateway's path.
-func newCoreAnthropic(instance, baseURL string, timeout float64) (*coreproviders.Anthropic, error) {
+// newCoreAnthropic builds core's Anthropic at baseURL, sending its requests
+// with client. Core's catalog client is never used, since the catalog stays
+// on the gateway's path.
+func newCoreAnthropic(instance, baseURL string, client *http.Client) (*coreproviders.Anthropic, error) {
 	anthropic, err := coreproviders.NewAnthropic(coreproviders.AnthropicConfig{
-		BaseURL: baseURL, Client: httpClient(anthropicTimeout(timeout)),
+		BaseURL: baseURL, Client: client,
 	})
 	if err != nil {
 		return nil, &ConfigError{Msg: fmt.Sprintf("provider '%s': initialize Anthropic: %v", instance, err)}
@@ -61,6 +61,8 @@ func newCoreAnthropic(instance, baseURL string, timeout float64) (*coreproviders
 	return anthropic, nil
 }
 
+// anthropicTimeout is an instance's timeout, or a minute when it is not
+// positive.
 func anthropicTimeout(timeout float64) float64 {
 	if timeout > 0 {
 		return timeout

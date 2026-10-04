@@ -46,12 +46,13 @@ func (rt *Runtime) azureCoreVertical() coreVertical {
 }
 
 // newCoreAzure builds core's AzureOpenAI for the resource at baseURL, which
-// core normalizes as azureInferenceBaseURL does. Its requests time out as the
-// transport's did, after timeout, and never when it is zero. Core's catalog
-// client is never used, since the catalog stays on the gateway's path.
+// core normalizes as azureInferenceBaseURL does. Its requests wait at most
+// timeout for each part of an answer (see providerClient), and indefinitely
+// when it is zero. Core's catalog client is never used, since the catalog
+// stays on the gateway's path.
 func newCoreAzure(instance, baseURL string, timeout float64) (*coreproviders.AzureOpenAI, error) {
 	azure, err := coreproviders.NewAzureOpenAI(coreproviders.AzureOpenAIConfig{
-		BaseURL: baseURL, Client: httpClient(timeout),
+		BaseURL: baseURL, Client: providerClient(timeout),
 	})
 	if err != nil {
 		return nil, &ConfigError{Msg: fmt.Sprintf("provider '%s': initialize Azure OpenAI: %v", instance, err)}

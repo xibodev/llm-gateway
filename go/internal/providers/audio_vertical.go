@@ -27,7 +27,7 @@ func (rt *Runtime) audioCoreVertical(providerType string) coreVertical {
 		},
 		provider: func(settings *config.Settings, instance string) (core.Provider, error) {
 			cfg := settings.Providers[instance]
-			client := httpClient(cfg.TimeoutOr(settings.OpenAICompatibleTimeoutSeconds))
+			client := providerClient(cfg.TimeoutOr(settings.OpenAICompatibleTimeoutSeconds))
 			var provider core.Provider
 			var err error
 			switch providerType {

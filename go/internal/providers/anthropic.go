@@ -200,7 +200,9 @@ func (p AnthropicNativeProvider) CountAnthropicTokens(model string, payload map[
 	if err != nil {
 		return "", err
 	}
-	counter, err := newCoreAnthropic(p.instance, p.BaseURL, p.Timeout)
+	// A count is a short answer, so the whole request stays bounded, and it
+	// goes out on the shared transport rather than a new one per count.
+	counter, err := newCoreAnthropic(p.instance, p.BaseURL, httpClient(p.timeout()))
 	if err != nil {
 		return "", err
 	}

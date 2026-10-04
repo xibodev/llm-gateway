@@ -61,15 +61,15 @@ func openAICompatibleInstance(settings *config.Settings, instance string, cfg *c
 
 // openAICompatibleCore is how an OpenAI-compatible instance's core provider
 // is built: at the instance's base URL, for its registry entry, with its
-// configured adaptation, and with requests that time out as the transport's
-// did. Core's catalog client is never used, since the catalog stays on the
-// gateway's path.
+// configured adaptation, and with requests that wait at most the instance's
+// timeout for each part of an answer (see providerClient). Core's catalog
+// client is never used, since the catalog stays on the gateway's path.
 func openAICompatibleCore(settings *config.Settings, instance string, cfg *config.ProviderConfig) openAICoreSpec {
 	return openAICoreSpec{
 		instance: instance,
 		config: coreproviders.OpenAICompatibleConfig{
 			BaseURL: openAICompatibleBase(settings, cfg), RegistryID: EffectiveRegistryID(instance, cfg.RegistryID, cfg.Type),
-			ForceAPISupport: cfg.ForceApiSupport, Client: httpClient(cfg.TimeoutOr(settings.OpenAICompatibleTimeoutSeconds)),
+			ForceAPISupport: cfg.ForceApiSupport, Client: providerClient(cfg.TimeoutOr(settings.OpenAICompatibleTimeoutSeconds)),
 		},
 		build: func(config coreproviders.OpenAICompatibleConfig) (*coreproviders.OpenAICompatible, error) {
 			provider, err := coreproviders.NewOpenAICompatible(config)

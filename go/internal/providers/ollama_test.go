@@ -28,8 +28,14 @@ func ollamaDaemon(t *testing.T, handler http.HandlerFunc) *httptest.Server {
 // core Runtime of a Runtime installed for the test serves.
 func ollamaFixture(t *testing.T, base string) *ollamaProvider {
 	t.Helper()
+	return ollamaFixtureTimeout(t, base, 2)
+}
+
+// ollamaFixtureTimeout is ollamaFixture for an instance whose timeout is
+// timeout seconds.
+func ollamaFixtureTimeout(t *testing.T, base string, timeout float64) *ollamaProvider {
+	t.Helper()
 	runtime := InstallForTests(t)
-	timeout := 2.0
 	cfg := &config.ProviderConfig{Type: "ollama", BaseURL: base, Timeout: &timeout}
 	// Add the instance rather than replace the providers, so a test that also
 	// builds another fixture keeps that one's settings.

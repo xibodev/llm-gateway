@@ -2,7 +2,6 @@ package providers
 
 import (
 	"fmt"
-	"net/http"
 	"strings"
 
 	"llmgw/internal/config"
@@ -50,9 +49,9 @@ func bedrockInstance(cfg *config.ProviderConfig) bool {
 // bedrockCore is how a Bedrock instance's core provider is built: at its
 // base URL, such as a bedrock-mantle or VPC endpoint, or else at its
 // region's endpoint, which core refuses to build unless the region is a
-// region name; with its configured adaptation; and with requests that time
-// out after the instance's timeout, or core's default of five minutes when
-// it configures none, where the transport's never timed out.
+// region name; with its configured adaptation; and with requests that wait
+// at most the instance's timeout for each part of an answer (see
+// providerClient), or five minutes, core's default, when it configures none.
 //
 // The transport read the registry entry of a Bedrock instance only to serve
 // Responses for every model of the openai entry, so only that entry reaches
@@ -62,10 +61,7 @@ func bedrockCore(instance string, cfg *config.ProviderConfig) openAICoreSpec {
 	if EffectiveRegistryID(instance, cfg.RegistryID, cfg.Type) == "openai" {
 		registryID = "openai"
 	}
-	var client *http.Client
-	if cfg.Timeout != nil {
-		client = httpClient(*cfg.Timeout)
-	}
+	client := providerClient(cfg.TimeoutOr(300))
 	region, baseURL := cfg.Region, cfg.BaseURL
 	return openAICoreSpec{
 		instance: instance,
