@@ -109,10 +109,20 @@ jobs:
             echo "release_exists=$release_exists"
           } >> "$GITHUB_OUTPUT"
 
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: "22.23.2"
+
+      - name: Install pinned release tooling
+        working-directory: .github/release-harness
+        run: npm ci --ignore-scripts --no-audit --no-fund
+
       - name: Validate release-harness contracts and lifecycle
+        env:
+          RELEASE_HARNESS: ${{ github.workspace }}/.github/release-harness/node_modules/.bin/release-harness
         run: |
-          npx --yes @xibodev/release-harness@3.0.0-beta.1 validate --all
-          npx --yes @xibodev/release-harness@3.0.0-beta.1 lifecycle check
+          "$RELEASE_HARNESS" validate --all
+          "$RELEASE_HARNESS" lifecycle check
 
   ci:
     needs: validate
@@ -134,6 +144,14 @@ jobs:
           go-version: 1.26.6
           cache-dependency-path: go/go.sum
 
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: "22.23.2"
+
+      - name: Install pinned release tooling
+        working-directory: .github/release-harness
+        run: npm ci --ignore-scripts --no-audit --no-fund
+
       - name: Install Syft
         uses: anchore/sbom-action/download-syft@e22c389904149dbc22b58101806040fa8d37a610 # v0
         with:
@@ -147,6 +165,7 @@ jobs:
           BUILD_TIME: ${{ needs.validate.outputs.build_time }}
           TAG: ${{ needs.validate.outputs.tag }}
           CGO_ENABLED: "0"
+          RELEASE_HARNESS: ${{ github.workspace }}/.github/release-harness/node_modules/.bin/release-harness
         run: |
           set -euo pipefail
           mkdir -p ../dist
@@ -175,9 +194,9 @@ jobs:
               SERVER_PID=$!
               sleep 2
               cd ..
-              npx --yes @xibodev/release-harness@3.0.0-beta.1 bind ci --target "cli=$(pwd)/go/llmgw" --target "gateway=http://127.0.0.1:8787"
-              npx --yes @xibodev/release-harness@3.0.0-beta.1 run --binding ci
-              npx --yes @xibodev/release-harness@3.0.0-beta.1 verify
+              "$RELEASE_HARNESS" bind ci --target "cli=$(pwd)/go/llmgw" --target "gateway=http://127.0.0.1:8787"
+              "$RELEASE_HARNESS" run --binding ci
+              "$RELEASE_HARNESS" verify
               kill $SERVER_PID
               rm -rf .release-harness/bindings .release-harness/runs
               cd go

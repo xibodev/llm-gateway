@@ -33,6 +33,7 @@ dist/
 test/uat-output/
 test/live-acceptance/node_modules/
 test/live-acceptance/report*.json
+.github/release-harness/node_modules/
 .acceptance-claude/
 test/upgrade-drill/
 test/docker-roster/build-context/

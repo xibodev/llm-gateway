@@ -1,0 +1,8 @@
+{
+  "name": "llmgw-release-tooling",
+  "private": true,
+  "description": "Pins the release-harness CLI and its dependency tree for the CI and release workflows.",
+  "dependencies": {
+    "@xibodev/release-harness": "3.0.0-beta.1"
+  }
+}
