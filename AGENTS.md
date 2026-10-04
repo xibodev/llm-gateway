@@ -66,17 +66,19 @@ When a task needs a real credential, **reference it by path** and let the progra
 read it at runtime:
 
 ```bash
-LLMGW_LIVE_GCP_KEY=/path/to/key.json go test ./internal/gcpauth -run Live -v
+LLMGW_LIVE_GCP_KEY=/path/to/key.json go test ./internal/providers -run LiveVertex -v
 ```
 
 Do not open the file, paste its contents into a conversation, or copy it into a
 test fixture. Tests must synthesise their own key material — see
-`internal/gcpauth/gcpauth_test.go`, which generates a throwaway RSA key so the
-suite needs no credential and can run in CI.
+`internal/api/credential_upload_test.go`, which generates a throwaway RSA key so
+the suite needs no credential and can run in CI. The GCP key parsing and token
+code itself lives in `github.com/xibodev/llm-provider-auth/gcp`.
 
 Never log a secret, and never include one in an error message. Errors are
-frequently pasted into issues. `internal/gcpauth` has a test that pins this
-invariant; keep that pattern when adding a credential type.
+frequently pasted into issues. `TestUploadErrorsNeverEchoTheSecret` in
+`internal/api/credential_upload_test.go` pins this invariant; keep that pattern
+when adding a credential type.
 
 ## If a secret is committed
 
@@ -104,15 +106,16 @@ console source change **must** be rebuilt and committed with it or CI fails.
 - Comments explain **why**, not what. Prefer a comment that records a decision or
   a trap over one that restates the code.
 - Keep the dependency tree small. The direct Go dependency set is deliberately
-  small, and releases cross-compile five OS/architecture artifacts with
+  small, and releases cross-compile eight OS/architecture artifacts with
   `CGO_ENABLED=0`. Prefer
   the standard library; a new dependency needs a reason that survives review.
 - No AI attribution trailers in commit messages.
 - Do not commit dates or version stamps into documentation — git records history.
-\n\n<!-- release-harness:managed:start -->
+
+<!-- release-harness:managed:start -->
 When work affects tests, public behavior, packaging, build/release configuration,
 deployment inputs, compatibility boundaries, or normative dependencies, load the
 project Release-Harness capability. Read existing Release-Harness state before
 reasoning from the repository. Perform change-impact review before claiming
 release readiness.
-<!-- release-harness:managed:end -->\n
+<!-- release-harness:managed:end -->

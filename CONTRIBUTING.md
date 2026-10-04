@@ -50,7 +50,8 @@ Two test suites guard the library boundary (llm-gateway#67):
 
 ## Pull requests
 
-- Keep one focused acceptance slice per branch and PR into `staging`.
+- Keep each branch focused on one change; changes land on `main` through
+  reviewed merges.
 - Add focused regression tests for demonstrated behavior.
 - Avoid new dependencies when the standard library is sufficient.
 - Do not stage or commit local configuration, real hosts, credentials, identity

@@ -137,7 +137,7 @@
         <div>
           <p class="eyebrow">Authenticated quickstart</p>
           <h2>Install the image. Configure your route.</h2>
-          <p class="muted measure">No clone or build required. Put this <code>compose.yaml</code> in your own private installation folder and <a href="quickstart.html#secrets">generate its .env once</a>. Then run <code>docker compose up -d</code> and open <code>http://127.0.0.1:8787/console</code>. Keep the folder, keys and state volume for restarts and upgrades.</p>
+          <p class="muted measure">No clone or build required. Put this <code>compose.yaml</code> in your own private installation folder, replace <code>&lt;VERSION&gt;</code> with the <a href="https://github.com/xibodev/llm-gateway/releases/latest">latest release</a> number without its leading <code>v</code>, and <a href="quickstart.html#secrets">generate its .env once</a>. Then run <code>docker compose up -d</code> and open <code>http://127.0.0.1:8787/console</code>. Keep the folder, keys and state volume for restarts and upgrades.</p>
           <ol>
             <li>Create a human owner and project.</li>
             <li>Connect and verify one provider.</li>
@@ -150,7 +150,7 @@
           <div class="code-head"><span>compose.yaml · published image</span><button class="copy-button" type="button" data-copy="#home-quickstart">Copy</button></div>
           <pre id="home-quickstart"><code>services:
   gateway:
-    image: ghcr.io/xibodev/llm-gateway:0.7.4
+    image: ghcr.io/xibodev/llm-gateway:&lt;VERSION&gt;
     ports:
       - "127.0.0.1:${LLMGW_PORT:-8787}:8787"
     environment:
@@ -220,7 +220,7 @@ volumes:
           <article class="feature"><span class="feature-index">RECOVERY</span><h3>Journaled restore</h3><p>Validate before replacement, recover an interrupted prepared transaction, and reject newer unsupported schemas.</p><code>backup restore --force</code></article>
           <article class="feature"><span class="feature-index">RETENTION</span><h3>Bounded history</h3><p>Batch-prune old usage, telemetry, audit, delivered outbox, completed quota periods, logs, and verified backups.</p><code>LLMGW_RETENTION_*</code></article>
           <article class="feature"><span class="feature-index">PROVENANCE</span><h3>Build identity</h3><p>CLI, health, admin state, binaries, and images carry the same version, commit, and commit-derived time.</p><code>llmgw version</code></article>
-          <article class="feature"><span class="feature-index">RELEASE</span><h3>Supply-chain evidence</h3><p>Five archives, SPDX SBOMs, verified checksums, GitHub provenance, and two-architecture image attestations.</p><code>SHA256SUMS</code></article>
+          <article class="feature"><span class="feature-index">RELEASE</span><h3>Supply-chain evidence</h3><p>Eight archives, SPDX SBOMs, verified checksums, GitHub provenance, and two-architecture image attestations.</p><code>SHA256SUMS</code></article>
           <article class="feature"><span class="feature-index">ALERTS</span><h3>Durable outbox</h3><p>Quota and key-expiry rules enqueue deduplicated work for an operator-owned external delivery worker.</p><code>/admin/api/outbox</code></article>
         </div>
         <p><a href="operations.html">Open the operations runbook →</a></p>

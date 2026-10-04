@@ -22,9 +22,9 @@ newer than it supports.
 ## Standalone image installation
 
 Use this for the [published-image quickstart](QUICKSTART.md#docker-compose),
-not the repository's source-build Compose file. The quickstart pins
-`ghcr.io/xibodev/llm-gateway:0.7.4`; select future versions from the
-[release notes](https://github.com/xibodev/llm-gateway/releases/latest).
+not the repository's source-build Compose file. The quickstart pins an exact
+image version, `ghcr.io/xibodev/llm-gateway:<VERSION>`; select the next one from
+the [release notes](https://github.com/xibodev/llm-gateway/releases/latest).
 
 1. Complete the offline backup checklist above with the **installed** image.
    Keep the original snapshot outside the state volume and automatic retention.

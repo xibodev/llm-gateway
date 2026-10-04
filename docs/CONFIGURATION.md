@@ -164,9 +164,35 @@ configured profile and is reused exactly for exchange and refresh binding.
 | `LLMGW_GOOGLE_ANTIGRAVITY_CLIENT_MODE` | Required manual profile mode: `public` or `confidential`. |
 | `LLMGW_GOOGLE_ANTIGRAVITY_REDIRECT_URI` | Exact registered redirect URI used by the manual profile. |
 | `LLMGW_OAUTH_PUBLIC_BASE_URL` | Public HTTP(S) origin used for browser OAuth callbacks; required outside loopback. Register `<origin>/oauth/callback/google_antigravity` as the exact redirect URI. |
-| `LLMGW_ALLOW_COPILOT_PROXY` | Enable the personal Copilot provider boundary. |
-| `LLMGW_EXPERIMENTAL_COPILOT_PROVIDER` | Compatibility enable flag for Copilot provider use. |
+| `LLMGW_GITHUB_COPILOT_OAUTH_TOKEN` | Optional GitHub OAuth token that an administrator can import as the shared credential of a `github_copilot` provider (`source: configured`). |
 | `LLMGW_GITHUB_COPILOT_CACHE_DIR` | Copilot session-cache location. |
+
+### Providers and discovery
+
+| Variable | Default | Purpose |
+| --- | --- | --- |
+| `LLMGW_OPENAI_COMPATIBLE_BASE_URL` | `https://api.openai.com/v1` | Base URL for `openai_compatible`, `openai`, and `litellm` providers that set no `base_url`. |
+| `LLMGW_OPENAI_COMPATIBLE_TIMEOUT_SECONDS` | `300` | Request timeout for `openai_compatible`, `openai`, `litellm`, `azure_openai`, `elevenlabs`, and `mimo` providers that set no `timeout`. |
+| `LLMGW_OLLAMA_BASE_URL` | `http://127.0.0.1:11434` | Base URL for `ollama` providers that set no `base_url`. |
+| `LLMGW_OLLAMA_TIMEOUT_SECONDS` | `30` | Request timeout for `ollama` providers that set no `timeout`. |
+| `LLMGW_EXTENSION_URL` | `http://127.0.0.1:18888` | Address of the optional companion daemon, distributed separately, that serves the GitHub Copilot, OpenAI Codex, Google Antigravity, Edge TTS, anonymous OpenCode Zen, and Anthropic setup-token provider types. Must be an absolute `http` or `https` URL without credentials, query, or fragment. |
+| `LLMGW_EXTENSION_SECRET` | unset | Shared secret sent to that daemon as a bearer token. Set it, and start the daemon with the same value: a daemon started without a secret accepts any caller. |
+| `LLMGW_ANTHROPIC_DISCOVERY_ALIASES` | `true` | `GET /v1/models` also lists chat models whose IDs start with `claude` or `anthropic` under their bare ID, so Claude Code's gateway model discovery shows them. Affects listing only, not routing. |
+| `LLMGW_ANTHROPIC_DISCOVERY_ALL_MODELS` | `false` | Lets every other model be requested as `claude-<model-id>`, and lists chat models that way while discovery aliases are on. |
+| `LLMGW_AUTODISCOVER_LOCAL` | `0` | When `1`, `true`, `yes`, or `on`, `serve` adds every reachable [local model server](PROVIDERS.md#local-detection) that is not configured yet and saves it to the configuration. |
+
+### Provider roster
+
+| Variable | Default | Purpose |
+| --- | --- | --- |
+| `LLMGW_PROVIDER_ROSTER_URL` | `https://xibodev.github.io/llm-gateway/roster/payload.json` | Discovery feed; must be a public HTTPS URL. `serve` applies the default only when `LLMGW_PROVIDER_ROSTER_DISABLE` is unset. |
+| `LLMGW_PROVIDER_ROSTER_DISABLE` | unset | Any non-empty value stops `serve` from applying the default feed URL; an explicit `LLMGW_PROVIDER_ROSTER_URL` still applies. |
+| `LLMGW_PROVIDER_ROSTER_AUTO_REFRESH` | `true` | `true` or `false`: refresh the feed in the background. |
+| `LLMGW_PROVIDER_ROSTER_PUBLIC_KEY` | unset | Optional base64 Ed25519 public key; when set, the feed must be a signed envelope. |
+| `LLMGW_PROVIDER_ROSTER_KEY_ID` | `staging` | Expected envelope key ID; used only with a public key. |
+
+See the [provider roster guide](PROVIDER_ROSTER.md#gateway-environment-and-refresh)
+for refresh and trust behavior.
 
 ### Logging and retention
 
@@ -183,6 +209,19 @@ configured profile and is reused exactly for exchange and refresh binding.
 Retention runs after startup and then every 24 hours. Current quota periods,
 pending/failed outbox work, identities, credentials, provider state, and policies
 are not age-pruned.
+
+### Variables without effect
+
+These variables currently have no effect:
+
+- `LLMGW_RATE_LIMIT_PER_MINUTE` is parsed but not enforced. Use per-key or
+  project requests-per-minute limits instead; see
+  [policy and quotas](MULTI_USER.md#policy-and-quotas).
+- `LLMGW_ALLOW_COPILOT_PROXY` and `LLMGW_EXPERIMENTAL_COPILOT_PROVIDER`.
+- `LLMGW_OPENAI_COMPATIBLE_API_KEY`.
+- `LLMGW_GITHUB_COPILOT_USE_GH_CLI`, `LLMGW_GITHUB_COPILOT_TIMEOUT_SECONDS`,
+  `LLMGW_GITHUB_COPILOT_EDITOR_VERSION`, and
+  `LLMGW_GITHUB_COPILOT_INTEGRATION_ID`.
 
 ## Persistence and console saves
 

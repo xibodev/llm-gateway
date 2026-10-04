@@ -8,9 +8,10 @@ release verification, and rollback for the single-node gateway.
 ### Published image (recommended)
 
 Use the standalone [Quickstart Compose recipe](QUICKSTART.md#docker-compose),
-pinned to `ghcr.io/xibodev/llm-gateway:0.7.4`. No clone, build or config seed is
-required. From the private installation folder containing `compose.yaml` and
-the generate-once `.env`:
+pinned to an exact release image, `ghcr.io/xibodev/llm-gateway:<VERSION>`, from
+the [latest release](https://github.com/xibodev/llm-gateway/releases/latest).
+No clone, build or config seed is required. From the private installation
+folder containing `compose.yaml` and the generate-once `.env`:
 
 ```bash
 docker compose up -d
@@ -240,9 +241,10 @@ repository.
 Stable tags have the form `vMAJOR.MINOR.PATCH` and must point to an approved
 `main` commit. The consolidated release workflow produces:
 
-- Windows amd64 ZIP;
-- Linux amd64 and arm64 tarballs;
+- Windows amd64 and arm64 ZIPs;
+- Linux amd64, arm64, and riscv64 tarballs;
 - macOS amd64 and arm64 tarballs;
+- a FreeBSD amd64 tarball;
 - one SPDX JSON SBOM per binary;
 - `SHA256SUMS`;
 - GitHub build-provenance attestations;

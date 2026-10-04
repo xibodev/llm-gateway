@@ -52,6 +52,31 @@ Native Anthropic Messages advances past retryable upstream statuses and
 statusless provider failures such as malformed responses. It does not hide
 definitive client/request HTTP errors by trying another model.
 
+## Failover budget and affinity
+
+Chat Completions and Responses run each routed request under one budget that
+covers every attempt in the chain, provider retries included, and the response
+stream once one opens. The budget defaults to 2 minutes. When it runs out, the
+gateway stops trying further members and the request fails; a stream that is
+still open is cut off.
+
+Set another budget per request, in whole milliseconds, with the
+`X-LLMGW-Fallback-Timeout-Ms` header or the `fallback_timeout_ms` body field.
+The header takes precedence. A zero, negative, or non-integer value keeps the
+default, and the body field currently also ignores JSON numbers of 1,000,000 or
+more; use the header for longer budgets.
+
+`X-LLMGW-Affinity-Key`, or the `affinity_key` body field, chooses where an
+endpoint chain starts; the header takes precedence. When more than one member
+is eligible, the gateway hashes the key with SHA-256 and rotates the member
+order to start at the member the hash selects; the rest follow in their
+configured order, wrapping around. For the same eligible members, the same key
+always starts at the same member, while different keys spread across members.
+Without a key, the configured order applies.
+
+`/v1/messages` reads neither control. Its streaming chain always uses the
+default budget, and its non-streaming chain does not apply the budget.
+
 ## Single-target surfaces
 
 These handlers resolve one eligible target and do not walk a cross-model chain:

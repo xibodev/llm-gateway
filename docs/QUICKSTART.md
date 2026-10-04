@@ -20,7 +20,7 @@ Create `compose.yaml` in it with the following contents:
 ```yaml
 services:
   gateway:
-    image: ghcr.io/xibodev/llm-gateway:0.7.4
+    image: ghcr.io/xibodev/llm-gateway:<VERSION>
     ports:
       - "127.0.0.1:${LLMGW_PORT:-8787}:8787"
     environment:
@@ -41,9 +41,11 @@ healthcheck. No command or healthcheck override is needed. The named volume
 persists configuration and databases at `/state`, owned by container UID/GID
 65532. Configure providers in the console; no config seed is needed.
 
-This recipe pins [v0.7.4](https://github.com/xibodev/llm-gateway/releases/tag/v0.7.4).
-See [latest releases](https://github.com/xibodev/llm-gateway/releases/latest)
-when choosing a future version, and follow [Upgrading](UPGRADING.md).
+Replace `<VERSION>` with the number of the
+[latest release](https://github.com/xibodev/llm-gateway/releases/latest)
+without its leading `v`; image tags omit the `v`, while archive names and Git
+tags keep it. Pin that exact version and follow [Upgrading](UPGRADING.md) to
+move to a later one.
 
 ### Save secrets once
 
@@ -167,34 +169,36 @@ Keep the original encryption key and folder through every upgrade.
 ## Native binary
 
 This is an **alternative installation**, not a way to access the Compose volume.
-Choose a separate private folder and download your archive plus
-[SHA256SUMS](https://github.com/xibodev/llm-gateway/releases/download/v0.7.4/SHA256SUMS):
+Choose a separate private folder and download your archive plus `SHA256SUMS`
+from the [latest release](https://github.com/xibodev/llm-gateway/releases/latest).
+Archive names carry the release tag, shown here as `v<VERSION>`:
 
-| Platform | v0.7.4 download |
+| Platform | Archive |
 | --- | --- |
-| Windows x64 | [windows_amd64.zip](https://github.com/xibodev/llm-gateway/releases/download/v0.7.4/llmgw_v0.7.4_windows_amd64.zip) |
-| Windows ARM64 | [windows_arm64.zip](https://github.com/xibodev/llm-gateway/releases/download/v0.7.4/llmgw_v0.7.4_windows_arm64.zip) |
-| Linux x64 | [linux_amd64.tar.gz](https://github.com/xibodev/llm-gateway/releases/download/v0.7.4/llmgw_v0.7.4_linux_amd64.tar.gz) |
-| Linux ARM64 | [linux_arm64.tar.gz](https://github.com/xibodev/llm-gateway/releases/download/v0.7.4/llmgw_v0.7.4_linux_arm64.tar.gz) |
-| Linux RISC-V 64 | [linux_riscv64.tar.gz](https://github.com/xibodev/llm-gateway/releases/download/v0.7.4/llmgw_v0.7.4_linux_riscv64.tar.gz) |
-| macOS Intel | [darwin_amd64.tar.gz](https://github.com/xibodev/llm-gateway/releases/download/v0.7.4/llmgw_v0.7.4_darwin_amd64.tar.gz) |
-| macOS Apple Silicon | [darwin_arm64.tar.gz](https://github.com/xibodev/llm-gateway/releases/download/v0.7.4/llmgw_v0.7.4_darwin_arm64.tar.gz) |
-| FreeBSD x64 | [freebsd_amd64.tar.gz](https://github.com/xibodev/llm-gateway/releases/download/v0.7.4/llmgw_v0.7.4_freebsd_amd64.tar.gz) |
+| Windows x64 | `llmgw_v<VERSION>_windows_amd64.zip` |
+| Windows ARM64 | `llmgw_v<VERSION>_windows_arm64.zip` |
+| Linux x64 | `llmgw_v<VERSION>_linux_amd64.tar.gz` |
+| Linux ARM64 | `llmgw_v<VERSION>_linux_arm64.tar.gz` |
+| Linux RISC-V 64 | `llmgw_v<VERSION>_linux_riscv64.tar.gz` |
+| macOS Intel | `llmgw_v<VERSION>_darwin_amd64.tar.gz` |
+| macOS Apple Silicon | `llmgw_v<VERSION>_darwin_arm64.tar.gz` |
+| FreeBSD x64 | `llmgw_v<VERSION>_freebsd_amd64.tar.gz` |
 
 Before unpacking, calculate the archive's SHA-256 and compare it with the exact
-filename's entry in `SHA256SUMS`. Stop if they differ. For Linux x64:
+filename's entry in `SHA256SUMS`. Stop if they differ. For Linux x64, with
+`<VERSION>` replaced:
 
 ```bash
-sha256sum llmgw_v0.7.4_linux_amd64.tar.gz
-tar -xzf llmgw_v0.7.4_linux_amd64.tar.gz
+sha256sum 'llmgw_v<VERSION>_linux_amd64.tar.gz'
+tar -xzf 'llmgw_v<VERSION>_linux_amd64.tar.gz'
 ```
 
 On macOS use `shasum -a 256 <ARCHIVE>` and `tar -xzf <ARCHIVE>` with your actual
 archive name. On Windows:
 
 ```powershell
-Get-FileHash .\llmgw_v0.7.4_windows_amd64.zip -Algorithm SHA256
-Expand-Archive .\llmgw_v0.7.4_windows_amd64.zip -DestinationPath .
+Get-FileHash '.\llmgw_v<VERSION>_windows_amd64.zip' -Algorithm SHA256
+Expand-Archive '.\llmgw_v<VERSION>_windows_amd64.zip' -DestinationPath .
 ```
 
 For this fresh native installation, generate `.env` once using the earlier
@@ -238,10 +242,11 @@ and absolute state/config paths. Without overrides, native state defaults to
 
 Only use this path to build the code yourself. It is independent of the standalone
 image recipe and native installation; do not mix their folders, projects or volumes.
-Clone the selected source release (Git required):
+Clone the selected source release (Git required), replacing `<VERSION>` as
+above:
 
 ```bash
-git clone --branch v0.7.4 https://github.com/xibodev/llm-gateway.git
+git clone --branch 'v<VERSION>' https://github.com/xibodev/llm-gateway.git
 cd llm-gateway
 ```
 

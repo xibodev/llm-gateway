@@ -69,7 +69,9 @@ credential and policy. It is not a global list of every model a provider sells.
 The core profile supports non-streaming and SSE streaming, ordinary chat
 messages, function tools, tool calls, usage normalization, vision filtering, and
 request cancellation. Ordered endpoint failover is possible before output
-starts.
+starts. Chat Completions and Responses accept request-level controls for the
+failover deadline and member order; see
+[failover budget and affinity](ROUTING.md#failover-budget-and-affinity).
 
 Opt-in Chat-to-Responses adaptation uses `force_api_support` and catalog
 `supported_surfaces`. Adapted non-streaming responses include
@@ -117,8 +119,9 @@ Transcription accepts multipart form data with `file` and `model`. Speech accept
 an OpenAI-shaped JSON body. OpenAI-compatible providers receive proxied requests;
 `edge_tts` synthesizes MP3 through its native provider implementation.
 
-Audio resolves one target. The public transcription parser permits multipart
-input up to 128 MiB.
+Audio resolves one target. The gateway sets no size limit on transcription
+uploads; set a request-body limit in the reverse proxy in front of it if you
+need one.
 
 ## Images and video
 
