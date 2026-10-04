@@ -6,9 +6,11 @@ import (
 	"database/sql"
 	"database/sql/driver"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"testing"
 )
 
@@ -483,6 +485,38 @@ func TestMigrationsRejectMalformedLegacyBindingSchema(t *testing.T) {
 	}
 	if maxVersion != 7 {
 		t.Fatalf("max migration version=%d, want 7", maxVersion)
+	}
+}
+
+// A database a newer release migrated carries versions this binary has no
+// migration for. Opening it would serve without that release's columns.
+func TestOpenDBRefusesNewerSchema(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "gateway.db")
+	db, err := openDB(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	future := SchemaVersion() + 1
+	if _, err := db.Exec(
+		"INSERT INTO schema_migrations(version,applied_at) VALUES(?,0)", future,
+	); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	reopened, err := openDB(path)
+	if err == nil {
+		_ = reopened.Close()
+		t.Fatal("opened a database migrated by a newer release")
+	}
+	for _, want := range []string{
+		fmt.Sprintf("version %d", future), fmt.Sprintf("(%d)", SchemaVersion()), "docs/UPGRADING.md",
+	} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("error %q does not mention %q", err, want)
+		}
 	}
 }
 

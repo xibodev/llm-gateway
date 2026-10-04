@@ -739,6 +739,23 @@ CREATE TABLE IF NOT EXISTS schema_migrations (
 )`); err != nil {
 		return fmt.Errorf("create schema_migrations: %w", err)
 	}
+	// A binary applies only the migrations it knows. Serving a database that a
+	// newer release migrated would leave that release's columns unread, such
+	// as key scopes this binary would then not enforce, so the database is
+	// refused, as backup restore refuses a newer archive.
+	var newest int
+	if err := db.QueryRow(
+		"SELECT COALESCE(MAX(version),0) FROM schema_migrations",
+	).Scan(&newest); err != nil {
+		return fmt.Errorf("read schema version: %w", err)
+	}
+	if newest > SchemaVersion() {
+		return fmt.Errorf(
+			"IAM database schema version %d is newer than this binary supports (%d); "+
+				"run a release that supports it, or see docs/UPGRADING.md",
+			newest, SchemaVersion(),
+		)
+	}
 	if err := normalizeLegacyProviderBindingMigration(db); err != nil {
 		return err
 	}

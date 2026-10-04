@@ -17,7 +17,9 @@ backup. Follow the [repository-versioned procedure](../deploy/DEPLOY.md#upgrade-
 
 Database migrations are idempotent and recorded in `schema_migrations` and
 `control_metadata`. A binary refuses to inspect/restore a backup whose schema is
-newer than it supports.
+newer than it supports, and refuses to open a `gateway.db` that a newer release
+has migrated: run that release, or [roll back](#rollback) to the pre-upgrade
+snapshot.
 
 ## Standalone image installation
 
