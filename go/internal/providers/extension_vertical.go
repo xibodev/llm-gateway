@@ -243,11 +243,11 @@ func (f *ExtensionProviderFacade) CompleteContextWithObservation(ctx context.Con
 	ctx, collector := collectCredentials(ctx)
 	resp, err := f.runtime.core.Invoke(ctx, f.caller, f.instance, req)
 	if err != nil {
-		return nil, collector.Observation(), err
+		return nil, collector.Observation(), extensionFailure(ctx, f.instance, err)
 	}
 	var out map[string]any
 	if err := json.Unmarshal(resp.Body, &out); err != nil {
-		return nil, collector.Observation(), fmt.Errorf("decode response: %w", err)
+		return nil, collector.Observation(), circuitFailureInvocation(f.instance + ": the companion daemon's answer is not a JSON object")
 	}
 	return out, collector.Observation(), nil
 }
@@ -277,7 +277,7 @@ func (f *ExtensionProviderFacade) StreamContext(ctx context.Context, model strin
 	}
 	iter, err := f.runtime.core.Stream(ctx, f.caller, f.instance, req)
 	if err != nil {
-		return nil, err
+		return nil, extensionFailure(ctx, f.instance, err)
 	}
 	return &relayedStream{inner: iter, prefix: f.instance}, nil
 }
@@ -309,17 +309,18 @@ func (f *ExtensionProviderFacade) DefaultVoice() string {
 }
 
 func (f *ExtensionProviderFacade) Synthesize(voice, text, speed string) ([]byte, string, error) {
+	ctx := context.Background()
 	client, err := f.runtime.extensionClient()
 	if err != nil {
-		return nil, "", err
+		return nil, "", extensionFailure(ctx, f.instance, err)
 	}
-	resp, err := client.Invoke(context.Background(), f.providerID, core.Request{
+	resp, err := client.Invoke(ctx, f.providerID, core.Request{
 		Surface: core.ModelSurfaceAudioSpeech,
 		Model:   voice,
 		Body:    []byte(text),
 	})
 	if err != nil {
-		return nil, "", err
+		return nil, "", extensionFailure(ctx, f.instance, err)
 	}
 	return resp.Body, "audio/mpeg", nil
 }
