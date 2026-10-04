@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { readdirSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import test from "node:test";
 
@@ -8,6 +8,18 @@ const root = resolve(import.meta.dirname, "..");
 test("console source keeps its local asset base", () => {
   const vite = readFileSync(resolve(root, "vite.config.ts"), "utf8");
   assert.match(vite, /base: "\/console\/"/);
+});
+
+test("only the API client sends requests, so the browser never contacts a third party", () => {
+  const sources = readdirSync(resolve(root, "src"), { recursive: true })
+    .filter((file) => /\.tsx?$/.test(file))
+    .map((file) => [file.replaceAll("\\", "/"), readFileSync(resolve(root, "src", file), "utf8")]);
+  assert.ok(sources.length > 20);
+  for (const [file, source] of sources) {
+    if (file !== "lib/api.ts") assert.doesNotMatch(source, /\bfetch\(/, file);
+    assert.doesNotMatch(source, /favicons\?|src=\{`https?:/, file);
+  }
+  assert.match(sources.find(([file]) => file === "lib/api.ts")[1], /await fetch\(apiPath\(mode, path\),/);
 });
 
 test("console styles retain the approved neutral enterprise direction", () => {

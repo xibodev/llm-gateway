@@ -620,53 +620,36 @@ export function ProviderHub({ data, mode, onChanged, onOpenDetail, onOpenPlaygro
     });
   };
 
-  const quickConnectAnon = async (setup: JSONRecord, candidateEntries?: JSONRecord[]) => {
+  // The gateway checks the endpoint itself once the provider is added. The
+  // browser never contacts a roster endpoint: that request would come from the
+  // operator's machine rather than the gateway and prove nothing about it.
+  const quickConnectAnon = async (setup: JSONRecord) => {
     const pid = stringValue(setup.default_provider_id);
     const label = stringValue(setup.label, pid);
+    const baseURL = stringValue(setup.default_base_url);
     setBusy(`${pid}-connect`);
-
-    const candidateURLs = [stringValue(setup.default_base_url), ...(candidateEntries ?? []).map((e) => stringValue(e.base_url))].filter(Boolean);
-    const uniqueURLs = Array.from(new Set(candidateURLs));
-
-    let workingURL = uniqueURLs[0] || "";
-    let lastError = "";
-
-    for (const url of uniqueURLs) {
-      try {
-        const pingURL = url.endsWith("/models") ? url : url.replace(/\/+$/, "") + "/models";
-        const resp = await fetch(pingURL, {
-          method: "GET",
-          headers: { Accept: "application/json" },
-        });
-        if (resp.ok) {
-          workingURL = url;
-          break;
-        }
-      } catch (err) {
-        lastError = err instanceof Error ? err.message : String(err);
-      }
-    }
-
     try {
       await sendJSON<JSONRecord>("admin", "/providers", "POST", {
         registry_id: stringValue(setup.id),
         id: pid,
         api_key: "",
-        base_url: workingURL,
+        base_url: baseURL,
       });
-      const testRes = await sendJSON<JSONRecord>("admin", `/providers/${encodeURIComponent(pid)}/test`, "POST", {}).catch(() => null);
+      const check = await sendJSON<JSONRecord>("admin", `/providers/${encodeURIComponent(pid)}/test`, "POST", {}).catch(() => null);
       await onChanged();
-      const count = testRes ? numberValue(testRes.model_count) : 0;
+      const reached = boolValue(check?.success);
       setResult({
         title: label,
-        success: true,
-        detail: count > 0 ? `${label} connected successfully! ${count} models discovered.` : `${label} connected successfully using ${workingURL}.`,
+        success: reached,
+        detail: reached
+          ? `${label} connected. The gateway reached ${baseURL} and found ${numberValue(check?.model_count)} models.`
+          : `${label} was added, but the gateway could not confirm it: ${stringValue(check?.details, "the reachability check did not complete.")} Open its details to check again.`,
       });
     } catch (cause) {
       setResult({
         title: label,
         success: false,
-        detail: cause instanceof Error ? cause.message : lastError || "Failed to connect provider.",
+        detail: cause instanceof Error ? cause.message : "Failed to connect provider.",
       });
     } finally {
       setBusy("");
@@ -857,7 +840,7 @@ export function ProviderHub({ data, mode, onChanged, onOpenDetail, onOpenPlaygro
                           onClick={() => {
                             if (!setup || mode !== "admin") return;
                             if (isAnon) {
-                              void quickConnectAnon(setup, remoteEntries);
+                              void quickConnectAnon(setup);
                             } else {
                               setConnectEntry({ entry: setup, mode: "create" });
                             }

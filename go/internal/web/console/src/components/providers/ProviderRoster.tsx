@@ -326,24 +326,9 @@ export function RosterMark({ entry }: { entry: JSONRecord }) {
       </span>
     );
   }
-  const signup = safeRosterURL(entry.signup_url);
-  const base = safeRosterURL(entry.base_url);
-  const domain = (() => {
-    try {
-      const u = new URL(signup || base || "");
-      return u.hostname;
-    } catch {
-      return "";
-    }
-  })();
-  if (domain && failed !== domain) {
-    const faviconURL = `https://www.google.com/s2/favicons?domain=${domain}&sz=64`;
-    return (
-      <span class="provider-mark" aria-hidden="true">
-        <img src={faviconURL} alt="" width="24" height="24" onError={() => setFailed(domain)} />
-      </span>
-    );
-  }
+  // No remote favicon lookup: the console loads images only from itself or
+  // embedded data, and a lookup would tell a third party which providers an
+  // operator is browsing.
   return local;
 }
 

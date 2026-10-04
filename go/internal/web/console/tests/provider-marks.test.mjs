@@ -150,8 +150,9 @@ test("ProviderRoster uses a valid embedded raster only when no local mark is kno
 });
 
 test("ProviderRoster missing or invalid raster falls back to initials without remote image fetches", () => {
+  // Endpoint and signup URLs used to select a remote favicon lookup; they must not.
   for (const logo of [undefined, { mime: "image/svg+xml", data: png.data }, { ...png, data: "https://untrusted.invalid/logo.png" }, { ...png, data: "broken" }]) {
-    const tree = rosterRenderer({ id: opaqueID, label: "Example Service", logo })();
+    const tree = rosterRenderer({ id: opaqueID, label: "Example Service", base_url: "https://api.example.com/v1", signup_url: "https://example.com/signup", logo })();
     assert.equal(elements(tree, "img").length, 0);
     assert.equal(elements(tree, "svg").length, 0);
     assert.equal(text(tree), "ES");
@@ -159,7 +160,7 @@ test("ProviderRoster missing or invalid raster falls back to initials without re
 });
 
 test("ProviderRoster image errors fall back and a replacement raster can retry", () => {
-  const entry = { id: opaqueID, label: "Example Service", logo: png };
+  const entry = { id: opaqueID, label: "Example Service", base_url: "https://api.example.com/v1", logo: png };
   const render = rosterRenderer(entry);
   elements(render(), "img")[0].props.onError();
   assert.equal(elements(render(), "img").length, 0);
