@@ -164,6 +164,42 @@ database an earlier release wrote has no check value; the first start whose key
 decrypts one of its credentials records it, and until then a start logs a
 warning when the key decrypts none.
 
+### Rotate the key
+
+`llmgw credentials rekey` re-encrypts every stored credential with a new key.
+It runs offline under the same state lock as `serve` and `backup`, so it refuses
+to run while a gateway holds the state. Check that the installed binary's
+`llmgw --help` lists it, then:
+
+1. Stop the gateway.
+2. Create a backup with `llmgw backup create` and keep the current key with it:
+   the archive stays encrypted with that key.
+3. Generate a new key, for example with `openssl rand -base64 32`, and store it
+   with the deployment's secrets before using it. With the current key still in
+   `LLMGW_CREDENTIAL_ENCRYPTION_KEY` and the new one in
+   `LLMGW_NEW_CREDENTIAL_ENCRYPTION_KEY`, both loaded the way the service loads
+   its keys rather than typed on a command line, run:
+
+   ```bash
+   llmgw credentials rekey
+   ```
+
+4. Replace `LLMGW_CREDENTIAL_ENCRYPTION_KEY` in the service environment, such as
+   the Compose `.env`, with the new key, and remove
+   `LLMGW_NEW_CREDENTIAL_ENCRYPTION_KEY`.
+5. Start the gateway.
+
+For Compose, run the command in a one-shot container of the installed image
+with the same environment, project and state mount, and pass it
+`LLMGW_NEW_CREDENTIAL_ENCRYPTION_KEY` as well.
+
+The command re-encrypts provider connections, legacy provider credentials,
+recoverable gateway-key copies and OAuth client profiles in one transaction,
+binds each value to the same row identity as before, and records the new key's
+check value. It prints how many values it re-encrypted in each table, never the
+values or keys. It refuses a current key that does not match the database, and
+changes nothing when any stored value fails to decrypt or any write fails.
+
 ## Backup contents
 
 Check the **installed** binary with `llmgw --help` first. Source documentation
@@ -172,7 +208,8 @@ only when its help lists them.
 
 Stop all gateway writers before maintenance and retain the service's actual
 state/config environment, not the maintenance user's default home. `serve`,
-`backup create`, and `backup restore` share an exclusive state lock.
+`backup create`, `backup restore`, and `credentials rekey` share an exclusive
+state lock.
 
 If the installed binary lacks backup support, archive the **entire stopped state
 volume**, including SQLite `-wal` and `-shm` files, configuration, secrets and

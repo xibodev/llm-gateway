@@ -92,10 +92,13 @@ ON CONFLICT(key) DO UPDATE SET value=excluded.value,updated_at=excluded.updated_
 }
 
 // encryptedCredential is one stored value sealed with the credential
-// encryption key, with the associated data it is bound to.
+// encryption key, with the associated data it is bound to and the arguments
+// that select its row for an update.
 type encryptedCredential struct {
+	table, id         string
 	ciphertext, nonce []byte
 	additionalData    []byte
+	rowKey            []any
 }
 
 func (credential encryptedCredential) opens(key []byte) bool {
@@ -107,21 +110,22 @@ func (credential encryptedCredential) opens(key []byte) bool {
 // encryption key. Each binds its value to the identity of its row, as the
 // code that writes it does, so a value cannot be moved to another row.
 var encryptedCredentialColumns = []struct {
-	table, query string
-	scan         func(rowScanner) (encryptedCredential, error)
+	table, query, update string
+	scan                 func(rowScanner) (encryptedCredential, error)
 }{
 	{
 		table: "provider_connections",
 		query: `
 SELECT id,principal_id,provider_id,connection_name,aad_version,ciphertext,nonce
 FROM provider_connections ORDER BY id`,
+		update: "UPDATE provider_connections SET ciphertext=?,nonce=? WHERE id=?",
 		scan: func(row rowScanner) (encryptedCredential, error) {
 			var id, principalID, providerID, name string
 			var aadVersion int
 			var ciphertext, nonce []byte
 			err := row.Scan(&id, &principalID, &providerID, &name, &aadVersion, &ciphertext, &nonce)
 			return encryptedCredential{
-				ciphertext: ciphertext, nonce: nonce,
+				id: id, ciphertext: ciphertext, nonce: nonce, rowKey: []any{id},
 				additionalData: connectionAAD(principalID, providerID, name, aadVersion),
 			}, err
 		},
@@ -131,12 +135,13 @@ FROM provider_connections ORDER BY id`,
 		query: `
 SELECT id,principal_id,provider_id,ciphertext,nonce
 FROM provider_credentials ORDER BY id`,
+		update: "UPDATE provider_credentials SET ciphertext=?,nonce=? WHERE id=?",
 		scan: func(row rowScanner) (encryptedCredential, error) {
 			var id, principalID, providerID string
 			var ciphertext, nonce []byte
 			err := row.Scan(&id, &principalID, &providerID, &ciphertext, &nonce)
 			return encryptedCredential{
-				ciphertext: ciphertext, nonce: nonce,
+				id: id, ciphertext: ciphertext, nonce: nonce, rowKey: []any{id},
 				additionalData: []byte(principalID + "|" + providerID),
 			}, err
 		},
@@ -150,12 +155,13 @@ SELECT id,project_id,principal_id,secret_ciphertext,secret_nonce
 FROM api_keys
 WHERE length(COALESCE(secret_ciphertext,''))>0 AND length(COALESCE(secret_nonce,''))>0
 ORDER BY id`,
+		update: "UPDATE api_keys SET secret_ciphertext=?,secret_nonce=? WHERE id=?",
 		scan: func(row rowScanner) (encryptedCredential, error) {
 			var id, projectID, principalID string
 			var ciphertext, nonce []byte
 			err := row.Scan(&id, &projectID, &principalID, &ciphertext, &nonce)
 			return encryptedCredential{
-				ciphertext: ciphertext, nonce: nonce,
+				id: id, ciphertext: ciphertext, nonce: nonce, rowKey: []any{id},
 				additionalData: apiKeyAdditionalData(id, projectID, principalID),
 			}, err
 		},
@@ -165,12 +171,14 @@ ORDER BY id`,
 		query: `
 SELECT provider_id,profile,ciphertext,nonce
 FROM oauth_client_profiles ORDER BY provider_id,profile`,
+		update: "UPDATE oauth_client_profiles SET ciphertext=?,nonce=? WHERE provider_id=? AND profile=?",
 		scan: func(row rowScanner) (encryptedCredential, error) {
 			var providerID, profile string
 			var ciphertext, nonce []byte
 			err := row.Scan(&providerID, &profile, &ciphertext, &nonce)
 			return encryptedCredential{
-				ciphertext: ciphertext, nonce: nonce,
+				id: providerID + "/" + profile, ciphertext: ciphertext, nonce: nonce,
+				rowKey:         []any{providerID, profile},
 				additionalData: oauthClientProfileAAD(providerID, profile),
 			}, err
 		},
@@ -194,6 +202,7 @@ func encryptedCredentials(db interface {
 				_ = rows.Close()
 				return nil, fmt.Errorf("read %s: %w", column.table, err)
 			}
+			credential.table = column.table
 			stored = append(stored, credential)
 		}
 		if err := errors.Join(rows.Err(), rows.Close()); err != nil {

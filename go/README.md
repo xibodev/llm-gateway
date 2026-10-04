@@ -15,13 +15,13 @@ See [`docs/ARCHITECTURE.md`](../docs/ARCHITECTURE.md) for module boundaries and 
 ## Package map
 
 ```text
-cmd/llmgw             CLI: serve, health, version, backup/inspect/restore
+cmd/llmgw             CLI: serve, health, version, backup/inspect/restore, credentials rekey
 internal/api          OpenAI/Anthropic facades and admin/user APIs
 internal/buildinfo    linker-injected version, commit, and build time
 internal/config       settings, provider instances, endpoints, local detection
 internal/diagnostics  secret-redaction, text-limiting utilities
 internal/iam          SQLite IAM, keys, quotas, usage, audit, alerts, retention
-internal/operations   locked backup, inspection, restore, and recovery journal
+internal/operations   locked backup, inspection, restore, recovery journal, and credential key rotation
 internal/providers    core runtime assembly and verticals, facades, stores over IAM, catalogs, sign-in, retries and circuits
 internal/roster       provider catalog synchronization and metadata
 internal/router       target resolution, ordered failover, telemetry, usage bridge

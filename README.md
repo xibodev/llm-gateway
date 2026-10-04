@@ -135,7 +135,9 @@ llmgw backup restore /secure/path/llmgw-state.tar.gz --force
 The default create command writes under `<state>/backups`, where
 `LLMGW_BACKUP_KEEP` applies. Explicit external archive paths are not pruned.
 Archives can contain credentials; checksums detect corruption, not authorship,
-and `LLMGW_CREDENTIAL_ENCRYPTION_KEY` remains external.
+and `LLMGW_CREDENTIAL_ENCRYPTION_KEY` remains external. The gateway refuses to
+start with a different key than the one its state was encrypted with; rotate it
+offline with `llmgw credentials rekey`.
 
 `llmgw version`, `/health`, and `/admin/api/state` report the same semantic
 version, source commit, and RFC3339 build time. See

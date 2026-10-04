@@ -203,7 +203,8 @@ on loopback only.
 
 | Variable | Purpose |
 | --- | --- |
-| `LLMGW_CREDENTIAL_ENCRYPTION_KEY` | Base64 or hex encoding of exactly 32 bytes. Required for private provider connections and revealable gateway keys. The gateway refuses to start with a key other than the one `gateway.db` was encrypted with; see [the credential encryption key](OPERATIONS.md#credential-encryption-key). |
+| `LLMGW_CREDENTIAL_ENCRYPTION_KEY` | Base64 or hex encoding of exactly 32 bytes. Required for private provider connections and revealable gateway keys. The gateway refuses to start with a key other than the one `gateway.db` was encrypted with; see [the credential encryption key](OPERATIONS.md#credential-encryption-key), which also describes rotating it. |
+| `LLMGW_NEW_CREDENTIAL_ENCRYPTION_KEY` | Read only by `llmgw credentials rekey`: the key, encoded the same way, that it re-encrypts the stored credentials with. Remove it once `LLMGW_CREDENTIAL_ENCRYPTION_KEY` holds the new key; see [rotate the key](OPERATIONS.md#rotate-the-key). |
 | `LLMGW_SSO_ENABLED` | Enable trusted reverse-proxy identity assertions. |
 | `LLMGW_SSO_SHARED_SECRET` | Secret that must be overwritten by the trusted proxy. |
 | `LLMGW_SSO_ADMIN_GROUP` | SSO group allowed to call admin APIs. |

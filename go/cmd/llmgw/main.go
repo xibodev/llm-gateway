@@ -32,7 +32,7 @@ import (
 	"llmgw/internal/router"
 )
 
-const usage = `Usage: llmgw [serve|health|version|backup]
+const usage = `Usage: llmgw [serve|health|version|backup|credentials]
 
 Commands:
   serve   Run the gateway HTTP server (default when no command is given).
@@ -42,6 +42,9 @@ Commands:
   backup inspect <archive>      Validate and summarize a backup.
   backup restore <archive> --force
                                 Replace offline state from a verified backup.
+  credentials rekey             Re-encrypt stored credentials offline from
+                                LLMGW_CREDENTIAL_ENCRYPTION_KEY to
+                                LLMGW_NEW_CREDENTIAL_ENCRYPTION_KEY.
 
 Environment:
   LLMGW_HOST=127.0.0.1  LLMGW_PORT=8787
@@ -75,6 +78,15 @@ func main() {
 		}
 		if err := backupCommand(os.Args[2:], os.Stdout); err != nil {
 			fmt.Fprintln(os.Stderr, "backup:", err)
+			os.Exit(1)
+		}
+	case "credentials":
+		if _, err := config.Load(); err != nil {
+			fmt.Fprintln(os.Stderr, "credentials:", err)
+			os.Exit(1)
+		}
+		if err := credentialsCommand(os.Args[2:], os.Stdout); err != nil {
+			fmt.Fprintln(os.Stderr, "credentials:", err)
 			os.Exit(1)
 		}
 	default:
@@ -401,6 +413,25 @@ func printInspection(output io.Writer, inspection operations.BackupInspection) e
 		fmt.Fprintf(output, "%s: %d\n", name, inspection.Counts[name])
 	}
 	fmt.Fprintf(output, "credential_key: %s\n", inspection.CredentialKey)
+	return nil
+}
+
+// newCredentialKeyEnv names the key credentials rekey re-encrypts with. It
+// is read only by that command, so a gateway never starts with it.
+const newCredentialKeyEnv = "LLMGW_NEW_CREDENTIAL_ENCRYPTION_KEY"
+
+func credentialsCommand(args []string, output io.Writer) error {
+	if len(args) != 1 || args[0] != "rekey" {
+		return fmt.Errorf("usage: llmgw credentials rekey")
+	}
+	counts, err := operations.RekeyCredentials(config.Get().CredentialEncryptionKey, os.Getenv(newCredentialKeyEnv))
+	if err != nil {
+		return err
+	}
+	fmt.Fprintln(output, "credentials re-encrypted; set LLMGW_CREDENTIAL_ENCRYPTION_KEY to the new key before starting the gateway")
+	for _, count := range counts {
+		fmt.Fprintf(output, "%s: %d\n", count.Table, count.Values)
+	}
 	return nil
 }
 

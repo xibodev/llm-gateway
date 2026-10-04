@@ -101,3 +101,42 @@ func TestBackupReportsWhetherTheCredentialKeyMatches(t *testing.T) {
 		}
 	}
 }
+
+func TestCredentialsRekeyPrintsCountsAndTheNewKeyOpensTheState(t *testing.T) {
+	useStateWithCredential(t, 5)
+	if err := credentialsCommand([]string{"rotate"}, &bytes.Buffer{}); err == nil {
+		t.Fatal("an unknown credentials command was accepted")
+	}
+	t.Setenv(newCredentialKeyEnv, encodedFixtureKey(6))
+	var output bytes.Buffer
+	if err := credentialsCommand([]string{"rekey"}, &output); err != nil {
+		t.Fatal(err)
+	}
+	for _, line := range []string{
+		"provider_connections: 1\n", "provider_credentials: 0\n", "api_keys: 0\n", "oauth_client_profiles: 0\n",
+	} {
+		if !strings.Contains(output.String(), line) {
+			t.Fatalf("rekey output %q lacks %q", output.String(), line)
+		}
+	}
+	for _, value := range []string{"fixture-cli-secret", encodedFixtureKey(5), encodedFixtureKey(6)} {
+		if strings.Contains(output.String(), value) {
+			t.Fatal("rekey output exposed a secret value")
+		}
+	}
+
+	t.Setenv("LLMGW_CREDENTIAL_ENCRYPTION_KEY", encodedFixtureKey(6))
+	if _, err := config.Load(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := iam.Initialize(); err != nil {
+		t.Fatalf("start with the new key: %v", err)
+	}
+	owner, found, err := iam.PrincipalBySubject("fixture:cli-owner")
+	if err != nil || !found {
+		t.Fatalf("owner found=%v err=%v", found, err)
+	}
+	if secret, _, ok, err := iam.ProviderConnectionSecret(owner.ID, "fixture", ""); err != nil || !ok || secret != "fixture-cli-secret" {
+		t.Fatalf("connection under the new key: ok=%v err=%v", ok, err)
+	}
+}

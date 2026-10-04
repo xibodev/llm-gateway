@@ -368,9 +368,15 @@ FROM provider_credentials WHERE principal_id=? AND provider_id=?`,
 }
 
 func credentialKey() ([]byte, error) {
-	raw := strings.TrimSpace(config.Get().CredentialEncryptionKey)
+	return parseCredentialKey("LLMGW_CREDENTIAL_ENCRYPTION_KEY", config.Get().CredentialEncryptionKey)
+}
+
+// parseCredentialKey decodes raw, a credential encryption key the variable
+// name configures. Errors name the variable, never the value.
+func parseCredentialKey(name, raw string) ([]byte, error) {
+	raw = strings.TrimSpace(raw)
 	if raw == "" {
-		return nil, fmt.Errorf("LLMGW_CREDENTIAL_ENCRYPTION_KEY is required for encrypted credentials")
+		return nil, fmt.Errorf("%s is required for encrypted credentials", name)
 	}
 	decoders := []func(string) ([]byte, error){
 		base64.RawURLEncoding.DecodeString,
@@ -384,7 +390,7 @@ func credentialKey() ([]byte, error) {
 			return key, nil
 		}
 	}
-	return nil, fmt.Errorf("LLMGW_CREDENTIAL_ENCRYPTION_KEY must encode exactly 32 bytes")
+	return nil, fmt.Errorf("%s must encode exactly 32 bytes", name)
 }
 
 func encryptCredential(
