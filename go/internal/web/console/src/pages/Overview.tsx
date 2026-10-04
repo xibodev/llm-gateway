@@ -1,7 +1,7 @@
 import { Activity, ArrowRight, KeyRound, Plug, Route } from "lucide-preact";
 import type { JSONRecord } from "../lib/api";
 import type { PageID } from "../lib/navigation";
-import { asList, asRecord, endpointsOf, numberValue, stringValue } from "../lib/records";
+import { asList, asRecord, endpointsOf, numberValue } from "../lib/records";
 import { PageHeading } from "../components/PageState";
 import { GetStartedGuide } from "../components/GetStartedGuide";
 
@@ -125,7 +125,7 @@ export function Overview({ data, mode, onNavigate }: { data: JSONRecord; mode: "
       <section class="surface surface--split">
         <div><p class="eyebrow">Next step</p><h2>{nextStep.title}</h2><p>{nextStep.detail}</p></div>
         <div class="next-step-side">
-          <dl class="compact-facts"><div><dt>Mode</dt><dd>{isPortal ? "Owner portal" : "Administrator"}</dd></div><div><dt>Auth</dt><dd>{stringValue(asRecord(data.sso).enabled) === "true" ? "SSO enabled" : "Gateway policy"}</dd></div></dl>
+          <dl class="compact-facts"><div><dt>Mode</dt><dd>{isPortal ? "Owner portal" : "Administrator"}</dd></div><div><dt>Auth</dt><dd>{asRecord(data.sso).enabled === true ? "SSO enabled" : "Gateway policy"}</dd></div></dl>
           <button class="button button--primary" type="button" onClick={() => onNavigate(nextStep.page)}>
             {nextStep.action} <ArrowRight size={16} />
           </button>

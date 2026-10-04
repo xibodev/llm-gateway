@@ -19,6 +19,31 @@ function CopySnippet({ value }: { value: string }) {
 function valueList(value: unknown): string { return asList(value).map(String).join(" · "); }
 function capabilityList(value: unknown): string { return Object.keys(asRecord(value)).join(" · "); }
 
+// clientSnippets follows the client profiles in docs/CLIENTS.md. Clients use a
+// gateway-issued project key: the administrator keys (LLMGW_API_KEY and
+// LLMGW_API_KEYS) skip key and project policy, so no snippet may name them.
+export function clientSnippets(origin: string): { title: string; value: string }[] {
+  return [
+    { title: "OpenAI SDKs", value: `export OPENAI_BASE_URL=${origin}/v1
+export OPENAI_API_KEY='<GATEWAY_PROJECT_KEY>'` },
+    { title: "Claude Code", value: `export ANTHROPIC_BASE_URL=${origin}
+export ANTHROPIC_API_KEY='<GATEWAY_PROJECT_KEY>'` },
+    { title: "Codex", value: `# ~/.codex/config.toml
+# Codex reads the key from LLMGW_PROJECT_KEY:
+#   export LLMGW_PROJECT_KEY='<GATEWAY_PROJECT_KEY>'
+model_provider = "llmgw"
+[model_providers.llmgw]
+base_url = "${origin}/v1"
+env_key = "LLMGW_PROJECT_KEY"
+wire_api = "responses"
+requires_openai_auth = false` },
+    { title: "Copilot CLI BYOK", value: `export COPILOT_PROVIDER_BASE_URL=${origin}/v1
+export COPILOT_PROVIDER_API_KEY='<GATEWAY_PROJECT_KEY>'
+export COPILOT_PROVIDER_WIRE_API=completions
+export COPILOT_PROVIDER_WIRE_MODEL=PROVIDER_OR_ENDPOINT/MODEL` },
+  ];
+}
+
 export function ModelsEndpoints({ data, mode, principalID, onPrincipalIDChange }: { data: JSONRecord; mode: ConsoleMode; principalID: string; onPrincipalIDChange: (principalID: string) => void }) {
   const humans = asList(data.principals).map(asRecord).filter((principal) => stringValue(principal.kind) === "human" && stringValue(principal.status, "active") === "active");
   useEffect(() => {
@@ -56,27 +81,10 @@ export function ModelsEndpoints({ data, mode, principalID, onPrincipalIDChange }
   const filtered = useMemo(() => rows.filter((row) => visibleIDs.has(stringValue(row.id))), [rows, visibleIDs]);
   // The console is served BY the gateway, so its own origin is always the
   // correct base URL — a hardcoded localhost fails silently on any deployed host.
-  const gatewayOrigin = window.location.origin;
-  const snippets = [
-    { title: "OpenAI SDKs", value: `export OPENAI_BASE_URL=${gatewayOrigin}/v1
-export OPENAI_API_KEY=YOUR_GATEWAY_KEY` },
-    { title: "Claude Code", value: `export ANTHROPIC_BASE_URL=${gatewayOrigin}
-export ANTHROPIC_API_KEY=YOUR_GATEWAY_KEY` },
-    { title: "Codex", value: `# ~/.codex/config.toml
-model_provider = "llmgw"
-[model_providers.llmgw]
-base_url = "${gatewayOrigin}/v1"
-env_key = "LLMGW_API_KEY"
-wire_api = "responses"
-requires_openai_auth = false` },
-    { title: "Copilot CLI BYOK", value: `export COPILOT_PROVIDER_BASE_URL=${gatewayOrigin}/v1
-export COPILOT_PROVIDER_API_KEY=YOUR_GATEWAY_KEY
-export COPILOT_PROVIDER_WIRE_API=completions
-export COPILOT_PROVIDER_WIRE_MODEL=PROVIDER_OR_ENDPOINT/MODEL` },
-  ];
+  const snippets = clientSnippets(window.location.origin);
   return (
     <div class="page-stack">
-      <PageHeading eyebrow="Catalog and transport" title="Models & endpoints" detail="Catalog rows come from configured upstreams. Gateway setup snippets use placeholders only and never include a real secret." />
+      <PageHeading eyebrow="Catalog and transport" title="Models & endpoints" detail="Catalog rows come from configured upstreams. Setup snippets use placeholders only: replace them with a project key minted under API keys, never the administrator key." />
       <section class="endpoint-grid">
         {snippets.map((snippet) => <article class="endpoint-card" key={snippet.title}><header><Terminal size={18} /><h2>{snippet.title}</h2><CopySnippet value={snippet.value} /></header><pre class="technical">{snippet.value}</pre></article>)}
       </section>
