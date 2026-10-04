@@ -226,14 +226,15 @@ async function configureProvider(id, registry_id, base_url) {
   const diagnostics = catalog.json?.catalog || {};
   report.providers.push({
     id, registry_id, configure_status: result.status, refresh_status: refresh.status,
-    refresh_success: refresh.json?.success ?? null, catalog_status: catalog.status,
+    refresh_success: refresh.json?.success ?? null, refresh_failure_code: refresh.json?.failure_code || "",
+    refresh_details: safeExcerpt(refresh.json?.details || errorText(refresh)), catalog_status: catalog.status,
     catalog_state: diagnostics.status || "", failure_code: diagnostics.failure_code || "",
     model_count: models.length,
   });
   if (models.length) {
     check(`provider-catalog:${id}`, "passed", `${models.length} model(s) discovered`, false);
   } else if (mode === "deterministic") {
-    check(`provider-catalog:${id}`, "failed", `catalog unavailable: ${diagnostics.failure_code || "empty"}`, true);
+    check(`provider-catalog:${id}`, "failed", `catalog unavailable: ${diagnostics.failure_code || refresh.json?.failure_code || "empty"}`, true);
   } else {
     const direct = await directCatalogProbe(id);
     const candidateRegression = direct.status === 200 && direct.model_count > 0;
