@@ -7,7 +7,6 @@ import (
 	"net/http"
 	"net/netip"
 	"net/url"
-	"os"
 	"strings"
 	"time"
 )
@@ -44,43 +43,36 @@ func publicIP(ip netip.Addr) bool {
 	return true
 }
 
-func allowInsecureRoster() bool {
-	v := strings.ToLower(strings.TrimSpace(os.Getenv("LLMGW_ROSTER_ALLOW_INSECURE")))
-	return v == "1" || v == "true" || v == "yes" || v == "on"
-}
-
 func publicURL(raw string) (*url.URL, error) {
 	invalid := errors.New("Roster URL must be public HTTPS without credentials or query parameters.")
 	u, err := url.Parse(raw)
 	if err != nil || len(raw) > 4096 || u.Opaque != "" || u.User != nil || u.RawQuery != "" || u.ForceQuery || u.Fragment != "" || u.Hostname() == "" || strings.ContainsAny(raw, "\\#") {
 		return nil, invalid
 	}
-	if u.Scheme != "https" && !allowInsecureRoster() {
+	if u.Scheme != "https" {
 		return nil, invalid
 	}
-	if !allowInsecureRoster() {
-		host := strings.ToLower(u.Hostname())
-		if ip, err := netip.ParseAddr(host); err == nil {
-			if !publicIP(ip) {
+	host := strings.ToLower(u.Hostname())
+	if ip, err := netip.ParseAddr(host); err == nil {
+		if !publicIP(ip) {
+			return nil, invalid
+		}
+	} else {
+		if len(host) > 253 || !strings.Contains(host, ".") || strings.HasSuffix(host, ".") {
+			return nil, invalid
+		}
+		for _, suffix := range []string{".localhost", ".local", ".internal", ".home", ".lan"} {
+			if strings.HasSuffix(host, suffix) {
 				return nil, invalid
 			}
-		} else {
-			if len(host) > 253 || !strings.Contains(host, ".") || strings.HasSuffix(host, ".") {
+		}
+		for _, label := range strings.Split(host, ".") {
+			if len(label) == 0 || len(label) > 63 || label[0] == '-' || label[len(label)-1] == '-' {
 				return nil, invalid
 			}
-			for _, suffix := range []string{".localhost", ".local", ".internal", ".home", ".lan"} {
-				if strings.HasSuffix(host, suffix) {
+			for _, c := range label {
+				if !(c >= 'a' && c <= 'z' || c >= '0' && c <= '9' || c == '-') {
 					return nil, invalid
-				}
-			}
-			for _, label := range strings.Split(host, ".") {
-				if len(label) == 0 || len(label) > 63 || label[0] == '-' || label[len(label)-1] == '-' {
-					return nil, invalid
-				}
-				for _, c := range label {
-					if !(c >= 'a' && c <= 'z' || c >= '0' && c <= '9' || c == '-') {
-						return nil, invalid
-					}
 				}
 			}
 		}
@@ -92,7 +84,6 @@ func publicClient(resolver Resolver) *http.Client {
 	if resolver == nil {
 		resolver = net.DefaultResolver
 	}
-	insecure := allowInsecureRoster()
 	dialer := &net.Dialer{Timeout: 10 * time.Second}
 	transport := &http.Transport{
 		Proxy:                 nil, // Ambient proxy configuration must not bypass DNS/IP validation.
@@ -109,12 +100,10 @@ func publicClient(resolver Resolver) *http.Client {
 			if err != nil || len(ips) == 0 {
 				return nil, errors.New("Roster DNS lookup failed.")
 			}
-			if !insecure {
-				for _, ip := range ips {
-					a, ok := netip.AddrFromSlice(ip.IP)
-					if !ok || ip.Zone != "" || !publicIP(a) {
-						return nil, errors.New("Roster host is not public.")
-					}
+			for _, ip := range ips {
+				a, ok := netip.AddrFromSlice(ip.IP)
+				if !ok || ip.Zone != "" || !publicIP(a) {
+					return nil, errors.New("Roster host is not public.")
 				}
 			}
 			// Dial the validated address, never the hostname (no second DNS lookup).

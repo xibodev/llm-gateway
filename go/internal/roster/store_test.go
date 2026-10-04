@@ -287,6 +287,22 @@ func TestPublicNetworkBoundary(t *testing.T) {
 	}
 }
 
+// The boundary has no process-wide override: only Go callers can replace the
+// transport, through Options.Client, so the deployment environment cannot
+// relax it.
+func TestEnvironmentCannotRelaxNetworkBoundary(t *testing.T) {
+	t.Setenv("LLMGW_ROSTER_ALLOW_INSECURE", "1")
+	for _, raw := range []string{"http://feed.example.com/roster.json", "https://127.0.0.1/roster.json", "https://feed.internal/roster.json"} {
+		if _, err := publicURL(raw); err == nil {
+			t.Errorf("accepted %s", raw)
+		}
+	}
+	c := publicClient(fakeResolver{{IP: net.ParseIP("127.0.0.1")}})
+	if _, err := c.Get("https://feed.example.com"); err == nil || !strings.Contains(err.Error(), "not public") {
+		t.Fatalf("private DNS answer not rejected before dialing: %v", err)
+	}
+}
+
 func TestRedirectOversizeAndErrorSanitization(t *testing.T) {
 	pub, _, _ := fixture(t)
 	for _, kind := range []string{"redirect", "oversize", "secret"} {
