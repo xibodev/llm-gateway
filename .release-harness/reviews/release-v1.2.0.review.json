@@ -1,0 +1,571 @@
+{
+  "schema_version": "1.0.0",
+  "mode": "change",
+  "contract": {
+    "digest": "31b393ab3e80162226619c441694573993ac618382d74642101484a0bf2e9c80"
+  },
+  "authoring_provenance": {
+    "status": "established",
+    "path": ".release-harness/drafts/llm-gateway.record.json",
+    "digest": "6732ddf3dc8236b974e2aae5f81b546d89c2a466b6fb0a368d76620955bf981e"
+  },
+  "sources": [
+    {
+      "source_id": "primary",
+      "status": "established",
+      "repository_identity": "https://github.com/xibodev/llm-gateway.git",
+      "base_ref": "v1.1.0",
+      "base_commit": "c6085ccd1ead7c3ed7aa85cd6c977406c55cac33",
+      "merge_base": "c6085ccd1ead7c3ed7aa85cd6c977406c55cac33",
+      "head_commit": "5bc3e49eb4650cae7fa84eab71944ddfc064f309",
+      "head_tree": "28d39d190f957e2b034b1b90902b919554140622",
+      "reviewed_source_digest": "7b57c5ecd9d313a61a43252ba6b487cd2d591b93c813b7d2943e08188f55a132",
+      "changed_paths": [
+        {
+          "status": "added",
+          "path": ".github/dependabot.yml",
+          "old_blob": "0000000000000000000000000000000000000000",
+          "new_blob": "51566ebd94022f7407bdbf15a9056f8f6ea342cb"
+        },
+        {
+          "status": "added",
+          "path": ".github/release-harness/package-lock.json",
+          "old_blob": "0000000000000000000000000000000000000000",
+          "new_blob": "f9ff450656cf9bb538e7e60b2dbaca5653adbbcc"
+        },
+        {
+          "status": "added",
+          "path": ".github/release-harness/package.json",
+          "old_blob": "0000000000000000000000000000000000000000",
+          "new_blob": "638899ea03268d4509cdd445c24091d34f01dfc7"
+        },
+        {
+          "status": "modified",
+          "path": ".github/workflows/ci.yml",
+          "old_blob": "bdc70f1bb3657cfa532ae66c72a62dae2bcaf1a3",
+          "new_blob": "8315302f41ea0274da81c5a66b54be7a43307cd2"
+        },
+        {
+          "status": "modified",
+          "path": ".github/workflows/pages.yml",
+          "old_blob": "7ce32b363a4679a419b734a50f4d33f98559cd2c",
+          "new_blob": "f23f01d873165a539281a4e1218e21a9565b2089"
+        },
+        {
+          "status": "modified",
+          "path": ".github/workflows/provider-roster.yml",
+          "old_blob": "3dd4b5cbd33b2ca5dd180aa045fcf4c66f1c5390",
+          "new_blob": "a211cedc7a64a62a2f15f7fde5df778247156c1b"
+        },
+        {
+          "status": "modified",
+          "path": ".github/workflows/release.yml",
+          "old_blob": "2c190014f635eef5d9e337b11fae36cbc8dd7fcf",
+          "new_blob": "5ddbabcf9e0e31a1c63c269810ac3e253e2b6f96"
+        },
+        {
+          "status": "modified",
+          "path": ".gitignore",
+          "old_blob": "79200ef7578bc3350f29cd741b1357288f2b1abb",
+          "new_blob": "6918116b2e6499a087485d92a9f7e68aa656ab6a"
+        },
+        {
+          "status": "modified",
+          "path": "AGENTS.md",
+          "old_blob": "a9ca459070f27ba08296b91fe3d239547683d5c3",
+          "new_blob": "dbdebb916154109c02cf42ae2b03a7a644423ea5"
+        },
+        {
+          "status": "modified",
+          "path": "BACKLOG.md",
+          "old_blob": "ccb61968b79a8a273318af242880ece292785d08",
+          "new_blob": "d5b5ba73c8851aa1fc0bba61a729891a9cd191aa"
+        },
+        {
+          "status": "modified",
+          "path": "Caddyfile",
+          "old_blob": "a77f824e6a8f79295527504a9116b6091c03c92b",
+          "new_blob": "cacc939d5537752fe43391202f191c1251d1a285"
+        },
+        {
+          "status": "modified",
+          "path": "CONTRIBUTING.md",
+          "old_blob": "06249459dd344f0824a912d3fdef117872fb112f",
+          "new_blob": "8736bf1fde206e721db2b5aa69ea73656bd84f3d"
+        },
+        {
+          "status": "modified",
+          "path": "deploy/.env.example",
+          "old_blob": "93b6abdbcc369c4ac33dd632bbba6fd54d1afbf5",
+          "new_blob": "1535d8c7e9289ab44628d7614d17739ac8bfc356"
+        },
+        {
+          "status": "modified",
+          "path": "deploy/Caddyfile",
+          "old_blob": "dd77b405166c5d213fbb149ad884a871e0d09b0b",
+          "new_blob": "2eddbcf6c484c9d88d69a376da88aa21ed9bb50b"
+        },
+        {
+          "status": "modified",
+          "path": "deploy/docker-compose.prod.yml",
+          "old_blob": "c83fc47aa59f942b7cdae582c0e7a8cedff9e49a",
+          "new_blob": "1bcd7132118985ac77b50a83efca04c3c12b31f1"
+        },
+        {
+          "status": "modified",
+          "path": "docker-compose.yml",
+          "old_blob": "e5dc02123950986d8693b91cdcfd5e6d99af4de4",
+          "new_blob": "176ff438de946dc524ddd6f885859bf1722d6dd0"
+        },
+        {
+          "status": "modified",
+          "path": "docs/API.md",
+          "old_blob": "d2df06cfc5960a6885f98e6183fe2594bc9c9ff9",
+          "new_blob": "be5dc6bf7d6ceec7d715f26b4167b6114d335986"
+        },
+        {
+          "status": "modified",
+          "path": "docs/ARCHITECTURE.md",
+          "old_blob": "0a7380a5fddaf2f4a2301ad74e94e2665678a4b9",
+          "new_blob": "ceb32201cf0ff9925d42a39985b937c8cc4b9f49"
+        },
+        {
+          "status": "modified",
+          "path": "docs/CLI_COMPATIBILITY.md",
+          "old_blob": "e7add2fc0a9065367facbfc811301cf80f2c5b53",
+          "new_blob": "832eda0cefaf6a7fab23e2b7a0d89ce7d55c555e"
+        },
+        {
+          "status": "modified",
+          "path": "docs/CLIENTS.md",
+          "old_blob": "89ccad5ee7fd67a4c69e5d51f8a61cdf0af691f6",
+          "new_blob": "4b9fe94148df183c48b9d34849ce4c3a5ac83530"
+        },
+        {
+          "status": "modified",
+          "path": "docs/CONFIGURATION.md",
+          "old_blob": "3b1f41f70043df98d13482a3801809d6b486ca58",
+          "new_blob": "269a42d1ed62d3e15d8bc745ec5992e9e22b4a4f"
+        },
+        {
+          "status": "modified",
+          "path": "docs/MULTI_USER.md",
+          "old_blob": "603067d7bb85922b399983ca566d6131e15c5487",
+          "new_blob": "8ca9309beb63ff53b8732ffec938a0297d5107dc"
+        },
+        {
+          "status": "modified",
+          "path": "docs/OPERATIONS.md",
+          "old_blob": "4e5cd6525407afe60d00194faa5419d042274c9e",
+          "new_blob": "aabb2cbe5e27f0b0178d95aeeed7a8276479eb37"
+        },
+        {
+          "status": "modified",
+          "path": "docs/PROVIDER_ROSTER.md",
+          "old_blob": "9f525b7698cd7eeb630d9221c9a470a88f142cb0",
+          "new_blob": "d3574884ea7f9b668f11ff893e1bfc77a2a561ac"
+        },
+        {
+          "status": "modified",
+          "path": "docs/PROVIDERS.md",
+          "old_blob": "3ecd5d0efae19196a1872df6a3e44729cdf2eab8",
+          "new_blob": "22081555e436430b98ebca416f0cdda8d1c19758"
+        },
+        {
+          "status": "modified",
+          "path": "docs/QUICKSTART.md",
+          "old_blob": "7f828498c0532f91b6e8e5e8b90e1f2992df50d2",
+          "new_blob": "c3ae839a0cc939fc017caeb09bf8c1149a1bca0e"
+        },
+        {
+          "status": "modified",
+          "path": "docs/ROUTING.md",
+          "old_blob": "9271567fee4ae8f350cf93f696389f17d11e39bc",
+          "new_blob": "6041a83937b0c28c88c8224ec28062425696c8dc"
+        },
+        {
+          "status": "modified",
+          "path": "docs/UPGRADING.md",
+          "old_blob": "35b96f63210a6589310c2a03a29068bdd9eeb665",
+          "new_blob": "26a9460939344a3aa96fbdd37be2add1f8cc1bdb"
+        },
+        {
+          "status": "modified",
+          "path": "go/cmd/llmgw/main.go",
+          "old_blob": "c623f4d5f62d097d974ed84ccb085782b0bca176",
+          "new_blob": "7c8367c4b01f12c4f385d2666877d8fe82f063b6"
+        },
+        {
+          "status": "added",
+          "path": "go/cmd/llmgw/serve_test.go",
+          "old_blob": "0000000000000000000000000000000000000000",
+          "new_blob": "e557d9a74a3a5abf65136eb891270fb5824e6655"
+        },
+        {
+          "status": "modified",
+          "path": "go/go.mod",
+          "old_blob": "8e6cdfff1de6d143f9c21b642a1814219bb6ff71",
+          "new_blob": "f1aa9d243c36a88aabe7fa7664574e9d79d1d983"
+        },
+        {
+          "status": "modified",
+          "path": "go/go.sum",
+          "old_blob": "ae56b2a5d74af7cf71645db60948a965b5cebcdd",
+          "new_blob": "981121b5be09749694d8876ff428823eda770517"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/api/admin.go",
+          "old_blob": "e7e28e7bf19909e47c81f807639cb4146692e0b4",
+          "new_blob": "c335254cfb0becd0c974ea54bf859d062d7e81a9"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/api/anthropic.go",
+          "old_blob": "b56c27b7a3a941979ffa1f2f872f7ced71f34ba9",
+          "new_blob": "8e570c51cabb8e418fba671bdfc397966d8c1fad"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/api/audio.go",
+          "old_blob": "73ee57cbddbfd4aff31f4b619b80e0fb4bf9234a",
+          "new_blob": "9b7c858a4448b131ae1d5eb21b739e4ef0e403dc"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/api/audit.go",
+          "old_blob": "ae085e3fb6a211e42578036c427824e994fb36ba",
+          "new_blob": "11a44897d54219cc16e228cedae3b55363bcf41a"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/api/auth.go",
+          "old_blob": "03531becc44bc93c9af3d2bfc133597bea9383e3",
+          "new_blob": "b2adffb9060ba61c4e53059c75175fad864b1c47"
+        },
+        {
+          "status": "added",
+          "path": "go/internal/api/body_limit_test.go",
+          "old_blob": "0000000000000000000000000000000000000000",
+          "new_blob": "534a7b33f33ec575905b02bd81ea705d1f6704b5"
+        },
+        {
+          "status": "added",
+          "path": "go/internal/api/body_limit.go",
+          "old_blob": "0000000000000000000000000000000000000000",
+          "new_blob": "a454ec70f6f250eb76e8888d1374c97fd682b856"
+        },
+        {
+          "status": "added",
+          "path": "go/internal/api/characterization_test.go",
+          "old_blob": "0000000000000000000000000000000000000000",
+          "new_blob": "c6c3f02decad13142a2d718d77050d112e0ef4bf"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/api/connection_apikey_types_test.go",
+          "old_blob": "56f3f512a5a00844661a2d0a67fb9c42f0d9f012",
+          "new_blob": "705689ebcca224260c33fd7326cd62bfc8b44dea"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/api/connections.go",
+          "old_blob": "726b667d09d9d5877de6346bc22dcc8a2c10e90e",
+          "new_blob": "2e6fa07e040f0cb485cc0e8512e5610744ae354b"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/api/credential_upload_test.go",
+          "old_blob": "03a10ae5a438cac3081b3cce1b919112c28fde2c",
+          "new_blob": "e658e8081bd1c2141d0f98b5a8fb082177b665c4"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/api/embeddings.go",
+          "old_blob": "386e5706802efe9fa90dde25495bf649da8844c5",
+          "new_blob": "caf8714aa86165dc469dfb2460d628f1aa00219c"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/api/governance_test.go",
+          "old_blob": "1e9fb9bed501741937f4aa0dd3451568f1591a23",
+          "new_blob": "c48e9c47d8290ec348e09721b8545de155862ab3"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/api/iam_api_test.go",
+          "old_blob": "6b6233ec1d3fbc16d0b265d0db7655e1b354fff5",
+          "new_blob": "f9be7c2e4865fe2bd763bf7d7911bde42d2d2548"
+        },
+        {
+          "status": "added",
+          "path": "go/internal/api/local_mode_test.go",
+          "old_blob": "0000000000000000000000000000000000000000",
+          "new_blob": "c6ef57c310dba12941d40110c9b1ac76e3caac3d"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/api/media.go",
+          "old_blob": "6f45e75dacfc7f17934bd7188375af296424dd95",
+          "new_blob": "159cab907b08542a18e0e2f91c43c2579693c8c2"
+        },
+        {
+          "status": "added",
+          "path": "go/internal/api/oauth_test.go",
+          "old_blob": "0000000000000000000000000000000000000000",
+          "new_blob": "198cc838fb9c7d3f9b45a901fa153531c842e421"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/api/oauth.go",
+          "old_blob": "a36dc569f0b06b9e9697537f3bc747e86abece67",
+          "new_blob": "ba8f1c9da1f56a38841b0fc037f3d37d2b085826"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/api/openai.go",
+          "old_blob": "9594feef19967032d65fb8403ac7ffce152819bd",
+          "new_blob": "6ee3b07267d37f7069e140cbffe8caf61577890e"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/api/playground_audio.go",
+          "old_blob": "4a1ec093158def64a90d43430258f97d91d72c96",
+          "new_blob": "37e155c2d74aa64028fc4b5df1678deeeaad2d35"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/api/playground.go",
+          "old_blob": "868b51e096bac4636c04086379906c9f3a1b688b",
+          "new_blob": "07d479be323bebeecf11256061bb47e63081b81c"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/api/provider_credentials_test.go",
+          "old_blob": "54446db4f04c027f874233cc200fd88750bca540",
+          "new_blob": "5ba2c6c7670b40ccbd6872ec0e3a70bd96e3da77"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/api/provider_lifecycle_test.go",
+          "old_blob": "9af92fef664a284588f9dfcae8abf4ac4c9b61c7",
+          "new_blob": "7a44cc1960a7bbfc81a1cbf4383eb3a1d4d94339"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/api/provider_registry_test.go",
+          "old_blob": "f304f56bda5d2acc3d5e361da19b73cc558cc2da",
+          "new_blob": "16d2e59dab33cd3442cf47fae4bf5accb33f6ade"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/api/provider_service_account_test.go",
+          "old_blob": "648e7930cc6fcb9bbc56504c2804152f5464f5d6",
+          "new_blob": "d9cfecc3387d4e20f8d586b0646c752a75a0e9de"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/api/responses_api.go",
+          "old_blob": "331ccf004259dc5d3a25ee2cbf5ee7ca723cfed0",
+          "new_blob": "dab87a61174ff194d413679c7e51c86169a3f46d"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/api/routes_models_api_test.go",
+          "old_blob": "641bccb23ba5bb9d4036cbfc27d9ddb490c3bd22",
+          "new_blob": "079f3714e766794b211b7b203d98fbd093d785ee"
+        },
+        {
+          "status": "added",
+          "path": "go/internal/api/security_headers_test.go",
+          "old_blob": "0000000000000000000000000000000000000000",
+          "new_blob": "dfd5fb5e891a4cd112862f4df9fea973a831c26a"
+        },
+        {
+          "status": "added",
+          "path": "go/internal/api/security_headers.go",
+          "old_blob": "0000000000000000000000000000000000000000",
+          "new_blob": "a93d361fd9613e52a6cce774b482f72bf585128b"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/api/server_test.go",
+          "old_blob": "b3fc487975f5b988abe858415c58193e51ffc395",
+          "new_blob": "167dcbb42ff53f484d8fd16abc1fee4db71858d5"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/api/server.go",
+          "old_blob": "f08d4b2c0f2890ccdae9b782b93c837e23c44ccc",
+          "new_blob": "ac44c06602cabd619b8031fa07c31b72b7636a9d"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/api/sso.go",
+          "old_blob": "75e584e5109a244b05d71785127857afb9630367",
+          "new_blob": "e77b3b3c3935b4e79854f0d4242235ee18301c07"
+        },
+        {
+          "status": "added",
+          "path": "go/internal/api/startup.go",
+          "old_blob": "0000000000000000000000000000000000000000",
+          "new_blob": "7d221050651578932cd33f887ee8ae09ab63a89f"
+        },
+        {
+          "status": "added",
+          "path": "go/internal/api/static_key_audit_test.go",
+          "old_blob": "0000000000000000000000000000000000000000",
+          "new_blob": "dd112c47781fe70011d1b79e99e677189f80621a"
+        },
+        {
+          "status": "deleted",
+          "path": "go/internal/api/testdata/characterization/codex-chat-completions.golden",
+          "old_blob": "f2641171d984afff9bbf5b2c63d756a0c40c61ea",
+          "new_blob": "0000000000000000000000000000000000000000"
+        },
+        {
+          "status": "deleted",
+          "path": "go/internal/api/testdata/characterization/codex-messages.golden",
+          "old_blob": "a97b974688a8ef3095e7ef3f6d2e7eb4140ce1a7",
+          "new_blob": "0000000000000000000000000000000000000000"
+        },
+        {
+          "status": "renamed",
+          "path": "go/internal/api/testdata/characterization/codex-models.golden",
+          "old_blob": "1865acd4fb5a3ece8ec423d105ed920c7b304a56",
+          "new_blob": "c06906082b12d7f6f02a15fa194dd8224ee63d87"
+        },
+        {
+          "status": "deleted",
+          "path": "go/internal/api/testdata/characterization/codex-responses-native.golden",
+          "old_blob": "a7ba87a629c3c98788dd28522799f33d84a4c4a2",
+          "new_blob": "0000000000000000000000000000000000000000"
+        },
+        {
+          "status": "deleted",
+          "path": "go/internal/api/testdata/characterization/codex-responses-refresh-replay.golden",
+          "old_blob": "52655d7febfa9253e139723972969ef43cf12e8d",
+          "new_blob": "0000000000000000000000000000000000000000"
+        },
+        {
+          "status": "modified",
+          "path": "go/README.md",
+          "old_blob": "06ece692638cbae65bd9da665abb3fe99f3a8b07",
+          "new_blob": "1bf24c2566ec8204b170c24ca89c7ad6e625c7e6"
+        },
+        {
+          "status": "modified",
+          "path": "README.md",
+          "old_blob": "fdb963fd1efa1d8e8efe5359d1aba3805ef4b51e",
+          "new_blob": "0ca0b5868ae184a6d7c139c3598fd1c71b116a13"
+        },
+        {
+          "status": "modified",
+          "path": "SECURITY.md",
+          "old_blob": "27bc8562aaf5335837d89a1b4a1561a4f52bbaa9",
+          "new_blob": "5661b3345c7410f8b886a44aef66d11d51fc7cfd"
+        }
+      ]
+    }
+  ],
+  "facts": [
+    {
+      "id": "cli-and-health-identity",
+      "claim": "The version and health subcommands and the /health handler keep their output: version prints the semantic version, source commit and build time, health probes /health on the loopback address, and /health returns status ok with build identity. Every response now also carries X-Content-Type-Options and Referrer-Policy headers.",
+      "status": "observed",
+      "evidence": {
+        "source": "go/cmd/llmgw/main.go, go/internal/buildinfo, go/internal/api/models.go, go/internal/api/security_headers.go and their tests"
+      }
+    },
+    {
+      "id": "serve-lifecycle",
+      "claim": "serve binds its listener before background workers start, exits with an error when an existing configuration file cannot be read or parsed or a database records a schema newer than the binary, closes idle keep-alive connections after three minutes, and on SIGINT or SIGTERM drains in-flight requests for LLMGW_SHUTDOWN_TIMEOUT_SECONDS (default 25) before closing.",
+      "status": "observed",
+      "evidence": {
+        "source": "go/cmd/llmgw/main.go, go/cmd/llmgw/serve_test.go, go/internal/config/config.go, go/internal/iam/schema.go"
+      }
+    },
+    {
+      "id": "models-list-contract",
+      "claim": "GET /v1/models keeps its list envelope and its key, project and credential filtering. In unauthenticated local mode a request whose Origin header names a non-loopback host is rejected with 403; requests without an Origin header, as CLIs, SDKs and the release smoke send them, are unaffected.",
+      "status": "observed",
+      "evidence": {
+        "source": "go/internal/api/models.go, go/internal/api/auth.go, go/internal/api/local_mode_test.go"
+      }
+    },
+    {
+      "id": "governance-and-state-fixes",
+      "claim": "Revoking a provider connection also revokes the legacy credential row it was migrated from; removing a project membership revokes that member's keys in the project; a configured roster signing key requires a signed feed; service-account keys must name a Google token endpoint; secrets accepted by the encrypted store are no longer written to secrets.json; configuration saves keep settings they do not manage; data-plane request bodies are capped by LLMGW_MAX_REQUEST_BODY_BYTES; the legacy admin and portal pages are removed; Codex sign-in no longer requires a gateway-side client ID.",
+      "status": "observed",
+      "evidence": {
+        "source": "go/internal/iam, go/internal/roster/store.go, go/internal/config/config.go, go/internal/api and their tests"
+      }
+    },
+    {
+      "id": "dependencies",
+      "claim": "go.mod requires the tagged releases llmgw-core v1.3.0, llm-provider-auth v1.0.1 and golang.org/x/sys v0.48.0 with no replace directive. OpenAI-compatible audio keeps the gateway's own proxy path.",
+      "status": "observed",
+      "evidence": {
+        "source": "go/go.mod, go/go.sum, go/internal/providers/openai_compatible_vertical.go, go/internal/architecture"
+      }
+    },
+    {
+      "id": "release-gates",
+      "claim": "At source revision 5bc3e49eb4650cae7fa84eab71944ddfc064f309: go build, go vet, go test for every package, govulncheck, go mod tidy -diff and go mod verify pass; the console typecheck, 154 console tests, npm audit and the dist rebuild check pass; the documentation check passes; go test -race over every package passes on linux/amd64 with Go 1.26.6; the deterministic Docker acceptance passes all 31 checks against an image built from that revision on a Linux engine, where its digest policy does not apply to a locally built candidate.",
+      "status": "observed",
+      "evidence": {
+        "source": "local release-gate execution for 5bc3e49eb4650cae7fa84eab71944ddfc064f309"
+      }
+    }
+  ],
+  "impact": {
+    "assertions": [
+      {
+        "id": "A1",
+        "impact": "unchanged",
+        "supported_by": [
+          "cli-and-health-identity",
+          "release-gates"
+        ]
+      },
+      {
+        "id": "A2",
+        "impact": "unchanged",
+        "supported_by": [
+          "cli-and-health-identity",
+          "serve-lifecycle",
+          "release-gates"
+        ]
+      },
+      {
+        "id": "A3",
+        "impact": "unchanged",
+        "supported_by": [
+          "cli-and-health-identity",
+          "serve-lifecycle",
+          "release-gates"
+        ]
+      },
+      {
+        "id": "A4",
+        "impact": "unchanged",
+        "supported_by": [
+          "models-list-contract",
+          "governance-and-state-fixes",
+          "release-gates"
+        ]
+      }
+    ],
+    "requires": [],
+    "possible_binding_changes": []
+  },
+  "questions": [],
+  "conclusion": {
+    "action": "reuse_contract",
+    "summary": "The release fixes governance, credential, configuration, routing-status and console defects and hardens request limits, browser headers and shutdown, without changing the accepted CLI identity, CLI health, HTTP health or public model-list propositions. The existing accepted contract and bindings remain appropriate."
+  },
+  "proposed": {
+    "by": "release operator",
+    "at": "2026-10-04T08:58:20.298Z"
+  }
+}
