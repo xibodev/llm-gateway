@@ -101,6 +101,12 @@ jobs:
           go-version-file: go/go.mod
           cache: false
 
+      # The test step blocks the network, so the modules it builds against
+      # are fetched first, as the go job's build step fetches them.
+      - name: Download modules
+        working-directory: go
+        run: go mod download
+
       - name: Test platform-specific packages
         working-directory: go
         # Hermetic, as in the go job: an unreachable proxy fails any test that
