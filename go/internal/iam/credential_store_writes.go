@@ -234,10 +234,10 @@ WHERE id=? AND status='active' AND credential_kind=?`,
 }
 
 // revokeConnection mirrors RevokeOAuthProviderConnectionIfCurrent, and
-// RevokeProviderConnection for other kinds: it revokes the connection,
-// clears its quota, promotes the most recently updated active connection to
-// default and invalidates checks, but only while revision is current. Like
-// both, it leaves the revision alone.
+// RevokeProviderConnection for other kinds: it revokes the connection and its
+// legacy row, clears its quota, promotes the most recently updated active
+// connection to default and invalidates checks, but only while revision is
+// current. Like both, it leaves the revision alone.
 func (s *CredentialStore) revokeConnection(ctx context.Context, key, revision string) error {
 	expected, ok := parseCredentialRevision(revision)
 	if !ok {
@@ -277,6 +277,9 @@ SELECT principal_id,provider_id,credential_kind,is_default FROM provider_connect
 	if _, err := tx.ExecContext(ctx, `
 UPDATE provider_connections SET status='revoked',is_default=0,updated_at=? WHERE id=?`,
 		now, key); err != nil {
+		return err
+	}
+	if err := revokeLegacyCredentialTx(tx, key, now); err != nil {
 		return err
 	}
 	if err := clearProviderQuotaSnapshotsTx(tx, key, now); err != nil {

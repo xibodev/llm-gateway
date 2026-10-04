@@ -425,6 +425,9 @@ WHERE id=? AND principal_id=?`,
 	); err != nil {
 		return err
 	}
+	if err := revokeLegacyCredentialTx(tx, strings.TrimSpace(connectionID), time.Now().Unix()); err != nil {
+		return err
+	}
 	if err := clearProviderQuotaSnapshotsTx(tx, strings.TrimSpace(connectionID), time.Now().Unix()); err != nil {
 		return err
 	}
@@ -447,6 +450,22 @@ WHERE id=(
 		return err
 	}
 	return tx.Commit()
+}
+
+// revokeLegacyCredentialTx revokes the provider_credentials row the v7
+// migration copied into provider_connections as connectionID. The copy left
+// that row active, and a human's OAuth resolution falls back to it once no
+// connection is active, so revoking only the connection would keep serving
+// the same token. Gateway-owned rows are not a fallback: project bindings
+// share them and their status is managed on its own.
+func revokeLegacyCredentialTx(tx *sql.Tx, connectionID string, now int64) error {
+	_, err := tx.Exec(`
+UPDATE provider_credentials SET status='revoked',updated_at=?
+WHERE id=? AND status!='revoked'
+  AND principal_id IN (SELECT id FROM principals WHERE kind='human')`,
+		now, connectionID,
+	)
+	return err
 }
 
 func RevokeDefaultProviderConnection(principalID, providerID string) error {

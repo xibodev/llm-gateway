@@ -537,6 +537,24 @@ CREATE TABLE credential_leases (
 );
 `,
 	},
+	{
+		// revokeLegacyCredentialTx retires the human-owned legacy row of a
+		// revoked connection; this applies it to connections revoked before
+		// it did. A row written after its connection was revoked was
+		// re-enabled on purpose and keeps its status.
+		version: 21,
+		sql: `
+UPDATE provider_credentials
+SET status='revoked',updated_at=CAST(strftime('%s','now') AS INTEGER)
+WHERE status!='revoked'
+  AND principal_id IN (SELECT id FROM principals WHERE kind='human')
+  AND EXISTS (
+    SELECT 1 FROM provider_connections c
+    WHERE c.id=provider_credentials.id AND c.status='revoked'
+      AND c.updated_at>=provider_credentials.updated_at
+  );
+`,
+	},
 }
 
 func SchemaVersion() int { return len(migrations) }

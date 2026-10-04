@@ -7,6 +7,7 @@ import (
 	"database/sql"
 	"encoding/base64"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"io"
 	"strings"
@@ -223,7 +224,19 @@ func ActiveLegacyOAuthProviderCredentialExists(providerID string) (bool, error) 
 	return false, nil
 }
 
+// RevokeProviderCredential revokes a principal's legacy credential for a
+// provider and the connection the v7 migration copied it into, which
+// resolution prefers. The copy goes first: revoking it retires a human's row
+// in the same transaction, so a later failure cannot leave the copy active.
 func RevokeProviderCredential(principalID, providerID string) error {
+	if legacy, err := providerCredentialInfo(principalID, providerID); err == nil {
+		if err := RevokeProviderConnection(principalID, legacy.ID); err != nil &&
+			!errors.Is(err, ErrProviderConnectionNotFound) {
+			return err
+		}
+	} else if err != sql.ErrNoRows {
+		return err
+	}
 	db, err := DB()
 	if err != nil {
 		return err

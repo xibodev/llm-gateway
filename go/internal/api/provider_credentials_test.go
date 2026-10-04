@@ -173,6 +173,76 @@ func TestAdminSharedCredentialBindingIsSecretFreeAndAudited(t *testing.T) {
 	}
 }
 
+// The v7 migration copied each legacy Copilot credential into a connection
+// under the same ID, and resolution prefers that copy, so both disconnect
+// endpoints must revoke it along with the legacy row.
+func TestCopilotDisconnectRevokesTheMigratedConnection(t *testing.T) {
+	setupProviderCredentialAPI(t, t.TempDir())
+	config.Update(func(s *config.Settings) {
+		s.SSOEnabled = true
+		s.SSOSharedSecret = "proxy-secret"
+		s.SSOAutoProvision = true
+	})
+	server := httptest.NewServer(NewServer(Runtime{}))
+	defer server.Close()
+	for _, c := range []struct {
+		subject    string
+		disconnect func(t *testing.T, principalID string) (int, map[string]any)
+	}{
+		{"copilot-self-service", func(t *testing.T, _ string) (int, map[string]any) {
+			return ssoConnectionRequest(t, server.URL, "copilot-self-service", http.MethodDelete, "/user/api/copilot", nil)
+		}},
+		{"copilot-admin", func(t *testing.T, principalID string) (int, map[string]any) {
+			return jsonRequest(t, server.URL+"/admin/api/principals/"+principalID+"/copilot", http.MethodDelete, "admin-secret", nil)
+		}},
+	} {
+		t.Run(c.subject, func(t *testing.T) {
+			principal, err := iam.EnsurePrincipalBySubject("human", "authentik:"+c.subject, "", c.subject)
+			if err != nil {
+				t.Fatal(err)
+			}
+			legacy, err := iam.PutProviderCredential(principal.ID, "copilot", "github_oauth", "legacy-"+c.subject)
+			if err != nil {
+				t.Fatal(err)
+			}
+			db, err := iam.DB()
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := db.Exec(`
+INSERT INTO provider_connections(
+    id,principal_id,provider_id,connection_name,credential_kind,source,
+    private_to_principal,is_default,ciphertext,nonce,key_version,aad_version,
+    status,created_at,updated_at,last_used_at
+)
+SELECT
+    id,principal_id,provider_id,'default',credential_kind,'migration',
+    1,1,ciphertext,nonce,key_version,1,status,created_at,updated_at,last_used_at
+FROM provider_credentials WHERE id=?`, legacy.ID); err != nil {
+				t.Fatal(err)
+			}
+			if status, body := c.disconnect(t, principal.ID); status != http.StatusOK || body["ok"] != true {
+				t.Fatalf("disconnect status=%d body=%+v", status, body)
+			}
+			var legacyStatus, connectionStatus string
+			if err := db.QueryRow(`
+SELECT (SELECT status FROM provider_credentials WHERE id=?),
+       (SELECT status FROM provider_connections WHERE id=?)`, legacy.ID, legacy.ID,
+			).Scan(&legacyStatus, &connectionStatus); err != nil {
+				t.Fatal(err)
+			}
+			if legacyStatus != "revoked" || connectionStatus != "revoked" {
+				t.Fatalf("legacy=%s connection=%s, want both revoked", legacyStatus, connectionStatus)
+			}
+			if _, _, ok, err := iam.ResolveProviderOAuthCredentialSecretWithObservation(
+				&config.Principal{PrincipalID: principal.ID, PrincipalKind: principal.Kind}, "copilot",
+			); err != nil || ok {
+				t.Fatalf("disconnected credential resolved: ok=%v err=%v", ok, err)
+			}
+		})
+	}
+}
+
 func TestServiceBindingPreservesUnrelatedHumanCatalog(t *testing.T) {
 	stateDir := t.TempDir()
 	setupProviderCredentialAPI(t, stateDir)

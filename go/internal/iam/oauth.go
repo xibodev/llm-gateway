@@ -326,6 +326,9 @@ WHERE id=? AND principal_id=? AND status='active' AND ciphertext=? AND nonce=?`,
 	if affected != 1 {
 		return false, nil
 	}
+	if err := revokeLegacyCredentialTx(tx, expectedConnection.ID, now); err != nil {
+		return false, err
+	}
 	if err := clearProviderQuotaSnapshotsTx(tx, expectedConnection.ID, now); err != nil {
 		return false, err
 	}
