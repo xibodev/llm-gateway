@@ -273,15 +273,19 @@ func TestCLIStreamContract(t *testing.T) {
 	}
 }
 
+// Each client reads errors in its own vendor's envelope: a Messages client
+// Anthropic's, typed by status and without a code, the others the
+// OpenAI-shaped one.
 func TestCLIErrorEnvelopeContract(t *testing.T) {
 	server, _ := setupCLIContractTest(t)
 	for _, tc := range []struct {
 		name, path string
 		body       map[string]any
+		anthropic  bool
 	}{
-		{"claude", "/v1/messages", map[string]any{"model": "missing/model", "messages": []any{}, "max_tokens": 1}},
-		{"copilot", "/v1/chat/completions", map[string]any{"model": "missing/model", "messages": []any{map[string]any{"role": "user", "content": "error"}}}},
-		{"codex", "/v1/responses", map[string]any{"model": "missing/model", "input": "error"}},
+		{"claude", "/v1/messages", map[string]any{"model": "missing/model", "messages": []any{}, "max_tokens": 1}, true},
+		{"copilot", "/v1/chat/completions", map[string]any{"model": "missing/model", "messages": []any{map[string]any{"role": "user", "content": "error"}}}, false},
+		{"codex", "/v1/responses", map[string]any{"model": "missing/model", "input": "error"}, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			status, raw := cliRequest(t, server.URL+tc.path, tc.body)
@@ -291,7 +295,12 @@ func TestCLIErrorEnvelopeContract(t *testing.T) {
 			}
 			errorBody, _ := envelope["error"].(map[string]any)
 			message, _ := errorBody["message"].(string)
-			if status != http.StatusNotFound || errorBody["type"] != "invalid_request_error" || errorBody["code"] != "404" ||
+			wantEnvelope := errorBody["type"] == "invalid_request_error" && errorBody["code"] == "404" && len(envelope) == 1
+			if tc.anthropic {
+				_, hasCode := errorBody["code"]
+				wantEnvelope = envelope["type"] == "error" && errorBody["type"] == "not_found_error" && !hasCode && len(envelope) == 2
+			}
+			if status != http.StatusNotFound || !wantEnvelope ||
 				!strings.Contains(message, `Model "missing/model"`) || !strings.Contains(message, "GET /v1/models") {
 				t.Fatalf("status=%d envelope=%+v", status, envelope)
 			}

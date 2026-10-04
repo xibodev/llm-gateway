@@ -47,6 +47,43 @@ func anthropicErrorType(status int) string {
 	}
 }
 
+// anthropicErrorWriter carries the response to a request on a Messages
+// route, whose clients read Anthropic's error envelope. Every error a
+// handler writes goes through writeError, so marking the writer once, on
+// the way in, answers the whole route as Anthropic does.
+type anthropicErrorWriter struct{ http.ResponseWriter }
+
+// Unwrap lets http.ResponseController reach the writer that flushes a
+// stream.
+func (w anthropicErrorWriter) Unwrap() http.ResponseWriter { return w.ResponseWriter }
+
+// anthropicErrors marks the responses to the Messages routes; see
+// anthropicErrorWriter. It runs after path aliases are resolved.
+func anthropicErrors(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/v1/messages", "/v1/messages/count_tokens":
+			w = anthropicErrorWriter{w}
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
+// answersAnthropic reports a response marked by anthropicErrors, through
+// any writer wrapped around it since.
+func answersAnthropic(w http.ResponseWriter) bool {
+	for {
+		if _, ok := w.(anthropicErrorWriter); ok {
+			return true
+		}
+		wrapper, ok := w.(interface{ Unwrap() http.ResponseWriter })
+		if !ok {
+			return false
+		}
+		w = wrapper.Unwrap()
+	}
+}
+
 // writeJSON writes v as JSON with the given status.
 func writeJSON(w http.ResponseWriter, status int, v any) {
 	w.Header().Set("Content-Type", "application/json")
@@ -54,13 +91,17 @@ func writeJSON(w http.ResponseWriter, status int, v any) {
 	_ = json.NewEncoder(w).Encode(v)
 }
 
-// writeError writes the standard error envelope.
+// writeError writes the error envelope the route's clients read: Anthropic's
+// on the Messages routes, typed by status, and the standard one elsewhere.
 func writeError(w http.ResponseWriter, status int, message string) {
-	writeJSON(w, status, errorPayload(
-		providers.SanitizeDiagnosticTextLimit(message, 2048),
-		httpExceptionType(status),
-		itoa(status),
-	))
+	message = providers.SanitizeDiagnosticTextLimit(message, 2048)
+	if answersAnthropic(w) {
+		writeJSON(w, status, map[string]any{"type": "error", "error": map[string]any{
+			"type": anthropicErrorType(status), "message": message,
+		}})
+		return
+	}
+	writeJSON(w, status, errorPayload(message, httpExceptionType(status), itoa(status)))
 }
 
 func itoa(n int) string {

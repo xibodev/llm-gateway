@@ -56,19 +56,24 @@ func limitBodiesForTest(t *testing.T) {
 	providers.ResetProviders()
 }
 
+// assertBodyTooLarge checks a 413 in the envelope the route's clients read:
+// Anthropic's, without a code, on the Messages routes.
 func assertBodyTooLarge(t *testing.T, response *httptest.ResponseRecorder, path string, declared bool) {
 	t.Helper()
 	var envelope struct {
+		Type  *string `json:"type"`
 		Error struct {
-			Message string `json:"message"`
-			Type    string `json:"type"`
-			Code    string `json:"code"`
+			Message string  `json:"message"`
+			Type    string  `json:"type"`
+			Code    *string `json:"code"`
 		} `json:"error"`
 	}
+	anthropic := strings.HasPrefix(path, "/v1/messages")
 	if response.Code != http.StatusRequestEntityTooLarge ||
 		json.Unmarshal(response.Body.Bytes(), &envelope) != nil ||
-		envelope.Error.Code != "413" || envelope.Error.Type != "invalid_request_error" ||
-		envelope.Error.Message != requestBodyTooLarge {
+		envelope.Error.Type != "invalid_request_error" || envelope.Error.Message != requestBodyTooLarge ||
+		anthropic != (envelope.Type != nil && *envelope.Type == "error" && envelope.Error.Code == nil) ||
+		!anthropic && (envelope.Error.Code == nil || *envelope.Error.Code != "413") {
 		t.Fatalf("%s (declared length %t): status=%d body=%s", path, declared, response.Code, response.Body.String())
 	}
 }

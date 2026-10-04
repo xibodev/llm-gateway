@@ -266,7 +266,7 @@ func (s *server) handler() http.Handler {
 	mux.HandleFunc("POST /admin/api/copilot/login/poll", s.handleCopilotLoginPoll)
 	mux.HandleFunc("POST /admin/api/copilot/logout", s.handleCopilotLogout)
 
-	return securityHeaders(aliasMiddleware(requestLogMiddleware(limitRequestBodies(mux))))
+	return securityHeaders(aliasMiddleware(requestLogMiddleware(anthropicErrors(limitRequestBodies(mux)))))
 }
 
 // aliasMiddleware rewrites bare paths before routing.

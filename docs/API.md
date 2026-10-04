@@ -141,7 +141,7 @@ job after the operation was created.
 
 Request bodies are limited to 64 MiB unless `LLMGW_MAX_REQUEST_BODY_BYTES`
 [changes the limit](CONFIGURATION.md#server-and-state). A larger body is refused
-with `413` in the standard error envelope: before it is read when it declares a
+with `413` in the route's error envelope: before it is read when it declares a
 `Content-Length`, and as soon as it crosses the limit otherwise. Multipart
 uploads count in full. The same limit bounds the management APIs.
 
@@ -150,6 +150,14 @@ uploads count in full. The same limit bounds the management APIs.
 Upstream errors preserve meaningful status while credential-shaped diagnostics
 are sanitized. Client cancellation on covered coding endpoints stops upstream
 work and suppresses success terminals, retry, and failover after abort.
+
+Errors on `/v1/messages` and `/v1/messages/count_tokens` use Anthropic's
+envelope, `{"type":"error","error":{"type":...,"message":...}}`, with the HTTP
+status and any `Retry-After` header kept. The type follows the status:
+`invalid_request_error` for `400`, `413` and `422`, `authentication_error` for
+`401`, `permission_error` for `403`, `not_found_error` for `404`,
+`rate_limit_error` for `429`, `overloaded_error` for `529`, and `api_error` for
+other `5xx`. Other routes use `{"error":{"message":...,"type":...,"code":...}}`.
 
 A stream whose upstream fails after the first byte, or closes the stream
 before its end, ends with the surface's error event and never with its success
