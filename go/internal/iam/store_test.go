@@ -539,3 +539,44 @@ VALUES('missing-project','missing-principal','member',0)`)
 		t.Fatal("foreign-key violation should fail")
 	}
 }
+
+// A stopped gateway closes the database, which folds the write-ahead log back
+// into gateway.db; a later caller gets a fresh handle.
+func TestCloseCheckpointsTheDatabase(t *testing.T) {
+	state := t.TempDir()
+	t.Setenv("LLMGW_STATE_DIR", state)
+	ResetForTests()
+	t.Cleanup(ResetForTests)
+
+	db, err := DB()
+	if err != nil {
+		t.Fatalf("DB: %v", err)
+	}
+	if _, err := db.Exec(`INSERT INTO projects(id, slug, name, created_at, updated_at) VALUES('p1','one','One',0,0)`); err != nil {
+		t.Fatal(err)
+	}
+	wal := filepath.Join(state, "gateway.db-wal")
+	if _, err := os.Stat(wal); err != nil {
+		t.Fatalf("an open database has no write-ahead log: %v", err)
+	}
+	if err := Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+	if err := db.Ping(); err == nil {
+		t.Fatal("the closed handle still answers")
+	}
+	if _, err := os.Stat(wal); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("the write-ahead log outlived Close: %v", err)
+	}
+	if err := Close(); err != nil {
+		t.Fatalf("a second Close: %v", err)
+	}
+	reopened, err := DB()
+	if err != nil {
+		t.Fatalf("DB after Close: %v", err)
+	}
+	var slug string
+	if err := reopened.QueryRow(`SELECT slug FROM projects WHERE id='p1'`).Scan(&slug); err != nil || slug != "one" {
+		t.Fatalf("reopened database lost the write: slug=%q err=%v", slug, err)
+	}
+}

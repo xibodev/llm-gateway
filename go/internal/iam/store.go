@@ -101,13 +101,20 @@ func sqliteDSN(path string, pragmas ...string) (string, error) {
 	return uri.String(), nil
 }
 
-// ResetForTests closes the cached database handle.
-func ResetForTests() {
+// Close closes the cached database handle; a later DB call opens a new one.
+// Closing the last connection checkpoints the write-ahead log, so a stopped
+// gateway leaves gateway.db self-contained.
+func Close() error {
 	storeMu.Lock()
 	defer storeMu.Unlock()
-	if storeDB != nil {
-		_ = storeDB.Close()
+	if storeDB == nil {
+		return nil
 	}
+	err := storeDB.Close()
 	storeDB = nil
 	storePath = ""
+	return err
 }
+
+// ResetForTests closes the cached database handle.
+func ResetForTests() { _ = Close() }

@@ -13,6 +13,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"net"
 	"net/http"
 	"os"
 	"os/signal"
@@ -58,7 +59,9 @@ func main() {
 	}
 	switch cmd {
 	case "serve", "run":
-		serve()
+		if err := serve(); err != nil {
+			log.Fatal(err)
+		}
 	case "health":
 		healthCheck()
 	case "-h", "--help", "help":
@@ -95,14 +98,14 @@ func healthCheck() {
 	}
 }
 
-func serve() {
+func serve() error {
 	lock, err := operations.AcquireStateLock()
 	if err != nil {
-		log.Fatal(err)
+		return err
 	}
 	defer lock.Release()
 	if err := operations.RecoverInterruptedRestore(); err != nil {
-		log.Fatal(err)
+		return err
 	}
 
 	const defaultRosterURL = "https://xibodev.github.io/llm-gateway/roster/payload.json"
@@ -112,13 +115,20 @@ func serve() {
 
 	config.Load()
 	if migrated, err := iam.Initialize(); err != nil {
-		log.Fatalf("initialize IAM control plane: %v", err)
+		return fmt.Errorf("initialize IAM control plane: %w", err)
 	} else if migrated.Keys > 0 {
 		log.Printf(
 			"migrated %d legacy API keys into gateway.db (%d projects, %d principals)",
 			migrated.Keys, migrated.Projects, migrated.Principals,
 		)
 	}
+	// Deferred here so it runs after the workers below have stopped and
+	// before the state lock is released.
+	defer func() {
+		if err := iam.Close(); err != nil {
+			log.Printf("close IAM database: %v", err)
+		}
+	}()
 	// The runtimes own the provider and routing state. Code that does not take
 	// them explicitly yet reaches them as the installed ones, so they are
 	// installed before anything that could use them starts.
@@ -126,9 +136,27 @@ func serve() {
 	providers.Install(providerRuntime)
 	routerRuntime := router.NewRuntime(providerRuntime)
 	router.Install(routerRuntime)
+
+	host := getenv("LLMGW_HOST", "127.0.0.1")
+	port := getenv("LLMGW_PORT", "8787")
+	if _, err := strconv.Atoi(port); err != nil {
+		port = "8787"
+	}
+	addr := host + ":" + port
+	// Bound before any background worker starts, so a port already in use
+	// fails the start before a worker touches state.
+	listener, err := net.Listen("tcp", addr)
+	if err != nil {
+		return fmt.Errorf("listen on %s: %w", addr, err)
+	}
+	defer listener.Close()
+	drain := shutdownTimeout()
+	ctx, stopSignals := shutdownOnSignal(drain)
+	defer stopSignals()
+
 	externalKeysStop, err := iam.StartExternalKeysFromEnv(context.Background())
 	if err != nil {
-		log.Fatalf("initialize external gateway keys: %v", err)
+		return fmt.Errorf("initialize external gateway keys: %w", err)
 	}
 	defer externalKeysStop()
 	retentionStop := startRetention(routerRuntime)
@@ -147,30 +175,95 @@ func serve() {
 		}()
 	}
 
-	host := getenv("LLMGW_HOST", "127.0.0.1")
-	port := getenv("LLMGW_PORT", "8787")
-	if _, err := strconv.Atoi(port); err != nil {
-		port = "8787"
-	}
-	addr := host + ":" + port
-
 	srv := newHTTPServer(api.NewServer(api.Runtime{Providers: providerRuntime, Router: routerRuntime}))
-	srv.Addr = addr
+	log.Printf("llm-gateway %s (%s) listening on http://%s (admin at /admin)", buildinfo.Version, buildinfo.Commit, addr)
+	switch err := serveUntilShutdown(ctx, srv, listener, drain); {
+	case errors.Is(err, errDrainExpired):
+		// Requests cut short by a stop are its expected cost, not a failure.
+		log.Print(err)
+		return nil
+	case err != nil:
+		return fmt.Errorf("server error: %w", err)
+	}
+	return nil
+}
 
-	go func() {
-		log.Printf("llm-gateway %s (%s) listening on http://%s (admin at /admin)", buildinfo.Version, buildinfo.Commit, addr)
-		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			log.Fatalf("server error: %v", err)
-		}
-	}()
+// defaultShutdownTimeout gives a long streamed completion time to finish. A
+// container's stop grace period has to be longer, or the runtime kills the
+// process mid-drain.
+const defaultShutdownTimeout = 25 * time.Second
 
-	stop := make(chan os.Signal, 1)
-	signal.Notify(stop, os.Interrupt, syscall.SIGTERM)
-	<-stop
-	log.Print("shutting down…")
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+// shutdownTimeout is how long a stop waits for requests in flight:
+// LLMGW_SHUTDOWN_TIMEOUT_SECONDS whole seconds, where zero closes them at once.
+func shutdownTimeout() time.Duration {
+	seconds, err := strconv.Atoi(strings.TrimSpace(os.Getenv("LLMGW_SHUTDOWN_TIMEOUT_SECONDS")))
+	if err != nil || seconds < 0 {
+		return defaultShutdownTimeout
+	}
+	return time.Duration(seconds) * time.Second
+}
+
+// shutdownOnSignal returns a context that ends at the first SIGINT or SIGTERM,
+// and a function that stops listening for them. A second signal exits at once
+// rather than waiting out the drain.
+func shutdownOnSignal(drain time.Duration) (context.Context, func()) {
+	ctx, cancel := context.WithCancel(context.Background())
+	signals := make(chan os.Signal, 1)
+	signal.Notify(signals, os.Interrupt, syscall.SIGTERM)
+	go relayShutdownSignals(signals, func() {
+		log.Printf("shutting down; draining requests in flight for up to %s", drain)
+		cancel()
+	}, func() {
+		log.Print("second signal; exiting without waiting for the drain")
+		os.Exit(1)
+	})
+	return ctx, func() {
+		// Stop guarantees no further delivery, so the channel can be closed.
+		signal.Stop(signals)
+		close(signals)
+		cancel()
+	}
+}
+
+// relayShutdownSignals calls shutdown on the first signal and force on the
+// second. It returns once signals is closed.
+func relayShutdownSignals(signals <-chan os.Signal, shutdown, force func()) {
+	if _, ok := <-signals; !ok {
+		return
+	}
+	shutdown()
+	if _, ok := <-signals; ok {
+		force()
+	}
+}
+
+// errDrainExpired reports a stop that closed requests still in flight when
+// the drain ran out.
+var errDrainExpired = errors.New("shutdown drain expired; closed the requests still in flight")
+
+// serveUntilShutdown serves srv on listener until ctx is done. It then stops
+// accepting connections and gives requests in flight, streams included, up to
+// drain to finish and record their usage, and closes whatever is still open
+// after that. A serving failure is returned rather than ending the process,
+// so the caller still stops its workers and releases its state.
+func serveUntilShutdown(ctx context.Context, srv *http.Server, listener net.Listener, drain time.Duration) error {
+	served := make(chan error, 1)
+	go func() { served <- srv.Serve(listener) }()
+	select {
+	case err := <-served:
+		_ = srv.Close()
+		return err
+	case <-ctx.Done():
+	}
+	drainCtx, cancel := context.WithTimeout(context.Background(), drain)
 	defer cancel()
-	_ = srv.Shutdown(ctx)
+	err := srv.Shutdown(drainCtx)
+	if errors.Is(err, context.DeadlineExceeded) {
+		_ = srv.Close()
+		err = errDrainExpired
+	}
+	<-served
+	return err
 }
 
 // newHTTPServer returns the gateway's HTTP server for handler.
@@ -221,7 +314,9 @@ func startRetention(routes *router.Runtime) func() {
 				telemetry, savings, backups)
 		}
 	}
+	done := make(chan struct{})
 	go func() {
+		defer close(done)
 		run()
 		ticker := time.NewTicker(24 * time.Hour)
 		defer ticker.Stop()
@@ -234,7 +329,9 @@ func startRetention(routes *router.Runtime) func() {
 			}
 		}
 	}()
-	return func() { close(stop) }
+	// Stopping waits out a run in progress, so the database it prunes is not
+	// closed under it.
+	return func() { close(stop); <-done }
 }
 
 func backupCommand(args []string, output io.Writer) error {

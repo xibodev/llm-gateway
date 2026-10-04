@@ -26,6 +26,9 @@ the loopback host port only; the container stays on port 8787. The image runs
 as UID/GID 65532 and already includes `/llmgw health` as an exec-form healthcheck.
 Do not replace it with shell/curl commands: the runtime image has no shell.
 
+A stop lets requests in flight finish for up to `LLMGW_SHUTDOWN_TIMEOUT_SECONDS`
+(default 25), so a container's stop grace period must exceed that timeout.
+
 Keep the encryption key separately from state backups and never regenerate it
 with existing state. Use [image upgrades](UPGRADING.md#standalone-image-installation)
 instead of rebuilding, and never use `down -v` for routine maintenance.

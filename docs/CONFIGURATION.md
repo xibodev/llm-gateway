@@ -112,6 +112,7 @@ backups and pruned with the usage-retention window.
 | `LLMGW_HOST` | `127.0.0.1` | Listen host. Containers set `0.0.0.0` and publish loopback or place a proxy in front. |
 | `LLMGW_PORT` | `8787` | Listen port. |
 | `LLMGW_MAX_REQUEST_BODY_BYTES` | `67108864` | Largest request body accepted, in bytes; a larger one is refused with `413`. Values below `1048576` are raised to it, and invalid values use the default. |
+| `LLMGW_SHUTDOWN_TIMEOUT_SECONDS` | `25` | Whole seconds a stop (SIGINT or SIGTERM) gives requests in flight, streams included, to finish before closing them; `0` closes them at once. A second signal exits immediately. |
 | `LLMGW_STATE_DIR` | `~/.llmgw` | Writable state directory. |
 | `LLMGW_CONFIG` | `<state>/config.yaml` | Writable runtime configuration path. |
 | `LLMGW_CONFIG_SEED` | unset | Read-once seed copied only when `LLMGW_CONFIG` is missing. |
