@@ -133,9 +133,12 @@ func TestAzureCallerCancellationEndsTheUpstreamRequest(t *testing.T) {
 }
 
 // The resilience wrapper waits for a native Messages or token-count retry on
-// the caller's context, so a caller that leaves ends the wait.
+// the caller's context, so a caller that leaves ends the wait. The failure
+// asks for a five-second Retry-After and the policy has no backoff, so the
+// wait is exactly that long: a backoff, drawn with full jitter, could be
+// shorter than the caller's deadline and let the retry run first.
 func TestResilientAnthropicRetryWaitEndsWithTheCaller(t *testing.T) {
-	policy := config.ProviderPolicy{RetryMaxAttempts: 2, RetryInitialBackoffSeconds: 10, RetryBackoffMultiplier: 1, RetryMaxBackoffSeconds: 10}
+	policy := config.ProviderPolicy{RetryMaxAttempts: 2}
 	for name, call := range map[string]func(context.Context, *ResilientProvider) error{
 		"messages": func(ctx context.Context, p *ResilientProvider) error {
 			_, err := p.CompleteAnthropicMessagesContext(ctx, "model", map[string]any{})
@@ -147,7 +150,7 @@ func TestResilientAnthropicRetryWaitEndsWithTheCaller(t *testing.T) {
 		},
 	} {
 		t.Run(name, func(t *testing.T) {
-			failure := invocationStatus("busy", http.StatusServiceUnavailable)
+			failure := invocationStatusRetryAfter("busy", http.StatusServiceUnavailable, "5")
 			var inner Provider = &messagesTestProvider{err: failure}
 			if name == "count" {
 				inner = &tokenCounterTestProvider{err: failure}
