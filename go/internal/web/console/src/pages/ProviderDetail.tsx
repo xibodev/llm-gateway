@@ -88,7 +88,7 @@ export function ProviderDetail({ entryID, data, mode, onChanged, onBack, onOpenP
 
   const owners = asList(data.principals).map(asRecord).filter((principal) => stringValue(principal.kind) === "human" && stringValue(principal.status, "active") === "active");
   const [ownerID, setOwnerID] = useState(stringValue(owners[0]?.id));
-  const { busy, result, runLifecycle } = useProviderLifecycle(ownerID, onChanged);
+  const { busy, result, setResult, runLifecycle } = useProviderLifecycle(ownerID, onChanged);
   const [connectOpen, setConnectOpen] = useState(false);
   const [zenAPIKey, setZenAPIKey] = useState(false);
   const [privateKeyOpen, setPrivateKeyOpen] = useState(false);
@@ -182,6 +182,8 @@ export function ProviderDetail({ entryID, data, mode, onChanged, onBack, onOpenP
     try {
       await sendJSON<JSONRecord>("admin", `/providers/${encodeURIComponent(providerID)}/enabled`, "POST", { enabled: enable });
       await onChanged();
+    } catch (cause) {
+      setResult({ title: `${providerID} ${enable ? "enable" : "disable"}`, success: false, detail: cause instanceof Error ? cause.message : "The provider could not be updated." });
     } finally {
       setToggleBusy("");
     }
@@ -198,6 +200,8 @@ export function ProviderDetail({ entryID, data, mode, onChanged, onBack, onOpenP
         : `/principals/${encodeURIComponent(principalID)}/connections/${encodeURIComponent(connectionID)}`;
       await sendJSON<JSONRecord>(mode, path, "DELETE");
       await onChanged();
+    } catch (cause) {
+      setResult({ title: `Disconnect ${stringValue(connection.connection_name, "account")}`, success: false, detail: cause instanceof Error ? cause.message : "The connection could not be removed." });
     } finally { setConnectionBusy(""); }
   };
 

@@ -1,4 +1,4 @@
-import type { ComponentChildren } from "preact";
+import { Component, type ComponentChildren } from "preact";
 import { AlertCircle, Inbox, LoaderCircle } from "lucide-preact";
 
 type StatePanelProps = {
@@ -32,6 +32,27 @@ export function ErrorState({ title, detail, action }: StatePanelProps) {
       <div><h2>{title}</h2><p>{detail}</p>{action}</div>
     </section>
   );
+}
+
+// RenderBoundary turns a render error into a panel instead of an empty
+// console. Around a page it keeps the shell and navigation usable, and a new
+// resetKey (another page or detail) renders the children again.
+export class RenderBoundary extends Component<{ resetKey?: string }, { failed: boolean }> {
+  state = { failed: false };
+
+  componentDidCatch(error: unknown) {
+    console.error(error);
+    this.setState({ failed: true });
+  }
+
+  componentDidUpdate(previous: Readonly<{ resetKey?: string }>) {
+    if (this.state.failed && previous.resetKey !== this.props.resetKey) this.setState({ failed: false });
+  }
+
+  render() {
+    if (!this.state.failed) return this.props.children;
+    return <ErrorState title="This view could not be displayed" detail="An unexpected error stopped this view from rendering. Open another page or reload the console." action={<button class="button button--primary" type="button" onClick={() => window.location.reload()}>Reload console</button>} />;
+  }
 }
 
 export function PageHeading({ eyebrow, title, detail, actions }: { eyebrow: string; title: string; detail: string; actions?: ComponentChildren }) {

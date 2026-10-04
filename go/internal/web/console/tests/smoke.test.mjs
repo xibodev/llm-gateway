@@ -185,7 +185,7 @@ test("official OAuth onboarding auto-opens, polls, tests, and reports the result
   assert.match(oauth, /let refreshed = true/);
   assert.match(oauth, /Reload the console to refresh the provider card/);
   assert.doesNotMatch(oauth, /> Check authorization</);
-  assert.match(app, /const refresh = \(\) => load\(false\)/);
+  assert.match(app, /const refresh = async \(\) => \{\s*const failure = await load\(false\);/);
   assert.match(app, /<Providers data=\{data\} mode=\{mode\} detail=\{route.detail\} onChanged=\{refresh\} onNavigate=\{navigate\}/);
   const hub = readFileSync(resolve(root, "src/components/providers/ProviderHub.tsx"), "utf8");
   assert.match(hub, /Add account/);

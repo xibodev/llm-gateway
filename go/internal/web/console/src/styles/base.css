@@ -211,6 +211,8 @@ tbody tr:last-child td { border-bottom: 0; }
 .action-notice span { color: #62707d; font-size: 0.78rem; line-height: 1.45; }
 .action-notice--success { border-color: #c9ddcf; background: #f5faf6; }
 .action-notice--warning { border-color: #ead8b7; background: #fffaf1; }
+.refresh-notice { align-items: center; flex-wrap: wrap; margin-bottom: 20px; }
+.refresh-notice span { flex: 1 1 260px; }
 .candidate-list { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 10px; margin-top: 16px; }
 .candidate-list > div { padding: 12px; border: 1px solid #e0e5ea; background: #fafbfc; border-radius: 5px; }
 .candidate-list strong, .candidate-list span, .candidate-list small { display: block; }

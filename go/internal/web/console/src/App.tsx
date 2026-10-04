@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "preact/hooks";
 import { AppShell } from "./components/AppShell";
-import { ErrorState, LoadingState } from "./components/PageState";
+import { ErrorState, LoadingState, RenderBoundary } from "./components/PageState";
 import { APIError, authenticationRedirectCode, clearStaticAdminKey, getJSON, hasStaticAdminKey, storeStaticAdminKey, type JSONRecord } from "./lib/api";
 import { modeForPath, type ConsoleMode } from "./lib/mode";
 import { asList, asRecord, stringValue } from "./lib/records";
@@ -71,19 +71,22 @@ export function App() {
     };
   }, [page, route.detail]);
 
-  const load = async (showLoading = true) => {
+  // load resolves to the failure, if any, instead of throwing: the initial load
+  // has no caller to catch it, while refresh reports it to the caller.
+  const load = async (showLoading = true): Promise<Error | null> => {
     if (showLoading) setLoading(true);
     setError(null);
     try {
       const endpoint = mode === "portal" ? "/me" : "/state";
       setData(await getJSON<JSONRecord>(mode, endpoint));
       if (mode === "admin") setAdminSignInRequired(false);
+      return null;
     } catch (cause) {
-      const message = cause instanceof Error ? cause.message : "The console could not load gateway state.";
-      setError(message);
+      const failure = cause instanceof Error ? cause : new Error("The console could not load gateway state.");
+      setError(failure.message);
       if (cause instanceof APIError && cause.code === authenticationRedirectCode) {
         window.location.assign(mode === "portal" ? "/portal" : "/admin");
-        return;
+        return failure;
       }
       if (mode === "admin" && cause instanceof APIError && cause.status === 401) {
         const rejectedStaticKey = hasStaticAdminKey();
@@ -94,11 +97,18 @@ export function App() {
           setError("Invalid administrator key. Check the value and try again.");
         }
       }
+      return failure;
     } finally {
       if (showLoading) setLoading(false);
     }
   };
-  const refresh = () => load(false);
+  // Pages call refresh after their own request succeeded. A failure keeps the
+  // last good state on screen, so an open dialog such as the one-time key value
+  // survives, and rejects with wording that stays true for every caller.
+  const refresh = async () => {
+    const failure = await load(false);
+    if (failure) throw new Error(`The request succeeded, but the console could not reload the latest gateway state: ${failure.message}`);
+  };
 
   useEffect(() => { void load(true); }, [mode]);
   useEffect(() => {
@@ -140,11 +150,13 @@ export function App() {
   };
 
   let content = <LoadingState />;
+  // Only a console with nothing loaded yet gives the whole page to an error; a
+  // failed refresh keeps the last good state and reports beside it.
+  let refreshNotice: preact.ComponentChildren = null;
   if (!loading && isAdmin && adminSignInRequired) {
     content = <StaticAdminSignIn error={error} onSignedIn={signedInWithStaticAdminKey} />;
-  } else if (!loading && error) {
-    content = <ErrorState title="Workspace state is unavailable" detail={error} action={<button class="button button--primary" type="button" onClick={() => void load(true)}>Retry</button>} />;
   } else if (!loading && data) {
+    if (error) refreshNotice = <section class="action-notice action-notice--warning refresh-notice" role="alert"><strong>Refresh failed</strong><span>{error} Showing the last loaded gateway state.</span><button class="button button--secondary" type="button" onClick={() => void load(false)}>Retry</button></section>;
     switch (page) {
       case "providers": content = <Providers data={data} mode={mode} detail={route.detail} onChanged={refresh} onNavigate={navigate} />; break;
       case "routes": content = <Routes data={data} mode={mode} detail={route.detail} onChanged={refresh} onNavigate={navigate} />; break;
@@ -169,11 +181,13 @@ export function App() {
       case "settings": content = <Settings data={data} mode={mode} onNavigate={navigate} />; break;
       default: content = <Overview data={data} mode={mode} onNavigate={navigate} />;
     }
+  } else if (!loading && error) {
+    content = <ErrorState title="Workspace state is unavailable" detail={error} action={<button class="button button--primary" type="button" onClick={() => void load(true)}>Retry</button>} />;
   }
 
   const principal = mode === "portal" ? asRecord(data?.principal) : {};
   const identityName = stringValue(principal.display_name, stringValue(principal.email));
   const identityDetail = stringValue(principal.email);
 
-  return <AppShell mode={mode} navigation={navigation} currentPage={page} onNavigate={navigate} identityName={identityName} identityDetail={identityDetail} staticAdminKeyActive={isAdmin && staticAdminKeyActive} onStaticAdminSignOut={isAdmin ? signOutStaticAdminKey : undefined}>{content}</AppShell>;
+  return <AppShell mode={mode} navigation={navigation} currentPage={page} onNavigate={navigate} identityName={identityName} identityDetail={identityDetail} staticAdminKeyActive={isAdmin && staticAdminKeyActive} onStaticAdminSignOut={isAdmin ? signOutStaticAdminKey : undefined}>{refreshNotice}<RenderBoundary resetKey={`${page}/${route.detail}`}>{content}</RenderBoundary></AppShell>;
 }
