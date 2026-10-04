@@ -14,7 +14,40 @@ import {
   routeResultPassed,
   schema,
   selectHealthyModels,
+  sendWithReplay,
 } from "./core.mjs";
+
+test("an unusable 2xx answer is replayed once and errors never are", async () => {
+  const passed = (result) => result.status === 200 && Boolean(result.text);
+  const sender = (...answers) => {
+    let calls = 0;
+    const send = async () => answers[Math.min(calls++, answers.length - 1)];
+    return { send, calls: () => calls };
+  };
+
+  let probe = sender({ status: 200, text: "hello" });
+  let outcome = await sendWithReplay(probe.send, passed);
+  assert.equal(probe.calls(), 1);
+  assert.deepEqual(outcome, { result: { status: 200, text: "hello" }, first: null });
+
+  probe = sender({ status: 200, text: "", finish_reason: "length" }, { status: 200, text: "hello" });
+  outcome = await sendWithReplay(probe.send, passed);
+  assert.equal(probe.calls(), 2);
+  assert.equal(outcome.result.text, "hello");
+  assert.equal(outcome.first.finish_reason, "length");
+
+  probe = sender({ status: 200, text: "" }, { status: 200, text: "" });
+  outcome = await sendWithReplay(probe.send, passed);
+  assert.equal(probe.calls(), 2, "a replay is sent only once");
+  assert.equal(passed(outcome.result), false);
+
+  for (const status of [400, 429, 500, 0]) {
+    probe = sender({ status, text: "" });
+    outcome = await sendWithReplay(probe.send, passed);
+    assert.equal(probe.calls(), 1, `status ${status} is not replayed`);
+    assert.equal(outcome.first, null);
+  }
+});
 
 test("chat evidence requires text from the expected served model", () => {
   const result = (content, model = "model") => ({

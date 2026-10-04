@@ -121,6 +121,18 @@ export function routeResultPassed(payload, members, minimumAttempts = 1) {
     attempts >= minimumAttempts && attempts <= members.length;
 }
 
+// sendWithReplay sends a request and, when the answer is a 2xx that passed
+// rejects, sends the same request once more. A free model answers one
+// request at a time with no fixed output, so one unusable answer, such as a
+// reasoning model spending its token budget before it writes any content, is
+// evidence about that answer and not about the gateway; an error status is
+// never replayed. first holds the unusable answer when a replay was sent.
+export async function sendWithReplay(send, passed) {
+  const result = await send();
+  if (passed(result) || !(result?.status >= 200 && result.status < 300)) return { result, first: null };
+  return { result: await send(), first: result };
+}
+
 export function evaluatePolicy(report) {
   const hardFailures = [];
   const warnings = [];

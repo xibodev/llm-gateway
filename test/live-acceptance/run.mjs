@@ -18,6 +18,7 @@ import {
   safeExcerpt,
   schema,
   selectHealthyModels,
+  sendWithReplay,
 } from "./core.mjs";
 
 const exec = promisify(execFile);
@@ -27,7 +28,9 @@ const output = resolve(process.env.LLMGW_ACCEPTANCE_REPORT || `${repo}/test/live
 const port = Number(process.env.LLMGW_ACCEPTANCE_PORT || 18810);
 const sweepConcurrency = Math.max(1, Number(process.env.LLMGW_ACCEPTANCE_CONCURRENCY || 1));
 const modelTimeout = Math.max(5_000, Number(process.env.LLMGW_ACCEPTANCE_MODEL_TIMEOUT_MS || 180_000));
-const completionMaxTokens = 512;
+// Free reasoning models can spend a small budget on reasoning before they
+// write any content, which would make the answer to "hi" unusable.
+const completionMaxTokens = 2048;
 const baseURL = `http://127.0.0.1:${port}`;
 const runID = `${Date.now()}-${process.pid}`;
 const project = `llmgw-live-${runID}`;
@@ -409,7 +412,8 @@ async function testAPIs(key, plans, healthy) {
     const plan = plans.find((item) => item.name === target.name);
     const validModels = plan ? plan.members.filter((m) => !m.provider.startsWith("fault-")).map((item) => item.model) : [healthy[0].model];
     const targetFinal = plan ? (plan.members.find((m) => !m.provider.startsWith("fault-")) || healthy[0]) : healthy[0];
-    const chat = await request("/v1/chat/completions", { method: "POST", key, body: { model: target.name, messages: [{ role: "user", content: "hi" }], max_tokens: completionMaxTokens }, timeout: 90_000 });
+    const chatRequest = { method: "POST", key, body: { model: target.name, messages: [{ role: "user", content: "hi" }], max_tokens: completionMaxTokens }, timeout: 90_000 };
+    const chat = await requestWithReplay(`chat:${target.name}`, "/v1/chat/completions", chatRequest, (result) => chatCompletionPassed(result, validModels), validModels[0]);
     const chatBody = chatText(chat.json);
     report.api.push({ surface: "chat", target: target.name, status: chat.status, duration_ms: chat.duration_ms, text: safeExcerpt(chatBody), error: safeExcerpt(errorText(chat)) });
     const chatModel = chat.json?.model || "";
@@ -425,15 +429,28 @@ async function testAPIs(key, plans, healthy) {
       const valid = attempts === target.expectedAttempts && served === expectedServed && JSON.stringify(order) === JSON.stringify(expectedOrder) && (target.expectedAttempts < 2 || event?.attempts?.[0]?.throttled === true);
       check(`trace:${target.name}`, valid ? "passed" : "failed", `attempts=${attempts}, served=${served}, order=${order.join(" -> ")}`, true);
     }
-    const messages = await request("/v1/messages", { method: "POST", key, body: { model: target.name, messages: [{ role: "user", content: "hi" }], max_tokens: completionMaxTokens }, timeout: 90_000 });
+    const messagesRequest = { method: "POST", key, body: { model: target.name, messages: [{ role: "user", content: "hi" }], max_tokens: completionMaxTokens }, timeout: 90_000 };
+    const messagesAnswered = (result) => result.status === 200 && Boolean(messagesText(result.json)) && validModels.includes(result.json?.model);
+    const messages = await requestWithReplay(`messages:${target.name}`, "/v1/messages", messagesRequest, messagesAnswered, validModels[0]);
     const messageBody = messagesText(messages.json);
     report.api.push({ surface: "messages", target: target.name, status: messages.status, duration_ms: messages.duration_ms, text: safeExcerpt(messageBody), error: safeExcerpt(errorText(messages)) });
-    const messagesPassed = messages.status === 200 && Boolean(messageBody) && validModels.includes(messages.json?.model);
+    const messagesPassed = messagesAnswered(messages);
     await recordLiveCheck(`messages:${target.name}`, messagesPassed, messages, targetFinal);
     if (target.kind !== "exact" && chat.status === 200 && Boolean(chatBody) && messagesPassed) routePasses++;
   }
   check("api-evidence", report.api.some((item) => item.status === 200) ? "passed" : "inconclusive", `${report.api.filter((item) => item.status === 200).length}/${report.api.length} API call(s) passed`, true);
   check("route-evidence", routePasses > 0 ? "passed" : "inconclusive", `${routePasses}/${plans.length} route(s) passed Chat and Messages`, true);
+}
+
+// requestWithReplay sends one gateway request through sendWithReplay. A
+// replay that passes is recorded as a warning that names the unusable first
+// answer; one that fails keeps that answer as evidence beside its own.
+async function requestWithReplay(name, path, options, passed, expectedModel) {
+  const { result, first } = await sendWithReplay(() => request(path, options), passed);
+  if (!first) return result;
+  result.firstEvidence = responseEvidence(first, expectedModel);
+  if (passed(result)) check(`replay:${name}`, "warning", `equivalent replay passed after unusable 2xx response: ${JSON.stringify(result.firstEvidence)}`, false);
+  return result;
 }
 
 async function recordLiveCheck(name, passed, result, finalModel) {
@@ -696,15 +713,8 @@ async function restartAndCheck(identity, healthy, plans) {
   let restartPasses = 0;
   for (const target of [`${healthy[0].provider}/${healthy[0].model}`, plans.at(-1).name]) {
     const requestOptions = { method: "POST", key: identity.token, body: { model: target, messages: [{ role: "user", content: "hi" }], max_tokens: completionMaxTokens }, timeout: 90_000 };
-    let result = await request("/v1/chat/completions", requestOptions);
-    let ok = chatCompletionPassed(result, healthy[0].model);
-    if (!ok && result.status >= 200 && result.status < 300) {
-      const first = responseEvidence(result, healthy[0].model);
-      result = await request("/v1/chat/completions", requestOptions);
-      result.firstEvidence = first;
-      ok = chatCompletionPassed(result, healthy[0].model);
-      if (ok) check(`restart-replay:${target}`, "warning", `equivalent replay passed after unusable 2xx response: ${JSON.stringify(first)}`, false);
-    }
+    const result = await requestWithReplay(`restart-chat:${target}`, "/v1/chat/completions", requestOptions, (answer) => chatCompletionPassed(answer, healthy[0].model), healthy[0].model);
+    const ok = chatCompletionPassed(result, healthy[0].model);
     if (ok) restartPasses++;
     if (ok || mode !== "live") check(`restart-chat:${target}`, ok ? "passed" : "failed", errorText(result) || chatText(result.json), true);
     else await recordLiveCheck(`restart-chat:${target}`, false, result, healthy[0]);
