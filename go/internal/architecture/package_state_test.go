@@ -34,11 +34,11 @@ type allowedVariable struct {
 // The list only shrinks: an entry whose variable is gone fails, so a removal
 // is locked in, and an addition needs a reason that survives review.
 var allowedPackageState = map[string]allowedVariable{
-	"providers.installed":                 {documentedSeam, "the runtime seam: the Runtime that code without one of its own reaches through Current"},
-	"router.installed":                    {documentedSeam, "the runtime seam: the router Runtime that code without one of its own reaches through Current"},
-	"providers.ProviderTypes":             {documentedConstant, "the runtime types the registry overlay is validated against; only read"},
-	"providers.providerRegistry":          {documentedConstant, "the effective registry, built once from the embedded overlay; only read"},
-	"router.defaultPrices":                {documentedConstant, "the built-in price table the savings ledger only reads"},
+	"providers.installed":        {documentedSeam, "the runtime seam: the Runtime that code without one of its own reaches through Current"},
+	"router.installed":           {documentedSeam, "the runtime seam: the router Runtime that code without one of its own reaches through Current"},
+	"providers.ProviderTypes":    {documentedConstant, "the runtime types the registry overlay is validated against; only read"},
+	"providers.providerRegistry": {documentedConstant, "the effective registry, built once from the embedded overlay; only read"},
+	"router.defaultPrices":       {documentedConstant, "the built-in price table the savings ledger only reads"},
 }
 
 type packageVariable struct {
