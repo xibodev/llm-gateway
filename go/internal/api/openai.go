@@ -238,7 +238,7 @@ func chatDispatch(w http.ResponseWriter, r *http.Request, req *chatRequest, prin
 		}
 	}
 
-	targets, polStatus, polMsg := enforceKeyPolicy(principal, req.Model, resolution.Category, targets)
+	targets, polStatus, polMsg := authorizeKeyPolicy(principal, req.Model, resolution.Category, targets)
 	if polStatus != 0 {
 		recordFailureUsage(endpoint, req.Model, principal, polStatus, "policy", started)
 		writeError(w, polStatus, polMsg)
@@ -269,6 +269,9 @@ func chatDispatch(w http.ResponseWriter, r *http.Request, req *chatRequest, prin
 			writeUpstreamError(w, providerErr)
 			return
 		}
+		if !admitRequest(w, endpoint, req.Model, principal, "policy", started) {
+			return
+		}
 		kw["_force_api_support"] = false
 		ctx := fallbackContext(r, req.FallbackTimeoutMS, req.AffinityKey)
 		response, providerErr := providers.CompleteProviderContext(ctx, provider, target.Model, msgs, kw)
@@ -281,6 +284,9 @@ func chatDispatch(w http.ResponseWriter, r *http.Request, req *chatRequest, prin
 		w.Header().Set(transportModeHeader, "transparent")
 		recordFromResponse(endpoint, req.Model, &served, principal, response, time.Since(started).Milliseconds())
 		writeJSON(w, http.StatusOK, response)
+		return
+	}
+	if !admitRequest(w, endpoint, req.Model, principal, "policy", started) {
 		return
 	}
 

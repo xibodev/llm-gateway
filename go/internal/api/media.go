@@ -116,7 +116,7 @@ func resolveMediaTarget(principal *config.Principal, model string, operation cor
 		}
 		return "", "", http.StatusInternalServerError, "Gateway is not configured for the requested model."
 	}
-	targets, status, message := enforceKeyPolicy(principal, model, resolution.Category, resolution.Targets)
+	targets, status, message := authorizeKeyPolicy(principal, model, resolution.Category, resolution.Targets)
 	if status != 0 {
 		return "", "", status, message
 	}
@@ -184,6 +184,9 @@ func handleImageGenerations(w http.ResponseWriter, r *http.Request) {
 	if !supported {
 		recordFailureUsage("openai.images", body.Model, principal, 400, "image_unsupported", started)
 		writeError(w, 400, "provider '"+providerID+"' does not generate images")
+		return
+	}
+	if !admitRequest(w, "openai.images", body.Model, principal, "policy_or_route", started) {
 		return
 	}
 	var images []providers.GeneratedImage
@@ -278,6 +281,9 @@ func handleVideoGenerations(w http.ResponseWriter, r *http.Request) {
 			writeError(w, status, message)
 			return
 		}
+		if !admitRequest(w, "openai.videos", body.Model, principal, "policy_or_route", started) {
+			return
+		}
 		var job providers.VideoJob
 		var err error
 		if contextual, ok := generator.(providers.ContextVideoGenerator); ok {
@@ -296,6 +302,9 @@ func handleVideoGenerations(w http.ResponseWriter, r *http.Request) {
 	if strings.TrimSpace(body.Prompt) == "" {
 		recordFailureUsage("openai.videos", body.Model, principal, 400, "missing_prompt", started)
 		writeError(w, 400, "'prompt' is required to start a generation, or pass 'operation' to poll one")
+		return
+	}
+	if !admitRequest(w, "openai.videos", body.Model, principal, "policy_or_route", started) {
 		return
 	}
 	var job providers.VideoJob

@@ -32,9 +32,10 @@ import (
 // Category-style failover across providers is NOT offered here on purpose.
 //
 // It still goes through the full governance path — `authed`, then
-// `ResolveForPrincipal`, then `enforceKeyPolicy` (project/key allowlists,
-// provider authorisation, and the durable RPM/day/month/budget consumption) —
-// so an embeddings call is metered and refused exactly like any other.
+// `ResolveForPrincipal`, then `authorizeKeyPolicy` (project/key allowlists and
+// provider authorisation) and, once the request is valid, `admitKeyPolicy`
+// (the durable RPM/day/month/budget consumption) — so an embeddings call is
+// metered and refused exactly like any other.
 
 var embeddingsClient = &http.Client{
 	Timeout:       120 * time.Second,
@@ -116,6 +117,9 @@ func handleEmbeddings(w http.ResponseWriter, r *http.Request) {
 				writeError(w, http.StatusBadRequest, "only encoding_format 'float' is supported by this native embeddings provider")
 				return
 			}
+			if !admitRequest(w, "openai.embeddings", requestedModel, principal, "policy_or_route", started) {
+				return
+			}
 			result, embedErr := embedder.Embed(r.Context(), upstreamModel, req.Input)
 			status := http.StatusOK
 			errorCode := ""
@@ -147,6 +151,9 @@ func handleEmbeddings(w http.ResponseWriter, r *http.Request) {
 		recordFailureUsage("openai.embeddings", req.Model, principal, 400, "embeddings_unsupported", started)
 		writeError(w, 400, "provider '"+provider+"' does not support embeddings "+
 			"(use an openai_compatible provider such as llama-embed)")
+		return
+	}
+	if !admitRequest(w, "openai.embeddings", req.Model, principal, "policy_or_route", started) {
 		return
 	}
 

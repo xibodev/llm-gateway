@@ -82,7 +82,7 @@ func responsesDispatch(
 		writeError(w, 500, "Gateway is not configured for the requested model.")
 		return
 	}
-	targets, status, message := enforceKeyPolicy(
+	targets, status, message := authorizeKeyPolicy(
 		principal, request.Model, resolution.Category, resolution.Targets,
 	)
 	if status != 0 {
@@ -136,6 +136,9 @@ func responsesDispatch(
 			writeUpstreamError(w, providerErr)
 			return
 		}
+		if !admitRequest(w, "openai.responses", request.Model, principal, "policy", started) {
+			return
+		}
 		ctx := fallbackContext(r, request.FallbackTimeoutMS, request.AffinityKey)
 		response, _, providerErr := providers.CompleteResponsesContext(ctx, provider, target.Model, payload)
 		if providerErr != nil {
@@ -146,6 +149,9 @@ func responsesDispatch(
 		w.Header().Set(transportModeHeader, "transparent")
 		recordFromResponses(request.Model, &served, principal, response, time.Since(started).Milliseconds())
 		writeJSON(w, http.StatusOK, response)
+		return
+	}
+	if !admitRequest(w, "openai.responses", request.Model, principal, "policy", started) {
 		return
 	}
 	ctx := fallbackContext(r, request.FallbackTimeoutMS, request.AffinityKey)

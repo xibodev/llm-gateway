@@ -43,7 +43,7 @@ func resolveAudioTarget(principal *config.Principal, model string, operation cor
 		}
 		return "", "", 500, "Gateway is not configured for the requested model."
 	}
-	targets, st, m := enforceKeyPolicy(principal, model, resolution.Category, resolution.Targets)
+	targets, st, m := authorizeKeyPolicy(principal, model, resolution.Category, resolution.Targets)
 	if st != 0 {
 		return "", "", st, m
 	}
@@ -256,6 +256,9 @@ func handleTranscriptions(w http.ResponseWriter, r *http.Request) {
 		writeError(w, 400, "missing 'file' (the audio to transcribe)")
 		return
 	}
+	if !admitRequest(w, "openai.transcriptions", model, principal, "policy_or_route", started) {
+		return
+	}
 	buf, contentType := form.finish(upstreamModel)
 
 	coreResponse, handled, coreErr := providers.InvokeCoreSurfaceForPrincipal(
@@ -339,6 +342,9 @@ func handleSpeech(w http.ResponseWriter, r *http.Request) {
 	}
 	if synthesizer, native := providers.SpeechSynthesizerForPrincipal(provider, callerOf(principal)); native {
 		serveNativeSpeech(r.Context(), w, body, synthesizer, provider, upstreamModel, principal, started, reqModel)
+		return
+	}
+	if !admitRequest(w, "openai.speech", reqModel, principal, "policy_or_route", started) {
 		return
 	}
 	body["model"] = upstreamModel
@@ -461,6 +467,9 @@ func serveNativeSpeech(
 	speed := 1.0
 	if raw, ok := body["speed"].(float64); ok {
 		speed = raw
+	}
+	if !admitRequest(w, "openai.speech", reqModel, principal, "policy_or_route", started) {
+		return
 	}
 	var audio []byte
 	var err error

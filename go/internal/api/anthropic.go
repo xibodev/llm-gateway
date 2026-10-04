@@ -125,7 +125,7 @@ func handleMessages(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	targets := resolution.Targets
-	targets, polStatus, polMsg := enforceKeyPolicy(principal, req.Model, resolution.Category, targets)
+	targets, polStatus, polMsg := authorizeKeyPolicy(principal, req.Model, resolution.Category, targets)
 	if polStatus != 0 {
 		recordFailureUsage("anthropic.messages", req.Model, principal, polStatus, "policy", started)
 		writeError(w, polStatus, polMsg)
@@ -147,6 +147,9 @@ func handleMessages(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusBadRequest, "provider does not implement its catalog-declared native Messages surface")
 			return
 		}
+		if !admitRequest(w, "anthropic.messages", req.Model, principal, "policy", started) {
+			return
+		}
 		response, providerErr := providers.CompleteAnthropicMessagesContext(ctx, provider, target.Model, raw)
 		if providerErr != nil {
 			writeUpstreamError(w, providerErr)
@@ -166,6 +169,9 @@ func handleMessages(w http.ResponseWriter, r *http.Request) {
 			writeError(w, 400, "Streaming cannot preserve Anthropic request: "+lossErr.Error())
 			return
 		}
+		if !admitRequest(w, "anthropic.messages", req.Model, principal, "policy", started) {
+			return
+		}
 		converted, kw := conversion.Value.Messages, conversion.Value.Keywords
 		if len(converted) < len(req.Messages) {
 			converted = translate.AnthropicMessagesToOpenAI(req.Messages, req.System)
@@ -175,6 +181,9 @@ func handleMessages(w http.ResponseWriter, r *http.Request) {
 			msgs[i] = providers.Message(converted[i])
 		}
 		streamMessagesSSE(w, ctx, targets, msgs, req.Model, principal, providers.Kwargs(kw), started)
+		return
+	}
+	if !admitRequest(w, "anthropic.messages", req.Model, principal, "policy", started) {
 		return
 	}
 

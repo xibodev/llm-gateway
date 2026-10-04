@@ -2,6 +2,7 @@ package api
 
 import (
 	"errors"
+	"net/http"
 	"strings"
 	"time"
 
@@ -48,22 +49,40 @@ func modelPolicyAllows(allowed []string, requestedModel, resolvedCategory string
 	return false
 }
 
-// enforceKeyPolicy applies a minted key's governance to a request. It returns
-// the (possibly provider-filtered) targets and an HTTP error (status,msg) when
-// the request is not allowed. status==0 means allowed.
-func enforceKeyPolicy(p *config.Principal, requestedModel, resolvedCategory string, targets []router.Target) ([]router.Target, int, string) {
-	targets, status, message := authorizeKeyPolicy(p, requestedModel, resolvedCategory, targets)
-	if status != 0 || p == nil || p.Token == "" {
-		return targets, status, message
+// admitKeyPolicy consumes one request from the principal's key and project
+// quotas; status==0 means admitted. It is the second governance step: a
+// handler authorizes as soon as the route is resolved, so a denial wins over a
+// validation error, and admits only after every check that can refuse the
+// request without contacting a provider, so a request the gateway rejects
+// itself spends no quota.
+func admitKeyPolicy(p *config.Principal) (int, string) {
+	if p == nil || p.Token == "" {
+		return 0, "" // admin / unauthenticated-local: unmetered
 	}
 	if err := iam.CheckAndConsumeRequest(p, time.Now()); err != nil {
 		var exceeded *iam.QuotaExceeded
 		if errors.As(err, &exceeded) {
-			return nil, 429, exceeded.Error()
+			return 429, exceeded.Error()
 		}
-		return nil, 500, "Quota store unavailable."
+		return 500, "Quota store unavailable."
 	}
-	return targets, 0, ""
+	return 0, ""
+}
+
+// admitRequest admits a handler's request immediately before it is executed.
+// It reports false once it has recorded and written the refusal, so the
+// handler only returns.
+func admitRequest(
+	w http.ResponseWriter, endpoint, requestedModel string,
+	p *config.Principal, errorCode string, started time.Time,
+) bool {
+	status, message := admitKeyPolicy(p)
+	if status == 0 {
+		return true
+	}
+	recordFailureUsage(endpoint, requestedModel, p, status, errorCode, started)
+	writeError(w, status, message)
+	return false
 }
 
 // authorizeKeyPolicy enforces routing and credential policy without consuming
