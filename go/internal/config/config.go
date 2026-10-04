@@ -7,13 +7,17 @@
 package config
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io/fs"
+	"maps"
 	"os"
 	"path/filepath"
+	"reflect"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -127,12 +131,14 @@ func (p BackendPolicies) ConfiguredOverrides() map[string]any {
 	return configured
 }
 
-// SavingsConfig controls the usage/cost ledger.
+// SavingsConfig controls the usage/cost ledger. Unset fields stay out of a
+// saved file, so a save does not add empty keys under an operator's savings
+// block.
 type SavingsConfig struct {
 	Enabled       bool                          `yaml:"enabled" json:"enabled"`
-	BaselineModel string                        `yaml:"baseline_model" json:"baseline_model"`
-	DBPath        string                        `yaml:"db_path" json:"db_path"`
-	PriceCatalog  map[string]map[string]float64 `yaml:"price_catalog" json:"price_catalog"`
+	BaselineModel string                        `yaml:"baseline_model,omitempty" json:"baseline_model"`
+	DBPath        string                        `yaml:"db_path,omitempty" json:"db_path"`
+	PriceCatalog  map[string]map[string]float64 `yaml:"price_catalog,omitempty" json:"price_catalog"`
 }
 
 // Settings is the whole runtime configuration.
@@ -328,7 +334,12 @@ func UpdateAndSave(fn func(*Settings) error) (func() error, error) {
 	if err := fn(next); err != nil {
 		return nil, err
 	}
-	if err := writeConfigPayload(configPayload(next)); err != nil {
+	path := ConfigFilePath()
+	original, err := readConfigFile(path)
+	if err != nil {
+		return nil, fmt.Errorf("configuration not saved: %w", err)
+	}
+	if err := writeSettings(path, original, next); err != nil {
 		return nil, err
 	}
 	generation := publishLocked(next)
@@ -341,10 +352,22 @@ func UpdateAndSave(fn func(*Settings) error) (func() error, error) {
 		// Memory is restored even when the write fails, so the running
 		// gateway holds the settings the caller meant to keep; the error
 		// tells the caller the file may still hold the change.
-		err := writeConfigPayload(configPayload(previous))
+		err := restoreFile(path, original, previous)
 		publishLocked(cloneSettings(previous))
 		return err
 	}, nil
+}
+
+// restoreFile writes previous back over the file an update replaced. It
+// builds on original, the content the update read, so whatever the update
+// dropped along with an entry, such as a deleted provider's api_key, comes
+// back with it. Like every writer it refuses to replace a file that no
+// longer parses.
+func restoreFile(path string, original []byte, previous *Settings) error {
+	if _, err := readYAML(path); err != nil {
+		return fmt.Errorf("configuration not saved: %w", err)
+	}
+	return writeSettings(path, original, previous)
 }
 
 // cloneSettings deep-copies every reference a writer could reach, so edits
@@ -399,7 +422,8 @@ func cloneProvider(provider *ProviderConfig) *ProviderConfig {
 }
 
 // AddProviderIfMissing persists one provider without overwriting an instance
-// another administrator or automation run created concurrently.
+// another administrator or automation run created concurrently. It adds the
+// one entry to the file and leaves the rest of the file as it is.
 func AddProviderIfMissing(id string, provider *ProviderConfig) (bool, error) {
 	writerMu.Lock()
 	defer writerMu.Unlock()
@@ -410,30 +434,32 @@ func AddProviderIfMissing(id string, provider *ProviderConfig) (bool, error) {
 	if current.Providers[id] != nil {
 		return false, nil
 	}
-	payload, err := readYAML(ConfigFilePath())
+	path := ConfigFilePath()
+	raw, err := readConfigFile(path)
 	if err != nil {
 		return false, fmt.Errorf("configuration not saved: %w", err)
 	}
-	if payload == nil {
-		payload = map[string]any{}
+	document, _, err := parseYAML(path, raw)
+	if err != nil {
+		return false, fmt.Errorf("configuration not saved: %w", err)
 	}
-	providersPayload, providersPresent := payload["providers"].(map[string]any)
-	if payload["providers"] != nil && !providersPresent {
+	root := rootMapping(document)
+	providers := unaliased(mappingValue(root, "providers"))
+	switch {
+	case providers == nil || providers.Tag == "!!null":
+		providers = &yaml.Node{Kind: yaml.MappingNode, Tag: "!!map"}
+	case providers.Kind != yaml.MappingNode:
 		return false, fmt.Errorf("existing providers configuration has an invalid shape")
-	}
-	if providersPayload == nil {
-		providersPayload = map[string]any{}
-	}
-	if _, exists := providersPayload[id]; exists {
+	case mappingValue(providers, id) != nil:
 		return false, nil
 	}
-	nextProviders := make(map[string]any, len(providersPayload)+1)
-	for key, value := range providersPayload {
-		nextProviders[key] = value
+	entry, err := encodeNode(providerConfigPayload(provider))
+	if err != nil {
+		return false, err
 	}
-	nextProviders[id] = providerConfigPayload(provider)
-	payload["providers"] = nextProviders
-	if err := writeConfigPayload(payload); err != nil {
+	providers.Content = append(providers.Content, keyNode(id), entry)
+	setMappingValue(root, "providers", providers)
+	if err := writeDocument(path, document); err != nil {
 		return false, err
 	}
 	next := cloneSettings(current)
@@ -535,10 +561,9 @@ func ResolveProviderAPIKey(providerID string, cfg *ProviderConfig) string {
 
 // ---- YAML load / save --------------------------------------------------- //
 
-// readYAML reads and parses one configuration file. A missing file yields
-// no payload and no error, because the gateway then runs on its defaults; a
-// file that exists but cannot be read or parsed is an error.
-func readYAML(path string) (map[string]any, error) {
+// readConfigFile returns the content of the configuration file at path, nil
+// when there is no file.
+func readConfigFile(path string) ([]byte, error) {
 	raw, err := os.ReadFile(path)
 	if errors.Is(err, fs.ErrNotExist) {
 		return nil, nil
@@ -546,29 +571,42 @@ func readYAML(path string) (map[string]any, error) {
 	if err != nil {
 		return nil, fmt.Errorf("read configuration: %w", err)
 	}
-	return parseYAML(path, raw)
+	return raw, nil
 }
 
-// parseYAML parses configuration content read from path. An empty or null
-// document is the defaults. Errors name the file and the position, and never
-// quote a value: a configuration file can hold credentials, and yaml's own
-// message for a document that is not a mapping quotes its start.
-func parseYAML(path string, raw []byte) (map[string]any, error) {
+// readYAML reads and parses one configuration file. A missing file yields
+// no payload and no error, because the gateway then runs on its defaults; a
+// file that exists but cannot be read or parsed is an error.
+func readYAML(path string) (map[string]any, error) {
+	raw, err := readConfigFile(path)
+	if err != nil || raw == nil {
+		return nil, err
+	}
+	_, payload, err := parseYAML(path, raw)
+	return payload, err
+}
+
+// parseYAML parses configuration content read from path into its document
+// and the payload the loader applies. An empty or null document is the
+// defaults. Errors name the file and the position, and never quote a value:
+// a configuration file can hold credentials, and yaml's own message for a
+// document that is not a mapping quotes its start.
+func parseYAML(path string, raw []byte) (*yaml.Node, map[string]any, error) {
 	var document yaml.Node
 	if err := yaml.Unmarshal(raw, &document); err != nil {
-		return nil, fmt.Errorf("parse configuration %s: %w", path, err)
+		return nil, nil, fmt.Errorf("parse configuration %s: %w", path, err)
 	}
 	if len(document.Content) == 0 || document.Content[0].Tag == "!!null" {
-		return nil, nil
+		return &document, nil, nil
 	}
 	if root := document.Content[0]; root.Kind != yaml.MappingNode {
-		return nil, fmt.Errorf("parse configuration %s: line %d, column %d: settings must be a mapping", path, root.Line, root.Column)
+		return nil, nil, fmt.Errorf("parse configuration %s: line %d, column %d: settings must be a mapping", path, root.Line, root.Column)
 	}
 	var payload map[string]any
 	if err := document.Decode(&payload); err != nil {
-		return nil, fmt.Errorf("parse configuration %s: %w", path, err)
+		return nil, nil, fmt.Errorf("parse configuration %s: %w", path, err)
 	}
-	return payload, nil
+	return &document, payload, nil
 }
 
 // Load reads config.yaml over the defaults, applies ${ENV:} resolution to
@@ -615,7 +653,7 @@ func seedConfigIfMissing() error {
 	if err != nil {
 		return fmt.Errorf("read configuration seed: %w", err)
 	}
-	if _, err := parseYAML(expandUser(seed), raw); err != nil {
+	if _, _, err := parseYAML(expandUser(seed), raw); err != nil {
 		return err
 	}
 	copyFailed := func(err error) error {
@@ -1027,66 +1065,354 @@ func configPayload(s *Settings) map[string]any {
 	return payload
 }
 
-// Save persists providers + endpoints + policies + savings (never keys) from
-// the current settings. It holds the writer mutex so the file cannot be
+// Save persists the sections the gateway manages from the current settings
+// (see mergeManagedSettings). It holds the writer mutex so the file cannot be
 // written between another writer's save and publish.
 func Save() error {
 	writerMu.Lock()
 	defer writerMu.Unlock()
-	payload := configPayload(state.Load().settings)
-	return writeConfigPayload(payload)
+	path := ConfigFilePath()
+	raw, err := readConfigFile(path)
+	if err != nil {
+		return fmt.Errorf("configuration not saved: %w", err)
+	}
+	return writeSettings(path, raw, state.Load().settings)
+}
+
+// providerField is one provider key a save writes: its value, and whether it
+// is set. A save removes an unset key from the file.
+type providerField struct {
+	key   string
+	value any
+	set   bool
+}
+
+// providerFields lists every provider key a save manages. api_key is not
+// among them: a save leaves it as the file has it, ${ENV:NAME} reference or
+// literal, because a key entered in the console goes to the credential store.
+func providerFields(pc *ProviderConfig) []providerField {
+	var timeout any
+	if pc.Timeout != nil {
+		timeout = *pc.Timeout
+	}
+	return []providerField{
+		{"type", pc.Type, true},
+		{"registry_id", pc.RegistryID, pc.RegistryID != ""},
+		{"public_oauth_client_id", pc.PublicOAuthClientID, pc.PublicOAuthClientID != ""},
+		{"base_url", pc.BaseURL, pc.BaseURL != ""},
+		{"region", pc.Region, pc.Region != ""},
+		{"default_voice", pc.DefaultVoice, pc.DefaultVoice != ""},
+		{"project", pc.Project, pc.Project != ""},
+		{"location", pc.Location, pc.Location != ""},
+		{"vertex_request_type", pc.VertexRequestType, pc.VertexRequestType != ""},
+		{"disabled", true, pc.Disabled},
+		{"timeout", timeout, pc.Timeout != nil},
+		{"force_api_support", true, pc.ForceApiSupport},
+	}
 }
 
 func providerConfigPayload(pc *ProviderConfig) map[string]any {
-	entry := map[string]any{"type": pc.Type}
-	if pc.RegistryID != "" {
-		entry["registry_id"] = pc.RegistryID
-	}
-	if pc.PublicOAuthClientID != "" {
-		entry["public_oauth_client_id"] = pc.PublicOAuthClientID
-	}
-	if pc.BaseURL != "" {
-		entry["base_url"] = pc.BaseURL
-	}
-	if pc.Region != "" {
-		entry["region"] = pc.Region
-	}
-	if pc.DefaultVoice != "" {
-		entry["default_voice"] = pc.DefaultVoice
-	}
-	if pc.Project != "" {
-		entry["project"] = pc.Project
-	}
-	if pc.Location != "" {
-		entry["location"] = pc.Location
-	}
-	if pc.VertexRequestType != "" {
-		entry["vertex_request_type"] = pc.VertexRequestType
-	}
-	if pc.Disabled {
-		entry["disabled"] = true
-	}
-	if pc.Timeout != nil {
-		entry["timeout"] = *pc.Timeout
-	}
-	if pc.ForceApiSupport {
-		entry["force_api_support"] = true
+	entry := map[string]any{}
+	for _, field := range providerFields(pc) {
+		if field.set {
+			entry[field.key] = field.value
+		}
 	}
 	return entry
 }
 
-func writeConfigPayload(payload map[string]any) error {
-	path := ConfigFilePath()
-	// A file the loader cannot parse holds an edit the operator has yet to
-	// fix; replacing it would discard that edit along with the rest.
-	if _, err := readYAML(path); err != nil {
+// writeSettings writes s over the file at path, whose content is raw,
+// keeping everything in raw that a save does not manage.
+func writeSettings(path string, raw []byte, s *Settings) error {
+	document, _, err := parseYAML(path, raw)
+	if err != nil {
+		// A file the loader cannot parse holds an edit the operator has yet
+		// to fix; replacing it would discard that edit along with the rest.
 		return fmt.Errorf("configuration not saved: %w", err)
 	}
-	if err := os.MkdirAll(StateDir(), 0o700); err != nil {
+	if err := mergeManagedSettings(rootMapping(document), s); err != nil {
+		return fmt.Errorf("configuration not saved: %w", err)
+	}
+	return writeDocument(path, document)
+}
+
+// mergeManagedSettings writes the sections a save manages, the keys of
+// configPayload, from s into root, the file's top-level mapping. Every other
+// key stays as the file has it, and so does every node that already holds
+// what a save would write there, comments included.
+func mergeManagedSettings(root *yaml.Node, s *Settings) error {
+	// A save moves a file still on the pre-rename categories: key to
+	// endpoints:, in place when there is no endpoints: key, because the
+	// loader then read the endpoints from categories:.
+	if index := keyIndex(root, "categories"); index >= 0 {
+		if keyIndex(root, "endpoints") < 0 {
+			root.Content[index].Value = "endpoints"
+		} else {
+			deleteMappingKey(root, "categories")
+		}
+	}
+	providers, err := mergeProviders(unaliased(mappingValue(root, "providers")), s.Providers)
+	if err != nil {
 		return err
 	}
-	b, err := yaml.Marshal(payload)
+	setMappingValue(root, "providers", providers)
+	payload := configPayload(s)
+	for _, key := range []string{"endpoints", "policies", "savings", "openai_codex_client_id"} {
+		value, managed := payload[key]
+		if !managed {
+			deleteMappingKey(root, key)
+			continue
+		}
+		merged, err := mergeValue(unaliased(mappingValue(root, key)), value)
+		if err != nil {
+			return err
+		}
+		setMappingValue(root, key, merged)
+	}
+	return nil
+}
+
+// mergeProviders returns the providers mapping holding exactly configured. An
+// entry the file already has keeps the keys a save does not manage, such as
+// api_key, and a base_url ${ENV:NAME} reference that still resolves to the
+// configured URL.
+func mergeProviders(existing *yaml.Node, configured map[string]*ProviderConfig) (*yaml.Node, error) {
+	return mergeEntries(existing, slices.Sorted(maps.Keys(configured)), func(id string, entry *yaml.Node) (*yaml.Node, error) {
+		provider := configured[id]
+		if entry == nil || entry.Kind != yaml.MappingNode {
+			return encodeNode(providerConfigPayload(provider))
+		}
+		for _, field := range providerFields(provider) {
+			current := mappingValue(entry, field.key)
+			if field.key == "base_url" && keepsEnvReference(current, provider.BaseURL) {
+				continue
+			}
+			if !field.set {
+				deleteMappingKey(entry, field.key)
+				continue
+			}
+			merged, err := mergeValue(current, field.value)
+			if err != nil {
+				return nil, err
+			}
+			setMappingValue(entry, field.key, merged)
+		}
+		return entry, nil
+	})
+}
+
+// keepsEnvReference reports whether node is an ${ENV:NAME} reference that
+// still resolves to value, which a save then leaves as written rather than
+// replacing it with what it resolves to.
+func keepsEnvReference(node *yaml.Node, value string) bool {
+	return node != nil && node.Kind == yaml.ScalarNode &&
+		envRef.MatchString(strings.TrimSpace(node.Value)) && resolveEnv(node.Value) == value
+}
+
+// mergeValue returns a node holding value, built on existing, the node the
+// file holds there, if any (see mergeNode).
+func mergeValue(existing *yaml.Node, value any) (*yaml.Node, error) {
+	desired, err := encodeNode(value)
 	if err != nil {
+		return nil, err
+	}
+	return mergeNode(existing, desired)
+}
+
+// mergeNode returns existing itself when it already holds the data desired
+// holds, whatever its style, and otherwise merges mappings key by key so the
+// unchanged entries keep their nodes. A node it replaces passes its comments
+// to its replacement.
+func mergeNode(existing, desired *yaml.Node) (*yaml.Node, error) {
+	switch {
+	case existing == nil:
+		return desired, nil
+	case sameData(existing, desired):
+		return existing, nil
+	case existing.Kind == yaml.MappingNode && desired.Kind == yaml.MappingNode:
+		keys := make([]string, 0, len(desired.Content)/2)
+		for index := 0; index+1 < len(desired.Content); index += 2 {
+			keys = append(keys, desired.Content[index].Value)
+		}
+		return mergeEntries(existing, keys, func(key string, entry *yaml.Node) (*yaml.Node, error) {
+			return mergeNode(entry, mappingValue(desired, key))
+		})
+	}
+	desired.HeadComment, desired.LineComment, desired.FootComment = existing.HeadComment, existing.LineComment, existing.FootComment
+	return desired, nil
+}
+
+// mergeEntries makes mapping hold exactly keys, each with the value merge
+// returns for it from the value the mapping holds, nil for a new key. Keys
+// the mapping already has keep their place and key node, and with it their
+// comments; new keys follow in the order given.
+func mergeEntries(mapping *yaml.Node, keys []string, merge func(key string, value *yaml.Node) (*yaml.Node, error)) (*yaml.Node, error) {
+	if mapping == nil || mapping.Kind != yaml.MappingNode {
+		mapping = &yaml.Node{Kind: yaml.MappingNode, Tag: "!!map"}
+	}
+	if len(mapping.Content) == 0 {
+		// An empty mapping is written {}; the entries it gains read better
+		// as a block.
+		mapping.Style = 0
+	}
+	missing := make(map[string]bool, len(keys))
+	for _, key := range keys {
+		missing[key] = true
+	}
+	content := make([]*yaml.Node, 0, 2*len(keys))
+	for index := 0; index+1 < len(mapping.Content); index += 2 {
+		key := mapping.Content[index]
+		if !missing[key.Value] {
+			continue
+		}
+		value, err := merge(key.Value, mapping.Content[index+1])
+		if err != nil {
+			return nil, err
+		}
+		content = append(content, key, value)
+		delete(missing, key.Value)
+	}
+	for _, key := range keys {
+		if !missing[key] {
+			continue
+		}
+		value, err := merge(key, nil)
+		if err != nil {
+			return nil, err
+		}
+		content = append(content, keyNode(key), value)
+	}
+	mapping.Content = content
+	return mapping, nil
+}
+
+// sameData reports whether two nodes decode to the same data.
+func sameData(a, b *yaml.Node) bool {
+	var left, right any
+	if a.Decode(&left) != nil || b.Decode(&right) != nil {
+		return false
+	}
+	return reflect.DeepEqual(left, right)
+}
+
+// rootMapping returns the top-level mapping of a document parseYAML
+// accepted, creating it in an empty or null document.
+func rootMapping(document *yaml.Node) *yaml.Node {
+	if document.Kind != yaml.DocumentNode {
+		*document = yaml.Node{Kind: yaml.DocumentNode}
+	}
+	if len(document.Content) == 0 || document.Content[0].Kind != yaml.MappingNode {
+		document.Content = []*yaml.Node{{Kind: yaml.MappingNode, Tag: "!!map"}}
+	}
+	return document.Content[0]
+}
+
+// keyIndex returns the index of key's key node in mapping, or -1.
+func keyIndex(mapping *yaml.Node, key string) int {
+	if mapping == nil || mapping.Kind != yaml.MappingNode {
+		return -1
+	}
+	for index := 0; index+1 < len(mapping.Content); index += 2 {
+		if mapping.Content[index].Value == key {
+			return index
+		}
+	}
+	return -1
+}
+
+// mappingValue returns the value node of key in mapping, or nil.
+func mappingValue(mapping *yaml.Node, key string) *yaml.Node {
+	if index := keyIndex(mapping, key); index >= 0 {
+		return mapping.Content[index+1]
+	}
+	return nil
+}
+
+// setMappingValue sets key in mapping to value, in place when the mapping
+// already has the key.
+func setMappingValue(mapping *yaml.Node, key string, value *yaml.Node) {
+	if index := keyIndex(mapping, key); index >= 0 {
+		mapping.Content[index+1] = value
+		return
+	}
+	mapping.Content = append(mapping.Content, keyNode(key), value)
+}
+
+// deleteMappingKey removes key and its value from mapping.
+func deleteMappingKey(mapping *yaml.Node, key string) {
+	if index := keyIndex(mapping, key); index >= 0 {
+		mapping.Content = append(mapping.Content[:index], mapping.Content[index+2:]...)
+	}
+}
+
+func keyNode(key string) *yaml.Node {
+	return &yaml.Node{Kind: yaml.ScalarNode, Tag: "!!str", Value: key}
+}
+
+func encodeNode(value any) (*yaml.Node, error) {
+	node := &yaml.Node{}
+	if err := node.Encode(value); err != nil {
+		return nil, err
+	}
+	return node, nil
+}
+
+// unaliased returns node with every alias in it replaced by a copy of what
+// the alias names. A save edits the sections it manages in place, and an
+// edit must not reach another value through a shared anchor.
+func unaliased(node *yaml.Node) *yaml.Node {
+	if node == nil {
+		return nil
+	}
+	if node.Kind == yaml.AliasNode && node.Alias != nil {
+		return copyNode(node.Alias)
+	}
+	for index, child := range node.Content {
+		node.Content[index] = unaliased(child)
+	}
+	return node
+}
+
+// copyNode deep-copies node, expanding its aliases and dropping its anchors,
+// so the copy shares nothing with the original.
+func copyNode(node *yaml.Node) *yaml.Node {
+	if node.Kind == yaml.AliasNode && node.Alias != nil {
+		return copyNode(node.Alias)
+	}
+	copied := *node
+	copied.Anchor = ""
+	copied.Content = make([]*yaml.Node, len(node.Content))
+	for index, child := range node.Content {
+		copied.Content[index] = copyNode(child)
+	}
+	return &copied
+}
+
+// writeDocument encodes document and writes it to path once the loader
+// accepts the result, so a save never leaves a file the next start refuses.
+func writeDocument(path string, document *yaml.Node) error {
+	var out bytes.Buffer
+	encoder := yaml.NewEncoder(&out)
+	encoder.SetIndent(2)
+	if err := encoder.Encode(document); err != nil {
+		return fmt.Errorf("configuration not saved: %w", err)
+	}
+	if err := encoder.Close(); err != nil {
+		return fmt.Errorf("configuration not saved: %w", err)
+	}
+	if _, _, err := parseYAML(path, out.Bytes()); err != nil {
+		return fmt.Errorf("configuration not saved: %w", err)
+	}
+	if err := writeConfigFile(path, out.Bytes()); err != nil {
+		return fmt.Errorf("configuration not saved: %w", err)
+	}
+	return nil
+}
+
+// writeConfigFile replaces the file at path with data atomically, so a crash
+// leaves either the old file or the new one.
+func writeConfigFile(path string, data []byte) error {
+	if err := os.MkdirAll(StateDir(), 0o700); err != nil {
 		return err
 	}
 	tmp, err := os.CreateTemp(filepath.Dir(path), ".config-*.tmp")
@@ -1099,7 +1425,7 @@ func writeConfigPayload(payload map[string]any) error {
 		_ = tmp.Close()
 		return err
 	}
-	if _, err := tmp.Write(b); err != nil {
+	if _, err := tmp.Write(data); err != nil {
 		_ = tmp.Close()
 		return err
 	}

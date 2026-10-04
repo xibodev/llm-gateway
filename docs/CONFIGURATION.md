@@ -252,7 +252,10 @@ These variables currently have no effect:
 ## Persistence and console saves
 
 The administration console writes providers, endpoints, provider policies,
-savings configuration, and the Codex client ID. The loader reapplies those
+savings configuration, and the Codex client ID. A save rewrites only the entries
+in those sections that changed: every other key, the comments on unchanged
+entries, each provider's `api_key`, and a `base_url` `${ENV:NAME}` reference that
+still resolves to the saved URL stay as written. The loader reapplies those
 values at startup (see [Provider resilience](#provider-resilience)).
 Environment-only secrets are not written to YAML. Prefer environment variables
 for other process settings so an administration save cannot turn a runtime
