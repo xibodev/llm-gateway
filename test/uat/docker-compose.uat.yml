@@ -32,6 +32,9 @@ services:
     image: llm-gateway-go:uat-${LLMGW_UAT_TAG:-local}
     container_name: llmgw-uat-gateway
     restart: "no"
+    # Outlasts the gateway's shutdown drain (LLMGW_SHUTDOWN_TIMEOUT_SECONDS,
+    # default 25), so a stop does not kill it mid-drain.
+    stop_grace_period: 30s
     env_file:
       - .env.uat
     environment:

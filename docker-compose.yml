@@ -1,6 +1,6 @@
 # Local / single-box deployment for the LLM gateway (Go).
 #
-#   LLMGW_API_KEY=... LLMGW_HOST_PORT=8787 docker compose up -d --build
+#   LLMGW_API_KEY=... docker compose up -d --build
 #
 # The gateway handles bearer auth itself (LLMGW_API_KEY). Put a real config at
 # ./config.local.yaml (see llmgw.config.example.yaml) — it is mounted read-only.
@@ -35,6 +35,8 @@ services:
       LLMGW_OAUTH_PUBLIC_BASE_URL: ${LLMGW_OAUTH_PUBLIC_BASE_URL:-}
       LLMGW_CREDENTIAL_ENCRYPTION_KEY: ${LLMGW_CREDENTIAL_ENCRYPTION_KEY:-}
       LLMGW_GITHUB_COPILOT_CACHE_DIR: /state/cache
+      LLMGW_EXTENSION_URL: ${LLMGW_EXTENSION_URL:-}
+      LLMGW_EXTENSION_SECRET: ${LLMGW_EXTENSION_SECRET:-}
       LLMGW_RETENTION_USAGE_DAYS: ${LLMGW_RETENTION_USAGE_DAYS:-90}
       LLMGW_RETENTION_AUDIT_DAYS: ${LLMGW_RETENTION_AUDIT_DAYS:-365}
       LLMGW_RETENTION_DELIVERED_OUTBOX_DAYS: ${LLMGW_RETENTION_DELIVERED_OUTBOX_DAYS:-400}
@@ -46,12 +48,20 @@ services:
       - ./config.local.yaml:/config/llmgw.config.yaml:ro
       - llmgw-state:/state
     ports:
-      - "${LLMGW_HOST_PORT:-8787}:8787"
+      # LLMGW_HOST_PORT is the host side of this mapping, address:port, and
+      # publishes on loopback by default. To expose the gateway deliberately,
+      # give it the address of the interface to publish on, such as
+      # 0.0.0.0:8787 for every interface, and put TLS in front of it (see
+      # Caddyfile). A port without an address also publishes on every interface.
+      - "${LLMGW_HOST_PORT:-127.0.0.1:8787}:8787"
     # Lets the gateway reach a host-side Ollama (auto-detected at startup) at
     # http://host.docker.internal:11434. Harmless when no host Ollama is running.
     extra_hosts:
       - "host.docker.internal:host-gateway"
     restart: unless-stopped
+    # Outlasts the gateway's shutdown drain (LLMGW_SHUTDOWN_TIMEOUT_SECONDS,
+    # default 25), so a stop does not kill it mid-drain.
+    stop_grace_period: 30s
 
 volumes:
   llmgw-state:

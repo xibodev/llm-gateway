@@ -45,8 +45,9 @@ maintenance commands. Native state is independent of a Compose volume.
 The [source-only recipe](QUICKSTART.md#developers-from-source) uses the repository
 root `docker-compose.yml`, not the standalone `compose.yaml`. It builds the
 worktree, requires `config.local.yaml` as a first-start seed, and uses its own
-`llmgw-state` volume. Set `LLMGW_HOST_PORT=127.0.0.1:8787` in that clone's private
-`.env`; without the address, the root file publishes on all interfaces.
+`llmgw-state` volume. It publishes on `127.0.0.1:8787` unless `LLMGW_HOST_PORT`
+in that clone's private `.env` names another `address:port`; a port without an
+address publishes on all interfaces.
 From that clone, after preparing the source recipe and clearing stale shell
 overrides:
 

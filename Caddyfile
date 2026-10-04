@@ -3,12 +3,24 @@
 #   LLMGW_DOMAIN=llm.example.com caddy run --config ./Caddyfile
 #
 # Or run Caddy as a sibling container and proxy to the compose `gateway` service.
-# The gateway enforces its own bearer auth (LLMGW_API_KEY), so Caddy only does
-# TLS termination + reverse proxy — do NOT expose the gateway port publicly
-# without this (or an equivalent) in front.
+# The gateway enforces its own bearer auth (LLMGW_API_KEY), so Caddy adds no
+# auth of its own: it terminates TLS and reverse-proxies — do NOT expose the
+# gateway port publicly without this (or an equivalent) in front.
 
 {$LLMGW_DOMAIN:llm.example.com} {
 	encode zstd gzip
+
+	# The gateway's default LLMGW_MAX_REQUEST_BODY_BYTES; raise both together.
+	request_body {
+		max_size 64MiB
+	}
+
+	# Deferred, so a header the gateway sends as well is replaced, not repeated.
+	header {
+		defer
+		X-Content-Type-Options nosniff
+		Referrer-Policy same-origin
+	}
 
 	# Streaming (SSE) must not be buffered.
 	reverse_proxy {$LLMGW_UPSTREAM:gateway:8787} {

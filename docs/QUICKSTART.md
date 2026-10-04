@@ -254,18 +254,19 @@ For a **fresh source Compose installation**, generate a local `.env` in this
 clone using [Save secrets once](#save-secrets-once), and keep it out of Git.
 Copy `llmgw.config.example.yaml` to `config.local.yaml` once, using `cp` on POSIX
 or `Copy-Item` in PowerShell. Do not overwrite an existing config.
-Add `LLMGW_HOST_PORT=127.0.0.1:8787` to this source `.env`.
 Clear stale shell overrides for the two keys and `LLMGW_HOST_PORT`, then run:
 
 ```bash
 docker compose --env-file .env up -d --build
 ```
 
-This uses the **repository root** `docker-compose.yml`: it builds `go/Dockerfile`,
-uses `LLMGW_HOST_PORT` (not the standalone recipe's `LLMGW_PORT`), and otherwise
-publishes on all interfaces by default. It seeds `/state/config.yaml` from the
-read-only `config.local.yaml` on first start only. Console edits and restores
-change the volume copy. Its named volume is `llmgw-state`, not standalone `state`.
+This uses the **repository root** `docker-compose.yml`: it builds `go/Dockerfile`
+and publishes on `127.0.0.1:8787`. To change that, set `LLMGW_HOST_PORT` (not the
+standalone recipe's `LLMGW_PORT`) in this `.env` to `address:port`, such as
+`127.0.0.1:8788`; a port without an address publishes on all interfaces. It seeds
+`/state/config.yaml` from the read-only `config.local.yaml` on first start only.
+Console edits and restores change the volume copy. Its named volume is
+`llmgw-state`, not standalone `state`.
 Use `docker compose --env-file .env down` to stop without deleting that volume.
 
 For a Go source run instead, install Go 1.26.6, load your intended native

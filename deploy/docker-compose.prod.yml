@@ -10,6 +10,9 @@ services:
   gateway:
     image: ${LLMGW_IMAGE:?set LLMGW_IMAGE to a versioned GHCR tag or digest}
     restart: unless-stopped
+    # Outlasts the gateway's shutdown drain (LLMGW_SHUTDOWN_TIMEOUT_SECONDS,
+    # default 25), so a stop does not kill it mid-drain.
+    stop_grace_period: 30s
     environment:
       LLMGW_HOST: 0.0.0.0
       LLMGW_PORT: "8787"
@@ -30,6 +33,10 @@ services:
       LLMGW_SSO_ADMIN_GROUP: ${LLMGW_SSO_ADMIN_GROUP:-llmgw-admin}
       LLMGW_SSO_AUTO_PROVISION: ${LLMGW_SSO_AUTO_PROVISION:-1}
       LLMGW_GITHUB_COPILOT_CACHE_DIR: /state/cache
+      # Optional companion daemon serving the extension provider types; start
+      # it with the same secret.
+      LLMGW_EXTENSION_URL: ${LLMGW_EXTENSION_URL:-}
+      LLMGW_EXTENSION_SECRET: ${LLMGW_EXTENSION_SECRET:-}
       # Discovery-only updates; registered providers and credentials are never reconciled.
       LLMGW_PROVIDER_ROSTER_AUTO_REFRESH: ${LLMGW_PROVIDER_ROSTER_AUTO_REFRESH:-true}
       LLMGW_PROVIDER_ROSTER_URL: ${LLMGW_PROVIDER_ROSTER_URL:-https://xibodev.github.io/llm-gateway/roster/payload.json}

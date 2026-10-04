@@ -2,6 +2,20 @@
 {$LLMGW_DOMAIN} {
 	encode zstd gzip
 
+	# The gateway's default LLMGW_MAX_REQUEST_BODY_BYTES; raise both together.
+	request_body {
+		max_size 64MiB
+	}
+
+	# Deferred, so a header the gateway sends as well is replaced, not repeated.
+	# HSTS is safe here because Caddy serves this domain only over HTTPS.
+	header {
+		defer
+		Strict-Transport-Security "max-age=31536000"
+		X-Content-Type-Options nosniff
+		Referrer-Policy same-origin
+	}
+
 	reverse_proxy gateway:8787 {
 		# Stream Server-Sent Events immediately (no response buffering).
 		flush_interval -1
