@@ -151,5 +151,6 @@ func authed(w http.ResponseWriter, r *http.Request) (*config.Principal, bool) {
 		writeError(w, status, msg)
 		return nil, false
 	}
+	principal.RequestID = requestIDFrom(r.Context())
 	return principal, true
 }

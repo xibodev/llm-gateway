@@ -69,6 +69,10 @@ type Principal struct {
 	// admin key and external keys all lack a PrincipalID. When it is unset,
 	// the Caller follows from PrincipalID, PrincipalKind and ProjectID.
 	Caller core.Caller `json:"-"`
+	// RequestID names the request the api layer resolved the Principal
+	// for. Every usage record of a request takes its attribution from the
+	// Principal, so the ID reaches each of them with it.
+	RequestID string `json:"-"`
 }
 
 func loadKeys() map[string]keyEntry {

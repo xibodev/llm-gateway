@@ -129,7 +129,7 @@ func handleEmbeddings(w http.ResponseWriter, r *http.Request) {
 			}
 			encoded, _ := json.Marshal(result)
 			router.RecordUsage(router.UsageRecord{
-				Endpoint: "openai.embeddings", RequestedModel: requestedModel,
+				RequestID: principal.RequestID, Endpoint: "openai.embeddings", RequestedModel: requestedModel,
 				RoutedModel: upstreamModel, Provider: provider,
 				Project: principal.Project, Key: principal.Key,
 				ProjectID: principal.ProjectID, PrincipalID: principal.PrincipalID,
@@ -180,7 +180,7 @@ func handleEmbeddings(w http.ResponseWriter, r *http.Request) {
 	// needs no schema change — an embedding produces no output tokens because it
 	// generates nothing.
 	router.RecordUsage(router.UsageRecord{
-		Endpoint: "openai.embeddings", RequestedModel: provider + "/" + upstreamModel,
+		RequestID: principal.RequestID, Endpoint: "openai.embeddings", RequestedModel: provider + "/" + upstreamModel,
 		RoutedModel: upstreamModel, Provider: provider,
 		Project: principal.Project, Key: principal.Key,
 		ProjectID: principal.ProjectID, PrincipalID: principal.PrincipalID,

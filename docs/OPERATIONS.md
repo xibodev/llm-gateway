@@ -1,7 +1,7 @@
 # Operations
 
-This runbook covers deployment, health, logging, retention, backup/restore,
-release verification, and rollback for the single-node gateway.
+This runbook covers deployment, health, logging, request correlation, retention,
+backup/restore, release verification, and rollback for the single-node gateway.
 
 ## Deployment profiles
 
@@ -121,6 +121,40 @@ Body logs can contain credentials, personal data, and proprietary source. Files
 are owner-only and rotate at `LLMGW_LOG_REQUESTS_MAX_BYTES`, retaining the active
 file and one `.1` generation. Request logs are intentionally excluded from
 built-in backups.
+
+## Correlating a request
+
+Every response names its request in an `X-Request-Id` header, and the gateway's
+own error bodies repeat it as `request_id`; a client may choose the ID itself,
+as [request IDs](API.md#request-ids) describes. Ask a client that reports a
+failure for that ID. The gateway keeps it with what it recorded about the
+request:
+
+- **Usage.** Each inference request, failed ones included, records its usage
+  as a row of the `usage_events` table in `<state>/gateway.db` whose
+  `request_id` is the ID. A request refused before its model is resolved, such
+  as one with an invalid key, may have no row.
+- **Request log.** With request logging on, the request's entry in
+  `<state>/requests.jsonl`, or in its `.1` generation, carries the ID as
+  `request_id`.
+- **Audit.** An event recording an administrator's action carries the ID of
+  the request that took it as `request_id` in its detail, which
+  `GET /admin/api/audit` returns.
+
+Read usage rows with a SQLite client in read-only mode, as the user the
+gateway runs as:
+
+```bash
+sqlite3 -readonly <state>/gateway.db \
+  "SELECT datetime(ts,'unixepoch'),endpoint,status_code,error_code,
+          requested_model,routed_model,provider,key_id,latency_ms
+   FROM usage_events WHERE request_id='<REQUEST_ID>'"
+```
+
+A usage row's ID is unique, so when a client repeats an ID an earlier request
+was recorded under, the later request is recorded under an ID the gateway
+assigns; find it by its time and key instead. Usage rows and audit events
+remain for their [retention](#retention) windows.
 
 ## Retention
 

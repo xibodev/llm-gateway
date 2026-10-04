@@ -3,6 +3,7 @@ request: POST /v1/responses
 status: 200
 header Content-Type: application/json
 header X-Llmgw-Transport-Mode: native
+header X-Request-Id: <generated req_>
 upstream: POST /f/responses
 upstream body: {"input":"Say hello","model":"responses-model","stream":false}
 body:

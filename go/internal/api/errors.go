@@ -9,9 +9,15 @@ import (
 	"llmgw/internal/providers"
 )
 
-// errorPayload matches the Python error envelope shape.
-func errorPayload(message, errorType, code string) map[string]any {
-	return map[string]any{"error": map[string]any{"message": message, "type": errorType, "code": code}}
+// errorPayload matches the Python error envelope shape. OpenAI's clients
+// pick the fields they know out of its error, so the request's ID can sit
+// beside them.
+func errorPayload(message, errorType, code, requestID string) map[string]any {
+	body := map[string]any{"message": message, "type": errorType, "code": code}
+	if requestID != "" {
+		body["request_id"] = requestID
+	}
+	return map[string]any{"error": body}
 }
 
 func httpExceptionType(status int) string {
@@ -93,15 +99,23 @@ func writeJSON(w http.ResponseWriter, status int, v any) {
 
 // writeError writes the error envelope the route's clients read: Anthropic's
 // on the Messages routes, typed by status, and the standard one elsewhere.
+// Either names the request by the ID assignRequestIDs put on the response,
+// since a client's report of a failure is often only the body it read.
 func writeError(w http.ResponseWriter, status int, message string) {
 	message = providers.SanitizeDiagnosticTextLimit(message, 2048)
+	requestID := w.Header().Get(requestIDHeader)
 	if answersAnthropic(w) {
-		writeJSON(w, status, map[string]any{"type": "error", "error": map[string]any{
+		// Anthropic's own envelope carries request_id beside its error.
+		envelope := map[string]any{"type": "error", "error": map[string]any{
 			"type": anthropicErrorType(status), "message": message,
-		}})
+		}}
+		if requestID != "" {
+			envelope["request_id"] = requestID
+		}
+		writeJSON(w, status, envelope)
 		return
 	}
-	writeJSON(w, status, errorPayload(message, httpExceptionType(status), itoa(status)))
+	writeJSON(w, status, errorPayload(message, httpExceptionType(status), itoa(status), requestID))
 }
 
 func itoa(n int) string {

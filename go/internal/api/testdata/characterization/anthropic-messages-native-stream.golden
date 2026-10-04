@@ -4,6 +4,7 @@ status: 200
 header Cache-Control: no-cache
 header Connection: keep-alive
 header Content-Type: text/event-stream
+header X-Request-Id: <generated req_>
 upstream: POST /n/v1/messages
 upstream body: {"max_tokens":64,"messages":[{"content":"Say hello","role":"user"}],"model":"claude-fixture","stream":true}
 body:

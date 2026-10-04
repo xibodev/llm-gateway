@@ -350,7 +350,9 @@ func TestAnthropicTokenCountRequestBodyLimit(t *testing.T) {
 	req.Header.Set("Authorization", "Bearer gateway-token")
 	recorder := httptest.NewRecorder()
 	NewServer(Runtime{}).ServeHTTP(recorder, req)
-	if recorder.Code != http.StatusRequestEntityTooLarge || recorder.Body.String() != `{"error":{"message":"request body too large","type":"invalid_request_error"},"type":"error"}`+"\n" {
+	want := `{"error":{"message":"request body too large","type":"invalid_request_error"},"request_id":"` +
+		recorder.Header().Get("X-Request-Id") + `","type":"error"}` + "\n"
+	if recorder.Code != http.StatusRequestEntityTooLarge || recorder.Body.String() != want {
 		t.Fatalf("status=%d body=%s", recorder.Code, recorder.Body.String())
 	}
 }

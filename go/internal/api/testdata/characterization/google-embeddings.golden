@@ -2,6 +2,7 @@
 request: POST /v1/embeddings
 status: 200
 header Content-Type: application/json
+header X-Request-Id: <generated req_>
 upstream: POST /studio/v1beta/models/gemini-embedding-fixture:embedContent
 upstream body: {"content":{"parts":[{"text":"Say hello"}]}}
 body:
@@ -27,6 +28,7 @@ body:
 request: POST /v1/embeddings
 status: 200
 header Content-Type: application/json
+header X-Request-Id: <generated req_>
 upstream: POST /vertex/v1/projects/fixture-project/locations/global/publishers/google/models/text-embedding-fixture:predict
 upstream body: {"instances":[{"content":"first"}]}
 upstream: POST /vertex/v1/projects/fixture-project/locations/global/publishers/google/models/text-embedding-fixture:predict
@@ -60,6 +62,7 @@ body:
 request: POST /v1/embeddings
 status: 404
 header Content-Type: application/json
+header X-Request-Id: <generated req_>
 upstream: POST /studio/v1beta/models/missing-embedding-fixture:embedContent
 upstream body: {"content":{"parts":[{"text":"Say hello"}]}}
 body:
@@ -67,6 +70,7 @@ body:
   "error": {
     "code": "404",
     "message": "Upstream provider request failed.",
+    "request_id": "<generated req_>",
     "type": "invalid_request_error"
   }
 }

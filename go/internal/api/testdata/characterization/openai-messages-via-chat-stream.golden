@@ -4,6 +4,7 @@ status: 200
 header Cache-Control: no-cache
 header Connection: keep-alive
 header Content-Type: text/event-stream
+header X-Request-Id: <generated req_>
 upstream: POST /f/chat/completions
 upstream body: {"max_tokens":64,"messages":[{"content":"Say hello","role":"user"}],"model":"chat-model","stream":true}
 body:

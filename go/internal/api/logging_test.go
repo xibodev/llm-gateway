@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"io"
 	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
@@ -118,5 +119,28 @@ func TestRequestLogBodiesRequireExplicitUnsafeOptIn(t *testing.T) {
 	if !strings.Contains(string(raw), "debug body") ||
 		!strings.Contains(string(raw), "debug response") {
 		t.Fatalf("explicit body log omitted debug bodies: %s", raw)
+	}
+}
+
+// An entry names its request by the ID its response carried, so the entry
+// of a request a client reports can be found.
+func TestRequestLogNamesTheRequest(t *testing.T) {
+	t.Setenv("LLMGW_STATE_DIR", t.TempDir())
+	request := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil)
+	request.Header.Set("X-Request-Id", "client-log.1")
+	response := httptest.NewRecorder()
+	assignRequestIDs(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
+		writeRequestLog(r, nil, 0, http.StatusOK, nil, 0, time.Millisecond, false)
+	})).ServeHTTP(response, request)
+	raw, err := os.ReadFile(filepath.Join(config.StateDir(), "requests.jsonl"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var entry map[string]any
+	if err := json.Unmarshal(bytes.TrimSpace(raw), &entry); err != nil {
+		t.Fatal(err)
+	}
+	if entry["request_id"] != "client-log.1" || response.Header().Get("X-Request-Id") != "client-log.1" {
+		t.Fatalf("entry=%+v X-Request-Id=%q", entry, response.Header().Get("X-Request-Id"))
 	}
 }

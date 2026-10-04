@@ -7,6 +7,7 @@ header Content-Type: text/event-stream
 header X-Llmgw-Prompt-Bytes: 39
 header X-Llmgw-Tool-Schema-Bytes: 0
 header X-Llmgw-Ttfb-Ms: <ms>
+header X-Request-Id: <generated req_>
 upstream: POST /f/chat/completions
 upstream body: {"messages":[{"content":"Say hello","role":"user"}],"model":"chat-model","stream":true}
 body:

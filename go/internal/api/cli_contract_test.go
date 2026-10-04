@@ -274,8 +274,8 @@ func TestCLIStreamContract(t *testing.T) {
 }
 
 // Each client reads errors in its own vendor's envelope: a Messages client
-// Anthropic's, typed by status and without a code, the others the
-// OpenAI-shaped one.
+// Anthropic's, typed by status, without a code and with the request's ID
+// beside the error, the others the OpenAI-shaped one.
 func TestCLIErrorEnvelopeContract(t *testing.T) {
 	server, _ := setupCLIContractTest(t)
 	for _, tc := range []struct {
@@ -298,7 +298,8 @@ func TestCLIErrorEnvelopeContract(t *testing.T) {
 			wantEnvelope := errorBody["type"] == "invalid_request_error" && errorBody["code"] == "404" && len(envelope) == 1
 			if tc.anthropic {
 				_, hasCode := errorBody["code"]
-				wantEnvelope = envelope["type"] == "error" && errorBody["type"] == "not_found_error" && !hasCode && len(envelope) == 2
+				requestID, _ := envelope["request_id"].(string)
+				wantEnvelope = envelope["type"] == "error" && errorBody["type"] == "not_found_error" && !hasCode && len(envelope) == 3 && requestID != ""
 			}
 			if status != http.StatusNotFound || !wantEnvelope ||
 				!strings.Contains(message, `Model "missing/model"`) || !strings.Contains(message, "GET /v1/models") {

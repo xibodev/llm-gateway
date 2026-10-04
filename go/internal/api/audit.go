@@ -26,6 +26,9 @@ func auditAdminResult(
 	if actor.KeyFingerprint != "" {
 		detail["actor_key_fingerprint"] = actor.KeyFingerprint
 	}
+	if id := requestIDFrom(r.Context()); id != "" {
+		detail["request_id"] = id
+	}
 	if err := iam.RecordAudit(iam.AuditEvent{
 		ActorPrincipalID: actor.PrincipalID, ActorKeyID: actor.KeyID,
 		Action: action, TargetType: targetType, TargetID: targetID,

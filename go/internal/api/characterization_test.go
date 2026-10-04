@@ -232,6 +232,8 @@ func (f *charFixture) replay(t *testing.T, gateway *httptest.Server, c charCase)
 		switch {
 		case strings.HasPrefix(name, "X-Llmgw-") && strings.HasSuffix(name, "-Ms"):
 			value = "<ms>"
+		case name == "X-Request-Id":
+			value, _ = charNormalize("request_id", value).(string)
 		case strings.HasPrefix(name, "X-Llmgw-"), name == "Content-Type", name == "Cache-Control", name == "Connection":
 		default:
 			continue
@@ -286,7 +288,7 @@ func charNormalize(key string, value any) any {
 			typed[i] = charNormalize(key, v)
 		}
 	case string:
-		if (key == "id" || key == "item_id" || key == "response_id") && !strings.Contains(typed, "fixture") {
+		if (key == "id" || key == "item_id" || key == "response_id" || key == "request_id") && !strings.Contains(typed, "fixture") {
 			if cut := strings.IndexAny(typed, "_-"); cut >= 0 {
 				return "<generated " + typed[:cut+1] + ">"
 			}

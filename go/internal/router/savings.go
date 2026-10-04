@@ -79,6 +79,9 @@ func (s *savingsStore) conn(path string) (*sql.DB, error) {
 
 // UsageRecord is the input to RecordUsage.
 type UsageRecord struct {
+	// RequestID names the request the record is for. Work no request
+	// started leaves it empty, and IAM gives the record an ID of its own.
+	RequestID      string
 	Endpoint       string
 	RequestedModel string
 	RoutedModel    string
@@ -115,7 +118,7 @@ func (rt *Runtime) RecordUsage(r UsageRecord) {
 		credits = 1000 // one neutral model-credit; weighted policies can override later
 	}
 	if err := iam.RecordUsageEvent(iam.UsageEvent{
-		Endpoint: r.Endpoint, StatusCode: status, LatencyMS: r.LatencyMS,
+		RequestID: r.RequestID, Endpoint: r.Endpoint, StatusCode: status, LatencyMS: r.LatencyMS,
 		RequestedModel: r.RequestedModel, RoutedModel: r.RoutedModel,
 		Provider: r.Provider, ProjectID: r.ProjectID, PrincipalID: r.PrincipalID,
 		KeyID: r.KeyID, InputTokens: r.InputTokens, OutputTokens: r.OutputTokens,

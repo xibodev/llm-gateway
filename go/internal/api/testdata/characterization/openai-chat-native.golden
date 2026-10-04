@@ -9,6 +9,7 @@ header X-Llmgw-Prompt-Bytes: 39
 header X-Llmgw-Tool-Schema-Bytes: 0
 header X-Llmgw-Transport-Mode: native
 header X-Llmgw-Ttfb-Ms: <ms>
+header X-Request-Id: <generated req_>
 upstream: POST /f/chat/completions
 upstream body: {"messages":[{"content":"Say hello","role":"user"}],"model":"chat-model","stream":false}
 body:

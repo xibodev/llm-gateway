@@ -3,6 +3,7 @@ request: POST /v1/responses
 status: 200
 header Content-Type: application/json
 header X-Llmgw-Transport-Mode: translated
+header X-Request-Id: <generated req_>
 upstream: POST /f/chat/completions
 upstream body: {"messages":[{"content":"Say hello","role":"user"}],"model":"chat-model","stream":false}
 body:

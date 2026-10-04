@@ -259,7 +259,7 @@ func (s *server) handler() http.Handler {
 	mux.HandleFunc("GET /admin/api/usage", s.handleUsage)
 	mux.HandleFunc("GET /admin/api/telemetry", s.handleTelemetry)
 
-	return securityHeaders(aliasMiddleware(requestLogMiddleware(anthropicErrors(limitRequestBodies(mux)))))
+	return securityHeaders(assignRequestIDs(aliasMiddleware(requestLogMiddleware(anthropicErrors(limitRequestBodies(mux))))))
 }
 
 // aliasMiddleware rewrites bare paths before routing.

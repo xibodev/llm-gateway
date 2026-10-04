@@ -176,7 +176,7 @@ func (u *streamUsage) tokens() (int, int) {
 func (u *streamUsage) record(status int, errorCode string) {
 	input, output := u.tokens()
 	router.RecordUsage(router.UsageRecord{
-		Endpoint: u.endpoint, RequestedModel: u.requested, RoutedModel: u.served.Model,
+		RequestID: u.principal.RequestID, Endpoint: u.endpoint, RequestedModel: u.requested, RoutedModel: u.served.Model,
 		Provider: u.served.Provider, Project: u.principal.Project, Key: u.principal.Key,
 		ProjectID: u.principal.ProjectID, PrincipalID: u.principal.PrincipalID, KeyID: u.principal.KeyID,
 		InputTokens: input, OutputTokens: output, StatusCode: status, ErrorCode: errorCode,

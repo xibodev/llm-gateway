@@ -210,7 +210,7 @@ func handleImageGenerations(w http.ResponseWriter, r *http.Request) {
 	}
 	inputTokens, outputTokens := googleModalityUsage(usage)
 	router.RecordUsage(router.UsageRecord{
-		Endpoint: "openai.images", RequestedModel: body.Model, RoutedModel: upstreamModel,
+		RequestID: principal.RequestID, Endpoint: "openai.images", RequestedModel: body.Model, RoutedModel: upstreamModel,
 		Provider: providerID, Project: principal.Project, Key: principal.Key,
 		ProjectID: principal.ProjectID, PrincipalID: principal.PrincipalID, KeyID: principal.KeyID,
 		InputTokens: inputTokens, OutputTokens: outputTokens,
@@ -320,7 +320,7 @@ func handleVideoGenerations(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	router.RecordUsage(router.UsageRecord{
-		Endpoint: "openai.videos", RequestedModel: body.Model, RoutedModel: upstreamModel,
+		RequestID: principal.RequestID, Endpoint: "openai.videos", RequestedModel: body.Model, RoutedModel: upstreamModel,
 		Provider: providerID, Project: principal.Project, Key: principal.Key,
 		ProjectID: principal.ProjectID, PrincipalID: principal.PrincipalID, KeyID: principal.KeyID,
 		StatusCode: http.StatusAccepted, LatencyMS: time.Since(started).Milliseconds(), IsStub: isStub(providerID),

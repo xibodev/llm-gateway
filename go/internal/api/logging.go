@@ -183,6 +183,7 @@ func writeRequestLog(
 	}
 	entry := map[string]any{
 		"ts":             time.Now().UTC().Format(time.RFC3339Nano),
+		"request_id":     requestIDFrom(r.Context()),
 		"path":           r.URL.Path,
 		"status":         status,
 		"dur_ms":         dur.Milliseconds(),

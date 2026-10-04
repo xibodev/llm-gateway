@@ -274,7 +274,7 @@ func handleTranscriptions(w http.ResponseWriter, r *http.Request) {
 			status, errorCode = upstreamErrorStatus(coreErr), "upstream"
 		}
 		router.RecordUsage(router.UsageRecord{
-			Endpoint: "openai.transcriptions", RequestedModel: provider + "/" + upstreamModel, RoutedModel: upstreamModel,
+			RequestID: principal.RequestID, Endpoint: "openai.transcriptions", RequestedModel: provider + "/" + upstreamModel, RoutedModel: upstreamModel,
 			Provider: provider, Project: principal.Project, Key: principal.Key,
 			ProjectID: principal.ProjectID, PrincipalID: principal.PrincipalID, KeyID: principal.KeyID,
 			StatusCode: status, LatencyMS: time.Since(started).Milliseconds(),
@@ -306,7 +306,7 @@ func handleTranscriptions(w http.ResponseWriter, r *http.Request) {
 	}
 	result := readAPIProxyResponse(resp, "audio transcription")
 	router.RecordUsage(router.UsageRecord{
-		Endpoint: "openai.transcriptions", RequestedModel: provider + "/" + upstreamModel, RoutedModel: upstreamModel,
+		RequestID: principal.RequestID, Endpoint: "openai.transcriptions", RequestedModel: provider + "/" + upstreamModel, RoutedModel: upstreamModel,
 		Provider: provider, Project: principal.Project, Key: principal.Key,
 		ProjectID: principal.ProjectID, PrincipalID: principal.PrincipalID, KeyID: principal.KeyID,
 		StatusCode: result.status, LatencyMS: time.Since(started).Milliseconds(),
@@ -362,7 +362,7 @@ func handleSpeech(w http.ResponseWriter, r *http.Request) {
 			status, errorCode = upstreamErrorStatus(coreErr), "upstream"
 		}
 		router.RecordUsage(router.UsageRecord{
-			Endpoint: "openai.speech", RequestedModel: provider + "/" + upstreamModel, RoutedModel: upstreamModel,
+			RequestID: principal.RequestID, Endpoint: "openai.speech", RequestedModel: provider + "/" + upstreamModel, RoutedModel: upstreamModel,
 			Provider: provider, Project: principal.Project, Key: principal.Key,
 			ProjectID: principal.ProjectID, PrincipalID: principal.PrincipalID, KeyID: principal.KeyID,
 			StatusCode: status, LatencyMS: time.Since(started).Milliseconds(),
@@ -392,7 +392,7 @@ func handleSpeech(w http.ResponseWriter, r *http.Request) {
 	}
 	result := readAPIProxyResponse(resp, "audio speech")
 	router.RecordUsage(router.UsageRecord{
-		Endpoint: "openai.speech", RequestedModel: provider + "/" + upstreamModel, RoutedModel: upstreamModel,
+		RequestID: principal.RequestID, Endpoint: "openai.speech", RequestedModel: provider + "/" + upstreamModel, RoutedModel: upstreamModel,
 		Provider: provider, Project: principal.Project, Key: principal.Key,
 		ProjectID: principal.ProjectID, PrincipalID: principal.PrincipalID, KeyID: principal.KeyID,
 		StatusCode: result.status, LatencyMS: time.Since(started).Milliseconds(),
@@ -484,7 +484,7 @@ func serveNativeSpeech(
 		return
 	}
 	router.RecordUsage(router.UsageRecord{
-		Endpoint: "openai.speech", RequestedModel: provider + "/" + voice, RoutedModel: voice,
+		RequestID: principal.RequestID, Endpoint: "openai.speech", RequestedModel: provider + "/" + voice, RoutedModel: voice,
 		Provider: provider, Project: principal.Project, Key: principal.Key,
 		ProjectID: principal.ProjectID, PrincipalID: principal.PrincipalID, KeyID: principal.KeyID,
 		StatusCode: 200, LatencyMS: time.Since(started).Milliseconds(), IsStub: isStub(provider),

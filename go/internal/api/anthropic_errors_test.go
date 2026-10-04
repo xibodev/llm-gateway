@@ -52,7 +52,8 @@ func TestMessagesRouteUpstreamErrorKeepsStatusAndRetryAfter(t *testing.T) {
 
 // Every error on the Messages routes, from authentication, body decoding,
 // routing or the upstream, reaches the client in Anthropic's envelope with
-// its HTTP status; the OpenAI-shaped routes keep their own envelope.
+// its HTTP status and, where Anthropic's own envelope has it, the request's
+// ID; the OpenAI-shaped routes keep their own envelope.
 func TestMessagesRoutesAnswerErrorsInAnthropicsEnvelope(t *testing.T) {
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -133,7 +134,8 @@ func TestMessagesRoutesAnswerErrorsInAnthropicsEnvelope(t *testing.T) {
 				response, envelope := send(path, tc.token, tc.body)
 				errorBody, _ := envelope["error"].(map[string]any)
 				message, _ := errorBody["message"].(string)
-				if response.StatusCode != tc.status || envelope["type"] != "error" || len(envelope) != 2 ||
+				if response.StatusCode != tc.status || envelope["type"] != "error" || len(envelope) != 3 ||
+					envelope["request_id"] != response.Header.Get("X-Request-Id") ||
 					errorBody["type"] != tc.errorType || len(errorBody) != 2 || message == "" {
 					t.Fatalf("status=%d envelope=%v", response.StatusCode, envelope)
 				}

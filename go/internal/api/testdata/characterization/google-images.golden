@@ -2,6 +2,7 @@
 request: POST /v1/images/generations
 status: 200
 header Content-Type: application/json
+header X-Request-Id: <generated req_>
 upstream: POST /vertex/v1/projects/fixture-project/locations/global/publishers/google/models/gemini-image-fixture:generateContent
 upstream body: {"contents":[{"parts":[{"text":"an origami crane"}],"role":"user"}],"generationConfig":{"responseModalities":["TEXT","IMAGE"]}}
 body:
@@ -19,6 +20,7 @@ body:
 request: POST /v1/images/generations
 status: 502
 header Content-Type: application/json
+header X-Request-Id: <generated req_>
 upstream: POST /studio/v1beta/models/gemini-fixture:generateContent
 upstream body: {"contents":[{"parts":[{"text":"an origami crane"}],"role":"user"}],"generationConfig":{"responseModalities":["TEXT","IMAGE"]}}
 body:
@@ -26,6 +28,7 @@ body:
   "error": {
     "code": "502",
     "message": "Upstream provider request failed.",
+    "request_id": "<generated req_>",
     "type": "api_error"
   }
 }
@@ -33,6 +36,7 @@ body:
 request: POST /v1/images/generations
 status: 403
 header Content-Type: application/json
+header X-Request-Id: <generated req_>
 upstream: POST /studio/v1beta/models/gemini-denied-fixture:generateContent
 upstream body: {"contents":[{"parts":[{"text":"an origami crane"}],"role":"user"}],"generationConfig":{"responseModalities":["TEXT","IMAGE"]}}
 body:
@@ -40,6 +44,7 @@ body:
   "error": {
     "code": "403",
     "message": "Upstream provider request failed.",
+    "request_id": "<generated req_>",
     "type": "invalid_request_error"
   }
 }

@@ -15,7 +15,7 @@ func recordFailureUsage(
 		return
 	}
 	router.RecordUsage(router.UsageRecord{
-		Endpoint: endpoint, RequestedModel: requestedModel,
+		RequestID: principal.RequestID, Endpoint: endpoint, RequestedModel: requestedModel,
 		Project: principal.Project, Key: principal.Key,
 		ProjectID: principal.ProjectID, PrincipalID: principal.PrincipalID,
 		KeyID: principal.KeyID, StatusCode: status,

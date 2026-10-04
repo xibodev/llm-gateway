@@ -9,6 +9,7 @@ header X-Llmgw-Prompt-Bytes: 39
 header X-Llmgw-Tool-Schema-Bytes: 0
 header X-Llmgw-Transport-Mode: native
 header X-Llmgw-Ttfb-Ms: <ms>
+header X-Request-Id: <generated req_>
 upstream: POST /br/chat/completions
 upstream body: {"max_tokens":64,"messages":[{"content":"Say hello","role":"user"}],"model":"chat-fixture","stream":false}
 body:
@@ -42,6 +43,7 @@ header Content-Type: text/event-stream
 header X-Llmgw-Prompt-Bytes: 39
 header X-Llmgw-Tool-Schema-Bytes: 0
 header X-Llmgw-Ttfb-Ms: <ms>
+header X-Request-Id: <generated req_>
 upstream: POST /br/chat/completions
 upstream body: {"max_tokens":64,"messages":[{"content":"Say hello","role":"user"}],"model":"chat-fixture","stream":true}
 body:
@@ -57,6 +59,7 @@ request: POST /v1/responses
 status: 200
 header Content-Type: application/json
 header X-Llmgw-Transport-Mode: native
+header X-Request-Id: <generated req_>
 upstream: POST /br/responses
 upstream body: {"input":"Say hello","model":"responses-fixture","stream":false}
 body:
@@ -94,6 +97,7 @@ status: 200
 header Cache-Control: no-cache
 header Connection: keep-alive
 header Content-Type: text/event-stream
+header X-Request-Id: <generated req_>
 upstream: POST /br/responses
 upstream body: {"input":"Say hello","model":"responses-fixture","stream":true}
 body:
@@ -122,6 +126,7 @@ request: POST /v1/responses
 status: 200
 header Content-Type: application/json
 header X-Llmgw-Transport-Mode: translated
+header X-Request-Id: <generated req_>
 upstream: POST /br/chat/completions
 upstream body: {"messages":[{"content":"Say hello","role":"user"}],"model":"chat-fixture","stream":false}
 body:
@@ -196,6 +201,7 @@ header X-Llmgw-Fallback-Ms: <ms>
 header X-Llmgw-Prompt-Bytes: 39
 header X-Llmgw-Tool-Schema-Bytes: 0
 header X-Llmgw-Ttfb-Ms: <ms>
+header X-Request-Id: <generated req_>
 upstream: POST /br/chat/completions
 upstream body: {"max_tokens":64,"messages":[{"content":"Say hello","role":"user"}],"model":"throttled-fixture","stream":false}
 body:
@@ -203,6 +209,7 @@ body:
   "error": {
     "code": "429",
     "message": "openai: upstream returned 429: fixture rate limit",
+    "request_id": "<generated req_>",
     "type": "invalid_request_error"
   }
 }

@@ -50,6 +50,20 @@ func RecordUsageEvent(event UsageEvent) error {
 		return err
 	}
 	defer func() { _ = tx.Rollback() }()
+	// request_id is unique, but a client names its own request and can send
+	// one ID twice, as a retry may. The repeat is recorded under an ID of its
+	// own rather than lost with the counters it adds to.
+	var recorded bool
+	if err := tx.QueryRow(
+		`SELECT EXISTS(SELECT 1 FROM usage_events WHERE request_id=?)`, event.RequestID,
+	).Scan(&recorded); err != nil {
+		return err
+	}
+	if recorded {
+		if event.RequestID, err = newID("req"); err != nil {
+			return err
+		}
+	}
 	_, err = tx.Exec(`
 INSERT INTO usage_events(
     request_id,ts,endpoint,status_code,latency_ms,requested_model,routed_model,

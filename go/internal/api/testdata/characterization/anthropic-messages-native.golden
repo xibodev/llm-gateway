@@ -3,6 +3,7 @@ request: POST /v1/messages
 status: 200
 header Content-Type: application/json
 header X-Llmgw-Transport-Mode: native
+header X-Request-Id: <generated req_>
 upstream: POST /n/v1/messages
 upstream body: {"max_tokens":64,"messages":[{"content":"Say hello","role":"user"}],"model":"claude-fixture","stream":false}
 body:

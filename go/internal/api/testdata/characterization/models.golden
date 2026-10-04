@@ -2,6 +2,7 @@
 request: GET /v1/models
 status: 200
 header Content-Type: application/json
+header X-Request-Id: <generated req_>
 body:
 {
   "data": [

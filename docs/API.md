@@ -187,6 +187,22 @@ with `413` in the route's error envelope: before it is read when it declares a
 `Content-Length`, and as soon as it crosses the limit otherwise. Multipart
 uploads count in full. The same limit bounds the management APIs.
 
+## Request IDs
+
+Every response carries an `X-Request-Id` header naming its request, errors
+included; a stream carries it before its first event. A client may name its
+own request by sending `X-Request-Id` with 1 to 128 letters, digits, `.`, `_`,
+`:` or `-`, and the response carries that value back. Without one, or with any
+other value, the gateway assigns an ID: `req_` followed by 32 hexadecimal
+digits.
+
+Quote the ID when reporting a failed request: it is how an operator finds the
+request's usage record, request log entry and audit event; see
+[correlating a request](OPERATIONS.md#correlating-a-request). Send a different
+ID for every request, retries included. A usage record's ID is unique, so a
+request that repeats an ID an earlier one was recorded under is recorded under
+an ID the gateway assigns instead.
+
 ## Errors and cancellation
 
 Upstream errors preserve meaningful status while credential-shaped diagnostics
@@ -194,12 +210,15 @@ are sanitized. Client cancellation on covered coding endpoints stops upstream
 work and suppresses success terminals, retry, and failover after abort.
 
 Errors on `/v1/messages` and `/v1/messages/count_tokens` use Anthropic's
-envelope, `{"type":"error","error":{"type":...,"message":...}}`, with the HTTP
-status and any `Retry-After` header kept. The type follows the status:
+envelope,
+`{"type":"error","error":{"type":...,"message":...},"request_id":...}`, with
+the HTTP status and any `Retry-After` header kept. The type follows the status:
 `invalid_request_error` for `400`, `413` and `422`, `authentication_error` for
 `401`, `permission_error` for `403`, `not_found_error` for `404`,
 `rate_limit_error` for `429`, `overloaded_error` for `529`, and `api_error` for
-other `5xx`. Other routes use `{"error":{"message":...,"type":...,"code":...}}`.
+other `5xx`. Other routes use
+`{"error":{"message":...,"type":...,"code":...,"request_id":...}}`. In both,
+`request_id` repeats the response's `X-Request-Id`.
 
 A stream whose upstream fails after the first byte, or closes the stream
 before its end, ends with the surface's error event and never with its success
