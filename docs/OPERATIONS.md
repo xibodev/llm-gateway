@@ -59,7 +59,9 @@ Keep source and standalone installation folders, projects and volumes separate.
 `deploy/docker-compose.prod.yml` and `deploy/Caddyfile` are a starting point for
 a single-user or static-admin deployment. Pin the image to a semantic version or
 digest, set a real domain, bind the gateway behind Caddy, keep unauthenticated
-mode off, and protect the state directory.
+mode off, and protect the state directory. The gateway closes keep-alive
+connections that stay idle for three minutes, so a proxy in front must close its
+idle upstream connections sooner; Caddy's two-minute default does.
 
 The released Compose example uses a local image name and `build:`. Merely
 exporting `LLMGW_IMAGE` does not override it. Add a private Compose override:

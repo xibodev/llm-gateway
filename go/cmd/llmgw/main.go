@@ -154,11 +154,8 @@ func serve() {
 	}
 	addr := host + ":" + port
 
-	srv := &http.Server{
-		Addr:              addr,
-		Handler:           api.NewServer(api.Runtime{Providers: providerRuntime, Router: routerRuntime}),
-		ReadHeaderTimeout: 10 * time.Second,
-	}
+	srv := newHTTPServer(api.NewServer(api.Runtime{Providers: providerRuntime, Router: routerRuntime}))
+	srv.Addr = addr
 
 	go func() {
 		log.Printf("llm-gateway %s (%s) listening on http://%s (admin at /admin)", buildinfo.Version, buildinfo.Commit, addr)
@@ -174,6 +171,25 @@ func serve() {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	_ = srv.Shutdown(ctx)
+}
+
+// newHTTPServer returns the gateway's HTTP server for handler.
+//
+// ReadHeaderTimeout bounds a client that never finishes its request headers.
+// IdleTimeout closes keep-alive connections nobody reuses; it outlasts the
+// two-minute idle pool of common reverse proxies, Caddy's default included, so
+// the proxy retires a pooled connection first and never sends a request into
+// one the gateway is closing. There is deliberately no ReadTimeout or
+// WriteTimeout: net/http keeps the ReadTimeout deadline on the connection while
+// the handler runs, and when it fires the server's background read cancels the
+// request context, aborting a long streamed response; a WriteTimeout would cut
+// such a stream off as well.
+func newHTTPServer(handler http.Handler) *http.Server {
+	return &http.Server{
+		Handler:           handler,
+		ReadHeaderTimeout: 10 * time.Second,
+		IdleTimeout:       3 * time.Minute,
+	}
 }
 
 func printVersion(output io.Writer) {
