@@ -13,6 +13,7 @@ import (
 	"fmt"
 	"io/fs"
 	"maps"
+	"math"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -606,6 +607,11 @@ func parseYAML(path string, raw []byte) (*yaml.Node, map[string]any, error) {
 	if err := document.Decode(&payload); err != nil {
 		return nil, nil, fmt.Errorf("parse configuration %s: %w", path, err)
 	}
+	// A setting the loader rejects makes the file as unusable as a syntax
+	// error does, so startup and every writer refuse it the same way.
+	if err := applyConfig(Defaults(), payload); err != nil {
+		return nil, nil, fmt.Errorf("parse configuration %s: %w", path, err)
+	}
 	return &document, payload, nil
 }
 
@@ -630,7 +636,9 @@ func Load() (*Settings, error) {
 		return nil, err
 	}
 	s := Defaults()
-	applyConfig(s, payload)
+	if err := applyConfig(s, payload); err != nil {
+		return nil, fmt.Errorf("parse configuration %s: %w", ConfigFilePath(), err)
+	}
 	applyEnv(s)
 	publishLocked(s)
 	return s, nil
@@ -697,7 +705,9 @@ func ReadFile(path string) (*Settings, error) {
 		return nil, err
 	}
 	s := Defaults()
-	applyConfig(s, payload)
+	if err := applyConfig(s, payload); err != nil {
+		return nil, fmt.Errorf("parse configuration %s: %w", path, err)
+	}
 	return s, nil
 }
 
@@ -768,9 +778,9 @@ func applyEnv(s *Settings) {
 	envBool("LLMGW_ALLOW_COPILOT_PROXY", &s.AllowCopilotProxy)
 }
 
-func applyConfig(s *Settings, payload map[string]any) {
+func applyConfig(s *Settings, payload map[string]any) error {
 	if payload == nil {
-		return
+		return nil
 	}
 	// Re-marshal the payload sections into typed structs via yaml round-trip.
 	if raw, ok := payload["providers"].(map[string]any); ok {
@@ -851,6 +861,46 @@ func applyConfig(s *Settings, payload map[string]any) {
 		s.Policies = BackendPolicies{Defaults: defaults, Overrides: overrides, OverrideFields: overrideFields}
 	}
 	applyScalars(s, payload)
+	if savings, ok := payload["savings"].(map[string]any); ok {
+		catalog, err := parsePriceCatalog(savings["price_catalog"])
+		if err != nil {
+			return err
+		}
+		s.Savings.PriceCatalog = catalog
+	}
+	return nil
+}
+
+// parsePriceCatalog reads savings.price_catalog: for each model ID, the
+// input and output price in US dollars per million tokens, the unit the
+// usage cost is computed in. A price that is missing, not a number, or
+// negative is an error rather than a zero, because every usage record would
+// then carry a wrong cost without a word, and so would cost quotas.
+func parsePriceCatalog(raw any) (map[string]map[string]float64, error) {
+	catalog := map[string]map[string]float64{}
+	if raw == nil {
+		return catalog, nil
+	}
+	models, ok := raw.(map[string]any)
+	if !ok {
+		return nil, fmt.Errorf("savings.price_catalog must map model IDs to prices")
+	}
+	for model, entry := range models {
+		fields, ok := entry.(map[string]any)
+		if !ok {
+			return nil, fmt.Errorf("savings.price_catalog: model %q needs input and output prices", model)
+		}
+		prices := map[string]float64{}
+		for _, field := range []string{"input", "output"} {
+			price, ok := toFloat(fields[field])
+			if !ok || price < 0 || math.IsNaN(price) || math.IsInf(price, 0) {
+				return nil, fmt.Errorf("savings.price_catalog: model %q: %s must be a number of US dollars per million tokens, zero or more", model, field)
+			}
+			prices[field] = price
+		}
+		catalog[model] = prices
+	}
+	return catalog, nil
 }
 
 // cloneStringAnyMap deep-copies decoded YAML. The policy fields the gateway

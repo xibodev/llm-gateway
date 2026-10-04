@@ -41,7 +41,7 @@ func populatedSettings() *Settings {
 			"keyed":              map[any]any{1: []any{"one"}},
 		},
 	}
-	s.Savings.PriceCatalog = map[string]map[string]float64{"model-a": {"input": 0.5}}
+	s.Savings.PriceCatalog = map[string]map[string]float64{"model-a": {"input": 0.5, "output": 1.5}}
 	return s
 }
 

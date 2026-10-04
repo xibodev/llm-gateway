@@ -108,6 +108,22 @@ savings:
 Enable it only for compatibility. Its configured database is included in built-in
 backups and pruned with the usage-retention window.
 
+`savings.price_catalog` prices models the built-in price table gets wrong or
+does not know. It applies to every usage record, including the cost counted
+against cost quotas in `gateway.db`, whether or not the ledger is enabled:
+
+```yaml
+savings:
+  price_catalog:
+    <served-model-id>:   # model ID as the provider served it, without the provider prefix
+      input: 0.15        # US dollars per million input tokens
+      output: 0.60       # US dollars per million output tokens
+```
+
+An entry replaces the built-in price for exactly that model ID. Both prices are
+required and must be numbers of zero or more; a catalog that breaks this stops
+startup with an error naming the model.
+
 ## Environment variables
 
 ### Server and state

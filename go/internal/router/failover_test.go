@@ -7,6 +7,8 @@ import (
 	"math"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"testing"
@@ -728,5 +730,41 @@ func TestRecordUsageWritesControlPlaneLedger(t *testing.T) {
 	}
 	if got := stats["totals"].(iam.UsageTotals).Requests; got != 1 {
 		t.Fatalf("control-plane requests=%d, want 1", got)
+	}
+}
+
+// A savings.price_catalog entry in the configuration file prices its model in
+// place of the built-in table, which would charge 2.50 and 10 US dollars per
+// million tokens for this one.
+func TestRecordUsageCostsAPriceCatalogOverrideFromTheConfigurationFile(t *testing.T) {
+	state := t.TempDir()
+	t.Setenv("LLMGW_STATE_DIR", state)
+	t.Setenv("LLMGW_CONFIG", filepath.Join(state, "config.yaml"))
+	t.Setenv("LLMGW_CONFIG_SEED", "")
+	iam.ResetForTests()
+	ResetSavingsState()
+	old := *config.Get()
+	t.Cleanup(func() {
+		iam.ResetForTests()
+		ResetSavingsState()
+		config.Update(func(s *config.Settings) { *s = old })
+	})
+	catalog := "savings:\n  price_catalog:\n    gpt-4o:\n      input: 1\n      output: 3\n"
+	if err := os.WriteFile(filepath.Join(state, "config.yaml"), []byte(catalog), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := config.Load(); err != nil {
+		t.Fatal(err)
+	}
+	RecordUsage(UsageRecord{
+		Endpoint: "openai.chat", RequestedModel: "gpt-4o", RoutedModel: "gpt-4o",
+		Provider: "fixture", InputTokens: 1_000_000, OutputTokens: 1_000_000,
+	})
+	stats, err := iam.UsageStats(0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := stats["totals"].(iam.UsageTotals).CostMicroUSD; got != 4_000_000 {
+		t.Fatalf("cost=%d micro-USD, want the catalog's 4000000", got)
 	}
 }

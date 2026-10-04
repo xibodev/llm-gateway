@@ -680,6 +680,63 @@ savings:
 	}
 }
 
+func TestPriceCatalogLoadsAndSurvivesASave(t *testing.T) {
+	keepSettings(t)
+	useTempConfig(t)
+	content := "savings:\n  enabled: false\n  price_catalog:\n    fixture-model:\n      input: 0.15 # per million\n      output: 2\n"
+	if err := os.WriteFile(ConfigFilePath(), []byte(content), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	want := map[string]map[string]float64{"fixture-model": {"input": 0.15, "output": 2}}
+	if got := mustLoad(t).Savings.PriceCatalog; !reflect.DeepEqual(got, want) {
+		t.Fatalf("price catalog=%v, want %v", got, want)
+	}
+	if _, err := UpdateAndSave(func(s *Settings) error {
+		s.Providers["added"] = &ProviderConfig{Type: "echo"}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	raw, err := os.ReadFile(ConfigFilePath())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := mustLoad(t).Savings.PriceCatalog; !reflect.DeepEqual(got, want) || !strings.Contains(string(raw), "# per million") {
+		t.Fatalf("price catalog after a save=%v:\n%s", got, raw)
+	}
+}
+
+func TestLoadRefusesAnInvalidPriceCatalog(t *testing.T) {
+	keepSettings(t)
+	useTempConfig(t)
+	for name, catalog := range map[string]string{
+		"negative":    "{m: {input: -1, output: 1}}",
+		"non-numeric": "{m: {input: cheap, output: 1}}",
+		"boolean":     "{m: {input: 1, output: true}}",
+		"missing":     "{m: {input: 1}}",
+		"not a price": "{m: 5}",
+		"not a map":   "[m]",
+	} {
+		t.Run(name, func(t *testing.T) {
+			content := "savings:\n  price_catalog: " + catalog + "\n"
+			if err := os.WriteFile(ConfigFilePath(), []byte(content), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			generation := Generation()
+			_, err := Load()
+			if err == nil || !strings.Contains(err.Error(), ConfigFilePath()) || !strings.Contains(err.Error(), "savings.price_catalog") {
+				t.Fatalf("err=%v, want the path and the setting", err)
+			}
+			if Generation() != generation {
+				t.Fatal("an invalid price catalog was published")
+			}
+			if err := Save(); err == nil {
+				t.Fatal("Save replaced a configuration the loader refuses")
+			}
+		})
+	}
+}
+
 func TestSecretsIsolation(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("LLMGW_STATE_DIR", dir)
@@ -702,7 +759,9 @@ func parseSettingsForTest(t *testing.T, yamlStr string) *Settings {
 		t.Fatalf("unmarshal: %v", err)
 	}
 	s := Defaults()
-	applyConfig(s, payload)
+	if err := applyConfig(s, payload); err != nil {
+		t.Fatalf("apply: %v", err)
+	}
 	return s
 }
 
