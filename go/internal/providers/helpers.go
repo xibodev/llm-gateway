@@ -32,7 +32,7 @@ func ensureProviderZenInvocation(ctx context.Context, _ Provider) (context.Conte
 }
 
 func ResetProviders() {
-	Current().instances.instances = map[string]Provider{}
+	Current().ResetProviders()
 }
 
 func RegisterQuotaAdapter(adapter QuotaAdapter) error {

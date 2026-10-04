@@ -1,6 +1,7 @@
 package providers
 
 import (
+	"sync"
 	"testing"
 
 	"llmgw/internal/config"
@@ -60,5 +61,60 @@ func TestCurrentInstallsARuntimeWhenNoneIsInstalled(t *testing.T) {
 	first := Current()
 	if first == nil || Current() != first {
 		t.Fatal("Current must install one Runtime and keep returning it")
+	}
+}
+
+// ResetProviders runs on every admin save while requests build providers. It
+// must hold the cache's lock and advance its epoch: GetProviderForPrincipal
+// stores a build only while the epoch it read before building still holds,
+// so a provider built from settings a reset replaced is never cached.
+func TestResetProvidersGuardsBuildsInFlight(t *testing.T) {
+	rt := installAnonymousFixture(t, map[string]*config.ProviderConfig{"fixture": {Type: "echo"}})
+	epoch := func() uint64 {
+		rt.instances.mu.Lock()
+		defer rt.instances.mu.Unlock()
+		return rt.instances.epoch
+	}
+	inFlight := epoch()
+	ResetProviders()
+	if epoch() == inFlight {
+		t.Fatal("reset kept the epoch a build in flight read, so that build would be cached")
+	}
+
+	stop := make(chan struct{})
+	var builders sync.WaitGroup
+	for range 4 {
+		builders.Add(1)
+		go func() {
+			defer builders.Done()
+			for {
+				select {
+				case <-stop:
+					return
+				default:
+					// Constant resets may exhaust the attempts a build
+					// gets; only what stays cached matters.
+					_, _ = GetProvider("fixture")
+				}
+			}
+		}()
+	}
+	const final = 64
+	for attempts := 2; attempts <= final; attempts++ {
+		config.Update(func(s *config.Settings) {
+			s.Policies.Defaults = config.ProviderPolicy{RetryMaxAttempts: attempts}
+		})
+		ResetProviders()
+	}
+	close(stop)
+	builders.Wait()
+	provider, err := GetProvider("fixture")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resilient, ok := provider.(*ResilientProvider); !ok {
+		t.Fatalf("cached %T, want a provider under the last retry policy", provider)
+	} else if got := resilient.policy.RetryMaxAttempts; got != final {
+		t.Fatalf("cached provider allows %d attempts, from settings a later reset replaced; want %d", got, final)
 	}
 }
