@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -21,9 +22,14 @@ import (
 	core "github.com/xibodev/llmgw-core"
 )
 
-// serviceAccountFixture builds a service-account key whose token endpoint is a
-// local stub, so the whole stored-credential path can run without a real key.
-func serviceAccountFixture(t *testing.T, tokenURI string) string {
+// googleTokenEndpoint is the token_uri Google issues in service-account keys.
+const googleTokenEndpoint = "https://oauth2.googleapis.com/token"
+
+// serviceAccountFixture builds a service-account key for a throwaway RSA key.
+// The gateway stores only keys that name a Google token endpoint, so a test
+// serves the exchange from a local stub with routeGoogleTokenEndpoint, and
+// the whole stored-credential path runs without a real key.
+func serviceAccountFixture(t *testing.T) string {
 	t.Helper()
 	key, err := rsa.GenerateKey(rand.Reader, 2048)
 	if err != nil {
@@ -39,7 +45,7 @@ func serviceAccountFixture(t *testing.T, tokenURI string) string {
 		"private_key_id": "key-1",
 		"private_key":    string(pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: der})),
 		"client_email":   "svc@fixture-project.iam.gserviceaccount.com",
-		"token_uri":      tokenURI,
+		"token_uri":      googleTokenEndpoint,
 	})
 	if err != nil {
 		t.Fatalf("marshal fixture: %v", err)
@@ -47,14 +53,40 @@ func serviceAccountFixture(t *testing.T, tokenURI string) string {
 	return string(raw)
 }
 
-func stubTokenEndpoint(t *testing.T) *httptest.Server {
+func stubTokenEndpoint(t *testing.T) {
 	t.Helper()
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`{"access_token":"ya29.stored-path","expires_in":3600}`))
 	}))
 	t.Cleanup(server.Close)
-	return server
+	routeGoogleTokenEndpoint(t, server)
+}
+
+// routeGoogleTokenEndpoint sends requests for Google's token endpoint to stub
+// until the test ends. Token exchanges use http.DefaultTransport.
+func routeGoogleTokenEndpoint(t *testing.T, stub *httptest.Server) {
+	t.Helper()
+	target, err := url.Parse(stub.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	original := http.DefaultTransport
+	http.DefaultTransport = tokenEndpointRoute{next: original, target: target}
+	t.Cleanup(func() { http.DefaultTransport = original })
+}
+
+type tokenEndpointRoute struct {
+	next   http.RoundTripper
+	target *url.URL
+}
+
+func (route tokenEndpointRoute) RoundTrip(request *http.Request) (*http.Response, error) {
+	if request.URL.String() == googleTokenEndpoint {
+		request = request.Clone(request.Context())
+		request.URL.Scheme, request.URL.Host = route.target.Scheme, route.target.Host
+	}
+	return route.next.RoundTrip(request)
 }
 
 func setupVertexIAM(t *testing.T) {
@@ -129,7 +161,7 @@ func expectVertexServiceAccount(t *testing.T, provider Provider, upstream *googl
 // header separately; only this test proves they meet.
 func TestVertexUsesStoredServiceAccountConnection(t *testing.T) {
 	setupVertexIAM(t)
-	server := stubTokenEndpoint(t)
+	stubTokenEndpoint(t)
 	upstream := vertexModelServer(t)
 
 	human, err := iam.CreatePrincipal("human", "authentik:vertex-owner", "", "Owner")
@@ -138,7 +170,7 @@ func TestVertexUsesStoredServiceAccountConnection(t *testing.T) {
 	}
 	if _, err := iam.PutProviderConnection(iam.ProviderConnectionCreate{
 		PrincipalID: human.ID, ProviderID: "vertex_ai", Name: "personal",
-		Kind: gcpauth.CredentialKind, Secret: serviceAccountFixture(t, server.URL),
+		Kind: gcpauth.CredentialKind, Secret: serviceAccountFixture(t),
 		Source: iam.ConnectionSourceUser, MakeDefault: true,
 	}); err != nil {
 		t.Fatalf("store service account connection: %v", err)
@@ -188,11 +220,11 @@ func TestVertexWithoutAnyCredentialFailsClearly(t *testing.T) {
 // consulted -- a key stored against a human principal cannot serve these calls.
 func TestVertexSystemConnectionServesAPIKeyCallers(t *testing.T) {
 	setupVertexIAM(t)
-	server := stubTokenEndpoint(t)
+	stubTokenEndpoint(t)
 	upstream := vertexModelServer(t)
 
 	if _, err := iam.PutSystemProviderConnection(
-		"vertex_ai", gcpauth.CredentialKind, serviceAccountFixture(t, server.URL),
+		"vertex_ai", gcpauth.CredentialKind, serviceAccountFixture(t),
 	); err != nil {
 		t.Fatalf("store system service account connection: %v", err)
 	}
@@ -222,6 +254,7 @@ func TestVertexCachedProviderRefreshesServiceAccountToken(t *testing.T) {
 		_, _ = fmt.Fprintf(w, `{"access_token":"token-%d","expires_in":%d}`, index, lifetime)
 	}))
 	defer tokenServer.Close()
+	routeGoogleTokenEndpoint(t, tokenServer)
 	modelServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		token := strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ")
 		_, _ = w.Write([]byte(`{"candidates":[{"content":{"parts":[{"text":"` + token + `"}]}}]}`))
@@ -233,7 +266,7 @@ func TestVertexCachedProviderRefreshesServiceAccountToken(t *testing.T) {
 	human, _ := iam.CreatePrincipal("human", "authentik:vertex-refresh", "", "Owner")
 	if _, err := iam.PutProviderConnection(iam.ProviderConnectionCreate{
 		PrincipalID: human.ID, ProviderID: "vertex_ai", Name: "personal",
-		Kind: gcpauth.CredentialKind, Secret: serviceAccountFixture(t, tokenServer.URL),
+		Kind: gcpauth.CredentialKind, Secret: serviceAccountFixture(t),
 		Source: iam.ConnectionSourceUser, MakeDefault: true,
 	}); err != nil {
 		t.Fatal(err)

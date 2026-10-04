@@ -108,6 +108,36 @@ func syntheticServiceAccountKey(t *testing.T) string {
 	return string(raw)
 }
 
+// serviceAccountKeyNaming is syntheticServiceAccountKey naming tokenURI as its
+// token endpoint.
+func serviceAccountKeyNaming(t *testing.T, tokenURI string) string {
+	t.Helper()
+	var doc map[string]string
+	if err := json.Unmarshal([]byte(syntheticServiceAccountKey(t)), &doc); err != nil {
+		t.Fatal(err)
+	}
+	doc["token_uri"] = tokenURI
+	raw, err := json.Marshal(doc)
+	if err != nil {
+		t.Fatalf("marshal fixture: %v", err)
+	}
+	return string(raw)
+}
+
+// refusedForTokenEndpoint fails the test unless a response refused a
+// service-account key for its token endpoint without repeating the key.
+func refusedForTokenEndpoint(t *testing.T, route string, status int, body map[string]any) {
+	t.Helper()
+	failure, _ := body["error"].(map[string]any)
+	msg, _ := failure["message"].(string)
+	if status != http.StatusBadRequest || !containsAll(msg, "token_uri") {
+		t.Fatalf("%s: status=%d body=%+v, want 400 naming token_uri", route, status, body)
+	}
+	if raw := stringifyAny(body); containsAll(raw, "PRIVATE KEY") || containsAll(raw, "example.test") {
+		t.Fatalf("%s: response repeats the key: %s", route, raw)
+	}
+}
+
 // multipartRequest builds a multipart body with the given fields, where a field
 // named with a leading "@" is sent as a file part rather than a value part.
 func multipartRequest(t *testing.T, fields map[string]string) (string, *bytes.Buffer) {
@@ -252,6 +282,41 @@ func TestUploadErrorsNeverEchoTheSecret(t *testing.T) {
 	raw := stringifyAny(body)
 	if containsAll(raw, marker) {
 		t.Fatalf("response echoed the submitted credential: %s", raw)
+	}
+}
+
+// A connection's service-account key naming a token endpoint other than
+// Google's is refused on the administrator's route, pasted or uploaded, and on
+// the owner's self-service route, and nothing is stored.
+func TestConnectionsRefuseForeignTokenEndpoint(t *testing.T) {
+	env := newCredentialTestEnv(t)
+	defer env.server.Close()
+	config.Update(func(s *config.Settings) {
+		s.SSOEnabled = true
+		s.SSOSharedSecret = "proxy-secret"
+		s.SSOAutoProvision = true
+	})
+	key := serviceAccountKeyNaming(t, "https://token.example.test/token")
+	route := env.server.URL + "/admin/api/principals/" + env.principalID + "/connections"
+
+	status, body := jsonRequest(t, route, http.MethodPost, "admin-secret", map[string]any{
+		"provider_id": "vertex-prod", "credential_kind": "gcp_service_account",
+		"connection_name": "pasted", "secret": key,
+	})
+	refusedForTokenEndpoint(t, "administrator JSON", status, body)
+	status, body = postMultipart(t, route, "admin-secret", map[string]string{
+		"provider_id": "vertex-prod", "credential_kind": "gcp_service_account",
+		"connection_name": "uploaded", "@secret": key,
+	})
+	refusedForTokenEndpoint(t, "administrator upload", status, body)
+	status, body = ssoConnectionRequest(t, env.server.URL, "token-endpoint-owner", http.MethodPost,
+		"/user/api/connections", map[string]any{
+			"provider_id": "vertex-prod", "credential_kind": "gcp_service_account",
+			"connection_name": "mine", "secret": key,
+		})
+	refusedForTokenEndpoint(t, "self-service", status, body)
+	if stored, err := iam.ActiveProviderConnectionExists("vertex-prod"); err != nil || stored {
+		t.Fatalf("a refused key was stored: stored=%v err=%v", stored, err)
 	}
 }
 

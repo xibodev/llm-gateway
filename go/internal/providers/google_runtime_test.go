@@ -148,13 +148,13 @@ func TestGoogleVerticalExchangesStoredServiceAccounts(t *testing.T) {
 	upstream := &googleUpstream{}
 	server := httptest.NewServer(upstream)
 	t.Cleanup(server.Close)
-	tokens := stubTokenEndpoint(t)
+	stubTokenEndpoint(t)
 	config.Update(func(s *config.Settings) {
 		s.Providers = map[string]*config.ProviderConfig{
 			"vertex": {Type: "vertex_ai", BaseURL: server.URL + "/v1", VertexRequestType: "paygo"},
 		}
 	})
-	if _, err := iam.PutSystemProviderConnection("vertex", gcpauth.CredentialKind, serviceAccountFixture(t, tokens.URL)); err != nil {
+	if _, err := iam.PutSystemProviderConnection("vertex", gcpauth.CredentialKind, serviceAccountFixture(t)); err != nil {
 		t.Fatal(err)
 	}
 	if err := googleRuntimeChat(runtime, gatewayCaller(), "vertex"); err != nil {

@@ -245,7 +245,7 @@ func createPersonalProviderConnection(
 				Msg: "a service account key is accepted only by a vertex_ai provider",
 			}
 		}
-		if _, err := gcpauth.Parse([]byte(body.Secret)); err != nil {
+		if err := iam.ValidateServiceAccountKey(body.Secret); err != nil {
 			return iam.ProviderConnection{}, &providers.ConfigError{Msg: err.Error()}
 		}
 		return iam.PutProviderConnection(iam.ProviderConnectionCreate{

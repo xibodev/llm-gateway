@@ -141,7 +141,7 @@ func connectionSecret(kind string, record tokenstore.Record) (string, error) {
 	if strings.EqualFold(kind, gcpauth.CredentialKind) {
 		// Parse before storing, as PutProviderConnection does, so a malformed
 		// key fails here instead of on the request path.
-		if _, err := gcpauth.Parse([]byte(strings.TrimSpace(record.AccessToken))); err != nil {
+		if err := ValidateServiceAccountKey(strings.TrimSpace(record.AccessToken)); err != nil {
 			return "", err
 		}
 	}

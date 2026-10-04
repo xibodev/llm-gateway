@@ -14,6 +14,8 @@ import (
 	"time"
 
 	"llmgw/internal/config"
+
+	gcpauth "github.com/xibodev/llm-provider-auth/gcp"
 )
 
 type ProviderCredentialInfo struct {
@@ -77,6 +79,11 @@ func putProviderCredential(
 	secret = strings.TrimSpace(secret)
 	if providerID == "" || kind == "" || secret == "" {
 		return ProviderCredentialInfo{}, fmt.Errorf("provider, credential kind and secret are required")
+	}
+	if strings.EqualFold(kind, gcpauth.CredentialKind) {
+		if err := ValidateServiceAccountKey(secret); err != nil {
+			return ProviderCredentialInfo{}, err
+		}
 	}
 	key, err := credentialKey()
 	if err != nil {

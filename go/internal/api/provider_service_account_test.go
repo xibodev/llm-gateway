@@ -145,3 +145,28 @@ func TestAdminRejectsServiceAccountForNonGoogleProvider(t *testing.T) {
 		t.Fatalf("expected a service account key to be refused for a non-Vertex provider, got %d %+v", status, body)
 	}
 }
+
+// The provider form stores a service-account key as the system connection
+// and in secrets.json. A key naming a token endpoint other than Google's is
+// refused, pasted or uploaded, before anything is stored.
+func TestAdminProviderRefusesForeignTokenEndpoint(t *testing.T) {
+	env := newCredentialTestEnv(t)
+	defer env.server.Close()
+	key := serviceAccountKeyNaming(t, "https://token.example.test/token")
+	route := env.server.URL + "/admin/api/providers"
+
+	status, body := jsonRequest(t, route, http.MethodPost, "admin-secret", map[string]any{
+		"registry_id": "vertex_ai", "project": "fixture-project", "location": "global", "api_key": key,
+	})
+	refusedForTokenEndpoint(t, "provider JSON", status, body)
+	status, body = postMultipart(t, route, "admin-secret", map[string]string{
+		"registry_id": "vertex_ai", "project": "fixture-project", "location": "global", "@api_key": key,
+	})
+	refusedForTokenEndpoint(t, "provider upload", status, body)
+	if _, _, stored, err := iam.SystemProviderConnectionSecret("vertex_ai"); err != nil || stored {
+		t.Fatalf("a refused key was stored: stored=%v err=%v", stored, err)
+	}
+	if config.Get().Providers["vertex_ai"] != nil || config.LoadSecrets()["vertex_ai"] != "" {
+		t.Fatal("a refused key still created the provider or its secret")
+	}
+}

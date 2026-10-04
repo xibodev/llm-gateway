@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"encoding/pem"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -192,7 +193,7 @@ func serviceAccountKeyFixture(t *testing.T) string {
 	raw, err := json.Marshal(map[string]string{
 		"type": "service_account", "project_id": "fixture-project", "private_key_id": "fixture-key-id",
 		"private_key":  string(pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: der})),
-		"client_email": "svc@fixture-project.iam.example.test", "token_uri": "https://token.example.test/token",
+		"client_email": "svc@fixture-project.iam.example.test", "token_uri": "https://oauth2.googleapis.com/token",
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -223,5 +224,80 @@ func TestCredentialStoreLoadsServiceAccountsAsCoreKind(t *testing.T) {
 		if _, err := store.ReplaceIfCurrent(ctx, connection.ID, record.Revision, record); err != nil {
 			t.Fatalf("kind %q: the loaded record was refused on write: %v", kind, err)
 		}
+	}
+}
+
+// serviceAccountKeyNaming is serviceAccountKeyFixture naming tokenURI as its
+// token endpoint.
+func serviceAccountKeyNaming(t *testing.T, tokenURI string) string {
+	t.Helper()
+	var document map[string]string
+	if err := json.Unmarshal([]byte(serviceAccountKeyFixture(t)), &document); err != nil {
+		t.Fatal(err)
+	}
+	document["token_uri"] = tokenURI
+	raw, err := json.Marshal(document)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(raw)
+}
+
+// Every token exchange posts a signed assertion to the key's token_uri, so
+// each path that stores a key refuses one naming any endpoint but Google's,
+// without repeating the key in the error.
+func TestStoredServiceAccountKeysNameGoogleTokenEndpoints(t *testing.T) {
+	path := credentialStatePath(t)
+	ctx := context.Background()
+	store := openCredentialStore(t, path, CredentialStoreOptions{})
+	for _, uri := range []string{"", "https://oauth2.googleapis.com/token", " https://accounts.google.com/o/oauth2/token "} {
+		if err := ValidateServiceAccountKey(serviceAccountKeyNaming(t, uri)); err != nil {
+			t.Errorf("token_uri %q refused: %v", uri, err)
+		}
+	}
+	accepted := serviceAccountKeyFixture(t)
+	if _, err := PutSystemProviderConnection("fixture-vertex", gcpauth.CredentialKind, accepted); err != nil {
+		t.Fatal(err)
+	}
+	system, _, _ := PrincipalBySubject(systemPrincipalSubject)
+	connection, _, _ := ActiveProviderConnection(system.ID, "fixture-vertex")
+	record, err := store.Load(ctx, connection.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	human, err := CreatePrincipal("human", "fixture:token-endpoint", "", "Token endpoint")
+	if err != nil {
+		t.Fatal(err)
+	}
+	// encoding/json reads the last key matching token_uri in any case, as
+	// the token exchange does.
+	shadowed := strings.TrimSuffix(accepted, "}") + `,"TOKEN_URI":"https://token.example.test/token"}`
+	for _, secret := range []string{
+		serviceAccountKeyNaming(t, "https://token.example.test/token"),
+		serviceAccountKeyNaming(t, "http://127.0.0.1:9/token"),
+		serviceAccountKeyNaming(t, "http://oauth2.googleapis.com/token"),
+		serviceAccountKeyNaming(t, "https://oauth2.googleapis.com/token?next=elsewhere"),
+		shadowed,
+	} {
+		refusals := map[string]error{}
+		_, refusals["system connection"] = PutSystemProviderConnection("fixture-vertex", gcpauth.CredentialKind, secret)
+		_, refusals["personal connection"] = PutProviderConnection(ProviderConnectionCreate{
+			PrincipalID: human.ID, ProviderID: "fixture-vertex", Kind: gcpauth.CredentialKind,
+			Secret: secret, Source: ConnectionSourceUser,
+		})
+		_, refusals["credential store write"] = store.ReplaceIfCurrent(ctx, connection.ID, record.Revision,
+			tokenstore.Record{AccessToken: secret, TokenType: core.TokenTypeGCPServiceAccount})
+		_, refusals["legacy credential"] = PutProviderCredential(human.ID, "fixture-vertex", gcpauth.CredentialKind, secret)
+		_, refusals["legacy gateway credential"] = PutGatewayProviderCredential("fixture-vertex", gcpauth.CredentialKind, secret)
+		for writer, err := range refusals {
+			if err == nil || !strings.Contains(err.Error(), "token_uri") {
+				t.Errorf("%s accepted a key naming another token endpoint: %v", writer, err)
+			} else if strings.Contains(err.Error(), "PRIVATE KEY") || strings.Contains(err.Error(), "example.test") {
+				t.Errorf("%s error repeats the key: %v", writer, err)
+			}
+		}
+	}
+	if stored, _, _, err := SystemProviderConnectionSecret("fixture-vertex"); err != nil || stored != accepted {
+		t.Fatalf("the stored key changed: err=%v", err)
 	}
 }

@@ -478,7 +478,7 @@ func handleUpsertProvider(w http.ResponseWriter, r *http.Request) {
 					"a Google service account key is only usable by a vertex_ai provider")
 				return
 			}
-			if _, err := gcpauth.Parse([]byte(raw)); err != nil {
+			if err := iam.ValidateServiceAccountKey(raw); err != nil {
 				writeError(w, 400, err.Error())
 				return
 			}

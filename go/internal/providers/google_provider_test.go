@@ -116,7 +116,8 @@ func TestGoogleFacadeTokenFailuresKeepTheTransportsErrors(t *testing.T) {
 		_, _ = io.WriteString(w, `{"error":"invalid_grant","error_description":"fixture refusal"}`)
 	}))
 	defer tokens.Close()
-	if _, err := iam.PutSystemProviderConnection("vertex_ai", gcpauth.CredentialKind, serviceAccountFixture(t, tokens.URL)); err != nil {
+	routeGoogleTokenEndpoint(t, tokens)
+	if _, err := iam.PutSystemProviderConnection("vertex_ai", gcpauth.CredentialKind, serviceAccountFixture(t)); err != nil {
 		t.Fatal(err)
 	}
 	provider, err := GetProviderForPrincipal("vertex_ai", gatewayCaller())

@@ -113,6 +113,10 @@ Google exposes four distinct paths:
 | `vertex_ai` | Native Gemini/Vertex API | Service-account JSON or eligible API key | Project and location scope; Cloud billing. `vertex_request_type: dedicated` requires matching provisioned capacity and never silently falls back. |
 | `google_antigravity` | Cloud Code Assist `v1internal` | Browser OAuth | Experimental owner-private catalog and non-streaming chat; requires an operator-provided OAuth client. |
 
+A `vertex_ai` service-account key must name `https://oauth2.googleapis.com/token`
+or `https://accounts.google.com/o/oauth2/token` as its `token_uri`, or omit it;
+the gateway refuses to store a key that names any other token endpoint.
+
 Model IDs and regional availability differ. Configure separate provider
 instances for locations that expose different model catalogs.
 

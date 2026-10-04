@@ -2,6 +2,7 @@ package iam
 
 import (
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"regexp"
@@ -62,6 +63,37 @@ type ProviderConnectionCreate struct {
 	AccountState       ProviderAccountStateSeed
 }
 
+// googleTokenEndpoints are the token_uri values Google issues in
+// service-account keys: the current endpoint and its legacy spelling.
+var googleTokenEndpoints = map[string]bool{
+	"https://oauth2.googleapis.com/token":        true,
+	"https://accounts.google.com/o/oauth2/token": true,
+}
+
+// ValidateServiceAccountKey parses a service-account key before it is stored
+// and refuses one whose token_uri is not a Google OAuth token endpoint. Every
+// token exchange posts a signed assertion to that URI, so accepting any other
+// would let whoever stores a key choose where the gateway sends it. A key
+// without a token_uri is exchanged at Google's endpoint.
+func ValidateServiceAccountKey(secret string) error {
+	if _, err := gcpauth.Parse([]byte(secret)); err != nil {
+		return err
+	}
+	// Read the field the way gcpauth.Parse does. encoding/json matches a
+	// name regardless of case and keeps the last match, so a looser reading
+	// could check a different value than the exchange uses.
+	var key struct {
+		TokenURI string `json:"token_uri"`
+	}
+	if err := json.Unmarshal([]byte(secret), &key); err != nil {
+		return errors.New("service account key: not valid JSON")
+	}
+	if uri := strings.TrimSpace(key.TokenURI); uri != "" && !googleTokenEndpoints[uri] {
+		return errors.New("service account key: token_uri is not a Google OAuth token endpoint")
+	}
+	return nil
+}
+
 // PutProviderConnection creates or replaces one named credential connection.
 // Human-owned connections are always private; service principals cannot own
 // provider credentials.
@@ -116,7 +148,7 @@ func PutProviderConnection(input ProviderConnectionCreate) (ProviderConnection, 
 	// merely encrypted would surface much later, as a failure on the request
 	// path, where the cause is far harder to see.
 	if strings.EqualFold(input.Kind, gcpauth.CredentialKind) {
-		if _, err := gcpauth.Parse([]byte(input.Secret)); err != nil {
+		if err := ValidateServiceAccountKey(input.Secret); err != nil {
 			return ProviderConnection{}, err
 		}
 	}
