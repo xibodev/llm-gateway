@@ -178,11 +178,11 @@ func TestOllamaStreamFinishesWithStopAfterToolCalls(t *testing.T) {
 	}
 }
 
-// The daemon's refusals keep the status, the transport's message and the
-// dispositions the router and the resilience wrapper decided on before; the
-// transport read no Retry-After, so none is kept. An answer that cannot be
-// used counts against the circuit, and a daemon that cannot be reached may
-// be repeated, with a message that does not name its address.
+// The daemon's refusals keep the status, the transport's message, the
+// dispositions the router and the resilience wrapper decided on before, and
+// the Retry-After the daemon or a proxy in front of it sent. An answer that
+// cannot be used counts against the circuit, and a daemon that cannot be
+// reached may be repeated, with a message that does not name its address.
 func TestOllamaFailuresKeepTheirClassification(t *testing.T) {
 	var status int
 	var answer string
@@ -211,7 +211,7 @@ func TestOllamaFailuresKeepTheirClassification(t *testing.T) {
 		want := fmt.Sprintf("ollama: request failed (%d): model 'fixture-model' not found", fixture.status)
 		for name, call := range calls {
 			err := call()
-			if UpstreamStatus(err) != fixture.status || err.Error() != want || InvocationRetryAfter(err) != "" ||
+			if UpstreamStatus(err) != fixture.status || err.Error() != want || InvocationRetryAfter(err) != "7" ||
 				InvocationRetryable(err) != fixture.retryable || InvocationFailoverEligible(err) != fixture.failover ||
 				InvocationCircuitFailure(err) != fixture.trips {
 				t.Fatalf("%s %d: err=%v retry-after=%q", name, fixture.status, err, InvocationRetryAfter(err))

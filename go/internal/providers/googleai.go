@@ -223,7 +223,7 @@ func (p GoogleAIProvider) doContext(ctx context.Context, method, url string, bod
 	var decoded map[string]any
 	decodeErr := json.Unmarshal(raw, &decoded)
 	if response.StatusCode >= 400 {
-		return decoded, response.StatusCode, p.upstreamError(decoded, raw, response.StatusCode)
+		return decoded, response.StatusCode, p.upstreamError(decoded, raw, response.StatusCode, googleRetryAfter(response.Header, decoded, time.Now()))
 	}
 	if decodeErr != nil || len(decoded) == 0 {
 		return nil, response.StatusCode, circuitFailureInvocation(p.label() + ": invalid JSON in upstream response")
@@ -231,10 +231,40 @@ func (p GoogleAIProvider) doContext(ctx context.Context, method, url string, bod
 	return decoded, response.StatusCode, nil
 }
 
+// googleRetryInfo is the type URL of the error detail that says how long to
+// wait before repeating a request.
+const googleRetryInfo = "type.googleapis.com/google.rpc.RetryInfo"
+
+// googleRetryAfter is the wait a Google refusal asks for, in whole seconds,
+// as core reads it on the surfaces it serves: the Retry-After header, or else
+// the retryDelay of the error envelope's google.rpc.RetryInfo detail, a
+// protobuf Duration such as "37s" that the Gemini API sends with a quota
+// refusal. It is "" when the refusal asks for no wait.
+func googleRetryAfter(header http.Header, decoded map[string]any, now time.Time) string {
+	if delay := retryAfterDelay(header.Get("Retry-After"), now); delay > 0 {
+		return retryAfterSeconds(delay)
+	}
+	envelope, _ := decoded["error"].(map[string]any)
+	details, _ := envelope["details"].([]any)
+	for _, item := range details {
+		detail, _ := item.(map[string]any)
+		if kind, _ := detail["@type"].(string); kind != googleRetryInfo {
+			continue
+		}
+		text, _ := detail["retryDelay"].(string)
+		if delay, err := time.ParseDuration(strings.TrimSpace(text)); err == nil {
+			return retryAfterSeconds(delay)
+		}
+		return ""
+	}
+	return ""
+}
+
 // upstreamError turns Google's error envelope into a gateway error that names
-// the real cause. Billing exhaustion and missing model access are distinct
-// operator problems and must not both surface as "upstream error".
-func (p GoogleAIProvider) upstreamError(decoded map[string]any, raw []byte, status int) error {
+// the real cause and keeps the wait Google asked for. Billing exhaustion and
+// missing model access are distinct operator problems and must not both
+// surface as "upstream error".
+func (p GoogleAIProvider) upstreamError(decoded map[string]any, raw []byte, status int, retryAfter string) error {
 	message := strings.TrimSpace(string(raw))
 	googleStatus := ""
 	if envelope, ok := decoded["error"].(map[string]any); ok {
@@ -247,13 +277,13 @@ func (p GoogleAIProvider) upstreamError(decoded map[string]any, raw []byte, stat
 	}
 	switch {
 	case googleStatus == "RESOURCE_EXHAUSTED" && strings.Contains(strings.ToLower(message), "credit"):
-		return invocationStatus(p.label()+": provider billing exhausted — "+message, status)
+		return invocationStatusRetryAfter(p.label()+": provider billing exhausted — "+message, status, retryAfter)
 	case status == http.StatusNotFound:
-		return invocationStatus(p.label()+": model not available to this project or location — "+message, status)
+		return invocationStatusRetryAfter(p.label()+": model not available to this project or location — "+message, status, retryAfter)
 	case status == http.StatusUnauthorized || status == http.StatusForbidden:
-		return invocationStatus(p.label()+": credential rejected — "+message, status)
+		return invocationStatusRetryAfter(p.label()+": credential rejected — "+message, status, retryAfter)
 	}
-	return invocationStatus(p.label()+": "+message, status)
+	return invocationStatusRetryAfter(p.label()+": "+message, status, retryAfter)
 }
 
 func (p GoogleAIProvider) label() string {

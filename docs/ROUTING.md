@@ -132,8 +132,11 @@ backoff (full jitter), so requests that failed together do not retry together.
 An upstream `Retry-After` lengthens that wait to at most 5 seconds; a target
 that asks for longer is not retried, and the request moves on to the next
 member. When the request fails on such a response, the gateway answers with the
-upstream's status and passes on the `Retry-After` the provider reported, for
-OpenAI-compatible, Anthropic and Azure OpenAI providers.
+upstream's status and passes on the `Retry-After` the provider reported, in
+whole seconds rounded up, for OpenAI-compatible, Anthropic, Azure OpenAI,
+Google and Ollama providers. Google's quota refusals carry their wait in a
+`RetryInfo` detail of the error body rather than a header; the gateway reads
+it the same way.
 
 ## Policy and credentials
 

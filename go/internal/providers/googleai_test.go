@@ -10,6 +10,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"llmgw/internal/config"
 	"llmgw/internal/iam"
@@ -97,7 +98,8 @@ func TestModelURLDiffersPerSurface(t *testing.T) {
 }
 
 // Google's refusals keep the message and status the transport gave them, and
-// its routing: the status decides, and no Retry-After is passed on.
+// its routing: the status decides. The Retry-After Google sent is kept for
+// the resilience wrapper, the router and the client.
 func TestUpstreamErrorsNameTheRealCause(t *testing.T) {
 	cases := []struct {
 		name, body string
@@ -144,12 +146,45 @@ func TestUpstreamErrorsNameTheRealCause(t *testing.T) {
 			if err == nil || err.Error() != testCase.want || UpstreamStatus(err) != testCase.status {
 				t.Fatalf("error = %v (status %d), want %q with status %d", err, UpstreamStatus(err), testCase.want, testCase.status)
 			}
-			if InvocationRetryAfter(err) != "" || InvocationRetryable(err) != testCase.retryable ||
+			if InvocationRetryAfter(err) != "7" || InvocationRetryable(err) != testCase.retryable ||
 				InvocationFailoverEligible(err) != testCase.retryable || InvocationCircuitFailure(err) != testCase.retryable {
 				t.Fatalf("status %d: retry-after=%q retryable=%v failover=%v circuit=%v", testCase.status, InvocationRetryAfter(err),
 					InvocationRetryable(err), InvocationFailoverEligible(err), InvocationCircuitFailure(err))
 			}
 		})
+	}
+}
+
+// The Gemini API asks for its wait in a RetryInfo detail rather than a
+// Retry-After header; the wait reaches the gateway rounded up to whole
+// seconds, on the surfaces core serves and on video generation alike.
+func TestGoogleRefusalsKeepTheRetryInfoDelay(t *testing.T) {
+	refusal := `{"error":{"code":429,"status":"RESOURCE_EXHAUSTED","message":"Quota exceeded.","details":[` +
+		`{"@type":"type.googleapis.com/google.rpc.RetryInfo","retryDelay":"36.2s"}]}}`
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusTooManyRequests)
+		_, _ = w.Write([]byte(refusal))
+	}))
+	defer server.Close()
+	provider := studioFixture(t, server.URL, "k")
+	_, err := provider.Complete("gemini-3.5-flash", []Message{{"role": "user", "content": "hi"}}, nil)
+	if InvocationRetryAfter(err) != "37" || !InvocationRetryable(err) {
+		t.Fatalf("chat: err=%v retry-after=%q", err, InvocationRetryAfter(err))
+	}
+	header := http.Header{}
+	if got := googleRetryAfter(header, map[string]any{"error": map[string]any{"details": []any{
+		map[string]any{"@type": googleRetryInfo, "retryDelay": "36.2s"},
+	}}}, time.Now()); got != "37" {
+		t.Fatalf("video path: retry-after=%q, want 37", got)
+	}
+	header.Set("Retry-After", "4")
+	if got := googleRetryAfter(header, nil, time.Now()); got != "4" {
+		t.Fatalf("a header: retry-after=%q, want 4", got)
+	}
+	if got := googleRetryAfter(http.Header{}, map[string]any{"error": map[string]any{"details": []any{
+		map[string]any{"@type": googleRetryInfo, "retryDelay": "soon"},
+	}}}, time.Now()); got != "" {
+		t.Fatalf("an unreadable delay: retry-after=%q", got)
 	}
 }
 

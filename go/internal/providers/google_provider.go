@@ -217,13 +217,14 @@ func (p *googleProvider) ListModelsWithError() ([]ModelInfo, *CredentialObservat
 // they did, and a client reads the message it read.
 //
 // A refusal from Google, and an answer without what was asked for, carries
-// the transport's message in the cause's Msg. The transport's error held the
-// status alone: it sent no Retry-After and had no retry, failover or circuit
-// reading of its own, so neither does this one, whatever core reads. A
-// request that got no complete answer may repeat, and an answer that is not
-// the JSON it should be counts against the provider, each under the
-// transport's message. What core refuses before sending anything is a
-// configuration error, as the transport's refusals were.
+// the transport's message in the cause's Msg, and a refusal keeps the wait
+// Google asked for: its Retry-After header, or the retryDelay of the
+// RetryInfo detail the Gemini API sends with a quota refusal, as core reads
+// them. The status alone decides retry, failover and the circuit, as it did
+// for the transport. A request that got no complete answer may repeat, and
+// an answer that is not the JSON it should be counts against the provider,
+// each under the transport's message. What core refuses before sending
+// anything is a configuration error, as the transport's refusals were.
 func (p *googleProvider) failure(err error) error {
 	var configErr *ConfigError
 	if errors.As(err, &configErr) {
@@ -235,7 +236,7 @@ func (p *googleProvider) failure(err error) error {
 			// Only a failed service-account token exchange keeps a cause.
 			return vertexTokenFailure(p.instance, upstream.Cause)
 		}
-		return invocationStatus(upstream.Msg, upstream.Status)
+		return invocationStatusRetryAfter(upstream.Msg, upstream.Status, retryAfterSeconds(upstream.RetryAfter))
 	}
 	var failure *core.ProviderError
 	if !errors.As(err, &failure) {

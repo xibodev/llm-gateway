@@ -708,12 +708,17 @@ func invocationStatusRetryAfter(msg string, status int, retryAfter string) error
 }
 
 // retryAfterSeconds is a Retry-After delay core read from an upstream answer
-// as the whole seconds an InvocationError carries, or "" for none.
+// as the whole seconds an InvocationError carries, rounded up so that a
+// client never repeats sooner than asked, or "" for none.
 func retryAfterSeconds(delay time.Duration) string {
 	if delay <= 0 {
 		return ""
 	}
-	return strconv.FormatInt(int64(delay/time.Second), 10)
+	seconds := int64(delay / time.Second)
+	if delay%time.Second != 0 {
+		seconds++
+	}
+	return strconv.FormatInt(seconds, 10)
 }
 
 // UpstreamStatus returns the upstream HTTP status carried by err, or 0.

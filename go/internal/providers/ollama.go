@@ -119,10 +119,10 @@ func ollamaRequest(model string, messages []Message, kw Kwargs) (core.Request, e
 // ollamaFailure returns the gateway error for what the core Runtime returned
 // for an Ollama operation, so the router and the resilience wrapper decide
 // on it as they did on the transport's errors. A refusal keeps the daemon's
-// status and, in the transport's message, its words, which a client reads
-// when the refusal ends the chain; the transport read no Retry-After, so
-// none is kept. A request that got no complete answer may repeat, and an
-// answer that cannot be used counts against the circuit.
+// status, its words in the transport's message, which a client reads when
+// the refusal ends the chain, and any Retry-After it sent, which a server
+// or proxy in front of Ollama may. A request that got no complete answer
+// may repeat, and an answer that cannot be used counts against the circuit.
 func ollamaFailure(ctx context.Context, err error) error {
 	if ctxErr := ctx.Err(); ctxErr != nil {
 		return ctxErr
@@ -136,7 +136,8 @@ func ollamaFailure(ctx context.Context, err error) error {
 		// Core quotes the daemon as "Ollama: upstream returned <status>:
 		// <words>", already redacted and bounded.
 		words := strings.TrimPrefix(refusal.Msg, fmt.Sprintf("Ollama: upstream returned %d: ", refusal.Status))
-		return invocationStatus(fmt.Sprintf("ollama: request failed (%d): %s", refusal.Status, words), refusal.Status)
+		return invocationStatusRetryAfter(fmt.Sprintf("ollama: request failed (%d): %s", refusal.Status, words), refusal.Status,
+			retryAfterSeconds(refusal.RetryAfter))
 	}
 	var failure *core.ProviderError
 	if !errors.As(err, &failure) {
