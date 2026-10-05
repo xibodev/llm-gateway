@@ -13,12 +13,12 @@ func TestOpenAIListModelsPrefersDisplayName(t *testing.T) {
 			return
 		}
 		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"data":[{"id":"atlas-small","owned_by":"demo","display_name":"Atlas Small"}]}`))
+		_, _ = w.Write([]byte(`{"data":[{"id":"demo-small","owned_by":"demo","display_name":"Demo Small"}]}`))
 	}))
 	defer server.Close()
 
 	rows := openAICatalogFixture(server.URL, 2).ListModels()
-	if len(rows) != 1 || rows[0].ID != "atlas-small" || rows[0].Label != "Atlas Small" {
+	if len(rows) != 1 || rows[0].ID != "demo-small" || rows[0].Label != "Demo Small" {
 		t.Fatalf("models=%+v", rows)
 	}
 }
