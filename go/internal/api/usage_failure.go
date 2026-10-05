@@ -14,7 +14,7 @@ func recordFailureUsage(
 	if principal == nil {
 		return
 	}
-	router.RecordUsage(router.UsageRecord{
+	recordUsage(router.UsageRecord{
 		RequestID: principal.RequestID, Endpoint: endpoint, RequestedModel: requestedModel,
 		Project: principal.Project, Key: principal.Key,
 		ProjectID: principal.ProjectID, PrincipalID: principal.PrincipalID,

@@ -803,7 +803,7 @@ func recordFromResponse(endpoint, requested string, served *router.Target, princ
 		in = firstInt(usage, "prompt_tokens", "input_tokens")
 		out = firstInt(usage, "completion_tokens", "output_tokens")
 	}
-	router.RecordUsage(router.UsageRecord{
+	recordUsage(router.UsageRecord{
 		RequestID: principal.RequestID, Endpoint: endpoint, RequestedModel: requested, RoutedModel: served.Model,
 		Provider: served.Provider, Project: principal.Project, Key: principal.Key,
 		ProjectID: principal.ProjectID, PrincipalID: principal.PrincipalID, KeyID: principal.KeyID,

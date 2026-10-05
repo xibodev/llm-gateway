@@ -273,7 +273,7 @@ func handleTranscriptions(w http.ResponseWriter, r *http.Request) {
 		if coreErr != nil {
 			status, errorCode = upstreamErrorStatus(coreErr), "upstream"
 		}
-		router.RecordUsage(router.UsageRecord{
+		recordUsage(router.UsageRecord{
 			RequestID: principal.RequestID, Endpoint: "openai.transcriptions", RequestedModel: provider + "/" + upstreamModel, RoutedModel: upstreamModel,
 			Provider: provider, Project: principal.Project, Key: principal.Key,
 			ProjectID: principal.ProjectID, PrincipalID: principal.PrincipalID, KeyID: principal.KeyID,
@@ -305,7 +305,7 @@ func handleTranscriptions(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	result := readAPIProxyResponse(resp, "audio transcription")
-	router.RecordUsage(router.UsageRecord{
+	recordUsage(router.UsageRecord{
 		RequestID: principal.RequestID, Endpoint: "openai.transcriptions", RequestedModel: provider + "/" + upstreamModel, RoutedModel: upstreamModel,
 		Provider: provider, Project: principal.Project, Key: principal.Key,
 		ProjectID: principal.ProjectID, PrincipalID: principal.PrincipalID, KeyID: principal.KeyID,
@@ -361,7 +361,7 @@ func handleSpeech(w http.ResponseWriter, r *http.Request) {
 		if coreErr != nil {
 			status, errorCode = upstreamErrorStatus(coreErr), "upstream"
 		}
-		router.RecordUsage(router.UsageRecord{
+		recordUsage(router.UsageRecord{
 			RequestID: principal.RequestID, Endpoint: "openai.speech", RequestedModel: provider + "/" + upstreamModel, RoutedModel: upstreamModel,
 			Provider: provider, Project: principal.Project, Key: principal.Key,
 			ProjectID: principal.ProjectID, PrincipalID: principal.PrincipalID, KeyID: principal.KeyID,
@@ -391,7 +391,7 @@ func handleSpeech(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	result := readAPIProxyResponse(resp, "audio speech")
-	router.RecordUsage(router.UsageRecord{
+	recordUsage(router.UsageRecord{
 		RequestID: principal.RequestID, Endpoint: "openai.speech", RequestedModel: provider + "/" + upstreamModel, RoutedModel: upstreamModel,
 		Provider: provider, Project: principal.Project, Key: principal.Key,
 		ProjectID: principal.ProjectID, PrincipalID: principal.PrincipalID, KeyID: principal.KeyID,
@@ -483,7 +483,7 @@ func serveNativeSpeech(
 		writeUpstreamError(w, err)
 		return
 	}
-	router.RecordUsage(router.UsageRecord{
+	recordUsage(router.UsageRecord{
 		RequestID: principal.RequestID, Endpoint: "openai.speech", RequestedModel: provider + "/" + voice, RoutedModel: voice,
 		Provider: provider, Project: principal.Project, Key: principal.Key,
 		ProjectID: principal.ProjectID, PrincipalID: principal.PrincipalID, KeyID: principal.KeyID,

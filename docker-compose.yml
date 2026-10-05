@@ -44,6 +44,9 @@ services:
       LLMGW_PROVIDER_ROSTER_URL: ${LLMGW_PROVIDER_ROSTER_URL:-https://xibodev.github.io/llm-gateway/roster/payload.json}
       LLMGW_PROVIDER_ROSTER_AUTO_REFRESH: ${LLMGW_PROVIDER_ROSTER_AUTO_REFRESH:-true}
       LLMGW_ANONYMOUS_PROVIDER_AUTOMATION: ${LLMGW_ANONYMOUS_PROVIDER_AUTOMATION:-false}
+      LLMGW_ACCESS_LOG: ${LLMGW_ACCESS_LOG:-}
+      LLMGW_METRICS_TOKEN: ${LLMGW_METRICS_TOKEN:-}
+      LLMGW_RATE_LIMIT_PER_MINUTE: ${LLMGW_RATE_LIMIT_PER_MINUTE:-0}
     volumes:
       - ./config.local.yaml:/config/llmgw.config.yaml:ro
       - llmgw-state:/state

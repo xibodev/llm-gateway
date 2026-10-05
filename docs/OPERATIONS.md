@@ -122,6 +122,57 @@ are owner-only and rotate at `LLMGW_LOG_REQUESTS_MAX_BYTES`, retaining the activ
 file and one `.1` generation. Request logs are intentionally excluded from
 built-in backups.
 
+## Access log
+
+`LLMGW_ACCESS_LOG=json` writes one JSON line per request, every route
+included, to standard output, where a container runtime or service manager
+collects it. It is off by default. A line looks like this:
+
+```json
+{"time":"…","level":"INFO","msg":"request","request_id":"req_…","method":"POST","path":"/v1/chat/completions","route":"/v1/chat/completions","status":200,"duration_ms":812.4,"bytes_out":731,"bytes_in":214,"remote_ip":"127.0.0.1","user_agent":"…","caller":"project_key","project_id":"…","key_id":"…","provider":"openai","model":"gpt-5.6-sol","input_tokens":11,"output_tokens":3}
+```
+
+`caller` is `project_key`, `external_key`, `admin_key`, or `local`. A static
+administrator key is named by `key_fingerprint`, the first twelve hex digits of
+its SHA-256, as audit events name it; no line carries a credential, a query
+string, a header other than the user agent, or a request or response body.
+`route` is the path the gateway routed the request by, or `unmatched`.
+`provider` and `model` name the target that served or last refused the
+request. Container log drivers keep everything a container writes unless they
+are configured to rotate, so set rotation before turning the log on for a busy
+gateway.
+
+## Metrics
+
+Setting `LLMGW_METRICS_TOKEN` serves Prometheus metrics at `GET /metrics` to a
+scraper that sends the value as a bearer token; without it the endpoint answers
+`404`. Use a token of its own rather than an administrator key:
+
+```yaml
+scrape_configs:
+  - job_name: llm-gateway
+    metrics_path: /metrics
+    authorization:
+      credentials_file: /etc/prometheus/llmgw-metrics-token
+    static_configs:
+      - targets: ["gateway.example.internal:8787"]
+```
+
+| Metric | Type | Labels |
+| --- | --- | --- |
+| `llmgw_http_requests_total` | counter | `route`, `method`, `code` |
+| `llmgw_http_request_duration_seconds` | histogram | `route` |
+| `llmgw_http_requests_in_flight` | gauge | none |
+| `llmgw_upstream_requests_total` | counter | `provider`, `model`, `outcome` (`success` or `error`) |
+| `llmgw_tokens_total` | counter | `provider`, `model`, `direction` (`input` or `output`) |
+| `llmgw_build_info` | gauge | `version`, `commit`, `goversion` |
+| `go_goroutines`, `go_memstats_heap_alloc_bytes`, `process_start_time_seconds` | gauge | none |
+
+Labels are routes the gateway registers and the providers and models that
+served requests, so their number stays bounded. Durations run until a
+response's last byte, so a stream's duration is its whole length. Counters
+start at zero when the gateway starts and count per process.
+
 ## Correlating a request
 
 Every response names its request in an `X-Request-Id` header, and the gateway's
@@ -137,6 +188,8 @@ request:
 - **Request log.** With request logging on, the request's entry in
   `<state>/requests.jsonl`, or in its `.1` generation, carries the ID as
   `request_id`.
+- **Access log.** With the [access log](#access-log) on, the request's line
+  carries the ID as `request_id`.
 - **Audit.** An event recording an administrator's action carries the ID of
   the request that took it as `request_id` in its detail, which
   `GET /admin/api/audit` returns.

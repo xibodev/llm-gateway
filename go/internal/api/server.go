@@ -2,7 +2,9 @@ package api
 
 import (
 	"bytes"
+	"log/slog"
 	"net/http"
+	"os"
 	"strings"
 	"time"
 
@@ -52,12 +54,16 @@ type server struct {
 	// oauthDrivers resolves the driver of each flow. Tests replace it to
 	// stand in for a provider no fixture endpoint can reach.
 	oauthDrivers func(instance string, method oauthflow.Method) (oauthflow.Driver, error)
+	// metrics are what /metrics exposes, and accessLog, when not nil, gets a
+	// line for every request.
+	metrics   *gatewayMetrics
+	accessLog *slog.Logger
 }
 
 // newServer returns a server acting on runtime whose OAuth flows read time
 // from now.
 func newServer(runtime Runtime, now func() time.Time) *server {
-	s := &server{runtime: runtime, now: now}
+	s := &server{runtime: runtime, now: now, metrics: newGatewayMetrics(now()), accessLog: accessLogger(os.Stdout)}
 	s.oauthDrivers = s.oauthDriver
 	s.oauthStore = oauthflow.NewMemoryFlowStore(oauthflow.MemoryFlowStoreOptions{
 		Now: now, MaxFlowsPerCaller: maxOAuthFlowsPerPrincipal,
@@ -101,6 +107,7 @@ func (s *server) handler() http.Handler {
 
 	// health (no auth)
 	mux.HandleFunc("GET /health", handleHealth)
+	mux.HandleFunc("GET /metrics", s.handleMetrics)
 	mux.HandleFunc("GET /oauth/callback/{provider_id}", s.handleOAuthBrowserCallback)
 
 	// OpenAI facade
@@ -259,7 +266,7 @@ func (s *server) handler() http.Handler {
 	mux.HandleFunc("GET /admin/api/usage", s.handleUsage)
 	mux.HandleFunc("GET /admin/api/telemetry", s.handleTelemetry)
 
-	return securityHeaders(assignRequestIDs(aliasMiddleware(requestLogMiddleware(anthropicErrors(limitRequestBodies(mux))))))
+	return securityHeaders(assignRequestIDs(aliasMiddleware(s.observe(mux, requestLogMiddleware(anthropicErrors(limitRequestBodies(mux)))))))
 }
 
 // aliasMiddleware rewrites bare paths before routing.

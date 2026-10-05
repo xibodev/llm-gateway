@@ -254,6 +254,8 @@ for refresh and trust behavior.
 | `LLMGW_LOG_REQUESTS` | `0` | Append metadata for `POST /v1/*` requests. |
 | `LLMGW_LOG_REQUEST_BODIES` | `0` | Unsafe explicit opt-in for prompt and response bodies. |
 | `LLMGW_LOG_REQUESTS_MAX_BYTES` | `104857600` | Rotate the active request log at this size and keep one `.1` generation. |
+| `LLMGW_ACCESS_LOG` | off | `json` writes one JSON line per request to standard output; see [the access log](OPERATIONS.md#access-log). |
+| `LLMGW_METRICS_TOKEN` | unset | Serves Prometheus metrics at `GET /metrics` to a scraper sending it as a bearer token; unset, the endpoint answers `404`. See [metrics](OPERATIONS.md#metrics). |
 | `LLMGW_RETENTION_USAGE_DAYS` | `90` | Usage, failover telemetry, and optional savings history. |
 | `LLMGW_RETENTION_AUDIT_DAYS` | `365` | Audit-history window. |
 | `LLMGW_RETENTION_DELIVERED_OUTBOX_DAYS` | `400` | Delivered notification tombstones; lower values fall back to 400. |

@@ -187,7 +187,7 @@ func handleAdminPlaygroundSpeech(w http.ResponseWriter, r *http.Request) {
 		if upstreamStatus == 0 {
 			upstreamStatus = http.StatusBadGateway
 		}
-		router.RecordUsage(router.UsageRecord{
+		recordUsage(router.UsageRecord{
 			Endpoint: "playground.speech", RequestedModel: body.Model, Provider: providerID,
 			Project: project.Slug, Key: "playground", ProjectID: project.ID,
 			PrincipalID: principal.PrincipalID, StatusCode: upstreamStatus,
@@ -202,7 +202,7 @@ func handleAdminPlaygroundSpeech(w http.ResponseWriter, r *http.Request) {
 		}
 		return
 	}
-	router.RecordUsage(router.UsageRecord{
+	recordUsage(router.UsageRecord{
 		Endpoint: "playground.speech", RequestedModel: body.Model, RoutedModel: voice,
 		Provider: providerID, Project: project.Slug, Key: "playground", ProjectID: project.ID,
 		PrincipalID: principal.PrincipalID, StatusCode: http.StatusOK, LatencyMS: latency,
@@ -316,7 +316,7 @@ func writePlaygroundEmbeddingResult(w http.ResponseWriter, r *http.Request, deco
 }
 
 func recordPlaygroundEmbeddingUsage(requestedModel, providerID, upstreamModel string, principal *config.Principal, project iam.Project, status int, latency int64, errorCode string) {
-	router.RecordUsage(router.UsageRecord{
+	recordUsage(router.UsageRecord{
 		Endpoint: "playground.embeddings", RequestedModel: requestedModel, RoutedModel: upstreamModel,
 		Provider: providerID, Project: project.Slug, Key: "playground", ProjectID: project.ID,
 		PrincipalID: principal.PrincipalID, StatusCode: status, LatencyMS: latency,
@@ -467,7 +467,7 @@ func handleAdminPlaygroundTranscription(w http.ResponseWriter, r *http.Request) 
 		if coreErr != nil {
 			status, errorCode = upstreamErrorStatus(coreErr), "upstream"
 		}
-		router.RecordUsage(router.UsageRecord{
+		recordUsage(router.UsageRecord{
 			Endpoint: "playground.transcription", RequestedModel: r.FormValue("model"), RoutedModel: upstreamModel,
 			Provider: providerID, Project: project.Slug, Key: "playground", ProjectID: project.ID,
 			PrincipalID: principal.PrincipalID, StatusCode: status, LatencyMS: latency, ErrorCode: errorCode,
@@ -505,7 +505,7 @@ func handleAdminPlaygroundTranscription(w http.ResponseWriter, r *http.Request) 
 	response, err := audioClient.Do(request)
 	latency := time.Since(started).Milliseconds()
 	if err != nil {
-		router.RecordUsage(router.UsageRecord{
+		recordUsage(router.UsageRecord{
 			Endpoint: "playground.transcription", RequestedModel: r.FormValue("model"), Provider: providerID,
 			Project: project.Slug, Key: "playground", ProjectID: project.ID,
 			PrincipalID: principal.PrincipalID, StatusCode: http.StatusBadGateway, LatencyMS: latency, ErrorCode: "upstream",
@@ -515,7 +515,7 @@ func handleAdminPlaygroundTranscription(w http.ResponseWriter, r *http.Request) 
 	}
 	defer response.Body.Close()
 	payload, _ := io.ReadAll(response.Body)
-	router.RecordUsage(router.UsageRecord{
+	recordUsage(router.UsageRecord{
 		Endpoint: "playground.transcription", RequestedModel: r.FormValue("model"), RoutedModel: upstreamModel,
 		Provider: providerID, Project: project.Slug, Key: "playground", ProjectID: project.ID,
 		PrincipalID: principal.PrincipalID, StatusCode: response.StatusCode, LatencyMS: latency,
@@ -644,7 +644,7 @@ func executePlaygroundImage(w http.ResponseWriter, r *http.Request, body playgro
 		return
 	}
 	inputTokens, outputTokens := googleModalityUsage(usage)
-	router.RecordUsage(router.UsageRecord{
+	recordUsage(router.UsageRecord{
 		Endpoint: "playground.image", RequestedModel: body.Model, RoutedModel: model,
 		Provider: providerID, Project: project.Slug, Key: "playground", ProjectID: project.ID,
 		PrincipalID: principal.PrincipalID, InputTokens: inputTokens, OutputTokens: outputTokens,
@@ -726,7 +726,7 @@ func handleAdminPlaygroundVideo(w http.ResponseWriter, r *http.Request) {
 		writeUpstreamError(w, err)
 		return
 	}
-	router.RecordUsage(router.UsageRecord{
+	recordUsage(router.UsageRecord{
 		Endpoint: "playground.video", RequestedModel: body.Model, RoutedModel: model,
 		Provider: providerID, Project: project.Slug, Key: "playground", ProjectID: project.ID,
 		PrincipalID: principal.PrincipalID, StatusCode: http.StatusAccepted,
@@ -737,7 +737,7 @@ func handleAdminPlaygroundVideo(w http.ResponseWriter, r *http.Request) {
 }
 
 func recordPlaygroundMediaFailure(r *http.Request, endpoint, action, requested, providerID, model string, principal *config.Principal, project iam.Project, started time.Time, err error) {
-	router.RecordUsage(router.UsageRecord{
+	recordUsage(router.UsageRecord{
 		Endpoint: endpoint, RequestedModel: requested, RoutedModel: model, Provider: providerID,
 		Project: project.Slug, Key: "playground", ProjectID: project.ID, PrincipalID: principal.PrincipalID,
 		StatusCode: upstreamErrorStatus(err), LatencyMS: time.Since(started).Milliseconds(), ErrorCode: "upstream",

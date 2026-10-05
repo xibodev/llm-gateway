@@ -1082,7 +1082,7 @@ func runProviderVerifyWithContext(
 	if principal != nil {
 		usagePrincipal = principal
 	}
-	router.RecordUsage(router.UsageRecord{
+	recordUsage(router.UsageRecord{
 		Endpoint: "provider.verify", RequestedModel: model, RoutedModel: model,
 		Provider: providerID, Project: usagePrincipal.Project, Key: usagePrincipal.Key,
 		ProjectID: usagePrincipal.ProjectID, PrincipalID: usagePrincipal.PrincipalID,

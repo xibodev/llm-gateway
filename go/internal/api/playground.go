@@ -236,7 +236,7 @@ func executePlayground(w http.ResponseWriter, r *http.Request, body playgroundBo
 		if r.Context().Err() != nil {
 			return
 		}
-		router.RecordUsage(router.UsageRecord{
+		recordUsage(router.UsageRecord{
 			Endpoint: "playground.chat", RequestedModel: body.Model, Project: project.Slug, Key: "playground",
 			ProjectID: project.ID, PrincipalID: principal.PrincipalID, StatusCode: upstreamErrorStatus(err), LatencyMS: latency, ErrorCode: "upstream",
 		})
@@ -245,7 +245,7 @@ func executePlayground(w http.ResponseWriter, r *http.Request, body playgroundBo
 		return
 	}
 	inputTokens, outputTokens := responseUsage(response)
-	router.RecordUsage(router.UsageRecord{
+	recordUsage(router.UsageRecord{
 		Endpoint: "playground.chat", RequestedModel: body.Model, RoutedModel: served.Model, Provider: served.Provider,
 		Project: project.Slug, Key: "playground", ProjectID: project.ID, PrincipalID: principal.PrincipalID,
 		InputTokens: inputTokens, OutputTokens: outputTokens, StatusCode: http.StatusOK, LatencyMS: latency, IsStub: playgroundStub(served.Provider, principal),
@@ -338,13 +338,13 @@ func executePlaygroundSurface(w http.ResponseWriter, r *http.Request, payload ma
 		if r.Context().Err() != nil {
 			return
 		}
-		router.RecordUsage(router.UsageRecord{Endpoint: endpoint, RequestedModel: body.Model, Project: project.Slug, Key: "playground", ProjectID: project.ID, PrincipalID: principal.PrincipalID, StatusCode: upstreamErrorStatus(err), LatencyMS: latency, ErrorCode: "upstream"})
+		recordUsage(router.UsageRecord{Endpoint: endpoint, RequestedModel: body.Model, Project: project.Slug, Key: "playground", ProjectID: project.ID, PrincipalID: principal.PrincipalID, StatusCode: upstreamErrorStatus(err), LatencyMS: latency, ErrorCode: "upstream"})
 		auditPlayground(r, source, "playground.execute", project.ID, principal.PrincipalID, "failure", map[string]any{"model": body.Model, "surface": playgroundSurfacePath(surface), "source": source})
 		writeUpstreamError(w, err)
 		return
 	}
 	inputTokens, outputTokens := responseUsage(response)
-	router.RecordUsage(router.UsageRecord{Endpoint: endpoint, RequestedModel: body.Model, RoutedModel: served.Model, Provider: served.Provider, Project: project.Slug, Key: "playground", ProjectID: project.ID, PrincipalID: principal.PrincipalID, InputTokens: inputTokens, OutputTokens: outputTokens, StatusCode: http.StatusOK, LatencyMS: latency, IsStub: playgroundStub(served.Provider, principal)})
+	recordUsage(router.UsageRecord{Endpoint: endpoint, RequestedModel: body.Model, RoutedModel: served.Model, Provider: served.Provider, Project: project.Slug, Key: "playground", ProjectID: project.ID, PrincipalID: principal.PrincipalID, InputTokens: inputTokens, OutputTokens: outputTokens, StatusCode: http.StatusOK, LatencyMS: latency, IsStub: playgroundStub(served.Provider, principal)})
 	auditPlayground(r, source, "playground.execute", project.ID, principal.PrincipalID, "success", map[string]any{"model": body.Model, "surface": playgroundSurfacePath(surface), "served_provider": served.Provider, "served_model": served.Model, "source": source})
 	writeJSON(w, http.StatusOK, map[string]any{
 		"project_id": project.ID, "principal_id": principal.PrincipalID,

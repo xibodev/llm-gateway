@@ -128,7 +128,7 @@ func handleEmbeddings(w http.ResponseWriter, r *http.Request) {
 				errorCode = "upstream"
 			}
 			encoded, _ := json.Marshal(result)
-			router.RecordUsage(router.UsageRecord{
+			recordUsage(router.UsageRecord{
 				RequestID: principal.RequestID, Endpoint: "openai.embeddings", RequestedModel: requestedModel,
 				RoutedModel: upstreamModel, Provider: provider,
 				Project: principal.Project, Key: principal.Key,
@@ -179,7 +179,7 @@ func handleEmbeddings(w http.ResponseWriter, r *http.Request) {
 	// DEFAULT 0 and the Go field is a plain int, so leaving it zero is correct and
 	// needs no schema change — an embedding produces no output tokens because it
 	// generates nothing.
-	router.RecordUsage(router.UsageRecord{
+	recordUsage(router.UsageRecord{
 		RequestID: principal.RequestID, Endpoint: "openai.embeddings", RequestedModel: provider + "/" + upstreamModel,
 		RoutedModel: upstreamModel, Provider: provider,
 		Project: principal.Project, Key: principal.Key,

@@ -761,7 +761,7 @@ func recordFromResponses(
 		inputTokens = firstInt(usage, "input_tokens", "prompt_tokens")
 		outputTokens = firstInt(usage, "output_tokens", "completion_tokens")
 	}
-	router.RecordUsage(router.UsageRecord{
+	recordUsage(router.UsageRecord{
 		RequestID: principal.RequestID, Endpoint: "openai.responses", RequestedModel: requested,
 		RoutedModel: served.Model, Provider: served.Provider,
 		Project: principal.Project, Key: principal.Key,
