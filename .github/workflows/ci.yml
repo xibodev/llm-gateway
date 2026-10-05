@@ -221,12 +221,14 @@ jobs:
         working-directory: .github/release-harness
         run: npm ci --ignore-scripts --no-audit --no-fund
 
-      - name: Validate release-harness contracts and lifecycle
+      # Contracts, drafts and reviews must stay well-formed on every change.
+      # Whether a confirmed review covers the source is release readiness:
+      # release.yml checks it before it builds anything, so a dependency
+      # update awaiting a maintainer's review still passes here.
+      - name: Validate release-harness contracts
         env:
           RELEASE_HARNESS: ${{ github.workspace }}/.github/release-harness/node_modules/.bin/release-harness
-        run: |
-          "$RELEASE_HARNESS" validate --all
-          "$RELEASE_HARNESS" lifecycle check
+        run: '"$RELEASE_HARNESS" validate --all'
 
   deterministic-acceptance:
     name: deterministic Docker acceptance
