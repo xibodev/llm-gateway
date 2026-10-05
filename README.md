@@ -160,6 +160,8 @@ backup, recovery, release verification, and rollback.
 - [Limitations](docs/LIMITATIONS.md)
 - [Security policy](SECURITY.md)
 - [Contributing](CONTRIBUTING.md)
+- [Release notes](https://github.com/xibodev/llm-gateway/releases): each
+  release's changes, upgrade notes and verified artifacts
 
 The public website is published from `website/` through GitHub Pages.
 

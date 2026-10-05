@@ -101,6 +101,18 @@ No removal release is scheduled. New integrations should use the replacement.
 When both `endpoints` and `categories` exist in YAML, `endpoints` wins and they
 are not merged.
 
+## Deprecated behavior
+
+The static administrator keys, `LLMGW_API_KEY` and `LLMGW_API_KEYS`, still
+authenticate `/v1/*` requests, without key or project policy and quotas. That is
+deprecated: the next major release refuses them on `/v1/*` by default. Before
+upgrading to it, give every client a gateway-issued project key. The first
+`/v1` request each static key authenticates logs a warning naming the key's
+fingerprint, and with `LLMGW_ACCESS_LOG=json` every such request is logged with
+`caller` `admin_key` and that `key_fingerprint`. Set
+`LLMGW_ADMIN_KEYS_ON_DATA_PLANE=false` to refuse them now, or `true` to keep
+accepting them after the default changes.
+
 ## Breaking compatibility already in effect
 
 Endpoint pseudo-model rows use `owned_by: "endpoint"`. Clients that previously

@@ -73,6 +73,8 @@ future installed client release.
 - Request logs are excluded from built-in backups.
 - Checksums detect corruption, not archive authorship.
 - `/health` proves process liveness, not provider readiness.
+- Metrics, the access log and `LLMGW_RATE_LIMIT_PER_MINUTE` count per process
+  and start afresh when it restarts.
 - Alert delivery requires an external worker/webhook.
 - The included Caddy/Compose files are not a turnkey Authentik deployment.
 
