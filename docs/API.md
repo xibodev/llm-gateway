@@ -14,7 +14,8 @@ When both are present, `x-api-key` takes precedence. An invalid `x-api-key` is
 not rescued by a valid bearer token. Active gateway-issued project keys are
 accepted; give them to clients. The static administrator keys (`LLMGW_API_KEY`,
 `LLMGW_API_KEYS`) are also accepted but bypass key and project allowlists and
-quotas. `LLMGW_ALLOW_UNAUTHENTICATED_API=1` disables only data-plane
+quotas; this is deprecated, and `LLMGW_ADMIN_KEYS_ON_DATA_PLANE=false` refuses
+them with `403`. `LLMGW_ALLOW_UNAUTHENTICATED_API=1` disables only data-plane
 authentication and is for deliberate local use; admin authentication remains
 required. In that mode any token, or none, is accepted, and browser requests
 from a non-loopback `Origin` are refused with `403`; see

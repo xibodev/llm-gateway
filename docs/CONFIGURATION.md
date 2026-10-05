@@ -149,6 +149,7 @@ startup with an error naming the model.
 | `LLMGW_CONFIG_SEED` | unset | Read-once seed copied only when `LLMGW_CONFIG` is missing. |
 | `LLMGW_API_KEY` | unset | Static recovery/administrator key for the console and `/admin/api/*`. `/v1/*` also accepts it, without key or project allowlists and quotas; give clients gateway-issued project keys instead. |
 | `LLMGW_API_KEYS` | unset | Comma-separated additional administrator keys, each with the same powers as `LLMGW_API_KEY`. Entries are used verbatim, so do not add spaces. When any are set, the gateway logs a startup warning with their count, never their values. |
+| `LLMGW_ADMIN_KEYS_ON_DATA_PLANE` | `true` | Whether `/v1/*` accepts the static administrator keys. Accepting them is deprecated: the next major release defaults to `false`. The first `/v1` request each key authenticates logs a warning naming the key's fingerprint, so its clients can be moved to project keys first. `false` refuses them there with `403`; the console and `/admin/api/*` still accept them. Also YAML `admin_keys_on_data_plane`. |
 | `LLMGW_EXTERNAL_KEYS_FILE` | unset | Opt in to a reloadable version-1 JSON gateway-key document. |
 | `LLMGW_EXTERNAL_KEYS_URL` | unset | Opt in to a reloadable version-1 JSON gateway-key endpoint; supports ETag/304. |
 | `LLMGW_EXTERNAL_KEYS_HTTP_TOKEN` | unset | Optional bearer credential for the external key endpoint. |

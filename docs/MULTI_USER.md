@@ -38,7 +38,10 @@ must also be same-origin.
 carries project, role, model/provider policy, and quota limits through the
 request path. The static administrator keys are accepted too, but belong to no
 principal or project, so key and project allowlists and quotas do not apply to
-them; give clients project keys.
+them; give clients project keys. Their use on `/v1` is deprecated and the next
+major release refuses it by default; set
+[`LLMGW_ADMIN_KEYS_ON_DATA_PLANE=false`](CONFIGURATION.md#server-and-state) to
+refuse it now.
 
 ## SSO trust boundary
 

@@ -4,10 +4,12 @@ import (
 	"crypto/sha256"
 	"crypto/subtle"
 	"encoding/hex"
+	"log"
 	"net/http"
 	"net/netip"
 	"net/url"
 	"strings"
+	"sync"
 
 	"llmgw/internal/config"
 	"llmgw/internal/iam"
@@ -93,6 +95,10 @@ func requireAPIKey(r *http.Request) (*config.Principal, int, string) {
 	}
 
 	if token != "" && len(adminKeys) > 0 && matchesAnyKey(token, adminKeys) {
+		if !s.AdminKeysOnDataPlane {
+			return nil, http.StatusForbidden, staticKeyDataPlaneMessage
+		}
+		warnStaticKeyOnDataPlane(token)
 		return withCaller(sourceAdminKey, &config.Principal{Project: "admin", Key: "admin"}), 0, ""
 	}
 	if token != "" {
@@ -138,6 +144,27 @@ func loopbackHost(host string) bool {
 	}
 	addr, err := netip.ParseAddr(host)
 	return err == nil && addr.IsLoopback()
+}
+
+// staticKeyDataPlaneMessage refuses a static administrator key on /v1 when
+// LLMGW_ADMIN_KEYS_ON_DATA_PLANE is false.
+const staticKeyDataPlaneMessage = "Static administrator keys are not accepted on /v1; use a gateway-issued project key."
+
+// staticKeysWarned holds the fingerprints of the static administrator keys
+// whose use on /v1 has been logged, so each is reported once per process.
+var staticKeysWarned sync.Map
+
+// warnStaticKeyOnDataPlane logs, once per key, that a client authenticated a
+// /v1 request with a static administrator key, naming the key by its
+// fingerprint so the operator can find the client before the default turns.
+func warnStaticKeyOnDataPlane(token string) {
+	fingerprint := staticKeyFingerprint(token)
+	if _, seen := staticKeysWarned.LoadOrStore(fingerprint, true); seen {
+		return
+	}
+	log.Printf("warning: a /v1 request authenticated with the static administrator key %s: static keys on the data plane "+
+		"are deprecated and the next major release refuses them by default; give the client a gateway-issued project key, "+
+		"then set LLMGW_ADMIN_KEYS_ON_DATA_PLANE=false", fingerprint)
 }
 
 // authed wraps a handler that needs a principal. On failure it writes the error

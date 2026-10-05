@@ -30,7 +30,9 @@ runtime configuration. Use synthetic reproduction data.
   same-origin.
 - **Data plane**: active project key, unless deliberate unauthenticated local
   mode is enabled. Static administrator keys are also accepted there but bypass
-  key and project allowlists and quotas, so never hand them to clients.
+  key and project allowlists and quotas, so never hand them to clients. This is
+  deprecated: the next major release refuses them on `/v1` by default, and
+  `LLMGW_ADMIN_KEYS_ON_DATA_PLANE=false` refuses them now.
 - **Unauthenticated local mode**: accepts any token, or none, because clients
   often send placeholder keys. Browser requests whose `Origin` is not a
   loopback host are refused with `403` unless they carry a gateway-issued key,
@@ -47,7 +49,8 @@ Static admin-key comparison is constant-time. Audit events of administrator
 actions authenticated by a static key record `actor_key_fingerprint`, the first
 12 hexadecimal digits of the key's SHA-256 (`printf '%s' "$KEY" | sha256sum`),
 so different keys can be told apart; the key itself is never stored. A startup
-warning reports how many keys `LLMGW_API_KEYS` holds.
+warning reports how many keys `LLMGW_API_KEYS` holds, and the first `/v1`
+request each static key authenticates logs a warning naming its fingerprint.
 
 ## SSO boundary
 

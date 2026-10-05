@@ -6,8 +6,9 @@ or endpoint returned by `GET /v1/models`.
 
 Every profile authenticates with a gateway-issued project key, minted in the
 console under **API keys**. The administrator keys (`LLMGW_API_KEY` and
-`LLMGW_API_KEYS`) are for administration only: the data plane accepts them, but
-without key or project policy and quotas.
+`LLMGW_API_KEYS`) are for administration only: the data plane still accepts them,
+without key or project policy and quotas, but that is deprecated and the next
+major release refuses them there by default.
 
 ## Claude Code
 

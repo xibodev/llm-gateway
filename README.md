@@ -92,7 +92,8 @@ known limits are in [`docs/CLIENTS.md`](docs/CLIENTS.md).
 
 Except for `/health`, data-plane requests require a gateway-issued project key
 unless unauthenticated local mode was explicitly enabled. The static
-administrator keys are accepted too, but skip key and project policy and quotas.
+administrator keys are accepted too, but skip key and project policy and quotas;
+that is deprecated and will be refused by default in the next major release.
 See [`docs/API.md`](docs/API.md) for aliases, request limits, streaming,
 adaptation, cancellation, and per-surface failover semantics.
 

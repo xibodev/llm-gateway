@@ -153,8 +153,12 @@ type Settings struct {
 	APIKey                  string   `yaml:"api_key"`
 	APIKeys                 []string `yaml:"api_keys"`
 	AllowUnauthenticatedAPI bool     `yaml:"allow_unauthenticated_api"`
-	RateLimitPerMinute      int      `yaml:"rate_limit_per_minute"`
-	GatewayPreamble         string   `yaml:"gateway_preamble"`
+	// AdminKeysOnDataPlane lets the static administrator keys authenticate
+	// /v1 requests. It is deprecated: the next major release refuses them
+	// there by default.
+	AdminKeysOnDataPlane bool   `yaml:"admin_keys_on_data_plane"`
+	RateLimitPerMinute   int    `yaml:"rate_limit_per_minute"`
+	GatewayPreamble      string `yaml:"gateway_preamble"`
 	// AnthropicDiscoveryAliases makes GET /v1/models also list Claude-family
 	// models under their bare id (claude-â€¦ / anthropic-â€¦) so Claude Code's
 	// gateway model discovery â€” which ignores ids not beginning with "claude" or
@@ -226,6 +230,7 @@ func Defaults() *Settings {
 		GithubCopilotEditorVersion:     "vscode/1.95.3",
 		GithubCopilotIntegrationID:     "vscode-chat",
 		AnthropicDiscoveryAliases:      true,
+		AdminKeysOnDataPlane:           true,
 		SSOAdminGroup:                  "llmgw-admin",
 		SSOAutoProvision:               true,
 	}
@@ -824,6 +829,7 @@ func applyEnv(s *Settings) {
 		s.APIKeys = strings.Split(v, ",")
 	}
 	envBool("LLMGW_ALLOW_UNAUTHENTICATED_API", &s.AllowUnauthenticatedAPI)
+	envBool("LLMGW_ADMIN_KEYS_ON_DATA_PLANE", &s.AdminKeysOnDataPlane)
 	if v, ok := os.LookupEnv("LLMGW_RATE_LIMIT_PER_MINUTE"); ok {
 		if n, err := strconv.Atoi(strings.TrimSpace(v)); err == nil {
 			s.RateLimitPerMinute = n
@@ -1109,6 +1115,7 @@ func applyScalars(s *Settings, p map[string]any) {
 		}
 	}
 	b("allow_unauthenticated_api", &s.AllowUnauthenticatedAPI)
+	b("admin_keys_on_data_plane", &s.AdminKeysOnDataPlane)
 	if v, ok := toFloat(p["rate_limit_per_minute"]); ok {
 		s.RateLimitPerMinute = int(v)
 	}
