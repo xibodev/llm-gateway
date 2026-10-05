@@ -6,12 +6,14 @@ import { modeForPath, type ConsoleMode } from "./lib/mode";
 import { asList, asRecord, stringValue } from "./lib/records";
 import { navigationFor, type PageID } from "./lib/navigation";
 import { Access } from "./pages/Access";
+import { AuditLog } from "./pages/AuditLog";
 import { ApiKeys } from "./pages/ApiKeys";
 import { Alerts } from "./pages/Alerts";
 import { ModelsEndpoints } from "./pages/ModelsEndpoints";
 import { Overview } from "./pages/Overview";
 import { Playground } from "./pages/Playground";
 import { Providers } from "./pages/Providers";
+import { Requests } from "./pages/Requests";
 import { Routes } from "./pages/Routes";
 import { Settings } from "./pages/Settings";
 import { UsageQuotas } from "./pages/UsageQuotas";
@@ -177,6 +179,8 @@ export function App() {
       }
       case "access": content = <Access data={data} mode={mode} onChanged={refresh} onNavigate={navigate} />; break;
       case "usage": content = <UsageQuotas data={data} mode={mode} />; break;
+      case "requests": content = <Requests data={data} mode={mode} />; break;
+      case "audit": content = <AuditLog mode={mode} />; break;
       case "alerts": content = <Alerts data={data} />; break;
       case "settings": content = <Settings data={data} mode={mode} onNavigate={navigate} />; break;
       default: content = <Overview data={data} mode={mode} onNavigate={navigate} />;

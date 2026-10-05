@@ -1,22 +1,12 @@
 import { useEffect, useRef, useState } from "preact/hooks";
-import { LoaderCircle, RefreshCw, Save, ShieldCheck, Users } from "lucide-preact";
+import { LoaderCircle, RefreshCw, Save, ScrollText, ShieldCheck, Users } from "lucide-preact";
 import { getJSON, sendJSON, type JSONRecord } from "../lib/api";
+import { auditTone, safeAuditDetail } from "../lib/activity";
 import { quotaValueFromDraft } from "../lib/key-policy";
 import type { ConsoleMode } from "../lib/mode";
 import type { PageID } from "../lib/navigation";
 import { asList, asRecord, numberValue, stringValue } from "../lib/records";
 import { EmptyState, ErrorState, LoadingState, PageHeading } from "../components/PageState";
-
-function safeDetail(value: unknown): JSONRecord {
-  const detail = asRecord(value);
-  const out: JSONRecord = {};
-  for (const [key, child] of Object.entries(detail)) {
-    const lower = key.toLowerCase();
-    if (lower.includes("token") || lower.includes("secret") || lower.includes("authorization") || lower.includes("api_key")) continue;
-    out[key] = child;
-  }
-  return out;
-}
 
 // Numeric policy fields editable in the project policy form. Zero means "no
 // limit" and is stored by omission.
@@ -161,14 +151,17 @@ function AnonymousProviderAutomation({ onSaved }: { onSaved: (message: string) =
 }
 
 export function Settings({ data, mode, onNavigate }: { data: JSONRecord; mode: ConsoleMode; onNavigate: (page: PageID) => void }) {
+  const isAdmin = mode === "admin";
   const [audit, setAudit] = useState<JSONRecord | null>(null);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
+  // Administrators search the whole history on the audit log page; the portal
+  // lists the signed-in person's own events here.
   const loadAudit = async () => {
     try { setError(""); setAudit(await getJSON<JSONRecord>(mode, "/audit?limit=30")); }
     catch (cause) { setError(cause instanceof Error ? cause.message : "Audit log could not load."); }
   };
-  useEffect(() => { void loadAudit(); }, [mode]);
+  useEffect(() => { if (!isAdmin) void loadAudit(); }, [mode]);
   const sso = asRecord(data.sso);
   const memberships = asList(data.memberships).map(asRecord);
   const principals = asList(data.principals).map(asRecord);
@@ -177,7 +170,7 @@ export function Settings({ data, mode, onNavigate }: { data: JSONRecord; mode: C
   const ssoEnabled = sso.enabled === true;
   return (
     <div class="page-stack">
-      <PageHeading eyebrow="Governance" title="Settings" detail="Project budgets and allowlists, authentication posture, and retained audit history." actions={<button class="button button--secondary" type="button" onClick={() => void loadAudit()}><RefreshCw size={16} /> Refresh audit</button>} />
+      <PageHeading eyebrow="Governance" title="Settings" detail="Project budgets and allowlists, authentication posture, and retained audit history." actions={isAdmin ? undefined : <button class="button button--secondary" type="button" onClick={() => void loadAudit()}><RefreshCw size={16} /> Refresh audit</button>} />
       {notice ? <section class="action-notice action-notice--success" role="status"><strong>Saved</strong><span>{notice}</span></section> : null}
       <section class="settings-grid">
         <article class="surface"><ShieldCheck size={20} /><p class="eyebrow">Authentication</p><h2>{mode === "portal" ? "Private portal session" : ssoEnabled ? "Single sign-on" : "Gateway administrator access"}</h2><p>Mutation requests require same-origin validation. Provider credentials and API-key values are never represented in settings state. SSO and encryption settings are environment-driven — see the deployment guide.</p></article>
@@ -189,7 +182,8 @@ export function Settings({ data, mode, onNavigate }: { data: JSONRecord; mode: C
         <p class="muted-copy">Limits apply to every key minted in the project. Empty fields mean no limit; allowlists restrict which models and providers project keys may use.</p>
         <ProjectPolicyEditor projects={projects} onSaved={setNotice} />
       </section> : null}
-      <section class="surface"><div class="section-heading"><div><p class="eyebrow">Audit</p><h2>Immutable operational activity</h2></div><span class="status-pill status-pill--muted">Secret-free records</span></div>{error ? <ErrorState title="Audit log is unavailable" detail={error} action={<button class="button button--secondary" type="button" onClick={() => void loadAudit()}>Retry</button>} /> : audit === null ? <LoadingState title="Loading audit records" /> : events.length === 0 ? <EmptyState title="No audit records yet" detail="Governance and connection changes will appear here without secret values." /> : <div class="table-wrap"><table><thead><tr><th>Time</th><th>Action</th><th>Target</th><th>Result</th><th>Detail</th></tr></thead><tbody>{events.map((event) => <tr key={String(event.id)}><td class="technical">{new Date(Number(event.ts) * 1000).toLocaleString()}</td><td>{stringValue(event.action)}</td><td>{stringValue(event.target_type)} {stringValue(event.target_id)}</td><td><span class="status-pill status-pill--ready">{stringValue(event.result, "success")}</span></td><td class="technical">{JSON.stringify(safeDetail(event.detail))}</td></tr>)}</tbody></table></div>}</section>
+      {isAdmin ? <section class="surface"><div class="section-heading"><div><p class="eyebrow">Audit</p><h2>Operational activity</h2></div><span class="status-pill status-pill--muted">Secret-free records</span></div><p class="muted-copy">Search the retained audit history by action, actor, result and target, and page back through it.</p><button class="button button--secondary" type="button" onClick={() => onNavigate("audit")}><ScrollText size={15} /> Open audit log</button></section>
+        : <section class="surface"><div class="section-heading"><div><p class="eyebrow">Audit</p><h2>Your operational activity</h2></div><span class="status-pill status-pill--muted">Secret-free records</span></div>{error ? <ErrorState title="Audit log is unavailable" detail={error} action={<button class="button button--secondary" type="button" onClick={() => void loadAudit()}>Retry</button>} /> : audit === null ? <LoadingState title="Loading audit records" /> : events.length === 0 ? <EmptyState title="No audit records yet" detail="Governance and connection changes will appear here without secret values." /> : <div class="table-wrap"><table><thead><tr><th>Time</th><th>Action</th><th>Target</th><th>Result</th><th>Detail</th></tr></thead><tbody>{events.map((event) => <tr key={String(event.id)}><td class="technical">{new Date(Number(event.ts) * 1000).toLocaleString()}</td><td>{stringValue(event.action)}</td><td>{stringValue(event.target_type)} {stringValue(event.target_id)}</td><td><span class={`status-pill status-pill--${auditTone(stringValue(event.result, "success"))}`}>{stringValue(event.result, "success")}</span></td><td class="technical">{JSON.stringify(safeAuditDetail(event.detail))}</td></tr>)}</tbody></table></div>}</section>}
     </div>
   );
 }

@@ -1,4 +1,5 @@
 import {
+  Activity,
   BellRing,
   BarChart3,
   Boxes,
@@ -7,6 +8,7 @@ import {
   Play,
   Plug,
   Route,
+  ScrollText,
   Settings,
   Users,
 } from "lucide-preact";
@@ -20,7 +22,9 @@ export type PageID =
   | "keys"
   | "access"
   | "usage"
+  | "requests"
   | "alerts"
+  | "audit"
   | "settings";
 
 export type NavigationItem = {
@@ -39,7 +43,9 @@ const adminNavigation: NavigationItem[] = [
   { id: "keys", label: "API keys", description: "Lifecycle and policy", Icon: KeyRound },
   { id: "access", label: "Access", description: "Principals, projects, memberships", Icon: Users },
   { id: "usage", label: "Usage & quotas", description: "Consumption and advisory status", Icon: BarChart3 },
+  { id: "requests", label: "Requests", description: "Recorded requests and failover", Icon: Activity },
   { id: "alerts", label: "Alerts", description: "Quota and expiry notifications", Icon: BellRing },
+  { id: "audit", label: "Audit log", description: "Administrative activity", Icon: ScrollText },
   { id: "settings", label: "Settings", description: "Access and audit", Icon: Settings },
 ];
 

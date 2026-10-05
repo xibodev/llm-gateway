@@ -87,3 +87,39 @@ test("the usage page totals the filtered series and keeps bucket choices the ser
   assert.match(requests.at(-1), /bucket=week/);
   assert.match(text(tree), /Requests by week/);
 });
+
+test("the usage chart shows the chosen metric and the breakdown names its rows", async () => {
+  const start = Date.UTC(2026, 9, 3) / 1000;
+  globalThis.__api = {
+    async getJSON() {
+      return {
+        series: [{ start, requests: 3, errors: 1, input_tokens: 100, output_tokens: 20, cost_microusd: 1500000 }],
+        control_plane: { groups: {
+          provider: [{ provider: "openai", requests: 3, errors: 1, input_tokens: 100, output_tokens: 20, cost_microusd: 1500000, average_latency_ms: 812 }],
+          key: [{ key_id: "k1", requests: 2 }, { key_id: "", requests: 1 }],
+        } },
+      };
+    },
+  };
+  const render = mount(() => UsageQuotas({ data: { providers: [], keys: [{ id: "k1", name: "ci key" }], projects: [] }, mode: "admin" }));
+  render();
+  await settle();
+  let tree = render();
+  const card = (label) => text(find(tree, (node) => node.type === "article" && text(node).includes(label)));
+  assert.match(card("Tokens"), /Tokens120Input and output/);
+  const select = (value) => find(tree, (node) => node.type === "select" && findAll(node, (option) => option.props?.value === value).length);
+  select("tokens").props.onInput(input("tokens"));
+  tree = render();
+  assert.match(text(tree), /Tokens by day/);
+  assert.ok(findAll(tree, (node) => node.type === "strong" && node.props?.children === "120").length >= 1);
+  select("cost").props.onInput(input("cost"));
+  tree = render();
+  assert.match(text(tree), /Estimated cost by day/);
+  assert.match(text(tree), /\$1\.5000/);
+  assert.match(text(tree), /openai/);
+  assert.match(text(tree), /812 ms/);
+  select("project").props.onInput(input("key"));
+  tree = render();
+  assert.match(text(tree), /ci key/, "a key is named, not shown by ID");
+  assert.match(text(tree), /Administrator or local/);
+});

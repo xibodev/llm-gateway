@@ -317,6 +317,10 @@ tbody tr:last-child td { border-bottom: 0; }
 .usage-bar__track span { width: 100%; display: block; min-height: 2px; background: #4777b9; }
 .usage-bar strong { color: #3c4a58; font-size: 0.7rem; }
 .usage-bar small { max-width: 58px; color: #77828e; font-size: 0.62rem; line-height: 1.25; text-align: center; overflow-wrap: anywhere; }
+.inline-select { display: inline-flex; align-items: center; gap: 8px; color: #5c6976; font-size: 0.7rem; font-weight: 650; }
+.inline-select select { min-height: 34px; padding: 4px 8px; border: 1px solid #cfd7e0; background: #fff; color: #2e3945; border-radius: 5px; }
+.activity-more { display: flex; justify-content: center; padding-top: 12px; }
+td details pre { max-width: 34rem; margin: 6px 0 0; white-space: pre-wrap; font-size: 0.7rem; }
 .alert-editor { display: grid; gap: 15px; }
 .alert-editor > header { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
 .alert-editor__grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
@@ -546,6 +550,7 @@ tbody tr:last-child td { border-bottom: 0; }
 :root[data-theme="dark"] .model-toolbar select,
 :root[data-theme="dark"] .usage-filter input,
 :root[data-theme="dark"] .usage-filter select,
+:root[data-theme="dark"] .inline-select select,
 :root[data-theme="dark"] .alert-editor__grid input,
 :root[data-theme="dark"] .alert-editor__grid select,
 :root[data-theme="dark"] .key-editor input,
