@@ -1,0 +1,147 @@
+{
+  "schema_version": "1.0.0",
+  "mode": "change",
+  "contract": {
+    "digest": "da05219969e051b692980ada8e8066ac909bf88d11ad6a5af6338834a8cc384f"
+  },
+  "authoring_provenance": {
+    "status": "established",
+    "path": ".release-harness/drafts/llm-gateway.record.json",
+    "digest": "e819045146db82b3754d02e0950d13ca8527706a2b478ada58c176c24e706d2b"
+  },
+  "sources": [
+    {
+      "source_id": "primary",
+      "status": "established",
+      "repository_identity": "https://github.com/xibodev/llm-gateway.git",
+      "base_ref": "b7547c4",
+      "base_commit": "b7547c41e3f6cb40d973451392d1668b467c8882",
+      "merge_base": "b7547c41e3f6cb40d973451392d1668b467c8882",
+      "head_commit": "dbd1f870960ae382ecdc48a53a280f0feff781ae",
+      "head_tree": "a5cc0aa6564e7e52d59036522a06856f7a16b2c0",
+      "reviewed_source_digest": "6d9b13c3e85b9af4276410e75749c0875dd1194a321703f2828e445f09089eef",
+      "changed_paths": [
+        {
+          "status": "modified",
+          "path": ".github/workflows/release.yml",
+          "old_blob": "83399d21f456dbb042e40bcf338419b01bdf1bdf",
+          "new_blob": "2f7fdc0a17d6cc13bbcd874ad91a04e27b947abc"
+        }
+      ]
+    }
+  ],
+  "facts": [
+    {
+      "id": "release-contract-selection",
+      "claim": "The change since the confirmed v1.5.0 release review touches only .github/workflows/release.yml: a workflow-level RELEASE_CONTRACT names accepted contract da05219969e0, which its lifecycle check and its certifying run of the release smoke now pass as --contract. No gateway source, build, test or documentation file changes.",
+      "status": "observed",
+      "evidence": {
+        "source": "git diff b7547c4..HEAD -- .github/workflows/release.yml"
+      }
+    },
+    {
+      "id": "workflow-lint",
+      "claim": "actionlint v1.7.7 reports no problem in the workflows at this revision.",
+      "status": "observed",
+      "evidence": {
+        "source": "local actionlint execution"
+      }
+    }
+  ],
+  "impact": {
+    "assertions": [
+      {
+        "id": "A1",
+        "impact": "unchanged",
+        "supported_by": [
+          "release-contract-selection",
+          "workflow-lint"
+        ]
+      },
+      {
+        "id": "A2",
+        "impact": "unchanged",
+        "supported_by": [
+          "release-contract-selection",
+          "workflow-lint"
+        ]
+      },
+      {
+        "id": "A3",
+        "impact": "unchanged",
+        "supported_by": [
+          "release-contract-selection",
+          "workflow-lint"
+        ]
+      },
+      {
+        "id": "A4",
+        "impact": "unchanged",
+        "supported_by": [
+          "release-contract-selection",
+          "workflow-lint"
+        ]
+      },
+      {
+        "id": "A5",
+        "impact": "unchanged",
+        "supported_by": [
+          "release-contract-selection",
+          "workflow-lint"
+        ]
+      },
+      {
+        "id": "A6",
+        "impact": "unchanged",
+        "supported_by": [
+          "release-contract-selection",
+          "workflow-lint"
+        ]
+      },
+      {
+        "id": "A7",
+        "impact": "unchanged",
+        "supported_by": [
+          "release-contract-selection",
+          "workflow-lint"
+        ]
+      },
+      {
+        "id": "A8",
+        "impact": "unchanged",
+        "supported_by": [
+          "release-contract-selection",
+          "workflow-lint"
+        ]
+      },
+      {
+        "id": "A9",
+        "impact": "unchanged",
+        "supported_by": [
+          "release-contract-selection",
+          "workflow-lint"
+        ]
+      },
+      {
+        "id": "A10",
+        "impact": "unchanged",
+        "supported_by": [
+          "release-contract-selection",
+          "workflow-lint"
+        ]
+      }
+    ],
+    "requires": [],
+    "possible_binding_changes": []
+  },
+  "questions": [],
+  "conclusion": {
+    "action": "reuse_contract",
+    "summary": "Only the release workflow changed, to name the accepted contract it checks and certifies; no proposition's implementation changed."
+  },
+  "proposed": {
+    "by": "release operator",
+    "at": "2026-10-05T09:43:31.290Z"
+  },
+  "digest": "d1fbc3b175a5b155c08d6e17ca926dc78e0b28b7857149144687e48fc8bede1b"
+}
