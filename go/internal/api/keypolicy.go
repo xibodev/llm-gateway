@@ -54,32 +54,41 @@ func modelPolicyAllows(allowed []string, requestedModel, resolvedCategory string
 // handler authorizes as soon as the route is resolved, so a denial wins over a
 // validation error, and admits only after every check that can refuse the
 // request without contacting a provider, so a request the gateway rejects
-// itself spends no quota.
-func admitKeyPolicy(p *config.Principal) (int, string) {
+// itself spends no quota. A refusal by a limit reports how long until the
+// limit's window ends.
+func admitKeyPolicy(p *config.Principal, now time.Time) (int, string, time.Duration) {
 	if p == nil || p.Token == "" {
-		return 0, "" // admin / unauthenticated-local: unmetered
+		return 0, "", 0 // admin / unauthenticated-local: unmetered
 	}
-	if err := iam.CheckAndConsumeRequest(p, time.Now()); err != nil {
+	if err := iam.CheckAndConsumeRequest(p, now); err != nil {
 		var exceeded *iam.QuotaExceeded
 		if errors.As(err, &exceeded) {
-			return 429, exceeded.Error()
+			return 429, exceeded.Error(), exceeded.Reset.Sub(now)
 		}
-		return 500, "Quota store unavailable."
+		return 500, "Quota store unavailable.", 0
 	}
-	return 0, ""
+	return 0, "", 0
 }
 
-// admitRequest admits a handler's request immediately before it is executed.
-// It reports false once it has recorded and written the refusal, so the
-// handler only returns.
+// admitRequest admits a handler's request immediately before it is executed:
+// first under the process-wide per-caller rate limit, then under the key's
+// and project's quotas. It reports false once it has recorded and written the
+// refusal, so the handler only returns. A refusal by a limit carries
+// Retry-After.
 func admitRequest(
 	w http.ResponseWriter, endpoint, requestedModel string,
 	p *config.Principal, errorCode string, started time.Time,
 ) bool {
-	status, message := admitKeyPolicy(p)
+	if message, ok := admitRate(w, p); !ok {
+		recordFailureUsage(endpoint, requestedModel, p, http.StatusTooManyRequests, "rate_limit", started)
+		writeError(w, http.StatusTooManyRequests, message)
+		return false
+	}
+	status, message, wait := admitKeyPolicy(p, time.Now())
 	if status == 0 {
 		return true
 	}
+	setRetryAfter(w, wait)
 	recordFailureUsage(endpoint, requestedModel, p, status, errorCode, started)
 	writeError(w, status, message)
 	return false

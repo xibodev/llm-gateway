@@ -10,9 +10,13 @@ import (
 	"llmgw/internal/config"
 )
 
+// QuotaExceeded refuses a request that a request, token, cost or credit limit
+// does not admit. Reset is when the window the limit counts ends, after which
+// the same request may be admitted.
 type QuotaExceeded struct {
 	Metric string
 	Limit  int64
+	Reset  time.Time
 }
 
 func (e *QuotaExceeded) Error() string {
@@ -69,7 +73,7 @@ func CheckAndConsumeRequest(p *config.Principal, now time.Time) error {
 		DailyCostMicroUSD:  p.DailyCostMicroUSD, MonthlyCostMicroUSD: p.MonthlyCostMicroUSD,
 		DailyCreditsMilli: p.DailyCreditsMilli, MonthlyCreditsMilli: p.MonthlyCreditsMilli,
 	}
-	if err := checkPolicyCounters("", keyPolicy, minute, day, month); err != nil {
+	if err := checkPolicyCounters("", keyPolicy, minute, day, month, quotaWindowEnds(now)); err != nil {
 		return err
 	}
 	projectPolicy, err := projectPolicyTx(tx, p.ProjectID)
@@ -89,7 +93,7 @@ func CheckAndConsumeRequest(p *config.Principal, now time.Time) error {
 		return err
 	}
 	if err := checkPolicyCounters(
-		"project ", projectPolicy.KeyPolicy, projectMinute, projectDay, projectMonth,
+		"project ", projectPolicy.KeyPolicy, projectMinute, projectDay, projectMonth, quotaWindowEnds(now),
 	); err != nil {
 		return err
 	}
@@ -125,27 +129,28 @@ DO UPDATE SET requests=requests+1`, p.ProjectID, period.name, period.start); err
 }
 
 func checkPolicyCounters(
-	prefix string, policy KeyPolicy, minute, day, month quotaCounter,
+	prefix string, policy KeyPolicy, minute, day, month quotaCounter, ends quotaWindows,
 ) error {
 	checks := []struct {
 		metric string
 		value  int64
 		limit  int64
+		reset  time.Time
 	}{
-		{prefix + "requests/minute", minute.Requests, int64(policy.RPM)},
-		{prefix + "requests/day", day.Requests, int64(policy.DailyRequests)},
-		{prefix + "requests/month", month.Requests, int64(policy.MonthlyRequests)},
-		{prefix + "input tokens/day", day.InputTokens, policy.DailyInputTokens},
-		{prefix + "output tokens/day", day.OutputTokens, policy.DailyOutputTokens},
-		{prefix + "total tokens/month", month.InputTokens + month.OutputTokens, policy.MonthlyTotalTokens},
-		{prefix + "estimated cost/day (micro-USD)", day.CostMicroUSD, policy.DailyCostMicroUSD},
-		{prefix + "estimated cost/month (micro-USD)", month.CostMicroUSD, policy.MonthlyCostMicroUSD},
-		{prefix + "credits/day (milli)", day.CreditsMilli, policy.DailyCreditsMilli},
-		{prefix + "credits/month (milli)", month.CreditsMilli, policy.MonthlyCreditsMilli},
+		{prefix + "requests/minute", minute.Requests, int64(policy.RPM), ends.minute},
+		{prefix + "requests/day", day.Requests, int64(policy.DailyRequests), ends.day},
+		{prefix + "requests/month", month.Requests, int64(policy.MonthlyRequests), ends.month},
+		{prefix + "input tokens/day", day.InputTokens, policy.DailyInputTokens, ends.day},
+		{prefix + "output tokens/day", day.OutputTokens, policy.DailyOutputTokens, ends.day},
+		{prefix + "total tokens/month", month.InputTokens + month.OutputTokens, policy.MonthlyTotalTokens, ends.month},
+		{prefix + "estimated cost/day (micro-USD)", day.CostMicroUSD, policy.DailyCostMicroUSD, ends.day},
+		{prefix + "estimated cost/month (micro-USD)", month.CostMicroUSD, policy.MonthlyCostMicroUSD, ends.month},
+		{prefix + "credits/day (milli)", day.CreditsMilli, policy.DailyCreditsMilli, ends.day},
+		{prefix + "credits/month (milli)", month.CreditsMilli, policy.MonthlyCreditsMilli, ends.month},
 	}
 	for _, check := range checks {
 		if check.limit > 0 && check.value >= check.limit {
-			return &QuotaExceeded{Metric: check.metric, Limit: check.limit}
+			return &QuotaExceeded{Metric: check.metric, Limit: check.limit, Reset: check.reset}
 		}
 	}
 	return nil
@@ -217,6 +222,19 @@ func quotaPeriods(now time.Time) (minute, day, month int64) {
 	return
 }
 
+// quotaWindows are the ends of the UTC minute, day and month a request falls
+// in: when a limit that refused it counts afresh.
+type quotaWindows struct{ minute, day, month time.Time }
+
+func quotaWindowEnds(now time.Time) quotaWindows {
+	minute, day, month := quotaPeriods(now)
+	return quotaWindows{
+		minute: time.Unix(minute+60, 0).UTC(),
+		day:    time.Unix(day, 0).UTC().AddDate(0, 0, 1),
+		month:  time.Unix(month, 0).UTC().AddDate(0, 1, 0),
+	}
+}
+
 // CheckAndConsumeProjectRequest enforces a project policy for traffic without a
 // gateway-issued key: externally managed keys and keyless internal traffic
 // such as the owner playground. It consumes only project counters and never
@@ -252,7 +270,7 @@ func CheckAndConsumeProjectRequest(projectID string, now time.Time) error {
 	if err != nil {
 		return err
 	}
-	if err := checkPolicyCounters("project ", policy.KeyPolicy, minute, day, month); err != nil {
+	if err := checkPolicyCounters("project ", policy.KeyPolicy, minute, day, month, quotaWindowEnds(now)); err != nil {
 		return err
 	}
 	for _, period := range []struct {

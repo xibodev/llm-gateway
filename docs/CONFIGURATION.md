@@ -143,6 +143,7 @@ startup with an error naming the model.
 | `LLMGW_PORT` | `8787` | Listen port. |
 | `LLMGW_MAX_REQUEST_BODY_BYTES` | `67108864` | Largest request body accepted, in bytes; a larger one is refused with `413`. Values below `1048576` are raised to it, and invalid values use the default. |
 | `LLMGW_SHUTDOWN_TIMEOUT_SECONDS` | `25` | Whole seconds a stop (SIGINT or SIGTERM) gives requests in flight, streams included, to finish before closing them; `0` closes them at once. A second signal exits immediately. |
+| `LLMGW_RATE_LIMIT_PER_MINUTE` | `0` | Most data-plane requests one caller may start in a UTC minute on this process: a gateway-issued or external key, the static administrator key, or local mode. A request over it is refused with `429` and a `Retry-After` until the next minute. It applies on top of [key and project quotas](MULTI_USER.md#policy-and-quotas), is kept in memory, and counts per process. `0` turns it off. Also YAML `rate_limit_per_minute`. |
 | `LLMGW_STATE_DIR` | `~/.llmgw` | Writable state directory. |
 | `LLMGW_CONFIG` | `<state>/config.yaml` | Writable runtime configuration path. |
 | `LLMGW_CONFIG_SEED` | unset | Read-once seed copied only when `LLMGW_CONFIG` is missing. |
@@ -266,9 +267,6 @@ are not age-pruned.
 
 These variables currently have no effect:
 
-- `LLMGW_RATE_LIMIT_PER_MINUTE` is parsed but not enforced. Use per-key or
-  project requests-per-minute limits instead; see
-  [policy and quotas](MULTI_USER.md#policy-and-quotas).
 - `LLMGW_ALLOW_COPILOT_PROXY` and `LLMGW_EXPERIMENTAL_COPILOT_PROVIDER`.
 - `LLMGW_OPENAI_COMPATIBLE_API_KEY`.
 - `LLMGW_GITHUB_COPILOT_USE_GH_CLI`, `LLMGW_GITHUB_COPILOT_TIMEOUT_SECONDS`,

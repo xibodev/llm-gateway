@@ -163,7 +163,12 @@ request validation, so request-count limits are strict. Token, estimated-cost,
 and credit counters settle only after a response completes, and a request is
 admitted while they are below their limit, so concurrent requests can each pass
 and together exceed it. Quota windows are fixed UTC calendar minutes, days, and
-months, not rolling windows.
+months, not rolling windows. A refused request gets `429` with a `Retry-After`
+giving the seconds until the window of the limit that refused it ends.
+
+[`LLMGW_RATE_LIMIT_PER_MINUTE`](CONFIGURATION.md#server-and-state) adds a
+per-process ceiling for every caller, including the static administrator key and
+local mode, which no quota meters.
 
 A model that neither the built-in price table nor
 [`savings.price_catalog`](CONFIGURATION.md#legacy-savings-ledger) prices records
