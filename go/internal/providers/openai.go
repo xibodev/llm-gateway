@@ -31,10 +31,10 @@ func buildOpenAIPayload(model string, messages []Message, stream bool, kw Kwargs
 }
 
 // openAITransportField reports a Chat field the OpenAI transport forwards
-// besides the model, the messages and the stream flag. Core's Azure OpenAI
-// provider forwards exactly these and drops the others, as core's
-// OpenAI-compatible provider does unless it is built to forward every field,
-// which only the gateway's OpenAI-compatible instances are, not Bedrock.
+// besides the model, the messages and the stream flag. Core's
+// OpenAI-compatible provider forwards exactly these and drops the others
+// unless it is built to forward every field, which only the gateway's
+// OpenAI-compatible instances are, not Bedrock.
 func openAITransportField(field string) bool {
 	switch field {
 	case "temperature", "top_p", "max_tokens", "max_completion_tokens",

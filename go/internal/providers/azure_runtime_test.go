@@ -17,6 +17,7 @@ import (
 	"llmgw/internal/iam"
 
 	core "github.com/xibodev/llmgw-core"
+	coreproviders "github.com/xibodev/llmgw-core/providers"
 )
 
 const azureFixtureInstance = "azure-fixture"
@@ -99,10 +100,11 @@ func (a *azureRecorder) count() int {
 	return len(a.calls)
 }
 
-// Core's AzureOpenAI sends the body the transport sent: the payload
-// buildOpenAIPayload built from withOpenAIOutputLimit's options, byte for
-// byte, fields it did not forward dropped.
-func TestAzureChatBodyIsTheTransportsPayload(t *testing.T) {
+// Core's AzureOpenAI sends the model, the messages, the stream flag and
+// every set field Azure's v1 Chat Completions defines, byte for byte, with
+// a translated output limit as max_completion_tokens; any other field,
+// the gateway's own included, never reaches Azure.
+func TestAzureChatBodyCarriesTheFieldsAzureAccepts(t *testing.T) {
 	upstream := &azureRecorder{}
 	server := httptest.NewServer(upstream.handler(t))
 	defer server.Close()
@@ -114,9 +116,10 @@ func TestAzureChatBodyIsTheTransportsPayload(t *testing.T) {
 			"temperature": 0.2, "top_p": json.Number("0.9"), "max_tokens": json.Number("64"), "stop": []any{"END"},
 			"tools": []any{map[string]any{"type": "function", "function": map[string]any{"name": "lookup"}}}, "tool_choice": "auto",
 			"reasoning_effort": "high", "stream_options": map[string]any{"include_usage": true}, "metadata": map[string]any{"user": "fixture"},
-			"parallel_tool_calls": true, "thinking": map[string]any{"type": "enabled"},
+			"parallel_tool_calls": true, "response_format": map[string]any{"type": "json_object"}, "n": json.Number("2"),
+			"logprobs": true, "seed": json.Number("7"), "user": "fixture-user", "store": false, "verbosity": "low",
 		},
-		"dropped":        {"logprobs": true, "n": json.Number("2"), "temperature": nil, "_affinity_key": "fixture", "_force_api_support": false},
+		"dropped":        {"thinking": map[string]any{"type": "enabled"}, "web_search_options": map[string]any{}, "temperature": nil, "_affinity_key": "fixture", "_force_api_support": false},
 		"output limit":   {"_max_output_tokens": json.Number("128")},
 		"explicit limit": {"_max_output_tokens": json.Number("128"), "max_tokens": json.Number("64")},
 		"null limit":     {"_max_output_tokens": json.Number("128"), "max_completion_tokens": nil},
@@ -131,7 +134,13 @@ func TestAzureChatBodyIsTheTransportsPayload(t *testing.T) {
 			} else if _, err := provider.Complete("gpt-5.6-sol", messages, kw); err != nil {
 				t.Fatalf("%s: %v", name, err)
 			}
-			want, _ := json.Marshal(buildOpenAIPayload("gpt-5.6-sol", messages, stream, withOpenAIOutputLimit(kw)))
+			payload := map[string]any{"model": "gpt-5.6-sol", "messages": messages, "stream": stream}
+			for key, value := range withOpenAIOutputLimit(kw) {
+				if value != nil && coreproviders.AzureChatField(key) {
+					payload[key] = value
+				}
+			}
+			want, _ := json.Marshal(payload)
 			call, body := upstream.last()
 			if call != "/openai/v1/chat/completions fixture-key" || string(body) != string(want) {
 				t.Fatalf("%s stream=%v: call=%q\nbody=%s\nwant=%s", name, stream, call, body, want)

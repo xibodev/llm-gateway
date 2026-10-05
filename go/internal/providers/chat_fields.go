@@ -11,6 +11,7 @@ import (
 
 	"github.com/xibodev/llm-translate"
 	core "github.com/xibodev/llmgw-core"
+	coreproviders "github.com/xibodev/llmgw-core/providers"
 )
 
 // ChatFieldsAsSent marks the kwargs of a Chat Completions request as its
@@ -121,7 +122,7 @@ func (rt *Runtime) chatFieldsSent(providerID, model string, caller core.Caller, 
 		}
 		return nil
 	case "azure_openai":
-		return openAITransportField
+		return coreproviders.AzureChatField
 	case "anthropic":
 		return anthropicChatField
 	case "ai_studio", "vertex_ai":
