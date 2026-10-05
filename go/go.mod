@@ -1,6 +1,6 @@
 module llmgw
 
-go 1.26.6
+go 1.26.8
 
 require (
 	github.com/xibodev/llm-provider-auth v1.0.1

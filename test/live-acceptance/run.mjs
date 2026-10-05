@@ -778,7 +778,7 @@ async function runAcceptance() {
     if (mode === "deterministic") {
       const createFixture = async (id, status, models) => {
         const name = `${project}-${id}`;
-        await docker("run", "-d", "--name", name, "--network", network, "-e", `STATUS=${status}`, "-e", `MODELS=${models.join(",")}`, "-v", `${resolve(import.meta.dirname)}:/harness:ro`, "node:22.23.2-alpine", "node", "/harness/fixture-server.mjs");
+        await docker("run", "-d", "--name", name, "--network", network, "-e", `STATUS=${status}`, "-e", `MODELS=${models.join(",")}`, "-v", `${resolve(import.meta.dirname)}:/harness:ro`, "node:22.23.3-alpine", "node", "/harness/fixture-server.mjs");
         servers.push(name);
         await waitFixture(name);
         await configureProvider(id, "custom_openai", `http://${name}:8080`);
@@ -795,7 +795,7 @@ async function runAcceptance() {
 	  progress(`providers: automation complete for ${modelsByProvider.length} provider(s)`);
       for (const [id, status] of [["fault-429", 429], ["fault-503", 503]]) {
         const name = `${project}-${id}`;
-        await docker("run", "-d", "--name", name, "--network", network, "-e", `STATUS=${status}`, "-e", "MODELS=fault-model", "-v", `${resolve(import.meta.dirname)}:/harness:ro`, "node:22.23.2-alpine", "node", "/harness/fixture-server.mjs");
+        await docker("run", "-d", "--name", name, "--network", network, "-e", `STATUS=${status}`, "-e", "MODELS=fault-model", "-v", `${resolve(import.meta.dirname)}:/harness:ro`, "node:22.23.3-alpine", "node", "/harness/fixture-server.mjs");
         servers.push(name);
         await waitFixture(name);
         await configureProvider(id, "custom_openai", `http://${name}:8080`);

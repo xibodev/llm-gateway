@@ -2,7 +2,7 @@
 ARG SOURCE_DATE_EPOCH=0
 #
 # Build the console before compiling Go so the final binary embeds only local assets.
-FROM --platform=$BUILDPLATFORM node:22.23.2-alpine@sha256:c610fcdfb1d5b4740dd70c284ed3cb16bb857e0f7166196e36a5501df7a3aa32 AS console-builder
+FROM --platform=$BUILDPLATFORM node:22.23.3-alpine@sha256:0a7108bf6c7bf5de370ffb1a3ed6be93d405b43ff159f681a8d18c0e2bc2e402 AS console-builder
 ARG SOURCE_DATE_EPOCH
 WORKDIR /console
 COPY internal/web/console/package.json internal/web/console/package-lock.json ./
@@ -11,7 +11,7 @@ COPY internal/web/console/ ./
 RUN npm run build
 
 # ---- builder ------------------------------------------------------------- #
-FROM --platform=$BUILDPLATFORM golang:1.26.6-alpine@sha256:3889b425f035be855a72fb4755265311293b6d414521f0a519d819df32222d83 AS builder
+FROM --platform=$BUILDPLATFORM golang:1.26.8-alpine@sha256:8ac98ca534ac3f51e1f420a1dd2c15e74c75cfa0f23f3ad27eb5d7236c349a0c AS builder
 WORKDIR /src
 
 # Set by buildx for each requested platform.

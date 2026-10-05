@@ -269,7 +269,7 @@ Console edits and restores change the volume copy. Its named volume is
 `llmgw-state`, not standalone `state`.
 Use `docker compose --env-file .env down` to stop without deleting that volume.
 
-For a Go source run instead, install Go 1.26.6, load your intended native
+For a Go source run instead, install the Go release that `go/go.mod` names, load your intended native
 environment and absolute state/config paths as above, then from `go/` run
 `go run ./cmd/llmgw serve`. See [Go development](../go/README.md).
 
