@@ -62,6 +62,95 @@
         "supported_by": [
           "http-models-endpoint"
         ]
+      },
+      {
+        "id": "A5",
+        "kind": "http",
+        "target": "gateway",
+        "description": "an unreadable Chat Completions request gets an OpenAI-shaped client error",
+        "expect": {
+          "method": "POST",
+          "path": "/v1/chat/completions",
+          "status": 422,
+          "body_contains": "invalid_request_error"
+        },
+        "supported_by": [
+          "chat-unreadable-body"
+        ]
+      },
+      {
+        "id": "A6",
+        "kind": "http",
+        "target": "gateway",
+        "description": "an unreadable Responses request gets an OpenAI-shaped client error",
+        "expect": {
+          "method": "POST",
+          "path": "/v1/responses",
+          "status": 422,
+          "body_contains": "invalid_request_error"
+        },
+        "supported_by": [
+          "responses-unreadable-body"
+        ]
+      },
+      {
+        "id": "A7",
+        "kind": "http",
+        "target": "gateway",
+        "description": "an unreadable Messages request gets an Anthropic-shaped error",
+        "expect": {
+          "method": "POST",
+          "path": "/v1/messages",
+          "status": 422,
+          "body_contains": "\"type\":\"error\""
+        },
+        "supported_by": [
+          "messages-anthropic-envelope"
+        ]
+      },
+      {
+        "id": "A8",
+        "kind": "http",
+        "target": "gateway",
+        "description": "the administrator API refuses an unauthenticated caller even when the data plane needs no key",
+        "expect": {
+          "method": "GET",
+          "path": "/admin/api/state",
+          "status": 401,
+          "body_contains": "Admin authentication required."
+        },
+        "supported_by": [
+          "admin-api-requires-authentication"
+        ]
+      },
+      {
+        "id": "A9",
+        "kind": "http",
+        "target": "gateway",
+        "description": "the gateway serves its embedded console",
+        "expect": {
+          "method": "GET",
+          "path": "/console/",
+          "status": 200,
+          "body_contains": "<title>LLM Gateway Console</title>"
+        },
+        "supported_by": [
+          "embedded-console"
+        ]
+      },
+      {
+        "id": "A10",
+        "kind": "http",
+        "target": "gateway",
+        "description": "the gateway exposes no metrics unless an operator sets a metrics token",
+        "expect": {
+          "method": "GET",
+          "path": "/metrics",
+          "status": 404
+        },
+        "supported_by": [
+          "metrics-off-by-default"
+        ]
       }
     ]
   },

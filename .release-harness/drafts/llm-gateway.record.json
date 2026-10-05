@@ -33,6 +33,54 @@
       "evidence": {
         "source": "go/internal/api/server.go:43"
       }
+    },
+    {
+      "id": "chat-unreadable-body",
+      "claim": "POST /v1/chat/completions answers a body that is not a Chat request with 422 and the OpenAI error envelope, whose type is invalid_request_error",
+      "status": "observed",
+      "evidence": {
+        "source": "go/internal/api/openai.go:237"
+      }
+    },
+    {
+      "id": "responses-unreadable-body",
+      "claim": "POST /v1/responses answers a body that is not a Responses request with 422 and the OpenAI error envelope, whose type is invalid_request_error",
+      "status": "observed",
+      "evidence": {
+        "source": "go/internal/api/responses_api.go:27"
+      }
+    },
+    {
+      "id": "messages-anthropic-envelope",
+      "claim": "POST /v1/messages answers a body that is not a Messages request with 422 in the Anthropic envelope, whose top-level type is error, where the OpenAI envelope has none",
+      "status": "observed",
+      "evidence": {
+        "source": "go/internal/api/anthropic.go:98; go/internal/api/errors.go:68-119"
+      }
+    },
+    {
+      "id": "admin-api-requires-authentication",
+      "claim": "every /admin/api route requires administrator authentication, which LLMGW_ALLOW_UNAUTHENTICATED_API never disables, and refuses a caller without it with 401 Admin authentication required.",
+      "status": "observed",
+      "evidence": {
+        "source": "go/internal/api/sso.go:92"
+      }
+    },
+    {
+      "id": "embedded-console",
+      "claim": "GET /console/ serves the console index embedded in the binary, titled LLM Gateway Console",
+      "status": "observed",
+      "evidence": {
+        "source": "go/internal/api/server.go:160-162; go/internal/web/console/index.html"
+      }
+    },
+    {
+      "id": "metrics-off-by-default",
+      "claim": "GET /metrics answers 404 unless LLMGW_METRICS_TOKEN is set",
+      "status": "observed",
+      "evidence": {
+        "source": "go/internal/api/metrics.go:185"
+      }
     }
   ]
 }
