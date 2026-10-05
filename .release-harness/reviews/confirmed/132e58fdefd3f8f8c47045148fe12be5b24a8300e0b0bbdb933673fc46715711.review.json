@@ -1,0 +1,293 @@
+{
+  "schema_version": "1.0.0",
+  "mode": "change",
+  "contract": {
+    "digest": "31b393ab3e80162226619c441694573993ac618382d74642101484a0bf2e9c80"
+  },
+  "authoring_provenance": {
+    "status": "established",
+    "path": ".release-harness/drafts/llm-gateway.record.json",
+    "digest": "6732ddf3dc8236b974e2aae5f81b546d89c2a466b6fb0a368d76620955bf981e"
+  },
+  "sources": [
+    {
+      "source_id": "primary",
+      "status": "established",
+      "repository_identity": "https://github.com/xibodev/llm-gateway.git",
+      "base_ref": "v1.4.0",
+      "base_commit": "85ebb19abef2985f300f86da920be7970ae09d12",
+      "merge_base": "85ebb19abef2985f300f86da920be7970ae09d12",
+      "head_commit": "bcd0c5f85f1c5f8987889678d83066d187374d2f",
+      "head_tree": "2f89738575e411e9d3945e42010c9cc1226bf09c",
+      "reviewed_source_digest": "01d391667e6953795b67d6cced2a41f1dd3bd73a6bec03ad1b081b7db4bf0111",
+      "changed_paths": [
+        {
+          "status": "modified",
+          "path": ".github/workflows/ci.yml",
+          "old_blob": "1c6b790765a386a889e487be42c12cf7cb53c926",
+          "new_blob": "6dfa504c180dd1074f30fc2c3730499ba800311c"
+        },
+        {
+          "status": "modified",
+          "path": ".github/workflows/live-acceptance.yml",
+          "old_blob": "b08d175bb8b99bc9aa0df068052e4fee6a55c159",
+          "new_blob": "c6b5a5e00179e2ab70b01fe3eb7ae55b248c5fb2"
+        },
+        {
+          "status": "modified",
+          "path": ".github/workflows/pages.yml",
+          "old_blob": "f23f01d873165a539281a4e1218e21a9565b2089",
+          "new_blob": "9f510e7765ece0679b24252b4e1eae6c5f249996"
+        },
+        {
+          "status": "modified",
+          "path": ".github/workflows/provider-roster.yml",
+          "old_blob": "a211cedc7a64a62a2f15f7fde5df778247156c1b",
+          "new_blob": "bbef1fdd48f9f900756527fc875686fd468a79fd"
+        },
+        {
+          "status": "modified",
+          "path": ".github/workflows/release.yml",
+          "old_blob": "d530327e71d1b10dccb7c2c7f4e95a352b01927d",
+          "new_blob": "83399d21f456dbb042e40bcf338419b01bdf1bdf"
+        },
+        {
+          "status": "modified",
+          "path": "docs/API.md",
+          "old_blob": "74371675e22de482bdbbfac9e4687cc48515724a",
+          "new_blob": "8d553093ba6c4f1ea589f47e6145c3c4b6b3af05"
+        },
+        {
+          "status": "modified",
+          "path": "docs/QUICKSTART.md",
+          "old_blob": "c3ae839a0cc939fc017caeb09bf8c1149a1bca0e",
+          "new_blob": "f14943e58bea41fd2200fb028b916c1acc59beb7"
+        },
+        {
+          "status": "modified",
+          "path": "docs/ROUTING.md",
+          "old_blob": "25d010382394a2683ef0386bcbe227e562db0ae6",
+          "new_blob": "63dfa91dc8a4d7c0b9ad766a6f7200c2dfd6d16e"
+        },
+        {
+          "status": "modified",
+          "path": "go/Dockerfile",
+          "old_blob": "9103d03ddecf27cd70a470769359e7edce87f3ff",
+          "new_blob": "0007b932a4c3f7e354e769a5e9920518d29ca03d"
+        },
+        {
+          "status": "modified",
+          "path": "go/go.mod",
+          "old_blob": "894b3bc787b83e44d699636636d76b0f3f1cefad",
+          "new_blob": "c4a8fe37f63539113ff1eb1498c90f44850bd8b0"
+        },
+        {
+          "status": "modified",
+          "path": "go/go.sum",
+          "old_blob": "f2ee9219395f8889e8408374e541f34a30f75f00",
+          "new_blob": "21a611818bdd24fd6a780f8f429ad2bac00233d5"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/providers/azure_runtime_test.go",
+          "old_blob": "f969d5d2a2d88981f07b0e9e1cc33cb34bffba0a",
+          "new_blob": "8c5a7dcc615b898efa6f51d63c5183cbcf8491c2"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/providers/chat_fields_test.go",
+          "old_blob": "2681408ff057e7f631b33ea0260e4c6fb72dd711",
+          "new_blob": "5b48c49f4feac1a8422e90fab9a2a53548c50516"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/providers/chat_fields.go",
+          "old_blob": "665c155ab875cf194dd7b76636368215495a06c3",
+          "new_blob": "0322ea9a4380eb6bb4c6b65f508895647b8a7fdc"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/providers/facade_cancellation_test.go",
+          "old_blob": "06aeb6893ee21bb8286fb5211883f2a70ec30dbd",
+          "new_blob": "4369a0909ef832128e83077cf7f8eafbf8452fcd"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/providers/google_provider.go",
+          "old_blob": "e52b443ada2fe8da4cf6cd0fc8acbbb2ffdcdce0",
+          "new_blob": "48e27379e65cdc3d78b689cc55a6bdda9e8be89d"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/providers/googleai_test.go",
+          "old_blob": "ca8926a9cdf4bc68a093c40e9fa7211615dc2cfa",
+          "new_blob": "d6d106aa63af2eb423b7b6c7275cf1e539ce6b9b"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/providers/googleai.go",
+          "old_blob": "869028fd5684d878dc70f4c7faa9ac7c61a9d03a",
+          "new_blob": "b54ee9a8a8005691fbc27caccf37af7b7cec4c3b"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/providers/ollama_test.go",
+          "old_blob": "f43891bb4a6f5d61e02025167f609fe3ac18713f",
+          "new_blob": "d7ad08ec93fb871e3494f6efbfb135a5933b07ec"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/providers/ollama.go",
+          "old_blob": "576f7701561d294f3370a0fdf9152e2d02889def",
+          "new_blob": "872f74c4f0122d2b3fabc520aeccaf78a39cd7c5"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/providers/openai_models_test.go",
+          "old_blob": "7bf0ff2e0fc9ad20a5225a23ea8638bf247ea487",
+          "new_blob": "7af4a7941558590adc60300bf0c323d0f624be4c"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/providers/openai.go",
+          "old_blob": "9003e53658d69187d62f86d69f4094ab6bb21ca3",
+          "new_blob": "915785c46d69fee3032b9d23216aee98466d27ba"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/providers/provider.go",
+          "old_blob": "086caaa1f2f6b44d6404eacd68de2b64024a917e",
+          "new_blob": "f2d18031014294a34c9c7fb6ad2bf2f8c360c522"
+        },
+        {
+          "status": "modified",
+          "path": "test/live-acceptance/core.mjs",
+          "old_blob": "9b26f6b7bd7113cf3bb3df0f4080a6365c81c138",
+          "new_blob": "a724ce1bb69bbe90d9c0790090d6bec0bfa1ed52"
+        },
+        {
+          "status": "modified",
+          "path": "test/live-acceptance/core.test.mjs",
+          "old_blob": "d184316c4f0b38a13f7090d5a354b6cea3f4cbfc",
+          "new_blob": "4c4f95b0d8152b69f31015e83605ee34d6774a0b"
+        },
+        {
+          "status": "modified",
+          "path": "test/live-acceptance/README.md",
+          "old_blob": "7c7fe8db924b55bcda9515b02847c62416565dc9",
+          "new_blob": "b25034f3863ac8e2990c9e5e117c6d04651a6875"
+        },
+        {
+          "status": "modified",
+          "path": "test/live-acceptance/run.mjs",
+          "old_blob": "9b17d7c153a13aed703925f08d286cf084e10b67",
+          "new_blob": "1f0628eebaabbda9e45fc380e8029094ac748a17"
+        },
+        {
+          "status": "modified",
+          "path": "website/quickstart.html",
+          "old_blob": "5e879b1e39942ececd684a854b74c66ebf8edfd6",
+          "new_blob": "d44706f14f5ae0e7c86d7ede745fd2149dc885d2"
+        }
+      ]
+    }
+  ],
+  "facts": [
+    {
+      "id": "toolchain",
+      "claim": "The module requires Go 1.26.8 and the image builds from golang:1.26.8-alpine and node:22.23.3-alpine, each pinned by index digest. Every workflow sets up Node 22.23.3 and reads the Go release from go/go.mod instead of repeating it. No direct Go or npm dependency had a newer release within its pinned range apart from llmgw-core.",
+      "status": "observed",
+      "evidence": {
+        "source": "git diff v1.4.0..HEAD -- go/go.mod go/Dockerfile .github/workflows"
+      }
+    },
+    {
+      "id": "ci-workflows",
+      "claim": "Every workflow action moves to its Node 24 release, pinned by commit, with artifact upload (v7.0.1) and download (v8.0.1) moved together; jobs that named ubuntu-latest name ubuntu-24.04. ci.yml still validates every release-harness artifact but no longer checks review coverage; release.yml's validate job still runs lifecycle check before anything is built or published.",
+      "status": "observed",
+      "evidence": {
+        "source": ".github/workflows/ci.yml, .github/workflows/release.yml"
+      }
+    },
+    {
+      "id": "azure-fields",
+      "claim": "With llmgw-core v1.5.0, Azure OpenAI Chat bodies carry every request property of Azure's v1 Chat Completions operation and service_tier, and no longer carry thinking. The gateway weighs Azure targets with core's AzureChatField, so a field Azure does not define refuses only that target.",
+      "status": "observed",
+      "evidence": {
+        "source": "go/internal/providers/chat_fields.go; llmgw-core v1.5.0 providers/azure_openai.go"
+      }
+    },
+    {
+      "id": "retry-after",
+      "claim": "Google and Ollama refusals keep the Retry-After core reads, Google refusals keep the retryDelay of a google.rpc.RetryInfo detail on chat, embeddings, images and video, and a fractional wait is rounded up to whole seconds.",
+      "status": "observed",
+      "evidence": {
+        "source": "go/internal/providers/google_provider.go, googleai.go, ollama.go, provider.go"
+      }
+    },
+    {
+      "id": "harness-and-tests",
+      "claim": "The live-acceptance harness starts the candidate with LLMGW_OPENAI_COMPATIBLE_TIMEOUT_SECONDS at two thirds of its per-model limit. One test fixture renames its demo model, the cancelled-retry test waits a fixed Retry-After, and the harness counts a router model's direct answer as served.",
+      "status": "observed",
+      "evidence": {
+        "source": "test/live-acceptance/core.mjs, test/live-acceptance/run.mjs, go/internal/providers/openai_models_test.go"
+      }
+    },
+    {
+      "id": "verification",
+      "claim": "At source revision bcd0c5f85f1c5f8987889678d83066d187374d2f: go build, go vet, staticcheck, go test for every package, govulncheck, go mod tidy -diff and go mod verify pass; console typecheck, 154 tests, npm audit and the dist rebuild check pass; the documentation check, actionlint, the acceptance-policy tests (18) and the roster script tests pass; go test -race over every package passes on linux/amd64 with Go 1.26.8; the deterministic Docker acceptance passes all 31 checks against an image built from that revision on a Linux engine, where its digest policy does not apply to a locally built candidate.",
+      "status": "observed",
+      "evidence": {
+        "source": "local and remote Linux test execution"
+      }
+    }
+  ],
+  "impact": {
+    "assertions": [
+      {
+        "id": "A1",
+        "impact": "unchanged",
+        "supported_by": [
+          "toolchain",
+          "verification"
+        ]
+      },
+      {
+        "id": "A2",
+        "impact": "unchanged",
+        "supported_by": [
+          "toolchain",
+          "verification"
+        ]
+      },
+      {
+        "id": "A3",
+        "impact": "unchanged",
+        "supported_by": [
+          "toolchain",
+          "verification"
+        ]
+      },
+      {
+        "id": "A4",
+        "impact": "unchanged",
+        "supported_by": [
+          "toolchain",
+          "verification"
+        ]
+      }
+    ],
+    "requires": [],
+    "possible_binding_changes": []
+  },
+  "questions": [],
+  "conclusion": {
+    "action": "reuse_contract",
+    "summary": "The toolchain, CI workflows, Azure field forwarding and Retry-After handling changed. The CLI identity, CLI health, HTTP health and model-list propositions are unaffected; the release smoke exercises them against the built binary."
+  },
+  "proposed": {
+    "by": "release operator",
+    "at": "2026-10-05T08:33:40.886Z"
+  },
+  "digest": "132e58fdefd3f8f8c47045148fe12be5b24a8300e0b0bbdb933673fc46715711"
+}
