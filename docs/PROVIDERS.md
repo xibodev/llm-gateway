@@ -65,6 +65,15 @@ reaches it at `LLMGW_EXTENSION_URL` and authenticates with
 [Configuration](CONFIGURATION.md#providers-and-discovery). Without the daemon,
 those provider types are unavailable. Other provider types do not use it.
 
+The gateway sends each of those providers only the surfaces the daemon serves
+for it. Codex answers Chat Completions and Responses natively, so a Responses
+request reaches it as sent, encrypted reasoning and the Codex client's own
+tools included; this needs a daemon that forwards the Codex client's request
+fields, and an older one refuses them with `400`. Copilot, Antigravity, and
+anonymous OpenCode Zen answer Chat Completions, over which the gateway serves
+Responses and Messages. Edge TTS answers speech, and the setup-token Anthropic
+provider answers non-streaming Messages natively and no Chat Completions.
+
 ## Connection resolution
 
 Generic API-key providers resolve:

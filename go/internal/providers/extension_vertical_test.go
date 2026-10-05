@@ -45,7 +45,7 @@ func writeExtensionJSON(t *testing.T, w http.ResponseWriter, status int, value a
 func TestExtensionVerticalServesThroughTheDaemon(t *testing.T) {
 	const reply = `{"choices":[{"message":{"content":"hello from extension"}}]}`
 	mux := http.NewServeMux()
-	mux.HandleFunc("POST /extension/v1/test_provider/invoke", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("POST /extension/v1/openai_codex/invoke", func(w http.ResponseWriter, r *http.Request) {
 		for header, want := range map[string]string{
 			"X-Surface":          string(core.ModelSurfaceChatCompletions),
 			"X-Model":            "gpt-test",
@@ -59,7 +59,7 @@ func TestExtensionVerticalServesThroughTheDaemon(t *testing.T) {
 		w.Header().Set("Content-Type", core.ContentTypeJSON)
 		_, _ = io.WriteString(w, reply)
 	})
-	mux.HandleFunc("POST /extension/v1/test_provider/stream", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("POST /extension/v1/openai_codex/stream", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", core.ContentTypeEventStream)
 		flusher := w.(http.Flusher)
 		for _, record := range []string{"data: chunk-1\n\n", ": keepalive\n\n", "data: chunk-2\n\n"} {
@@ -67,12 +67,12 @@ func TestExtensionVerticalServesThroughTheDaemon(t *testing.T) {
 			flusher.Flush()
 		}
 	})
-	mux.HandleFunc("GET /extension/v1/test_provider/models", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("GET /extension/v1/openai_codex/models", func(w http.ResponseWriter, r *http.Request) {
 		writeExtensionJSON(t, w, http.StatusOK, map[string]any{
 			"models": []core.ModelInfo{{ID: "gpt-test", DisplayName: "GPT Test"}},
 		})
 	})
-	mux.HandleFunc("POST /extension/v1/test_provider/refresh", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("POST /extension/v1/openai_codex/refresh", func(w http.ResponseWriter, r *http.Request) {
 		var refresh struct {
 			Record tokenstore.Record `json:"record"`
 		}
@@ -85,15 +85,12 @@ func TestExtensionVerticalServesThroughTheDaemon(t *testing.T) {
 	})
 	extensionDaemon(t, mux)
 
-	vertical := (&Runtime{}).extensionCoreVertical("test_provider")
+	vertical := (&Runtime{}).extensionCoreVertical(ExtensionTypeCodex)
 	provider, err := vertical.provider(nil, "instance")
 	if err != nil {
 		t.Fatal(err)
 	}
-	wantSurfaces := []core.ModelSurface{
-		core.ModelSurfaceChatCompletions, core.ModelSurfaceResponses, core.ModelSurfaceMessages,
-		core.ModelSurfaceAudioSpeech, core.ModelSurfaceImages,
-	}
+	wantSurfaces := []core.ModelSurface{core.ModelSurfaceChatCompletions, core.ModelSurfaceResponses}
 	if got := provider.NativeSurfaces("gpt-test"); !slices.Equal(got, wantSurfaces) {
 		t.Errorf("native surfaces = %v, want %v", got, wantSurfaces)
 	}
@@ -143,11 +140,34 @@ func TestExtensionVerticalServesThroughTheDaemon(t *testing.T) {
 	}
 
 	// A surface off the list fails before it reaches the daemon, whose mux
-	// has no route for it.
-	_, err = provider.Invoke(context.Background(), core.Request{Surface: core.ModelSurfaceEmbeddings, Model: "gpt-test"})
+	// has no route for it, even one the daemon serves for another provider.
+	_, err = provider.Invoke(context.Background(), core.Request{Surface: core.ModelSurfaceAudioSpeech, Model: "gpt-test"})
 	var surfaceError *core.SurfaceError
 	if !errors.As(err, &surfaceError) {
-		t.Errorf("embeddings error = %v, want a surface error", err)
+		t.Errorf("speech error = %v, want a surface error", err)
+	}
+}
+
+// Each provider type lists the surfaces the daemon serves for it, which are
+// the only ones the gateway sends it.
+func TestExtensionProvidersListTheSurfacesTheDaemonServes(t *testing.T) {
+	t.Setenv("LLMGW_EXTENSION_URL", "")
+	chat := []core.ModelSurface{core.ModelSurfaceChatCompletions}
+	for providerType, want := range map[string][]core.ModelSurface{
+		ExtensionTypeCodex:          {core.ModelSurfaceChatCompletions, core.ModelSurfaceResponses},
+		ExtensionTypeCopilot:        chat,
+		ExtensionTypeAntigravity:    chat,
+		ExtensionTypeZenAnonymous:   chat,
+		ExtensionTypeEdgeTTS:        {core.ModelSurfaceAudioSpeech},
+		ExtensionTypeAnthropicSetup: {core.ModelSurfaceMessages},
+	} {
+		provider, err := (&Runtime{}).extensionCoreVertical(providerType).provider(nil, providerType)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := provider.NativeSurfaces("model"); !slices.Equal(got, want) {
+			t.Errorf("%s surfaces = %v, want %v", providerType, got, want)
+		}
 	}
 }
 
@@ -234,6 +254,124 @@ func TestExtensionRequestsCarryNoGatewayControls(t *testing.T) {
 			if strings.HasPrefix(field, "_") && field != "_max_output_tokens" {
 				t.Errorf("%s body carries the gateway control %s", operation, field)
 			}
+		}
+	}
+}
+
+// Codex, whose daemon serves Responses, gets a Responses request as it is,
+// streamed or not, encrypted reasoning included and the gateway's own
+// controls left out, and its answer and events come back as the daemon sent
+// them. Copilot, whose daemon serves Responses only for some models, refuses
+// them before anything is sent, so the router serves them over Chat.
+func TestExtensionServesResponsesNativelyWhereTheDaemonDoes(t *testing.T) {
+	const completed = `{"type":"response.completed","response":{"id":"resp_1","status":"completed","output":[]}}`
+	bodies := make(chan map[string]any, 2)
+	record := func(r *http.Request) {
+		if surface := r.Header.Get("X-Surface"); surface != string(core.ModelSurfaceResponses) {
+			t.Errorf("%s surface = %q, want Responses", r.URL.Path, surface)
+		}
+		var body map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Error(err)
+		}
+		bodies <- body
+	}
+	mux := http.NewServeMux()
+	mux.HandleFunc("POST /extension/v1/openai_codex/invoke", func(w http.ResponseWriter, r *http.Request) {
+		record(r)
+		writeExtensionJSON(t, w, http.StatusOK, map[string]any{"id": "resp_1", "object": "response", "status": "completed", "output": []any{}})
+	})
+	mux.HandleFunc("POST /extension/v1/openai_codex/stream", func(w http.ResponseWriter, r *http.Request) {
+		record(r)
+		w.Header().Set("Content-Type", core.ContentTypeEventStream)
+		_, _ = io.WriteString(w, "event: response.completed\ndata: "+completed+"\n\n")
+	})
+	extensionDaemon(t, mux)
+	ctx := context.Background()
+	payload := map[string]any{
+		"model": "codex/gpt-test", "_affinity_key": "session",
+		"input": []any{map[string]any{"type": "reasoning", "encrypted_content": "opaque", "summary": []any{}}},
+	}
+
+	codex := extensionFacadeFixture(t, ExtensionTypeCodex, "codex")
+	response, _, err := CompleteResponsesContext(ctx, codex, "gpt-test", payload)
+	if err != nil || response["id"] != "resp_1" {
+		t.Fatalf("response = %v, %v", response, err)
+	}
+	stream, _, err := StreamResponsesContext(ctx, codex, "gpt-test", payload)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if event, more := stream.Next(); !more || event != completed {
+		t.Errorf("event = %q (more %t), want the daemon's", event, more)
+	}
+	if _, more := stream.Next(); more || stream.Err() != nil {
+		t.Errorf("stream after its terminal event: more %t, err %v", more, stream.Err())
+	}
+	_ = stream.Close()
+	for range 2 {
+		body := <-bodies
+		input, _ := body["input"].([]any)
+		if len(input) != 1 || body["_affinity_key"] != nil {
+			t.Errorf("body = %v, want the request without the gateway's controls", body)
+		}
+	}
+
+	copilot := extensionFacadeFixture(t, ExtensionTypeCopilot, "copilot")
+	if _, _, err := CompleteResponsesContext(ctx, copilot, "gpt-test", payload); !errors.Is(err, ErrResponsesUnsupported) {
+		t.Errorf("Copilot Responses error = %v, want the Chat fallback", err)
+	}
+	if _, _, err := StreamResponsesContext(ctx, copilot, "gpt-test", payload); !errors.Is(err, ErrResponsesUnsupported) {
+		t.Errorf("Copilot Responses stream error = %v, want the Chat fallback", err)
+	}
+}
+
+// The setup-token Anthropic provider, which the daemon serves over Messages
+// alone, answers Messages natively: as they are, with the preamble the
+// daemon reads but without the gateway's other controls, its answer keeping
+// its numbers as written. Its Chat is refused before anything is sent and
+// leaves an endpoint to its next member. No other provider the daemon serves
+// answers Messages natively, and this one synthesizes no speech.
+func TestExtensionServesMessagesNativelyWhereTheDaemonDoes(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("POST /extension/v1/anthropic_setup_token/invoke", func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("X-Surface") != string(core.ModelSurfaceMessages) || r.Header.Get("X-Model") != "claude-test" {
+			t.Errorf("surface %q, model %q", r.Header.Get("X-Surface"), r.Header.Get("X-Model"))
+		}
+		var body map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil || body["_llmgw_preamble"] != "policy" || body["_affinity_key"] != nil {
+			t.Errorf("body = %v (%v), want the preamble without the gateway's other controls", body, err)
+		}
+		w.Header().Set("Content-Type", core.ContentTypeJSON)
+		_, _ = io.WriteString(w, `{"id":"msg_1","type":"message","content":[],"usage":{"input_tokens":12}}`)
+	})
+	extensionDaemon(t, mux)
+	setup := extensionProviderFixture(t, ExtensionTypeAnthropicSetup, "setup")
+	if !SupportsAnthropicMessages(setup) {
+		t.Fatalf("the setup-token facade %T does not answer Messages", setup)
+	}
+	if _, speech := AsSpeechSynthesizer(setup); speech {
+		t.Error("the setup-token facade synthesizes speech")
+	}
+	payload := map[string]any{
+		"model": "setup/claude-test", "max_tokens": 16, "_llmgw_preamble": "policy", "_affinity_key": "session",
+		"messages": []any{map[string]any{"role": "user", "content": "hi"}},
+	}
+	response, err := CompleteAnthropicMessagesContext(context.Background(), setup, "claude-test", payload)
+	if err != nil || response["id"] != "msg_1" {
+		t.Fatalf("response = %v, %v", response, err)
+	}
+	if usage, _ := response["usage"].(map[string]any); usage["input_tokens"] != json.Number("12") {
+		t.Errorf("usage = %v, want its numbers as written", response["usage"])
+	}
+	_, err = setup.Complete("claude-test", []Message{{"role": "user", "content": "hi"}}, nil)
+	if !IsInvocation(err) || UpstreamStatus(err) != 0 || InvocationRetryable(err) || !InvocationFailoverEligible(err) {
+		t.Errorf("Chat error = %v, want one refused before it is sent", err)
+	}
+
+	for _, providerType := range []string{ExtensionTypeCodex, ExtensionTypeCopilot, ExtensionTypeEdgeTTS} {
+		if SupportsAnthropicMessages((&Runtime{}).newExtensionFacade(providerType, providerType, core.Caller{})) {
+			t.Errorf("%s answers Messages natively", providerType)
 		}
 	}
 }

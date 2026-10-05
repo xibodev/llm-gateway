@@ -1,6 +1,7 @@
 package providers
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -30,17 +31,24 @@ const (
 // LLMGW_EXTENSION_URL names another address.
 const defaultExtensionURL = "http://127.0.0.1:18888"
 
-// extensionSurfaces are the surfaces every extension-served provider
-// accepts. The gateway does not ask the daemon which surfaces each provider
-// serves, so the daemon itself refuses one a provider lacks.
-func extensionSurfaces() []core.ModelSurface {
-	return []core.ModelSurface{
-		core.ModelSurfaceChatCompletions,
-		core.ModelSurfaceResponses,
-		core.ModelSurfaceMessages,
-		core.ModelSurfaceAudioSpeech,
-		core.ModelSurfaceImages,
+// extensionSurfaces are the surfaces the daemon serves for providerType, the
+// only ones the extension client sends it; the facade serves natively what
+// they list beyond Chat. Copilot and anonymous OpenCode Zen serve Responses
+// only for some models, which the daemon chooses in a way the gateway cannot
+// see, so they list Chat alone, over which the router serves Responses. The
+// daemon refuses images for Antigravity, which lists Chat alone too.
+func extensionSurfaces(providerType string) []core.ModelSurface {
+	switch providerType {
+	case ExtensionTypeCodex:
+		return []core.ModelSurface{core.ModelSurfaceChatCompletions, core.ModelSurfaceResponses}
+	case ExtensionTypeCopilot, ExtensionTypeAntigravity, ExtensionTypeZenAnonymous:
+		return []core.ModelSurface{core.ModelSurfaceChatCompletions}
+	case ExtensionTypeEdgeTTS:
+		return []core.ModelSurface{core.ModelSurfaceAudioSpeech}
+	case ExtensionTypeAnthropicSetup:
+		return []core.ModelSurface{core.ModelSurfaceMessages}
 	}
+	return nil
 }
 
 func isExtensionType(ptype string) bool {
@@ -143,7 +151,7 @@ func (rt *Runtime) extensionCoreVertical(providerType string) coreVertical {
 			if err != nil {
 				return nil, err
 			}
-			return extension.NewProvider(client, extension.ProviderInfo{ID: providerType, Surfaces: extensionSurfaces()}), nil
+			return extension.NewProvider(client, extension.ProviderInfo{ID: providerType, Surfaces: extensionSurfaces(providerType)}), nil
 		},
 		refresh: func(_ *config.Settings, _ string) tokenstore.RefreshFunc {
 			return func(ctx context.Context, current tokenstore.Record) (tokenstore.Record, error) {
@@ -220,13 +228,20 @@ type ExtensionProviderFacade struct {
 	caller     core.Caller
 }
 
+// newExtensionFacade returns the facade of instance, which the daemon serves
+// as a provider of type providerID. A provider the daemon serves over
+// Messages gets the facade that answers Messages natively.
 func (rt *Runtime) newExtensionFacade(instance, providerID string, caller core.Caller) Provider {
-	return &ExtensionProviderFacade{
+	facade := &ExtensionProviderFacade{
 		runtime:    rt,
 		instance:   instance,
 		providerID: providerID,
 		caller:     caller,
 	}
+	if facade.serves(core.ModelSurfaceMessages) {
+		return &extensionMessagesFacade{extensionChat: facade, facade: facade}
+	}
+	return facade
 }
 
 func (f *ExtensionProviderFacade) IsStub() bool {
@@ -237,11 +252,17 @@ func (f *ExtensionProviderFacade) IsStub() bool {
 // prefixed "_" is one of the gateway's own controls, such as the failover
 // budget, the affinity key or the adaptation switch: it is not part of the
 // client's request, and the daemon does not read it, so it stays here. The
-// daemon reads one: _max_output_tokens, the output limit a Responses request
-// carries through the Chat fallback, which it turns into the provider's own
-// limit where the provider has one.
+// daemon reads two: a Chat body's _max_output_tokens, the output limit a
+// Responses request carries through the Chat fallback, which it turns into
+// the provider's own limit where the provider has one, and a Messages body's
+// _llmgw_preamble, the gateway's preamble, which it puts before the system
+// prompt.
 func daemonField(key string) bool {
-	return !strings.HasPrefix(key, "_") || key == "_max_output_tokens"
+	switch key {
+	case "_max_output_tokens", "_llmgw_preamble":
+		return true
+	}
+	return !strings.HasPrefix(key, "_")
 }
 
 func (f *ExtensionProviderFacade) Complete(model string, messages []Message, kw Kwargs) (map[string]any, error) {
@@ -254,35 +275,7 @@ func (f *ExtensionProviderFacade) CompleteWithObservation(model string, messages
 }
 
 func (f *ExtensionProviderFacade) CompleteContextWithObservation(ctx context.Context, model string, messages []Message, kw Kwargs) (map[string]any, *CredentialObservation, error) {
-	payload := map[string]any{
-		"model":    model,
-		"messages": messages,
-	}
-	for k, v := range kw {
-		if daemonField(k) {
-			payload[k] = v
-		}
-	}
-	raw, err := json.Marshal(payload)
-	if err != nil {
-		return nil, nil, fmt.Errorf("marshal request: %w", err)
-	}
-	req := core.Request{
-		Surface:     core.ModelSurfaceChatCompletions,
-		Model:       model,
-		Body:        raw,
-		ContentType: core.ContentTypeJSON,
-	}
-	ctx, collector := collectCredentials(ctx)
-	resp, err := f.runtime.core.Invoke(ctx, f.caller, f.instance, req)
-	if err != nil {
-		return nil, collector.Observation(), extensionFailure(ctx, f.instance, err)
-	}
-	var out map[string]any
-	if err := json.Unmarshal(resp.Body, &out); err != nil {
-		return nil, collector.Observation(), circuitFailureInvocation(f.instance + ": the companion daemon's answer is not a JSON object")
-	}
-	return out, collector.Observation(), nil
+	return f.answer(f.invoke(ctx, core.ModelSurfaceChatCompletions, model, chatPayload(model, messages, kw, false)))
 }
 
 func (f *ExtensionProviderFacade) Stream(model string, messages []Message, kw Kwargs) (StreamIter, error) {
@@ -290,31 +283,113 @@ func (f *ExtensionProviderFacade) Stream(model string, messages []Message, kw Kw
 }
 
 func (f *ExtensionProviderFacade) StreamContext(ctx context.Context, model string, messages []Message, kw Kwargs) (StreamIter, error) {
-	payload := map[string]any{
-		"model":    model,
-		"messages": messages,
-		"stream":   true,
+	return f.stream(ctx, core.ModelSurfaceChatCompletions, model, chatPayload(model, messages, kw, true))
+}
+
+func (f *ExtensionProviderFacade) CompleteResponses(model string, payload map[string]any) (map[string]any, *CredentialObservation, error) {
+	return f.CompleteResponsesContext(context.Background(), model, payload)
+}
+
+// CompleteResponsesContext sends Responses as they are to a provider whose
+// daemon serves them, which keeps what the Chat fallback cannot carry, such
+// as encrypted reasoning. Any other provider refuses with
+// ErrResponsesUnsupported before anything is sent, on which the router
+// serves the request over Chat.
+func (f *ExtensionProviderFacade) CompleteResponsesContext(ctx context.Context, model string, payload map[string]any) (map[string]any, *CredentialObservation, error) {
+	if !f.serves(core.ModelSurfaceResponses) {
+		return nil, nil, ErrResponsesUnsupported
+	}
+	return f.answer(f.invoke(ctx, core.ModelSurfaceResponses, model, payload))
+}
+
+func (f *ExtensionProviderFacade) StreamResponses(model string, payload map[string]any) (StreamIter, *CredentialObservation, error) {
+	return f.StreamResponsesContext(context.Background(), model, payload)
+}
+
+func (f *ExtensionProviderFacade) StreamResponsesContext(ctx context.Context, model string, payload map[string]any) (StreamIter, *CredentialObservation, error) {
+	if !f.serves(core.ModelSurfaceResponses) {
+		return nil, nil, ErrResponsesUnsupported
+	}
+	stream, err := f.stream(ctx, core.ModelSurfaceResponses, model, payload)
+	return stream, nil, err
+}
+
+// serves reports whether the daemon serves surface for the facade's provider.
+func (f *ExtensionProviderFacade) serves(surface core.ModelSurface) bool {
+	return slices.Contains(extensionSurfaces(f.providerID), surface)
+}
+
+// chatPayload is the Chat body of messages and kw.
+func chatPayload(model string, messages []Message, kw Kwargs, stream bool) map[string]any {
+	payload := map[string]any{"model": model, "messages": messages}
+	if stream {
+		payload["stream"] = true
 	}
 	for k, v := range kw {
-		if daemonField(k) {
-			payload[k] = v
+		payload[k] = v
+	}
+	return payload
+}
+
+// request is the core request of payload on surface, without the fields that
+// stay in the gateway.
+func (f *ExtensionProviderFacade) request(surface core.ModelSurface, model string, payload map[string]any) (core.Request, error) {
+	body := make(map[string]any, len(payload))
+	for key, value := range payload {
+		if daemonField(key) {
+			body[key] = value
 		}
 	}
-	raw, err := json.Marshal(payload)
+	raw, err := json.Marshal(body)
 	if err != nil {
-		return nil, fmt.Errorf("marshal request: %w", err)
+		return core.Request{}, fmt.Errorf("marshal request: %w", err)
 	}
-	req := core.Request{
-		Surface:     core.ModelSurfaceChatCompletions,
-		Model:       model,
-		Body:        raw,
-		ContentType: core.ContentTypeJSON,
+	return core.Request{Surface: surface, Model: model, Body: raw, ContentType: core.ContentTypeJSON}, nil
+}
+
+// invoke performs one non-streaming operation of payload on surface.
+func (f *ExtensionProviderFacade) invoke(ctx context.Context, surface core.ModelSurface, model string, payload map[string]any) (core.Response, *CredentialObservation, error) {
+	request, err := f.request(surface, model, payload)
+	if err != nil {
+		return core.Response{}, nil, err
 	}
-	iter, err := f.runtime.core.Stream(ctx, f.caller, f.instance, req)
+	ctx, collector := collectCredentials(ctx)
+	response, err := f.runtime.core.Invoke(ctx, f.caller, f.instance, request)
+	if err != nil {
+		return core.Response{}, collector.Observation(), extensionFailure(ctx, f.instance, err)
+	}
+	return response, collector.Observation(), nil
+}
+
+// answer decodes what invoke returned. An answer the gateway cannot read
+// counts against the circuit, as an upstream's does, but is not repeated.
+func (f *ExtensionProviderFacade) answer(response core.Response, observation *CredentialObservation, err error) (map[string]any, *CredentialObservation, error) {
+	if err != nil {
+		return nil, observation, err
+	}
+	var result map[string]any
+	if json.Unmarshal(response.Body, &result) != nil {
+		return nil, observation, f.unreadable()
+	}
+	return result, observation, nil
+}
+
+func (f *ExtensionProviderFacade) unreadable() error {
+	return circuitFailureInvocation(f.instance + ": the companion daemon's answer is not a JSON object")
+}
+
+// stream opens one streaming operation of payload on surface. A stream of
+// Responses events ends with a terminal event, which the API layer checks.
+func (f *ExtensionProviderFacade) stream(ctx context.Context, surface core.ModelSurface, model string, payload map[string]any) (StreamIter, error) {
+	request, err := f.request(surface, model, payload)
+	if err != nil {
+		return nil, err
+	}
+	iter, err := f.runtime.core.Stream(ctx, f.caller, f.instance, request)
 	if err != nil {
 		return nil, extensionFailure(ctx, f.instance, err)
 	}
-	return &relayedStream{inner: iter, prefix: f.instance}, nil
+	return &relayedStream{inner: iter, prefix: f.instance, responses: surface == core.ModelSurfaceResponses}, nil
 }
 
 func (f *ExtensionProviderFacade) ListModels() []ModelInfo {
@@ -358,4 +433,46 @@ func (f *ExtensionProviderFacade) Synthesize(voice, text, speed string) ([]byte,
 		return nil, "", extensionFailure(ctx, f.instance, err)
 	}
 	return resp.Body, "audio/mpeg", nil
+}
+
+// extensionChat is what the Messages facade keeps of the facade: Chat and
+// the catalog. It leaves out speech, which the daemon does not serve the
+// provider, so the gateway does not take the facade for a speech synthesizer.
+type extensionChat interface {
+	Provider
+	detailedCompleter
+	detailedContextCompleter
+	ContextStreamProvider
+	detailedModelLister
+}
+
+// extensionMessagesFacade is the facade of a provider the daemon serves over
+// Messages. It is a type of its own because the router sends Messages as
+// they are only to a facade whose type answers them. Its Chat, which the
+// daemon does not serve for the provider, is refused before anything is
+// sent, and the refusal leaves an endpoint to its next member.
+type extensionMessagesFacade struct {
+	extensionChat
+	facade *ExtensionProviderFacade
+}
+
+func (f *extensionMessagesFacade) CompleteAnthropicMessages(model string, payload map[string]any) (map[string]any, error) {
+	return f.CompleteAnthropicMessagesContext(context.Background(), model, payload)
+}
+
+// CompleteAnthropicMessagesContext passes a Messages payload through with
+// the preamble the API layer set, and decodes the answer with its numbers
+// kept as written, as the gateway's own Anthropic facade does.
+func (f *extensionMessagesFacade) CompleteAnthropicMessagesContext(ctx context.Context, model string, payload map[string]any) (map[string]any, error) {
+	response, _, err := f.facade.invoke(ctx, core.ModelSurfaceMessages, model, payload)
+	if err != nil {
+		return nil, err
+	}
+	var result map[string]any
+	decoder := json.NewDecoder(bytes.NewReader(response.Body))
+	decoder.UseNumber()
+	if decoder.Decode(&result) != nil {
+		return nil, f.facade.unreadable()
+	}
+	return result, nil
 }

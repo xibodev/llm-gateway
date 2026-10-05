@@ -15,11 +15,11 @@ import (
 	core "github.com/xibodev/llmgw-core"
 )
 
-// extensionFacadeFixture configures instance as a provider of providerType
-// until the test ends and returns its facade, built by a Runtime of its own
-// whose store holds no credential, so each request reaches the daemon
-// without one.
-func extensionFacadeFixture(t *testing.T, providerType, instance string) *ExtensionProviderFacade {
+// extensionProviderFixture configures instance as a provider of
+// providerType until the test ends and returns its facade, built by a
+// Runtime of its own whose store holds no credential, so each request
+// reaches the daemon without one.
+func extensionProviderFixture(t *testing.T, providerType, instance string) Provider {
 	t.Helper()
 	configured := config.Get().Providers
 	config.Update(func(s *config.Settings) {
@@ -27,7 +27,14 @@ func extensionFacadeFixture(t *testing.T, providerType, instance string) *Extens
 	})
 	t.Cleanup(func() { config.Update(func(s *config.Settings) { s.Providers = configured }) })
 	runtime := newRuntime(func(bool) (core.CredentialStore, error) { return core.NewMemoryCredentialStore(), nil })
-	return runtime.newExtensionFacade(instance, providerType, core.Caller{}).(*ExtensionProviderFacade)
+	return runtime.newExtensionFacade(instance, providerType, core.Caller{})
+}
+
+// extensionFacadeFixture is extensionProviderFixture for a provider type
+// whose facade is the plain one.
+func extensionFacadeFixture(t *testing.T, providerType, instance string) *ExtensionProviderFacade {
+	t.Helper()
+	return extensionProviderFixture(t, providerType, instance).(*ExtensionProviderFacade)
 }
 
 // refuseExtension answers as a daemon that failed an operation with status,
