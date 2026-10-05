@@ -156,18 +156,25 @@ type UsageGroup struct {
 
 // UsageStats returns totals plus project/principal/key/model/provider rollups.
 func UsageStats(since int64) (map[string]any, error) {
+	return UsageStatsFor(UsageTimeSeriesFilter{From: since})
+}
+
+// UsageStatsFor returns the totals and rollups of the usage filter selects:
+// From up to To, when To is set, and the provider, model, key, project and
+// principal it names, as UsageTimeSeries selects them.
+func UsageStatsFor(filter UsageTimeSeriesFilter) (map[string]any, error) {
 	db, err := DB()
 	if err != nil {
 		return nil, err
 	}
 
-	where := "WHERE ts >= ? AND is_stub=0"
+	where, args := usageWhere(filter)
 	total, err := queryUsageTotals(db.QueryRow(`
 SELECT COUNT(*),COALESCE(SUM(input_tokens),0),COALESCE(SUM(output_tokens),0),
        COALESCE(SUM(cost_microusd),0),COALESCE(SUM(credits_milli),0),
        COALESCE(SUM(CASE WHEN status_code>=400 THEN 1 ELSE 0 END),0),
        CAST(COALESCE(AVG(latency_ms),0) AS INTEGER)
-FROM usage_events `+where, since))
+FROM usage_events `+where, args...))
 	if err != nil {
 		return nil, err
 	}
@@ -186,7 +193,7 @@ SELECT COALESCE(`+group.column+`,''),COUNT(*),COALESCE(SUM(input_tokens),0),
        COALESCE(SUM(CASE WHEN status_code>=400 THEN 1 ELSE 0 END),0),
        CAST(COALESCE(AVG(latency_ms),0) AS INTEGER)
 FROM usage_events `+where+` GROUP BY `+group.column+` ORDER BY COUNT(*) DESC LIMIT 100`,
-			since,
+			args...,
 		)
 		if err != nil {
 			return nil, err

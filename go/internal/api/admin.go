@@ -1415,7 +1415,7 @@ func (s *server) handleUsage(w http.ResponseWriter, r *http.Request) {
 		writeError(w, 400, "Usage series is unavailable: "+err.Error())
 		return
 	}
-	controlPlane, err := iam.UsageStats(filter.From)
+	controlPlane, err := iam.UsageStatsFor(filter)
 	if err != nil {
 		writeError(w, 500, "Usage store unavailable.")
 		return
@@ -1438,6 +1438,40 @@ func (s *server) handleTelemetry(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, 200, map[string]any{"stats": s.router().TelemetryStats(), "recent": s.router().RecentTelemetry(50)})
+}
+
+// GET /admin/api/requests lists recorded requests, newest first. Optional
+// filters: provider, model (the routed model), key_id, project_id,
+// principal_id, request_id, status (ok, error or one code), from and to
+// (Unix seconds), and before_id, the next_before_id of the previous page;
+// limit is 1 to 200, 50 by default.
+func handleRequests(w http.ResponseWriter, r *http.Request) {
+	if !adminAuthed(w, r) {
+		return
+	}
+	query := r.URL.Query()
+	filter := iam.UsageEventFilter{
+		Provider: query.Get("provider"), Model: query.Get("model"), KeyID: query.Get("key_id"),
+		ProjectID: query.Get("project_id"), PrincipalID: query.Get("principal_id"),
+		RequestID: query.Get("request_id"), Status: query.Get("status"),
+	}
+	filter.Limit, _ = strconv.Atoi(query.Get("limit"))
+	var err error
+	if filter.From, filter.To, filter.BeforeID, err = listingBounds(query); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	requests, next, err := iam.ListUsageEvents(filter)
+	var invalid *iam.InvalidFilterError
+	switch {
+	case errors.As(err, &invalid):
+		writeError(w, http.StatusBadRequest, invalid.Message)
+		return
+	case err != nil:
+		writeError(w, 500, "Usage store unavailable.")
+		return
+	}
+	writeJSON(w, 200, map[string]any{"requests": requests, "next_before_id": next})
 }
 
 // ---- helpers ------------------------------------------------------------ //

@@ -265,6 +265,7 @@ func (s *server) handler() http.Handler {
 	mux.HandleFunc("POST /admin/api/detect", handleDetect)
 	mux.HandleFunc("GET /admin/api/usage", s.handleUsage)
 	mux.HandleFunc("GET /admin/api/telemetry", s.handleTelemetry)
+	mux.HandleFunc("GET /admin/api/requests", handleRequests)
 
 	return securityHeaders(assignRequestIDs(aliasMiddleware(s.observe(mux, requestLogMiddleware(anthropicErrors(limitRequestBodies(mux)))))))
 }

@@ -183,16 +183,19 @@ request:
 
 - **Usage.** Each inference request, failed ones included, records its usage
   as a row of the `usage_events` table in `<state>/gateway.db` whose
-  `request_id` is the ID. A request refused before its model is resolved, such
-  as one with an invalid key, may have no row.
+  `request_id` is the ID. The console's **Requests** page finds it by that ID,
+  as `GET /admin/api/requests?request_id=<ID>` does. A request refused before
+  its model is resolved, such as one with an invalid key, may have no row.
 - **Request log.** With request logging on, the request's entry in
   `<state>/requests.jsonl`, or in its `.1` generation, carries the ID as
   `request_id`.
 - **Access log.** With the [access log](#access-log) on, the request's line
   carries the ID as `request_id`.
 - **Audit.** An event recording an administrator's action carries the ID of
-  the request that took it as `request_id` in its detail, which
-  `GET /admin/api/audit` returns.
+  the request that took it as `request_id` in its detail. The console's
+  **Audit log** page and `GET /admin/api/audit` list events newest first,
+  filtered by action prefix, actor, result, target and time, and paged with
+  `before_id`.
 
 Read usage rows with a SQLite client in read-only mode, as the user the
 gateway runs as:

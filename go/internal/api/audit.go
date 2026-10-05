@@ -1,9 +1,12 @@
 package api
 
 import (
+	"fmt"
 	"log"
 	"net/http"
+	"net/url"
 	"strconv"
+	"strings"
 
 	"llmgw/internal/config"
 	"llmgw/internal/iam"
@@ -207,15 +210,49 @@ func auditAdminPlayground(
 	auditAdminResult(r, action, "project", projectID, result, detail)
 }
 
+// GET /admin/api/audit lists audit events, newest first. Optional filters:
+// action (a prefix), result, actor (a principal or key ID), target_type,
+// target_id, from and to (Unix seconds), and before_id, the next_before_id
+// of the previous page; limit is 1 to 1000, 100 by default.
 func handleAudit(w http.ResponseWriter, r *http.Request) {
 	if !adminAuthed(w, r) {
 		return
 	}
-	limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
-	events, err := iam.ListAudit(limit)
+	query := r.URL.Query()
+	filter := iam.AuditFilter{
+		Action: query.Get("action"), Result: query.Get("result"), Actor: query.Get("actor"),
+		TargetType: query.Get("target_type"), TargetID: query.Get("target_id"),
+	}
+	filter.Limit, _ = strconv.Atoi(query.Get("limit"))
+	var err error
+	if filter.From, filter.To, filter.BeforeID, err = listingBounds(query); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	events, next, err := iam.ListAuditFiltered(filter)
 	if err != nil {
 		writeError(w, 500, "Audit store unavailable.")
 		return
 	}
-	writeJSON(w, 200, map[string]any{"events": events})
+	writeJSON(w, 200, map[string]any{"events": events, "next_before_id": next})
+}
+
+// listingBounds reads a listing's from, to and before_id: non-negative
+// integers, from before to when both are set.
+func listingBounds(query url.Values) (from, to, beforeID int64, err error) {
+	for name, target := range map[string]*int64{"from": &from, "to": &to, "before_id": &beforeID} {
+		raw := strings.TrimSpace(query.Get(name))
+		if raw == "" {
+			continue
+		}
+		value, parseErr := strconv.ParseInt(raw, 10, 64)
+		if parseErr != nil || value < 0 {
+			return 0, 0, 0, fmt.Errorf("%s must be a non-negative integer", name)
+		}
+		*target = value
+	}
+	if from > 0 && to > 0 && to <= from {
+		return 0, 0, 0, fmt.Errorf("to must be later than from")
+	}
+	return from, to, beforeID, nil
 }
