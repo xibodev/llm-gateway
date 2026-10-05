@@ -19,6 +19,10 @@ env:
   DOCKER_BUILD_RECORD_UPLOAD: "false"
   # Release staging and publication have no checkout to infer a repository from.
   GH_REPO: ${{ github.repository }}
+  # The accepted release contract a release is reviewed against and certified
+  # by. More than one accepted contract exists, so each command names it;
+  # accepting a new contract means changing this digest with its review.
+  RELEASE_CONTRACT: da05219969e051b692980ada8e8066ac909bf88d11ad6a5af6338834a8cc384f
 
 concurrency:
   group: release-pipeline
@@ -123,7 +127,7 @@ jobs:
           RELEASE_HARNESS: ${{ github.workspace }}/.github/release-harness/node_modules/.bin/release-harness
         run: |
           "$RELEASE_HARNESS" validate --all
-          "$RELEASE_HARNESS" lifecycle check
+          "$RELEASE_HARNESS" lifecycle check --contract "$RELEASE_CONTRACT"
 
   ci:
     needs: validate
@@ -199,7 +203,7 @@ jobs:
               sleep 2
               cd ..
               "$RELEASE_HARNESS" bind ci --target "cli=$(pwd)/go/llmgw" --target "gateway=http://127.0.0.1:8787"
-              "$RELEASE_HARNESS" run --binding ci
+              "$RELEASE_HARNESS" run --binding ci --contract "$RELEASE_CONTRACT"
               "$RELEASE_HARNESS" verify
               kill $SERVER_PID
               rm -rf .release-harness/bindings .release-harness/runs
