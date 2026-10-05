@@ -140,7 +140,7 @@ func requestLogMiddleware(next http.Handler) http.Handler {
 		}
 		writeRequestLog(
 			r, reqBody, requestBytes, cw.status, cw.body.Bytes(),
-			cw.bytesWritten, time.Since(start), includeBodies,
+			cw.bytesWritten, time.Since(start), includeBodies, cw.Header().Get("X-LLMGW-Adapted"),
 		)
 	})
 }
@@ -170,6 +170,7 @@ func writeRequestLog(
 	responseBytes int64,
 	dur time.Duration,
 	includeBodies bool,
+	adapted string,
 ) {
 	model := ""
 	var m map[string]any
@@ -187,7 +188,7 @@ func writeRequestLog(
 		"path":           r.URL.Path,
 		"status":         status,
 		"dur_ms":         dur.Milliseconds(),
-		"adapted":        r.Header.Get("X-LLMGW-Adapted"),
+		"adapted":        adapted,
 		"request_bytes":  requestBytes,
 		"response_bytes": responseBytes,
 	}

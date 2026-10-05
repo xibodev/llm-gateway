@@ -79,7 +79,7 @@ func TestRequestLogExcludesBodiesByDefault(t *testing.T) {
 	responseBody := []byte(`{"choices":[{"message":{"content":"private response"}}]}`)
 	writeRequestLog(
 		request, requestBody, int64(len(requestBody)), http.StatusOK,
-		responseBody, int64(len(responseBody)), time.Millisecond, false,
+		responseBody, int64(len(responseBody)), time.Millisecond, false, "",
 	)
 	raw, err := os.ReadFile(filepath.Join(config.StateDir(), "requests.jsonl"))
 	if err != nil {
@@ -110,7 +110,7 @@ func TestRequestLogBodiesRequireExplicitUnsafeOptIn(t *testing.T) {
 	responseBody := []byte(`{"output_text":"debug response"}`)
 	writeRequestLog(
 		request, requestBody, int64(len(requestBody)), http.StatusOK,
-		responseBody, int64(len(responseBody)), time.Millisecond, true,
+		responseBody, int64(len(responseBody)), time.Millisecond, true, "chat->responses",
 	)
 	raw, err := os.ReadFile(filepath.Join(config.StateDir(), "requests.jsonl"))
 	if err != nil {
@@ -119,6 +119,10 @@ func TestRequestLogBodiesRequireExplicitUnsafeOptIn(t *testing.T) {
 	if !strings.Contains(string(raw), "debug body") ||
 		!strings.Contains(string(raw), "debug response") {
 		t.Fatalf("explicit body log omitted debug bodies: %s", raw)
+	}
+	// The adaptation is the response's, where the handler records it.
+	if !strings.Contains(string(raw), `"adapted":"chat-\u003eresponses"`) {
+		t.Fatalf("adaptation missing: %s", raw)
 	}
 }
 
@@ -130,7 +134,7 @@ func TestRequestLogNamesTheRequest(t *testing.T) {
 	request.Header.Set("X-Request-Id", "client-log.1")
 	response := httptest.NewRecorder()
 	assignRequestIDs(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
-		writeRequestLog(r, nil, 0, http.StatusOK, nil, 0, time.Millisecond, false)
+		writeRequestLog(r, nil, 0, http.StatusOK, nil, 0, time.Millisecond, false, "")
 	})).ServeHTTP(response, request)
 	raw, err := os.ReadFile(filepath.Join(config.StateDir(), "requests.jsonl"))
 	if err != nil {
