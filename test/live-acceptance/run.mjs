@@ -13,6 +13,7 @@ import {
   classifyPairedObservation,
   directProviderObservation,
   evaluatePolicy,
+  gatewayProviderTimeoutSeconds,
   isFreeModel,
   routeResultPassed,
   safeExcerpt,
@@ -695,7 +696,7 @@ async function setupDocker() {
   if (mode === "deterministic") await docker("network", "create", accessNetwork);
   await docker("volume", "create", volume);
   const publishedPort = mode === "deterministic" ? [] : ["-p", `127.0.0.1:${port}:8787`];
-  await docker("run", "-d", "--name", container, "--network", network, "--network-alias", "gateway", ...publishedPort, "-v", `${volume}:/state`, "-e", "LLMGW_HOST=0.0.0.0", "-e", "LLMGW_PORT=8787", "-e", "LLMGW_STATE_DIR=/state", "-e", "LLMGW_API_KEY", "-e", "LLMGW_CREDENTIAL_ENCRYPTION_KEY", "-e", "LLMGW_ALLOW_UNAUTHENTICATED_API=0", ...(mode === "live" ? ["-e", "LLMGW_ANONYMOUS_PROVIDER_AUTOMATION=true"] : []), image, "serve", { env: { ...process.env, LLMGW_API_KEY: adminKey, LLMGW_CREDENTIAL_ENCRYPTION_KEY: encryptionKey } });
+  await docker("run", "-d", "--name", container, "--network", network, "--network-alias", "gateway", ...publishedPort, "-v", `${volume}:/state`, "-e", "LLMGW_HOST=0.0.0.0", "-e", "LLMGW_PORT=8787", "-e", "LLMGW_STATE_DIR=/state", "-e", "LLMGW_API_KEY", "-e", "LLMGW_CREDENTIAL_ENCRYPTION_KEY", "-e", "LLMGW_ALLOW_UNAUTHENTICATED_API=0", "-e", `LLMGW_OPENAI_COMPATIBLE_TIMEOUT_SECONDS=${gatewayProviderTimeoutSeconds(modelTimeout)}`, ...(mode === "live" ? ["-e", "LLMGW_ANONYMOUS_PROVIDER_AUTOMATION=true"] : []), image, "serve", { env: { ...process.env, LLMGW_API_KEY: adminKey, LLMGW_CREDENTIAL_ENCRYPTION_KEY: encryptionKey } });
   progress("docker: gateway container started, waiting for health");
   if (mode === "deterministic") {
     await docker("create", "--name", edge, "--network", accessNetwork, "-p", `127.0.0.1:${port}:8080`, "-v", `${resolve(import.meta.dirname, "edge-nginx.conf")}:/etc/nginx/nginx.conf:ro`, "nginx:1.27-alpine@sha256:65645c7bb6a0661892a8b03b89d0743208a18dd2f3f17a54ef4b76fb8e2f2a10");

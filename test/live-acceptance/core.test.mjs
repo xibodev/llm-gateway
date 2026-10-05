@@ -9,6 +9,7 @@ import {
   classifyPairedObservation,
   evaluatePolicy,
   directProviderObservation,
+  gatewayProviderTimeoutSeconds,
   isFreeModel,
   requiredChecks,
   routeResultPassed,
@@ -16,6 +17,15 @@ import {
   selectHealthyModels,
   sendWithReplay,
 } from "./core.mjs";
+
+test("the gateway gives up on a provider before the harness gives up on the gateway", () => {
+  assert.equal(gatewayProviderTimeoutSeconds(180_000), 120);
+  assert.equal(gatewayProviderTimeoutSeconds(5_000), 3);
+  assert.equal(gatewayProviderTimeoutSeconds(1_000), 1);
+  for (const limit of [5_000, 60_000, 180_000, 600_000]) {
+    assert.ok(gatewayProviderTimeoutSeconds(limit) * 1000 < limit, `limit ${limit}`);
+  }
+});
 
 test("an unusable 2xx answer is replayed once and errors never are", async () => {
   const passed = (result) => result.status === 200 && Boolean(result.text);

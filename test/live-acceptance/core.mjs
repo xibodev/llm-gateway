@@ -27,6 +27,15 @@ export function isFreeModel(provider, model) {
   return false;
 }
 
+// The gateway under test must give up on a provider before the harness gives
+// up on the gateway, so a slow upstream is recorded as the gateway's own
+// outcome, an error or another member's answer, and not as the harness's
+// abort. The gateway's default waits up to 300 seconds for an answer to
+// begin; two thirds of the harness's limit leaves it time to answer.
+export function gatewayProviderTimeoutSeconds(modelTimeoutMs) {
+  return Math.max(1, Math.floor((Number(modelTimeoutMs) * 2) / 3 / 1000));
+}
+
 export function classifyObservation({ status = 0, error = "", validEnvelope = false, timedOut = false }) {
   const message = String(error || "").toLowerCase();
   if (status >= 200 && status < 300 && validEnvelope) return classifications.pass;

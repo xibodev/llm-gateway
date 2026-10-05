@@ -11,10 +11,16 @@ a structured report.
 - `deterministic`: local fixture providers prove the harness, route order,
   Playground, and restart behavior without external dependencies. CI requires
   this mode.
-- `live`: OpenCode Zen and Kilo Code are configured without credentials. Every
-  explicitly free model is called through the gateway; failed observations get
-  a direct-provider comparison before classification.
+- `live`: the gateway's anonymous provider automation connects Kilo Code,
+  LLM7, OVH AI Endpoints and Pollinations without credentials. Every free model
+  is called through the gateway; failed observations get a direct-provider
+  comparison before classification.
 - `policy`: evaluate an existing report with `node policy.mjs <report.json>`.
+
+Each model call waits `LLMGW_ACCEPTANCE_MODEL_TIMEOUT_MS`, 180 seconds by
+default. The candidate gateway is started with a provider timeout of two thirds
+of that, so a slow upstream is recorded as the gateway's own outcome rather
+than as the harness giving up first.
 
 Run locally:
 
