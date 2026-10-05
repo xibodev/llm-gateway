@@ -1,0 +1,11 @@
+{
+  "schema_version": "1.0.0",
+  "contract_digest": "da05219969e051b692980ada8e8066ac909bf88d11ad6a5af6338834a8cc384f",
+  "events": [
+    {
+      "by": "Abdul Gafar Manuel Meque <17961065+mekjr1@users.noreply.github.com>",
+      "at": "2026-10-05T09:29:21.794Z",
+      "note": "adds release assertions for error envelopes, administrator authentication, the embedded console and default-off metrics"
+    }
+  ]
+}

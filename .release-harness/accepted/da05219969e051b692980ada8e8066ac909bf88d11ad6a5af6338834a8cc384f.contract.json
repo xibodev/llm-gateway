@@ -1,0 +1,126 @@
+{
+  "assertions": [
+    {
+      "description": "the CLI reports release version and build identity",
+      "expect": {
+        "args": "version",
+        "exit_code": 0,
+        "stdout_contains": "llm-gateway"
+      },
+      "id": "A1",
+      "kind": "cli",
+      "target": "cli"
+    },
+    {
+      "description": "the CLI health command verifies local process health",
+      "expect": {
+        "args": "health",
+        "exit_code": 0
+      },
+      "id": "A2",
+      "kind": "cli",
+      "target": "cli"
+    },
+    {
+      "description": "the gateway exposes an unauthenticated GET /health endpoint reporting status ok",
+      "expect": {
+        "body_contains": "\"status\":\"ok\"",
+        "method": "GET",
+        "path": "/health",
+        "status": 200
+      },
+      "id": "A3",
+      "kind": "http",
+      "target": "gateway"
+    },
+    {
+      "description": "the gateway serves public models list on GET /v1/models",
+      "expect": {
+        "body_contains": "\"object\":\"list\"",
+        "method": "GET",
+        "path": "/v1/models",
+        "status": 200
+      },
+      "id": "A4",
+      "kind": "http",
+      "target": "gateway"
+    },
+    {
+      "description": "an unreadable Chat Completions request gets an OpenAI-shaped client error",
+      "expect": {
+        "body_contains": "invalid_request_error",
+        "method": "POST",
+        "path": "/v1/chat/completions",
+        "status": 422
+      },
+      "id": "A5",
+      "kind": "http",
+      "target": "gateway"
+    },
+    {
+      "description": "an unreadable Responses request gets an OpenAI-shaped client error",
+      "expect": {
+        "body_contains": "invalid_request_error",
+        "method": "POST",
+        "path": "/v1/responses",
+        "status": 422
+      },
+      "id": "A6",
+      "kind": "http",
+      "target": "gateway"
+    },
+    {
+      "description": "an unreadable Messages request gets an Anthropic-shaped error",
+      "expect": {
+        "body_contains": "\"type\":\"error\"",
+        "method": "POST",
+        "path": "/v1/messages",
+        "status": 422
+      },
+      "id": "A7",
+      "kind": "http",
+      "target": "gateway"
+    },
+    {
+      "description": "the administrator API refuses an unauthenticated caller even when the data plane needs no key",
+      "expect": {
+        "body_contains": "Admin authentication required.",
+        "method": "GET",
+        "path": "/admin/api/state",
+        "status": 401
+      },
+      "id": "A8",
+      "kind": "http",
+      "target": "gateway"
+    },
+    {
+      "description": "the gateway serves its embedded console",
+      "expect": {
+        "body_contains": "<title>LLM Gateway Console</title>",
+        "method": "GET",
+        "path": "/console/",
+        "status": 200
+      },
+      "id": "A9",
+      "kind": "http",
+      "target": "gateway"
+    },
+    {
+      "description": "the gateway exposes no metrics unless an operator sets a metrics token",
+      "expect": {
+        "method": "GET",
+        "path": "/metrics",
+        "status": 404
+      },
+      "id": "A10",
+      "kind": "http",
+      "target": "gateway"
+    }
+  ],
+  "schema_version": "1.0.0",
+  "subject": {
+    "id": "llm-gateway",
+    "name": "LLM Gateway"
+  },
+  "digest": "da05219969e051b692980ada8e8066ac909bf88d11ad6a5af6338834a8cc384f"
+}
