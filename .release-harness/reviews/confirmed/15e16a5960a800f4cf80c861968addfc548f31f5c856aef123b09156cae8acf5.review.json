@@ -1,0 +1,429 @@
+{
+  "schema_version": "1.0.0",
+  "mode": "change",
+  "contract": {
+    "digest": "da05219969e051b692980ada8e8066ac909bf88d11ad6a5af6338834a8cc384f"
+  },
+  "authoring_provenance": {
+    "status": "established",
+    "path": ".release-harness/drafts/llm-gateway.record.json",
+    "digest": "e819045146db82b3754d02e0950d13ca8527706a2b478ada58c176c24e706d2b"
+  },
+  "sources": [
+    {
+      "source_id": "primary",
+      "status": "established",
+      "repository_identity": "https://github.com/xibodev/llm-gateway.git",
+      "base_ref": "v1.7.0",
+      "base_commit": "c694b33e3a29d5f7a45bc958ce538585414fd903",
+      "merge_base": "c694b33e3a29d5f7a45bc958ce538585414fd903",
+      "head_commit": "86a3e3268f0a1883b7882d8ef51710b52f2b8bbe",
+      "head_tree": "f56e127d4331d51399ed21e8c0a051b4c2feba7d",
+      "reviewed_source_digest": "802cdf48a53ca5afe884528fe3a10046aca79d8cd34a4aa727e6497fa55dc9f5",
+      "changed_paths": [
+        {
+          "status": "modified",
+          "path": "docs/API.md",
+          "old_blob": "c91df310a01efec1ef8f5d234e30453de405652e",
+          "new_blob": "a84ff0f84b012a0ce9129c377fcd1e292f6950a5"
+        },
+        {
+          "status": "modified",
+          "path": "docs/LIMITATIONS.md",
+          "old_blob": "6ae8eca811695f0b789a9a1c041744afbd22179d",
+          "new_blob": "f4e9506a8b65d0ccfe91fd5c5aaa2c56ce3f8c64"
+        },
+        {
+          "status": "modified",
+          "path": "docs/PROVIDERS.md",
+          "old_blob": "a07bbef2cb06e4a84164710a3a0d4102cc808382",
+          "new_blob": "022dd02d9f048cddbb1a14cb62d376bbf27c080e"
+        },
+        {
+          "status": "modified",
+          "path": "go/go.mod",
+          "old_blob": "8a96426d153e97c56a195f5430424af79fc29494",
+          "new_blob": "c8cf84ee90540454c5c2bc15c4c126f2c62b559f"
+        },
+        {
+          "status": "modified",
+          "path": "go/go.sum",
+          "old_blob": "166e1c77079ad8d996873d396da439873179aa8e",
+          "new_blob": "2ed2df5897e191fcf8e7123ff1d1ce6b7a201b7c"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/api/characterization_test.go",
+          "old_blob": "9169de5047df630af04cfe9f7d5f4757ef6e1f32",
+          "new_blob": "ebb37fb08042853e33ccfcd8ce6bbd9cdfee0e48"
+        },
+        {
+          "status": "added",
+          "path": "go/internal/api/google_chat_test.go",
+          "old_blob": "0000000000000000000000000000000000000000",
+          "new_blob": "b868e33d5ae73be4edeee6e6e1804d20f0aaf9ea"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/api/key_list_test.go",
+          "old_blob": "92243e262338ce24f567033e2b07276ec9e8f1b8",
+          "new_blob": "e5205b03b81e4e1abdd78a622ecdf0a88f61f815"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/api/testdata/characterization/google-chat.golden",
+          "old_blob": "92dc555707a77013269aeb7956986bc040b19410",
+          "new_blob": "050663ec994fddbda04fcae58d0dfaac6d4c1d9e"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/providers/anthropic_runtime_test.go",
+          "old_blob": "561131e0a2e9ad8542e03c12803744196f7a98e4",
+          "new_blob": "4cf2aaf1759820ca33b7a525cebe7c21abc2aff6"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/providers/chat_fields_test.go",
+          "old_blob": "804e8969ad16bade437bd444e9e7f78d43e1f0db",
+          "new_blob": "6e6e5a815b8cb8027d40279dd819890f5801b2ee"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/providers/chat_fields.go",
+          "old_blob": "14a2cec5960adbbac8ede33975c41d03eaf194e3",
+          "new_blob": "f4605629ab575618990b4309927672d2003852ad"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/providers/error_classification_test.go",
+          "old_blob": "ffc03eed13a2e1c47d073aac45fd6cce643ad9f8",
+          "new_blob": "d676891b8c7f0b2950db195fe0102900bcc2c74c"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/providers/google_provider_test.go",
+          "old_blob": "b647ec0b501a8b3fbed7cec5c2b7e8da03da78d9",
+          "new_blob": "8388055732c8a86d592462994072ad4997eb646f"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/providers/google_provider.go",
+          "old_blob": "48e27379e65cdc3d78b689cc55a6bdda9e8be89d",
+          "new_blob": "9056c856a8ec2ec74ac5cf022e688f82703543d7"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/providers/googleai_test.go",
+          "old_blob": "d6d106aa63af2eb423b7b6c7275cf1e539ce6b9b",
+          "new_blob": "c5f40fbfa74887545772873e6770eb7ac40c0503"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/providers/ollama_test.go",
+          "old_blob": "d7ad08ec93fb871e3494f6efbfb135a5933b07ec",
+          "new_blob": "600f013d22484f5609dc37afccb56cabc6d58de4"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/providers/openai_compatible_failure_test.go",
+          "old_blob": "a9222109b2b74f199b415105ae5ec7c4c905957d",
+          "new_blob": "44065e41dcc7ec34390566e318a6a4423a3a0a6d"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/providers/openai_compatible_vertical.go",
+          "old_blob": "7717e48309d031236b84b7c5f196dd76aefab301",
+          "new_blob": "6ad4e1bfe82d065009e8419cbfb7f63853527ea0"
+        },
+        {
+          "status": "added",
+          "path": "go/internal/providers/ovh_speech_test.go",
+          "old_blob": "0000000000000000000000000000000000000000",
+          "new_blob": "38f1b74d58e85579a70060a2cb0421b402fb2dfd"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/providers/registry_snapshot.json",
+          "old_blob": "732f19d269b36ac1f77af476c579a2ec48a684df",
+          "new_blob": "51ab7639ca9a85cfb1a72ee7f83fac7c427f9387"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/providers/registry_test.go",
+          "old_blob": "2e3f5dee51e5d8b1ebaf880d5350d0b13fb6ead7",
+          "new_blob": "cabc839eb1ae7c3faccbc412afefe80b21b112d2"
+        },
+        {
+          "status": "modified",
+          "path": "website/docs.html",
+          "old_blob": "5095db08f7dc790591936752893ae17ed3934475",
+          "new_blob": "eacb2be4703b6fcc3ad6397ba7c6aa9c4d483701"
+        },
+        {
+          "status": "modified",
+          "path": "website/limitations.html",
+          "old_blob": "1eac7b4c0a6c20f9cf7a5f3c00132adffe75a0ef",
+          "new_blob": "01aa3bf1d79da65551b7a25676f2055980c46eb7"
+        },
+        {
+          "status": "modified",
+          "path": "website/providers.html",
+          "old_blob": "8d91e68cdd0aae7269049ce3eafdf87e6daa590d",
+          "new_blob": "9d58e8f86bd572e2542fe06ff61a182949021666"
+        }
+      ]
+    }
+  ],
+  "facts": [
+    {
+      "id": "google-chat-stream",
+      "claim": "The Google facade streams Chat Completions for AI Studio and Vertex AI targets through the core Runtime's Stream, which core's Google reads from streamGenerateContent, and hands the API layer each Chat chunk's data without [DONE]; at v1.7.0 its Stream returned a ConfigError, which the API answered with 502. A stream whose caller leaves ends with the caller's context error, one with a record over the size limit ends with StreamRecordTooLargeError, and any other failure maps as a completion's failure does. The characterization golden for an AI Studio Chat stream records a 200 event stream ending in [DONE] where it recorded that 502, and an API test streams a Gemini function call as a tool call delta with its thought signature, the finish reason tool_calls and the usage the client asked for, which the gateway records.",
+      "status": "observed",
+      "evidence": {
+        "source": "go/internal/providers/google_provider.go; go/internal/providers/google_provider_test.go; go/internal/api/google_chat_test.go; go/internal/api/characterization_test.go; go/internal/api/testdata/characterization/google-chat.golden"
+      }
+    },
+    {
+      "id": "google-chat-fields",
+      "claim": "googleChatPayload sends Google the messages, max_tokens (max_completion_tokens or the internal _max_output_tokens when max_tokens is unset), temperature, tools and tool_choice, and stream_options on a stream; at v1.7.0 the facade sent the messages, the output limit and temperature only. googleChatField reads the request: tools count as sent when every tool is a function tool with a name and parameters that are an object or absent, and tool_choice when it is auto, none, required with a function declared, or a declared function. Any other tools or tool choice count as unsent, and the API layer refuses a request that carries an unsent field with 400 before anything reaches Google, as an API test shows for tool_choice required without tools.",
+      "status": "observed",
+      "evidence": {
+        "source": "go/internal/providers/google_provider.go; go/internal/providers/chat_fields.go; go/internal/providers/chat_fields_test.go; go/internal/api/google_chat_test.go; docs/API.md"
+      }
+    },
+    {
+      "id": "registry",
+      "claim": "The effective provider registry, core's manifest with the gateway's overlay, lists 57 entries where v1.7.0 listed 27: llmgw-core v1.8.0 adds 30, among them DeepSeek, Moonshot AI (Kimi), Zhipu BigModel, Z.ai, Alibaba Cloud Model Studio (Qwen), Alibaba Cloud Coding Plan, Volcengine Ark, SiliconFlow, NVIDIA NIM, ModelScope, MiniMax, LiteLLM, vLLM and LM Studio. Of the 30, 28 run as openai_compatible and 2, the Coding Plan's Anthropic-compatible wires, as anthropic, runtime types TestProviderRegistryIsUniqueAndRunnable requires the gateway to build; 11 offer no model discovery. The four Alibaba Cloud Coding Plan entries are personal-only with risk level red, and NVIDIA NIM and the two ModelScope entries are yellow. The registry comes from the llmgw-core module: in the gateway only registry_snapshot.json, which a test reads, and the count in registry_test.go changed.",
+      "status": "observed",
+      "evidence": {
+        "source": "go/internal/providers/registry_snapshot.json; go/internal/providers/registry_test.go; go/go.mod; docs/PROVIDERS.md; website/providers.html; website/docs.html"
+      }
+    },
+    {
+      "id": "ovh-speech",
+      "claim": "openAICoreProvider.NativeSurfaces returns the surfaces core lists for a model core serves without Chat Completions, such as an OVHcloud AI Endpoints NVR voice, so the audio handlers send that model's speech through core, whose OVHcloud NVR client in llmgw-core v1.9.0 posts it to the voice's own host and answers with WAV. For a model with Chat Completions it drops the audio surfaces as at v1.7.0, so the gateway proxies that model's audio itself; a test shows both on one OVHcloud instance.",
+      "status": "observed",
+      "evidence": {
+        "source": "go/internal/providers/openai_compatible_vertical.go; go/internal/providers/ovh_speech_test.go; docs/API.md; docs/PROVIDERS.md"
+      }
+    },
+    {
+      "id": "core-dependency",
+      "claim": "go/go.mod requires github.com/xibodev/llmgw-core v1.9.0 where v1.7.0 required v1.6.0; llm-translate v0.4.0, llm-provider-auth v1.0.1 and every other requirement are as at v1.7.0, and go/go.sum changes only llmgw-core's two lines. go mod tidy -diff reports nothing to change and go mod verify verifies every module.",
+      "status": "observed",
+      "evidence": {
+        "source": "go/go.mod; go/go.sum"
+      }
+    },
+    {
+      "id": "core-refusal-classes",
+      "claim": "llmgw-core v1.9.0 classes a 402 refusal as billing, and a 4xx whose body cites quota, the context length, or tools or images the model does not take as billing, context_overflow, tools_unsupported or media_unsupported. The OpenAI-compatible, Anthropic, Azure OpenAI, Google, Ollama and companion daemon facades map an upstream refusal by its status before they read core's class, so retries, failover, circuits and the error a client reads follow the status for these refusals as for any other. Tests pin this for each reason on the OpenAI-compatible facade's four operations, for billing and a context overflow on Google, for billing and a long prompt on Anthropic and for unsupported tools on Ollama; under a mutation that reads core's class first these tests fail, where the tests at v1.7.0 caught only Google's billing refusal.",
+      "status": "observed",
+      "evidence": {
+        "source": "go/internal/providers/openai_compatible_failure.go; go/internal/providers/anthropic_failure.go; go/internal/providers/azure_failure.go; go/internal/providers/google_provider.go; go/internal/providers/ollama.go; go/internal/providers/extension_failure.go; go/internal/providers/openai_compatible_failure_test.go; go/internal/providers/googleai_test.go; go/internal/providers/anthropic_runtime_test.go; go/internal/providers/ollama_test.go"
+      }
+    },
+    {
+      "id": "core-execution",
+      "claim": "Core reads a gateway InvocationError with status 402 as class billing, which the classification test pins. Only execution.Execute records that class, in the attempts of its result; the router's walk passes a zero Executor and reads only the value and candidate Execute returns, so the Admission and CredentialFailover llmgw-core v1.9.0 adds stay off. The provider circuits observe outcomes through observeCircuit, which sets no class, and the gateway never calls the core Runtime's Health.",
+      "status": "observed",
+      "evidence": {
+        "source": "go/internal/providers/error_classification.go:58-66; go/internal/providers/error_classification_test.go; go/internal/router/failover.go:244-252; go/internal/providers/policy.go:157-179"
+      }
+    },
+    {
+      "id": "core-unused-config",
+      "claim": "The gateway sets neither the Headers llmgw-core v1.7.0 adds to the Anthropic, Google, Azure OpenAI, Ollama, ElevenLabs and MiMo configurations nor OpenAICompatibleConfig.Registry from v1.8.0, and builds providers with its own factory rather than providers.Build or runtime.RegistryProviders, so those additions leave its requests as they were.",
+      "status": "observed",
+      "evidence": {
+        "source": "go/internal (no Headers or Registry configuration field set, no call to providers.Build or runtime.RegistryProviders)"
+      }
+    },
+    {
+      "id": "key-listing",
+      "claim": "TestKeyListingPagesKeys names its keys first key, second key and third key and searches for d k, which spans the space in two of the names; a key's prefix and ID are random and never hold a space, so the search cannot match one by chance, as q=IR could. Only the test changed.",
+      "status": "observed",
+      "evidence": {
+        "source": "go/internal/api/key_list_test.go"
+      }
+    },
+    {
+      "id": "cli",
+      "claim": "go/cmd/llmgw and go/internal/buildinfo did not change since v1.7.0, so the version and health commands run the code v1.7.0 runs.",
+      "status": "observed",
+      "evidence": {
+        "source": "git diff --stat v1.7.0..HEAD -- go/cmd go/internal/buildinfo"
+      }
+    },
+    {
+      "id": "decode-paths",
+      "claim": "No non-test file under go/internal/api changed since v1.7.0: handleChat and handleResponses in openai.go and handleMessages in anthropic.go decode the request body, and answer 422 for one they cannot read, with the code v1.7.0 runs and before routing reaches a provider.",
+      "status": "observed",
+      "evidence": {
+        "source": "git diff --name-only v1.7.0..HEAD -- go/internal/api; go/internal/api/openai.go:230-251; go/internal/api/anthropic.go:87"
+      }
+    },
+    {
+      "id": "admin-authentication",
+      "claim": "go/internal/api/admin.go and every other non-test file under go/internal/api did not change since v1.7.0, so handleState answers a request without credentials through adminAuthed with the code v1.7.0 runs.",
+      "status": "observed",
+      "evidence": {
+        "source": "go/internal/api/admin.go; git diff --name-only v1.7.0..HEAD -- go/internal/api"
+      }
+    },
+    {
+      "id": "console",
+      "claim": "No file under go/internal/web changed since v1.7.0, so the binary embeds the console bundle v1.7.0 embeds, dist/assets/index-DuO9dpX1.js and dist/assets/index-DydG4eBF.css, and npm run check:dist confirms the committed dist matches its source.",
+      "status": "observed",
+      "evidence": {
+        "source": "git diff --stat v1.7.0..HEAD -- go/internal/web; go/internal/web/console/dist"
+      }
+    },
+    {
+      "id": "schema-forward",
+      "claim": "go/internal/iam did not change since v1.7.0: the newest of its 23 migrations is the one v1.7.0 applies, and a binary refuses only a database whose newest applied migration it does not include, so a database this source migrates opens with v1.7.0 too and going back to v1.7.0 needs no restore.",
+      "status": "observed",
+      "evidence": {
+        "source": "go/internal/iam/schema.go:574; go/internal/iam/schema.go:759-772; docs/UPGRADING.md#rollback"
+      }
+    },
+    {
+      "id": "docs",
+      "claim": "docs/API.md documents the Google tools and tool_choice fields, thought signatures at extra_content.google.thought_signature and the OVHcloud AI Endpoints NVR voices; docs/PROVIDERS.md and website/providers.html list the 30 new registry entries; docs/LIMITATIONS.md and website/limitations.html replace the missing Google chat streaming with Google chat sending message text and function tools only; website/docs.html counts 57 registry entries. node scripts/check-docs.mjs passes with 41 Markdown files, 57 registry entries and 28 website files.",
+      "status": "observed",
+      "evidence": {
+        "source": "docs/API.md; docs/PROVIDERS.md; docs/LIMITATIONS.md; website/providers.html; website/limitations.html; website/docs.html; scripts/check-docs.mjs"
+      }
+    },
+    {
+      "id": "untouched-surfaces",
+      "claim": "go/cmd, go/internal/buildinfo, go/internal/operations, go/internal/iam, go/internal/config, go/internal/router, go/internal/roster, go/internal/diagnostics, go/internal/architecture, go/internal/web, every non-test file under go/internal/api, .github, test and scripts did not change since v1.7.0; outside tests and the registry snapshot, only google_provider.go, chat_fields.go and openai_compatible_vertical.go changed in go/internal/providers.",
+      "status": "observed",
+      "evidence": {
+        "source": "git diff --stat v1.7.0..HEAD for those paths"
+      }
+    },
+    {
+      "id": "exploratory-run",
+      "claim": "Exploratory run run-20261008T183748-48ro2x of draft llm-gateway, the draft that became contract da05219969e0, against a binary built from 86a3e3268f0a and served with LLMGW_ALLOW_UNAUTHENTICATED_API=1 as the release smoke serves it, passed all ten assertions.",
+      "status": "observed",
+      "evidence": {
+        "source": "local exploratory run"
+      }
+    },
+    {
+      "id": "verification",
+      "claim": "For source revision 86a3e3268f0a1883b7882d8ef51710b52f2b8bbe: go test passes for every package, go test -race passes for every package on linux/amd64 with Go 1.26.8, and gofmt, go vet and staticcheck pass for go/internal/providers, the only package it changes from 0a97e1d. On 0a97e1d, which differs only in five _test.go files under go/internal/providers: go build, go vet, staticcheck, gofmt, govulncheck, go mod tidy -diff and go mod verify pass for the module, as do the console's lint, 203 tests, npm audit and dist rebuild check, the documentation check, actionlint, the acceptance-policy tests (19) and the roster script tests (78 passed, 1 skipped); the deterministic Docker acceptance passes all 31 checks against an image built from 0a97e1d on a Linux engine, where its digest policy does not apply to a locally built candidate.",
+      "status": "observed",
+      "evidence": {
+        "source": "local and remote Linux test execution"
+      }
+    }
+  ],
+  "impact": {
+    "assertions": [
+      {
+        "id": "A1",
+        "impact": "unchanged",
+        "supported_by": [
+          "cli",
+          "untouched-surfaces",
+          "verification",
+          "exploratory-run"
+        ]
+      },
+      {
+        "id": "A2",
+        "impact": "unchanged",
+        "supported_by": [
+          "cli",
+          "untouched-surfaces",
+          "verification",
+          "exploratory-run"
+        ]
+      },
+      {
+        "id": "A3",
+        "impact": "unchanged",
+        "supported_by": [
+          "untouched-surfaces",
+          "verification",
+          "exploratory-run"
+        ]
+      },
+      {
+        "id": "A4",
+        "impact": "unchanged",
+        "supported_by": [
+          "untouched-surfaces",
+          "registry",
+          "verification",
+          "exploratory-run"
+        ]
+      },
+      {
+        "id": "A5",
+        "impact": "unchanged",
+        "supported_by": [
+          "decode-paths",
+          "untouched-surfaces",
+          "exploratory-run"
+        ]
+      },
+      {
+        "id": "A6",
+        "impact": "unchanged",
+        "supported_by": [
+          "decode-paths",
+          "exploratory-run"
+        ]
+      },
+      {
+        "id": "A7",
+        "impact": "unchanged",
+        "supported_by": [
+          "decode-paths",
+          "exploratory-run"
+        ]
+      },
+      {
+        "id": "A8",
+        "impact": "unchanged",
+        "supported_by": [
+          "admin-authentication",
+          "untouched-surfaces",
+          "exploratory-run"
+        ]
+      },
+      {
+        "id": "A9",
+        "impact": "unchanged",
+        "supported_by": [
+          "console",
+          "untouched-surfaces",
+          "exploratory-run"
+        ]
+      },
+      {
+        "id": "A10",
+        "impact": "unchanged",
+        "supported_by": [
+          "untouched-surfaces",
+          "exploratory-run"
+        ]
+      }
+    ],
+    "requires": [],
+    "possible_binding_changes": []
+  },
+  "questions": [],
+  "conclusion": {
+    "action": "reuse_contract",
+    "summary": "The release streams Google AI Studio and Vertex AI chat and sends function tools to Gemini, offers 30 more registry providers, speaks through OVHcloud AI Endpoints' NVR voices, and takes llmgw-core v1.9.0, whose new refusal classes the facades read by status. No non-test file under go/internal/api, the CLI, IAM, configuration, the router or the console changed. Every accepted proposition holds for this source; none rests on an implementation this release changed, and the exploratory run, the unit tests, the race run and the Docker acceptance exercise them."
+  },
+  "proposed": {
+    "by": "release operator",
+    "at": "2026-10-08T18:42:43.538Z"
+  },
+  "digest": "15e16a5960a800f4cf80c861968addfc548f31f5c856aef123b09156cae8acf5"
+}
