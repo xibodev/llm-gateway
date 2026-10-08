@@ -99,6 +99,40 @@ func TestGoogleChatCompletionStreamsToolCalls(t *testing.T) {
 	}
 }
 
+// A streamed Messages or Responses request to a Google model streams too,
+// translated from the Chat stream: Gemini's function call reaches a Messages
+// client as a tool_use block and a Responses client as a function call, and
+// each stream ends as its protocol ends one.
+func TestGoogleStreamsServeMessagesAndResponses(t *testing.T) {
+	resetState(t)
+	take, _ := googleChatUpstream(t)
+	for _, call := range []struct {
+		path, body string
+		want       []string
+	}{
+		{"/v1/messages", `{"model":"studio/gemini-fixture","stream":true,"max_tokens":64,"messages":[{"role":"user","content":"What is a crane?"}]}`, []string{
+			`"content_block":{"id":"call_resp-fixture_0","input":{},"name":"lookup","type":"tool_use"}`, `"stop_reason":"tool_use"`, "event: message_stop",
+		}},
+		{"/v1/responses", `{"model":"studio/gemini-fixture","stream":true,"input":"What is a crane?"}`, []string{
+			`"name":"lookup","status":"completed","type":"function_call"`, "event: response.completed",
+		}},
+	} {
+		rec := httptest.NewRecorder()
+		NewServer(Runtime{}).ServeHTTP(rec, httptest.NewRequest(http.MethodPost, call.path, strings.NewReader(call.body)))
+		if rec.Code != http.StatusOK || !strings.HasPrefix(rec.Header().Get("Content-Type"), "text/event-stream") {
+			t.Fatalf("%s: status=%d body=%s", call.path, rec.Code, rec.Body.String())
+		}
+		for _, want := range call.want {
+			if !strings.Contains(rec.Body.String(), want) {
+				t.Fatalf("%s stream lacks %s:\n%s", call.path, want, rec.Body.String())
+			}
+		}
+		if seen := take(); len(seen) != 1 || !strings.HasPrefix(seen[0], "/models/gemini-fixture:streamGenerateContent ") {
+			t.Fatalf("%s upstream = %q", call.path, seen)
+		}
+	}
+}
+
 // A Chat request that calls tools is served by a Google model, and a tool
 // choice Gemini cannot be sent is refused before anything reaches it.
 func TestGoogleChatCompletionTakesTools(t *testing.T) {
