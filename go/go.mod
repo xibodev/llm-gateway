@@ -5,7 +5,7 @@ go 1.26.8
 require (
 	github.com/xibodev/llm-provider-auth v1.0.1
 	github.com/xibodev/llm-translate v0.4.0
-	github.com/xibodev/llmgw-core v1.8.0
+	github.com/xibodev/llmgw-core v1.9.0
 	golang.org/x/sys v0.48.0
 	gopkg.in/yaml.v3 v3.0.1
 	modernc.org/sqlite v1.60.1

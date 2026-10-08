@@ -170,7 +170,10 @@ and usage accounting.
 
 Transcription accepts multipart form data with `file` and `model`. Speech accepts
 an OpenAI-shaped JSON body. OpenAI-compatible providers receive proxied requests;
-`edge_tts` synthesizes MP3 through its native provider implementation.
+`edge_tts` synthesizes MP3 through its native provider implementation. The
+`nvr-tts-*` voices of an OVHcloud AI Endpoints instance speak WAV at their own
+hosts: the model names the language, and `voice` is one of that language's
+voices, such as `English-US.Male-1`, or else its base voice speaks.
 
 Audio resolves one target. Transcription uploads count against the
 [request size limit](#request-size).

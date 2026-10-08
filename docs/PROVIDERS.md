@@ -77,7 +77,7 @@ is `endpoints`.
 | OpenCode Zen | OpenAI-compatible | None by default | System or personal | Free anonymous multi-model European inference endpoint. |
 | Kilo Code | OpenAI-compatible | None by default | System or personal | Free anonymous multi-model inference endpoint with auto/free routing. |
 | LLM7.io | OpenAI-compatible | None by default | System or personal | Anonymous turbo-tier chat models. |
-| OVH AI Endpoints | OpenAI-compatible | None by default | System or personal | Anonymous per-IP inference tier; availability is rate-limited. |
+| OVH AI Endpoints | OpenAI-compatible | None by default | System or personal | Anonymous per-IP inference tier; availability is rate-limited. Its NVR voices speak on `/v1/audio/speech`. |
 | Pollinations.ai | OpenAI-compatible | None by default | System or personal | Anonymous text inference with provider-specific discovery paths. |
 | Custom OpenAI-compatible | OpenAI-compatible | Optional bearer key | System or personal | Requires a base URL; actual feature support depends on the upstream. |
 | Custom Anthropic-compatible | Native Messages | API key | System or personal | Requires a Messages-compatible base URL. |

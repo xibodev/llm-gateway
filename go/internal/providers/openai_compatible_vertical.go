@@ -146,13 +146,20 @@ func (p openAICoreProvider) bind(ctx context.Context) (*coreproviders.OpenAIComp
 // Core's OpenAICompatible also lists the audio surfaces for every model,
 // which this leaves out: the gateway proxies an instance's audio itself
 // (see ProviderHTTPTarget), with a client that follows no redirect, so the
-// audio handlers, which ask core first, keep that path.
+// audio handlers, which ask core first, keep that path. A model core serves
+// on audio alone, such as an OVHcloud AI Endpoints NVR voice, which speaks
+// beside the OpenAI wire rather than on it, keeps its surfaces, so the
+// audio handlers send it through core.
 func (p openAICoreProvider) NativeSurfaces(model string) []core.ModelSurface {
 	provider, err := p.bind(context.Background())
 	if err != nil {
 		return nil
 	}
-	return slices.DeleteFunc(slices.Clone(provider.NativeSurfaces(model)), func(surface core.ModelSurface) bool {
+	surfaces := provider.NativeSurfaces(model)
+	if !slices.Contains(surfaces, core.ModelSurfaceChatCompletions) {
+		return surfaces
+	}
+	return slices.DeleteFunc(slices.Clone(surfaces), func(surface core.ModelSurface) bool {
 		return surface == core.ModelSurfaceAudioTranscriptions || surface == core.ModelSurfaceAudioSpeech
 	})
 }
