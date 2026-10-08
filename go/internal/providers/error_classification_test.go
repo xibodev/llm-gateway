@@ -56,11 +56,15 @@ func TestInvocationErrorClassification(t *testing.T) {
 			disposition: core.DispositionFailover, circuit: true, class: core.ProviderErrorUpstream,
 		}},
 	}
-	for _, status := range []int{400, 401, 403, 404, 408, 409, 429, 500, 502, 503, 504, 520, 521, 522, 523, 524, 529} {
+	for _, status := range []int{400, 401, 402, 403, 404, 408, 409, 429, 500, 502, 503, 504, 520, 521, 522, 523, 524, 529} {
 		plain := classified{status: status, disposition: core.DispositionTerminal, class: core.ProviderErrorUpstream}
 		switch status {
 		case http.StatusUnauthorized:
 			plain.class = core.ProviderErrorAuth
+		case http.StatusPaymentRequired:
+			// Core's class for health only: the gateway's routing reads the
+			// status, so a 402 ends the chain as any definitive refusal does.
+			plain.class = core.ProviderErrorBilling
 		case http.StatusForbidden:
 			plain.class = core.ProviderErrorForbidden
 		case http.StatusTooManyRequests:

@@ -73,6 +73,18 @@ func TestAnthropicFailuresKeepTheTransportsErrors(t *testing.T) {
 			t.Fatalf("%s: err=%v", name, err)
 		}
 	}
+	// Core reads these refusals as billing and a context overflow; the
+	// status decides, as for any other 400.
+	for _, words := range []string{"Your credit balance is too low to access the API.", "prompt is too long: 201000 tokens > 200000 maximum"} {
+		respond(http.StatusBadRequest, fmt.Sprintf(`{"type":"error","error":{"type":"invalid_request_error","message":%q}}`, words))
+		for name, call := range anthropicCalls {
+			err := call(provider)
+			if err == nil || err.Error() != "anthropic: upstream returned 400: "+words || UpstreamStatus(err) != 400 || IsConfig(err) ||
+				InvocationRetryable(err) || InvocationFailoverEligible(err) || InvocationCircuitFailure(err) {
+				t.Fatalf("%s %q: err=%v", name, words, err)
+			}
+		}
+	}
 
 	for text, want := range map[string]string{
 		`{"id":`:       "anthropic: invalid JSON in upstream response",

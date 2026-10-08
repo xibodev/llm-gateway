@@ -98,8 +98,9 @@ func TestModelURLDiffersPerSurface(t *testing.T) {
 }
 
 // Google's refusals keep the message and status the transport gave them, and
-// its routing: the status decides. The Retry-After Google sent is kept for
-// the resilience wrapper, the router and the client.
+// its routing: the status decides, whatever reason core reads in the refusal,
+// billing and a context overflow included. The Retry-After Google sent is
+// kept for the resilience wrapper, the router and the client.
 func TestUpstreamErrorsNameTheRealCause(t *testing.T) {
 	cases := []struct {
 		name, body string
@@ -131,6 +132,12 @@ func TestUpstreamErrorsNameTheRealCause(t *testing.T) {
 			status: 400,
 			body:   `{"error":{"code":400,"status":"INVALID_ARGUMENT","message":"bad request"}}`,
 			want:   "ai_studio: bad request",
+		},
+		{
+			name:   "context overflow",
+			status: 400,
+			body:   `{"error":{"code":400,"status":"INVALID_ARGUMENT","message":"The input token count exceeds the maximum number of tokens allowed."}}`,
+			want:   "ai_studio: The input token count exceeds the maximum number of tokens allowed.",
 		},
 	}
 	for _, testCase := range cases {

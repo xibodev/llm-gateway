@@ -81,6 +81,48 @@ func TestOpenAICompatibleFailuresKeepTheTransportsErrors(t *testing.T) {
 	}
 }
 
+// Core names a refusal by the reason its body gives when a product may route
+// on it: a 402 is billing whatever it says, and a 4xx citing quota, the
+// context length, or tools or images the model does not take is billing or a
+// refused request shape. The facade reads every refusal by its status, as the
+// transport did, so such a refusal reaches the router as any other definitive
+// refusal: with its status and the upstream's words, neither repeated nor
+// failed over, and counted against nothing. Read by core's class first, it
+// would end as a configuration error.
+func TestOpenAICompatibleRefusalsAreReadByStatusWhateverReasonTheyGive(t *testing.T) {
+	var status int
+	var body string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(status)
+		_, _ = io.WriteString(w, body)
+	}))
+	t.Cleanup(server.Close)
+	provider := openAICompatibleFixture(t, &config.ProviderConfig{Type: "openai_compatible", RegistryID: "openai", BaseURL: server.URL, APIKey: "fixture-key"})
+	for _, refusal := range []struct {
+		status        int
+		code, message string
+	}{
+		{http.StatusPaymentRequired, "fixture_code", "add credit to continue"},
+		{http.StatusBadRequest, "insufficient_quota", "the fixture quota is spent"},
+		{http.StatusBadRequest, "context_length_exceeded", "the request is longer than the model takes"},
+		{http.StatusBadRequest, "fixture_code", "fixture-model does not support tools"},
+		{http.StatusBadRequest, "fixture_code", "image input is not supported by fixture-model"},
+	} {
+		status, body = refusal.status, fmt.Sprintf(`{"error":{"message":%q,"code":%q}}`, refusal.message, refusal.code)
+		for name, call := range openAIOperations(provider) {
+			want := fmt.Sprintf("openai: upstream returned %d: %s", refusal.status, refusal.message)
+			if strings.HasPrefix(name, "responses") {
+				want = fmt.Sprintf("openai: responses endpoint returned %d: %s", refusal.status, refusal.message)
+			}
+			err := call()
+			if err == nil || err.Error() != want || UpstreamStatus(err) != refusal.status || IsConfig(err) ||
+				InvocationRetryable(err) || InvocationFailoverEligible(err) || InvocationCircuitFailure(err) {
+				t.Fatalf("%s %d %s: err=%v", name, refusal.status, refusal.code, err)
+			}
+		}
+	}
+}
+
 // An answer that cannot be used keeps the transport's message, and counts
 // against the circuit without being repeated.
 func TestOpenAICompatibleUnusableAnswersKeepTheTransportsMessages(t *testing.T) {

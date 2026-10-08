@@ -218,6 +218,16 @@ func TestOllamaFailuresKeepTheirClassification(t *testing.T) {
 			}
 		}
 	}
+	// Core reads this refusal as tools the model does not take; the status
+	// decides, as for any other 400.
+	status, answer = http.StatusBadRequest, `{"error":"fixture-model does not support tools"}`
+	for name, call := range calls {
+		err := call()
+		if err == nil || err.Error() != "ollama: request failed (400): fixture-model does not support tools" || UpstreamStatus(err) != 400 ||
+			IsConfig(err) || InvocationRetryable(err) || InvocationFailoverEligible(err) || InvocationCircuitFailure(err) {
+			t.Fatalf("%s tools refusal: err=%v", name, err)
+		}
+	}
 
 	status = http.StatusOK
 	for _, unusable := range []string{`not json`, `{"message":{"content":""}}`, `{"done":true}`} {
