@@ -41,6 +41,13 @@ var ErrAPIKeyConflict = errors.New("API key policy changed; reload and retry")
 // expired key stays expired, and a new key replaces it.
 var ErrAPIKeyExpired = errors.New("an expired API key keeps its expiry; issue a new key instead")
 
+// ErrAPIKeyNotFound reports a key that does not exist, was deleted, or is
+// not the caller's.
+var ErrAPIKeyNotFound = errors.New("API key not found")
+
+// ErrAPIKeyLive refuses to delete a key that still works.
+var ErrAPIKeyLive = errors.New("only a revoked or expired API key can be deleted; revoke it first")
+
 func HasAPIKeys() (bool, error) {
 	db, err := DB()
 	if err != nil {
@@ -48,7 +55,7 @@ func HasAPIKeys() (bool, error) {
 	}
 	var count int
 	if err := db.QueryRow(
-		"SELECT COUNT(*) FROM api_keys WHERE status != 'revoked'",
+		"SELECT COUNT(*) FROM api_keys WHERE status != 'revoked' AND deleted_at IS NULL",
 	).Scan(&count); err != nil {
 		return false, err
 	}
@@ -175,7 +182,7 @@ FROM api_keys k
 JOIN principals n ON n.id=k.principal_id
 JOIN projects p ON p.id=k.project_id
 JOIN project_memberships m ON m.project_id=p.id AND m.principal_id=n.id
-WHERE k.secret_hash=?`, sum[:]).Scan(
+WHERE k.secret_hash=? AND k.deleted_at IS NULL`, sum[:]).Scan(
 		&storedHash, &keyID, &keyName, &keyStatus, &expiresAt, &modelsJSON,
 		&providersJSON, &rpm, &daily, &monthly, &dailyIn, &dailyOut, &monthlyTokens,
 		&dailyCost, &monthlyCost, &dailyCredits, &monthlyCredits,
@@ -235,10 +242,11 @@ SELECT k.id,k.prefix,k.project_id,p.slug,k.principal_id,n.display_name,n.kind,
        CASE WHEN k.secret_ciphertext IS NOT NULL AND k.secret_nonce IS NOT NULL THEN 1 ELSE 0 END,k.scope_json
 FROM api_keys k
 JOIN projects p ON p.id=k.project_id
-JOIN principals n ON n.id=k.principal_id`
+JOIN principals n ON n.id=k.principal_id
+WHERE k.deleted_at IS NULL`
 	args := []any{}
 	if projectID != "" {
-		query += " WHERE k.project_id=?"
+		query += " AND k.project_id=?"
 		args = append(args, projectID)
 	}
 	query += " ORDER BY k.created_at DESC,k.id"
@@ -274,7 +282,7 @@ SELECT k.id,k.prefix,k.project_id,p.slug,k.principal_id,n.display_name,n.kind,
 FROM api_keys k
 JOIN projects p ON p.id=k.project_id
 JOIN principals n ON n.id=k.principal_id
-WHERE k.principal_id=? ORDER BY k.created_at DESC,k.id`, principalID)
+WHERE k.principal_id=? AND k.deleted_at IS NULL ORDER BY k.created_at DESC,k.id`, principalID)
 	if err != nil {
 		return nil, err
 	}
@@ -309,7 +317,7 @@ SELECT k.id,k.prefix,k.project_id,p.slug,k.principal_id,n.display_name,n.kind,
 FROM api_keys k
 JOIN projects p ON p.id=k.project_id
 JOIN principals n ON n.id=k.principal_id
-WHERE k.id=?`, id)
+WHERE k.id=? AND k.deleted_at IS NULL`, id)
 	k, err := scanAPIKey(row)
 	if err == sql.ErrNoRows {
 		return APIKey{}, false, nil
@@ -332,7 +340,7 @@ func UpdateAPIKey(id string, update KeyUpdate) error {
 		return err
 	}
 	if !ok {
-		return fmt.Errorf("API key not found")
+		return ErrAPIKeyNotFound
 	}
 	if update.OwnerPrincipalID != "" {
 		if key.PrincipalID != update.OwnerPrincipalID || update.Admin {
@@ -402,7 +410,7 @@ UPDATE api_keys SET status=?,expires_at=?,allowed_models_json=?,allowed_provider
  rpm=?,daily_requests=?,monthly_requests=?,daily_input_tokens=?,daily_output_tokens=?,
  monthly_total_tokens=?,daily_cost_microusd=?,monthly_cost_microusd=?,
  daily_credits_milli=?,monthly_credits_milli=?,scope_json=?
- WHERE id=? AND (status != 'revoked' OR ? = 'revoked')
+ WHERE id=? AND deleted_at IS NULL AND (status != 'revoked' OR ? = 'revoked')
  AND (COALESCE(json_extract(scope_json, '$.admin_managed'), 0)=0 OR ?=1)`,
 		key.Status, nullInt(key.ExpiresAt), string(models), string(providers),
 		key.Policy.RPM, key.Policy.DailyRequests, key.Policy.MonthlyRequests,
@@ -429,6 +437,75 @@ func RevokeAPIKey(id string) error {
 	return UpdateAPIKey(id, KeyUpdate{Status: &status})
 }
 
+// DeleteAPIKey deletes the key id, which ownerPrincipalID owns unless it is
+// empty, and returns the key as it was. Only a revoked or expired key is
+// deleted, so revoking stays the one way to stop a key. A deleted key leaves
+// every listing and lookup and its encrypted copy is erased, but its row
+// stays, so usage and audit history still name it.
+func DeleteAPIKey(id, ownerPrincipalID string) (APIKey, error) {
+	db, err := DB()
+	if err != nil {
+		return APIKey{}, err
+	}
+	key, ok, err := apiKeyByID(db, strings.TrimSpace(id))
+	if err != nil {
+		return APIKey{}, err
+	}
+	if !ok || (ownerPrincipalID != "" && key.PrincipalID != ownerPrincipalID) {
+		return APIKey{}, ErrAPIKeyNotFound
+	}
+	if key.Status != "revoked" && !key.IsExpired() {
+		return APIKey{}, ErrAPIKeyLive
+	}
+	now := time.Now().Unix()
+	result, err := db.Exec(`
+UPDATE api_keys SET deleted_at=?,secret_ciphertext=NULL,secret_nonce=NULL
+WHERE id=? AND deleted_at IS NULL
+  AND (status='revoked' OR (expires_at IS NOT NULL AND expires_at>0 AND expires_at<=?))`,
+		now, key.ID, now)
+	if err != nil {
+		return APIKey{}, err
+	}
+	if affected, err := result.RowsAffected(); err != nil {
+		return APIKey{}, err
+	} else if affected == 0 {
+		// Another request deleted it first.
+		return APIKey{}, ErrAPIKeyNotFound
+	}
+	return key, nil
+}
+
+// apiKeyNames returns the names of the keys ids names, deleted ones
+// included, so a key's usage still names it once it is deleted.
+func apiKeyNames(db *sql.DB, ids []string) (map[string]string, error) {
+	names := map[string]string{}
+	unique := []any{}
+	for _, id := range ids {
+		if id != "" {
+			if _, seen := names[id]; !seen {
+				names[id] = ""
+				unique = append(unique, id)
+			}
+		}
+	}
+	if len(unique) == 0 {
+		return names, nil
+	}
+	rows, err := db.Query(`SELECT id,name FROM api_keys WHERE id IN (?`+strings.Repeat(",?", len(unique)-1)+`)`, unique...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var id, name string
+		if err := rows.Scan(&id, &name); err != nil {
+			return nil, err
+		}
+		names[id] = name
+	}
+	return names, rows.Err()
+}
+
 // RevealAPIKey decrypts a stored token. The boolean reports whether the key ID
 // exists; older hash-only keys return ErrAPIKeyNotRevealable.
 func RevealAPIKey(id string) (string, bool, error) {
@@ -440,7 +517,7 @@ func RevealAPIKey(id string) (string, bool, error) {
 	var storedHash, ciphertext, nonce []byte
 	err = db.QueryRow(`
 SELECT project_id,principal_id,secret_hash,secret_ciphertext,secret_nonce
-FROM api_keys WHERE id=?`, strings.TrimSpace(id)).Scan(
+FROM api_keys WHERE id=? AND deleted_at IS NULL`, strings.TrimSpace(id)).Scan(
 		&projectID, &principalID, &storedHash, &ciphertext, &nonce,
 	)
 	if err == sql.ErrNoRows {

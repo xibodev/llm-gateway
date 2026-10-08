@@ -122,6 +122,20 @@ encrypted copy supports explicit reveal:
 Disabled, expired, and revoked state controls authentication. Reveal authorization
 is based on ownership/admin access rather than key status.
 
+An expired key stays expired: its expiry cannot change, and a new key
+replaces it. An active key's expiry can be changed, or cleared so the key
+never expires.
+
+Revoking a key stops it for good. Deleting removes a key that no longer
+works, revoked or expired, from the console and the key listings, and erases
+its encrypted copy; a key that still works must be revoked first. A deleted
+key's usage and audit history keep its name. An administrator deletes any
+such keys with `POST /admin/api/keys/delete`, and a user their own with
+`POST /user/api/keys/delete`, each with a body of `{"ids": [...]}` naming up
+to 500 keys; the answer lists the keys deleted and why any others were not.
+Each deletion is audited as `api_key.delete`. The console hides revoked and
+expired keys unless its status filter shows them.
+
 Removing a principal from a project revokes that principal's keys in the
 project, including disabled ones; adding the membership back does not restore
 them.

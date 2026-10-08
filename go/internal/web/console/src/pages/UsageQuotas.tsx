@@ -72,7 +72,8 @@ export function UsageQuotas({ data, mode }: { data: JSONRecord; mode: ConsoleMod
   const groupName = (row: JSONRecord) => {
     const value = stringValue(row[groupBy.field]);
     if (!value) return groupBy.id === "key" || groupBy.id === "project" ? "Administrator or local" : "Not routed";
-    if (groupBy.id === "key") return names.key.get(value) ?? value;
+    // A key group names its key, a deleted one included, which no key list does.
+    if (groupBy.id === "key") return stringValue(row.key_name) || (names.key.get(value) ?? value);
     if (groupBy.id === "project") return names.project.get(value) ?? value;
     return value;
   };

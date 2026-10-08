@@ -56,11 +56,12 @@ test("mode-aware API client names only local API roots", () => {
 });
 
 
-test("revoked keys have no console enable action", () => {
+test("keys that no longer work have no console enable action", () => {
   const keys = readFileSync(resolve(root, "src/pages/ApiKeys.tsx"), "utf8");
   assert.match(keys, /const revoked = stringValue\(key.status\) === "revoked"/);
   assert.match(keys, /Permanently revoked/);
-  assert.match(keys, /!revoked \? <button class="button button--secondary"/);
+  assert.match(keys, /return \["revoked", "expired"\]\.includes\(keyStatus\(key\)\)/);
+  assert.match(keys, /!deletable \? <button class="button button--secondary"/);
 });
 
 test("recoverable keys have an accessible inline reveal control", () => {

@@ -96,7 +96,7 @@ test("the usage chart shows the chosen metric and the breakdown names its rows",
         series: [{ start, requests: 3, errors: 1, input_tokens: 100, output_tokens: 20, cost_microusd: 1500000 }],
         control_plane: { groups: {
           provider: [{ provider: "openai", requests: 3, errors: 1, input_tokens: 100, output_tokens: 20, cost_microusd: 1500000, average_latency_ms: 812 }],
-          key: [{ key_id: "k1", requests: 2 }, { key_id: "", requests: 1 }],
+          key: [{ key_id: "k1", requests: 2 }, { key_id: "", requests: 1 }, { key_id: "k-deleted", key_name: "retired key", requests: 1 }],
         } },
       };
     },
@@ -121,6 +121,7 @@ test("the usage chart shows the chosen metric and the breakdown names its rows",
   select("project").props.onInput(input("key"));
   tree = render();
   assert.match(text(tree), /ci key/, "a key is named, not shown by ID");
+  assert.match(text(tree), /retired key/, "a deleted key is named as the report names it");
   assert.match(text(tree), /Administrator or local/);
 });
 

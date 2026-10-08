@@ -57,7 +57,7 @@ test("the requests page lists, filters and pages recorded requests", async () =>
       return {
         requests: [
           { id: 3, ts: 3, request_id: "req_new", endpoint: "chat", status_code: 502, error_code: "upstream", provider: "openai", requested_model: "fast", routed_model: "gpt", key_id: "k1", latency_ms: 812, input_tokens: 11, output_tokens: 3 },
-          { id: 2, ts: 2, request_id: "req_mid", endpoint: "messages", status_code: 200, provider: "anthropic" },
+          { id: 2, ts: 2, request_id: "req_mid", endpoint: "messages", status_code: 200, provider: "anthropic", key_id: "k-deleted", key_name: "retired key" },
         ],
         next_before_id: 2,
       };
@@ -72,6 +72,7 @@ test("the requests page lists, filters and pages recorded requests", async () =>
   const rows = () => findAll(tree, (node) => node.type === "tr");
   assert.match(text(tree), /req_new/);
   assert.match(text(tree), /ci key/, "a key is named, not shown by ID");
+  assert.match(text(tree), /retired key/, "a deleted key is named as the request records it");
   assert.match(text(tree), /fast → gpt/);
   const pill = find(tree, (node) => node.type === "span" && text(node).startsWith("502"));
   assert.match(pill.props.class, /status-pill--attention/);

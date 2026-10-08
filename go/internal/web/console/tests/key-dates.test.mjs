@@ -86,9 +86,9 @@ test("a key without an expiry omits it, and the list shows created, expiry and l
   assert.equal(sent.length, 1);
   assert.equal("expires_at" in sent[0].body, false);
   const headings = findAll(tree, (node) => node.type === "th").map(text);
-  assert.deepEqual(headings.slice(5, 9), ["Status", "Created", "Expires", "Last used"]);
+  assert.deepEqual(headings.slice(6, 10), ["Status", "Created", "Expires", "Last used"]);
   const cells = findAll(find(tree, (node) => node.type === "tr" && node.key === "key-1"), (node) => node.type === "td").map(text);
-  assert.deepEqual(cells.slice(6, 9), [dates.formatKeyTime(1798700000, "—"), "Never", dates.formatKeyTime(1798783140, "Never")]);
+  assert.deepEqual(cells.slice(7, 10), [dates.formatKeyTime(1798700000, "—"), "Never", dates.formatKeyTime(1798783140, "Never")]);
 });
 
 // A narrow keys table scrolls: its prefixes stay on one line and its row
@@ -141,6 +141,9 @@ test("an active key's expiry can change and an expired key's cannot", async () =
   await settle();
   assert.equal(sent.at(-1).body.expires_at, 0, "a cleared expiry means the key never expires");
 
+  // Expired keys are listed once the status filter shows them.
+  find(tree, (node) => node.type === "select" && findAll(node, (option) => option.props?.value === "all").length).props.onChange(input("all"));
+  tree = render();
   editKey("gone");
   assert.equal(findAll(tree, (node) => node.props?.name === "expires_at").length, 0);
   assert.match(text(tree), /An expired key stays expired; create a new key to replace it\./);

@@ -55,12 +55,14 @@ type RecordedRequest struct {
 	ProjectID      string `json:"project_id,omitempty"`
 	PrincipalID    string `json:"principal_id,omitempty"`
 	KeyID          string `json:"key_id,omitempty"`
-	InputTokens    int64  `json:"input_tokens"`
-	OutputTokens   int64  `json:"output_tokens"`
-	CostMicroUSD   int64  `json:"cost_microusd"`
-	CreditsMilli   int64  `json:"credits_milli"`
-	ErrorCode      string `json:"error_code,omitempty"`
-	Stub           bool   `json:"stub,omitempty"`
+	// KeyName names the request's key, a deleted one included.
+	KeyName      string `json:"key_name,omitempty"`
+	InputTokens  int64  `json:"input_tokens"`
+	OutputTokens int64  `json:"output_tokens"`
+	CostMicroUSD int64  `json:"cost_microusd"`
+	CreditsMilli int64  `json:"credits_milli"`
+	ErrorCode    string `json:"error_code,omitempty"`
+	Stub         bool   `json:"stub,omitempty"`
 }
 
 // ListUsageEvents returns the recorded requests filter selects and the
@@ -139,6 +141,17 @@ FROM usage_events WHERE `+strings.Join(where, " AND ")+` ORDER BY id DESC LIMIT 
 	}
 	if err := rows.Err(); err != nil {
 		return nil, 0, err
+	}
+	keyIDs := make([]string, 0, len(events))
+	for _, event := range events {
+		keyIDs = append(keyIDs, event.KeyID)
+	}
+	keyNames, err := apiKeyNames(db, keyIDs)
+	if err != nil {
+		return nil, 0, err
+	}
+	for index := range events {
+		events[index].KeyName = keyNames[events[index].KeyID]
 	}
 	return page(events, filter.Limit, func(event RecordedRequest) int64 { return event.ID })
 }

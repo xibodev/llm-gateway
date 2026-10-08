@@ -149,8 +149,10 @@ type UsageGroup struct {
 	ProjectID   string `json:"project_id,omitempty"`
 	PrincipalID string `json:"principal_id,omitempty"`
 	KeyID       string `json:"key_id,omitempty"`
-	Provider    string `json:"provider,omitempty"`
-	Model       string `json:"model,omitempty"`
+	// KeyName names the key of a key group, a deleted one included.
+	KeyName  string `json:"key_name,omitempty"`
+	Provider string `json:"provider,omitempty"`
+	Model    string `json:"model,omitempty"`
 	UsageTotals
 }
 
@@ -230,6 +232,17 @@ FROM usage_events `+where+` GROUP BY `+group.column+` ORDER BY COUNT(*) DESC LIM
 		}
 		rows.Close()
 		groups[group.name] = items
+	}
+	keyIDs := make([]string, 0, len(groups["key"]))
+	for _, item := range groups["key"] {
+		keyIDs = append(keyIDs, item.KeyID)
+	}
+	keyNames, err := apiKeyNames(db, keyIDs)
+	if err != nil {
+		return nil, err
+	}
+	for index := range groups["key"] {
+		groups["key"][index].KeyName = keyNames[groups["key"][index].KeyID]
 	}
 	// Ensure the result can always be serialized before returning it to the API.
 	if _, err := json.Marshal(groups); err != nil {

@@ -555,6 +555,13 @@ WHERE status!='revoked'
   );
 `,
 	},
+	{
+		// A deleted key is a revoked or expired one kept as a tombstone: no
+		// listing or lookup shows it, but usage and audit history still name
+		// it, and their rows still reference it.
+		version: 22,
+		sql:     `ALTER TABLE api_keys ADD COLUMN deleted_at INTEGER;`,
+	},
 }
 
 func SchemaVersion() int { return len(migrations) }

@@ -81,7 +81,7 @@ export function Requests({ data, mode }: { data: JSONRecord; mode: ConsoleMode }
                 <td>{stringValue(row.endpoint)}</td>
                 <td class="technical">{modelSummary(row)}</td>
                 <td>{stringValue(row.provider, "—")}</td>
-                <td>{keyID ? keyNames.get(keyID) ?? keyID : projectID ? projectNames.get(projectID) ?? projectID : "Administrator or local"}</td>
+                <td>{keyID ? stringValue(row.key_name) || (keyNames.get(keyID) ?? keyID) : projectID ? projectNames.get(projectID) ?? projectID : "Administrator or local"}</td>
                 <td><span class={`status-pill status-pill--${statusTone(status)}`}>{status}{stringValue(row.error_code) ? ` ${stringValue(row.error_code)}` : ""}</span></td>
                 <td>{numberValue(row.latency_ms).toLocaleString()} ms</td>
                 <td>{tokenSummary(row)}</td>
