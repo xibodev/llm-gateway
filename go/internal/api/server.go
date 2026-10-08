@@ -262,6 +262,7 @@ func (s *server) handler() http.Handler {
 	mux.HandleFunc("DELETE /admin/api/alerts/{id}", handleDeleteAlert)
 	mux.HandleFunc("POST /admin/api/alerts/evaluate", handleEvaluateAlerts)
 	mux.HandleFunc("GET /admin/api/outbox", handleListOutbox)
+	mux.HandleFunc("GET /admin/api/deliveries", handleListDeliveries)
 	mux.HandleFunc("POST /admin/api/outbox/claim", handleClaimOutbox)
 	mux.HandleFunc("POST /admin/api/outbox/{id}/delivered", handleOutboxDelivered)
 	mux.HandleFunc("POST /admin/api/outbox/{id}/failed", handleOutboxFailed)

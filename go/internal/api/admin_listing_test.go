@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"llmgw/internal/iam"
 )
@@ -80,4 +81,53 @@ func TestAdminAuditPagesItsEvents(t *testing.T) {
 func jsonNumber(value int64) string {
 	raw, _ := json.Marshal(value)
 	return string(raw)
+}
+
+// The deliveries listing shows the administrator every alert delivery,
+// filtered by status and paged, and refuses filters it cannot apply.
+func TestAdminDeliveriesListAlertDeliveries(t *testing.T) {
+	handler, _ := observedFixture(t)
+	db, err := iam.DB()
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now().Unix()
+	for _, row := range []struct {
+		kind, status string
+		attempts     int
+	}{
+		{"quota_warning", "delivered", 1},
+		{"key_expiring", "failed", 2},
+		{"quota_exhausted", "pending", 0},
+	} {
+		if _, err := db.Exec(`INSERT INTO outbox_events(ts,kind,payload_json,status,attempts,available_at,last_error)
+			VALUES(?,?,'{}',?,?,?,?)`, now, row.kind, row.status, row.attempts, now, map[bool]any{true: "webhook answered 503", false: nil}[row.status == "failed"]); err != nil {
+			t.Fatal(err)
+		}
+	}
+	var listing struct {
+		Deliveries []iam.OutboxDelivery `json:"deliveries"`
+		Next       int64                `json:"next_before_id"`
+	}
+	w := adminGet(handler, "/admin/api/deliveries?status=failed")
+	if w.Code != http.StatusOK || json.Unmarshal(w.Body.Bytes(), &listing) != nil || len(listing.Deliveries) != 1 ||
+		listing.Deliveries[0].Kind != "key_expiring" || listing.Deliveries[0].Attempts != 2 ||
+		listing.Deliveries[0].LastError != "webhook answered 503" || listing.Deliveries[0].MaxAttempts == 0 {
+		t.Fatalf("failed deliveries: status=%d body=%s", w.Code, w.Body.String())
+	}
+	w = adminGet(handler, "/admin/api/deliveries?limit=2")
+	if w.Code != http.StatusOK || json.Unmarshal(w.Body.Bytes(), &listing) != nil || len(listing.Deliveries) != 2 ||
+		listing.Deliveries[0].Kind != "quota_exhausted" || listing.Next == 0 {
+		t.Fatalf("first page: status=%d body=%s", w.Code, w.Body.String())
+	}
+	for _, query := range []string{"status=stuck", "from=20&to=10", "before_id=-1"} {
+		if w := adminGet(handler, "/admin/api/deliveries?"+query); w.Code != http.StatusBadRequest {
+			t.Fatalf("%s: status=%d body=%s", query, w.Code, w.Body.String())
+		}
+	}
+	unauthenticated := httptest.NewRecorder()
+	handler.ServeHTTP(unauthenticated, httptest.NewRequest(http.MethodGet, "/admin/api/deliveries", nil))
+	if unauthenticated.Code != http.StatusUnauthorized {
+		t.Fatalf("without a key: status=%d", unauthenticated.Code)
+	}
 }

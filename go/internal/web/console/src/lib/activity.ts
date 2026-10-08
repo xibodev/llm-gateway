@@ -64,6 +64,51 @@ export function statusTone(code: number): "ready" | "attention" {
   return code > 0 && code < 400 ? "ready" : "attention";
 }
 
+// Filters of the alert delivery listing; "all" selects everything.
+export type DeliveryFilter = { status: string; kind: string };
+
+export const emptyDeliveryFilter: DeliveryFilter = { status: "all", kind: "all" };
+
+// deliveriesPath is the delivery listing for filter, after the delivery
+// beforeID when a later page is wanted.
+export function deliveriesPath(filter: DeliveryFilter, beforeID = 0, limit = activityPageSize): string {
+  const query = new URLSearchParams({ limit: String(limit) });
+  setIf(query, "status", filter.status);
+  setIf(query, "kind", filter.kind);
+  if (beforeID > 0) query.set("before_id", String(beforeID));
+  return `/deliveries?${query.toString()}`;
+}
+
+// deliveryKinds names the kinds of alert an outbox delivers.
+export const deliveryKinds: [string, string][] = [
+  ["quota_warning", "Quota warning"],
+  ["quota_exhausted", "Quota exhausted"],
+  ["key_expiring", "Key expiring"],
+];
+
+export function deliveryKindLabel(kind: string): string {
+  return deliveryKinds.find(([value]) => value === kind)?.[1] ?? kind.replaceAll("_", " ");
+}
+
+// deliveryState says where a delivery stands: delivered, given up after
+// every attempt, failed and waiting to retry, held by a worker, or waiting.
+export function deliveryState(delivery: JSONRecord, now = Date.now()): { label: string; tone: "ready" | "attention" | "muted" } {
+  const status = stringValue(delivery.status);
+  if (status === "delivered") return { label: "delivered", tone: "ready" };
+  if (delivery.exhausted === true) return { label: "exhausted", tone: "attention" };
+  if (status === "failed") return { label: "retrying", tone: "attention" };
+  if (numberValue(delivery.lease_until) * 1000 > now) return { label: "claimed", tone: "muted" };
+  return { label: "pending", tone: "muted" };
+}
+
+// nextAttemptLabel says when a worker may next claim a delivery: due now,
+// at a later time, or never for one delivered or exhausted.
+export function nextAttemptLabel(delivery: JSONRecord, now = Date.now()): string {
+  const next = numberValue(delivery.next_attempt_at);
+  if (next <= 0) return "—";
+  return next * 1000 <= now ? "Due now" : new Date(next * 1000).toLocaleString();
+}
+
 // auditTone colours an audit result: a completed action, or anything else.
 export function auditTone(result: string): "ready" | "attention" {
   return result === "" || result === "success" ? "ready" : "attention";

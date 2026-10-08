@@ -320,6 +320,9 @@ tbody tr:last-child td { border-bottom: 0; }
 .inline-select { display: inline-flex; align-items: center; gap: 8px; color: #5c6976; font-size: 0.7rem; font-weight: 650; }
 .inline-select select { min-height: 34px; padding: 4px 8px; border: 1px solid #cfd7e0; background: #fff; color: #2e3945; border-radius: 5px; }
 .activity-more { display: flex; justify-content: center; padding-top: 12px; }
+/* A delivery's last error can be long; the cell shows its start and the
+   title the whole message. */
+.delivery-error { max-width: 22rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 td details pre { max-width: 34rem; margin: 6px 0 0; white-space: pre-wrap; font-size: 0.7rem; }
 .alert-editor { display: grid; gap: 15px; }
 .alert-editor > header { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }

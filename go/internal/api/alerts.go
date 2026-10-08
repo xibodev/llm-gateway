@@ -1,6 +1,7 @@
 package api
 
 import (
+	"errors"
 	"net/http"
 	"strconv"
 	"strings"
@@ -99,6 +100,38 @@ func handleListOutbox(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, 200, map[string]any{"events": events})
+}
+
+// GET /admin/api/deliveries lists alert deliveries, newest first, with each
+// one's status, attempts, next attempt and last error, filtered by status,
+// kind, project, principal and time and paged with before_id. Unlike the
+// outbox listing a delivery worker reads, it covers every event.
+func handleListDeliveries(w http.ResponseWriter, r *http.Request) {
+	if !adminAuthed(w, r) {
+		return
+	}
+	query := r.URL.Query()
+	filter := iam.OutboxFilter{
+		Kind: query.Get("kind"), Status: query.Get("status"),
+		ProjectID: query.Get("project_id"), PrincipalID: query.Get("principal_id"),
+	}
+	filter.Limit, _ = strconv.Atoi(query.Get("limit"))
+	var err error
+	if filter.From, filter.To, filter.BeforeID, err = listingBounds(query); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	deliveries, next, err := iam.ListOutboxDeliveries(filter)
+	var invalid *iam.InvalidFilterError
+	switch {
+	case errors.As(err, &invalid):
+		writeError(w, http.StatusBadRequest, invalid.Message)
+		return
+	case err != nil:
+		writeError(w, 500, "Outbox unavailable.")
+		return
+	}
+	writeJSON(w, 200, map[string]any{"deliveries": deliveries, "next_before_id": next})
 }
 
 type claimOutboxBody struct {

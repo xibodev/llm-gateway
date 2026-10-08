@@ -249,6 +249,13 @@ others are refused with `400`:
 An outbox event whose delivery has failed 10 times is no longer claimed; it
 stays in the outbox listing with its last error.
 
+The console's **Alerts** page lists deliveries, and so does
+`GET /admin/api/deliveries`: every outbox event, newest first, with its status,
+its attempts out of the 10 allowed, when a worker may next claim it, and its
+last error. It filters by `status` (`pending`, `failed` with attempts left,
+`exhausted` or `delivered`), `kind`, `project_id`, `principal_id`, `from` and
+`to`, and pages with `before_id`.
+
 ## Console and portal
 
 `/admin` redirects to the embedded `/console` administration SPA. `/portal`

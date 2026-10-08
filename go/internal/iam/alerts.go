@@ -341,6 +341,114 @@ FROM outbox_events WHERE id=?`, id).Scan(
 	return event, err
 }
 
+// OutboxDelivery is an outbox event as the deliveries listing shows it: the
+// event, the attempts its delivery may make, and when the next one is due.
+type OutboxDelivery struct {
+	OutboxEvent
+	// MaxAttempts is how many delivery attempts an event may make.
+	MaxAttempts int `json:"max_attempts"`
+	// Exhausted reports an undelivered event that used every attempt, which
+	// no worker claims again.
+	Exhausted bool `json:"exhausted,omitempty"`
+	// NextAttemptAt is the earliest a worker may claim the event: once it is
+	// available and any lease on it ended. It is 0 for an event delivered or
+	// exhausted.
+	NextAttemptAt int64 `json:"next_attempt_at,omitempty"`
+}
+
+// OutboxFilter selects outbox events, newest first: those created at or
+// after From and before To when they are set, of the kind, project and
+// principal it names, of a Status of pending, failed (with attempts left),
+// exhausted or delivered, and older than BeforeID, the cursor of the next
+// page. Limit is 1 to 200, 50 when unset.
+type OutboxFilter struct {
+	From, To, BeforeID     int64
+	Kind, Status           string
+	ProjectID, PrincipalID string
+	Limit                  int
+}
+
+// ListOutboxDeliveries returns the outbox events filter selects and the
+// cursor of the next page, or 0 when no older one matches.
+func ListOutboxDeliveries(filter OutboxFilter) ([]OutboxDelivery, int64, error) {
+	if filter.Limit <= 0 || filter.Limit > 200 {
+		filter.Limit = 50
+	}
+	where := []string{"1=1"}
+	var args []any
+	add := func(clause string, values ...any) {
+		where = append(where, clause)
+		args = append(args, values...)
+	}
+	if filter.From > 0 {
+		add("ts >= ?", filter.From)
+	}
+	if filter.To > 0 {
+		add("ts < ?", filter.To)
+	}
+	if filter.BeforeID > 0 {
+		add("id < ?", filter.BeforeID)
+	}
+	for _, item := range []struct{ column, value string }{
+		{"kind", filter.Kind}, {"project_id", filter.ProjectID}, {"principal_id", filter.PrincipalID},
+	} {
+		if value := strings.TrimSpace(item.value); value != "" {
+			add(item.column+"=?", value)
+		}
+	}
+	switch status := strings.TrimSpace(filter.Status); status {
+	case "":
+	case "pending", "delivered":
+		add("status=?", status)
+	case "failed":
+		add("status='failed' AND attempts<?", maxOutboxAttempts)
+	case "exhausted":
+		add("status!='delivered' AND attempts>=?", maxOutboxAttempts)
+	default:
+		return nil, 0, &InvalidFilterError{Message: "status must be pending, failed, exhausted or delivered"}
+	}
+	db, err := DB()
+	if err != nil {
+		return nil, 0, err
+	}
+	rows, err := db.Query(`
+SELECT id,ts,kind,COALESCE(project_id,''),COALESCE(principal_id,''),
+       payload_json,status,attempts,available_at,COALESCE(delivered_at,0),
+       COALESCE(last_error,''),COALESCE(claimed_by,''),COALESCE(lease_until,0)
+FROM outbox_events WHERE `+strings.Join(where, " AND ")+` ORDER BY id DESC LIMIT ?`,
+		append(args, filter.Limit+1)...)
+	if err != nil {
+		return nil, 0, err
+	}
+	defer rows.Close()
+	deliveries := []OutboxDelivery{}
+	for rows.Next() {
+		var delivery OutboxDelivery
+		var payload string
+		event := &delivery.OutboxEvent
+		if err := rows.Scan(
+			&event.ID, &event.Timestamp, &event.Kind, &event.ProjectID,
+			&event.PrincipalID, &payload, &event.Status, &event.Attempts,
+			&event.AvailableAt, &event.DeliveredAt, &event.LastError,
+			&event.ClaimedBy, &event.LeaseUntil,
+		); err != nil {
+			return nil, 0, err
+		}
+		_ = json.Unmarshal([]byte(payload), &event.Payload)
+		event.LastError = sanitizeOutboxError(event.LastError)
+		delivery.MaxAttempts = maxOutboxAttempts
+		delivery.Exhausted = event.Status != "delivered" && event.Attempts >= maxOutboxAttempts
+		if event.Status != "delivered" && !delivery.Exhausted {
+			delivery.NextAttemptAt = max(event.AvailableAt, event.LeaseUntil)
+		}
+		deliveries = append(deliveries, delivery)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, 0, err
+	}
+	return page(deliveries, filter.Limit, func(delivery OutboxDelivery) int64 { return delivery.ID })
+}
+
 func evaluateUsageAlertsTx(tx *sql.Tx, event UsageEvent) error {
 	if event.KeyID == "" || event.IsStub {
 		return nil

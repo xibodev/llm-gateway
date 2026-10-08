@@ -1,4 +1,4 @@
-import { useEffect, useState } from "preact/hooks";
+import { useEffect, useRef, useState } from "preact/hooks";
 import {
   BellRing,
   CirclePlay,
@@ -8,6 +8,7 @@ import {
   X,
 } from "lucide-preact";
 import { getJSON, sendJSON, type JSONRecord } from "../lib/api";
+import { deliveriesPath, deliveryKindLabel, deliveryKinds, deliveryState, emptyDeliveryFilter, nextAttemptLabel, nextCursor, type DeliveryFilter } from "../lib/activity";
 import { asList, asRecord, numberValue, stringValue } from "../lib/records";
 import {
   EmptyState,
@@ -47,6 +48,14 @@ export function Alerts({ data }: { data: JSONRecord }) {
   const [period, setPeriod] = useState("month");
   const [projectID, setProjectID] = useState("");
   const [principalID, setPrincipalID] = useState("");
+  const [deliveryDraft, setDeliveryDraft] = useState<DeliveryFilter>(emptyDeliveryFilter);
+  const [deliveryFilter, setDeliveryFilter] = useState<DeliveryFilter>(emptyDeliveryFilter);
+  const [deliveries, setDeliveries] = useState<JSONRecord[] | null>(null);
+  const [deliveryCursor, setDeliveryCursor] = useState(0);
+  const [deliveryError, setDeliveryError] = useState("");
+  const [deliveryBusy, setDeliveryBusy] = useState(false);
+  // A page that arrives after a newer search must not mix into its rows.
+  const deliverySearch = useRef(0);
 
   const load = async () => {
     try {
@@ -58,7 +67,25 @@ export function Alerts({ data }: { data: JSONRecord }) {
     }
   };
 
-  useEffect(() => { void load(); }, []);
+  const loadDeliveries = async (filter: DeliveryFilter, beforeID = 0) => {
+    const search = beforeID ? deliverySearch.current : ++deliverySearch.current;
+    setDeliveryBusy(true);
+    setDeliveryError("");
+    try {
+      const listing = await getJSON<JSONRecord>("admin", deliveriesPath(filter, beforeID));
+      if (search !== deliverySearch.current) return;
+      const page = asList(listing.deliveries).map(asRecord);
+      setDeliveries((current) => beforeID && current ? [...current, ...page] : page);
+      setDeliveryCursor(nextCursor(listing));
+      setDeliveryFilter(filter);
+    } catch (cause) {
+      if (search === deliverySearch.current) setDeliveryError(cause instanceof Error ? cause.message : "Deliveries could not load.");
+    } finally {
+      if (search === deliverySearch.current) setDeliveryBusy(false);
+    }
+  };
+
+  useEffect(() => { void load(); void loadDeliveries(emptyDeliveryFilter); }, []);
 
   const create = async (event: Event) => {
     event.preventDefault();
@@ -158,7 +185,7 @@ export function Alerts({ data }: { data: JSONRecord }) {
             <button class="button button--secondary" type="button" disabled={busy === "evaluate"} onClick={() => void evaluate()}>
               <CirclePlay size={16} /> Evaluate now
             </button>
-            <button class="button button--secondary" type="button" onClick={() => void load()}>
+            <button class="button button--secondary" type="button" onClick={() => { void load(); void loadDeliveries(deliveryFilter); }}>
               <RefreshCw size={16} /> Refresh
             </button>
             <button class="button button--primary" type="button" onClick={() => { setCreating(true); setError(""); }}>
@@ -209,6 +236,41 @@ export function Alerts({ data }: { data: JSONRecord }) {
           </table>
         </section>
       ) : null}
+      <section class="surface table-wrap">
+        <div class="section-heading"><div><p class="eyebrow">Outbox</p><h2>Deliveries</h2></div><span>Delivered by an external worker, which claims each notification and retries a failure up to its attempt limit.</span></div>
+        <form class="usage-filter activity-filter" onSubmit={(event) => { event.preventDefault(); void loadDeliveries(deliveryDraft); }}>
+          <label>Status<select value={deliveryDraft.status} onInput={(event) => setDeliveryDraft((current) => ({ ...current, status: (event.currentTarget as HTMLSelectElement).value }))}><option value="all">All statuses</option><option value="pending">Pending</option><option value="failed">Failed, retrying</option><option value="exhausted">Failed, out of attempts</option><option value="delivered">Delivered</option></select></label>
+          <label>Kind<select value={deliveryDraft.kind} onInput={(event) => setDeliveryDraft((current) => ({ ...current, kind: (event.currentTarget as HTMLSelectElement).value }))}><option value="all">All kinds</option>{deliveryKinds.map(([value, label]) => <option value={value} key={value}>{label}</option>)}</select></label>
+          <button class="button button--primary" type="submit" disabled={deliveryBusy}>Search</button>
+        </form>
+        {deliveryError ? <ErrorState title="Deliveries are unavailable" detail={deliveryError} />
+          : deliveries === null ? <LoadingState title="Loading deliveries" />
+          : deliveries.length === 0 ? <EmptyState title="No deliveries" detail="No alert has been queued for delivery with these filters." />
+          : <>
+            <table>
+              <thead><tr><th>Queued</th><th>Kind</th><th>Scope</th><th>Status</th><th>Attempts</th><th>Next attempt</th><th>Delivered</th><th>Last error</th></tr></thead>
+              <tbody>{deliveries.map((delivery) => {
+                const state = deliveryState(delivery);
+                const project = stringValue(delivery.project_id);
+                const principal = stringValue(delivery.principal_id);
+                const scope = [project ? projectNames.get(project) ?? project : "", principal ? principalNames.get(principal) ?? principal : ""].filter(Boolean).join(" · ") || "—";
+                const deliveredAt = numberValue(delivery.delivered_at);
+                const lastError = stringValue(delivery.last_error);
+                return <tr key={String(delivery.id)}>
+                  <td class="technical">{new Date(numberValue(delivery.ts) * 1000).toLocaleString()}</td>
+                  <td>{deliveryKindLabel(stringValue(delivery.kind))}</td>
+                  <td>{scope}</td>
+                  <td><span class={`status-pill status-pill--${state.tone}`}>{state.label}</span></td>
+                  <td>{numberValue(delivery.attempts)} of {numberValue(delivery.max_attempts)}</td>
+                  <td class="technical">{nextAttemptLabel(delivery)}</td>
+                  <td class="technical">{deliveredAt ? new Date(deliveredAt * 1000).toLocaleString() : "—"}</td>
+                  <td class="delivery-error" title={lastError || undefined}>{lastError || "—"}</td>
+                </tr>;
+              })}</tbody>
+            </table>
+            {deliveryCursor ? <footer class="activity-more"><button class="button button--secondary" type="button" disabled={deliveryBusy} onClick={() => void loadDeliveries(deliveryFilter, deliveryCursor)}>Load older deliveries</button></footer> : null}
+          </>}
+      </section>
     </div>
   );
 }
