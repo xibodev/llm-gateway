@@ -44,7 +44,7 @@ func TestKeyListingPagesKeys(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	for _, key := range []struct{ owner, name string }{{user, "first"}, {other.ID, "second"}, {user, "third"}} {
+	for _, key := range []struct{ owner, name string }{{user, "first key"}, {other.ID, "second key"}, {user, "third key"}} {
 		if _, err := iam.IssueKey(iam.KeyCreate{ProjectID: project.ID, PrincipalID: key.owner, Name: key.name}); err != nil {
 			t.Fatal(err)
 		}
@@ -73,14 +73,16 @@ func TestKeyListingPagesKeys(t *testing.T) {
 		return page
 	}
 	page := read(adminGet(handler, "/admin/api/keys?limit=2"))
-	if got := names(page); len(got) != 2 || got[0] != "third" || got[1] != "second" || page.Total != 3 {
+	if got := names(page); len(got) != 2 || got[0] != "third key" || got[1] != "second key" || page.Total != 3 {
 		t.Fatalf("the first page, newest first: %v of %d", got, page.Total)
 	}
 	if page.Keys[0].RPM == nil || page.Keys[0].Policy != nil {
 		t.Fatalf("an administrator's key row is flat: %+v", page.Keys[0])
 	}
-	page = read(adminGet(handler, "/admin/api/keys?sort=name&order=asc&offset=1&q=IR"))
-	if got := names(page); len(got) != 1 || got[0] != "third" || page.Total != 2 {
+	// A key's prefix and ID are random, so the search term holds a space,
+	// which neither ever does.
+	page = read(adminGet(handler, "/admin/api/keys?sort=name&order=asc&offset=1&q=D+K"))
+	if got := names(page); len(got) != 1 || got[0] != "third key" || page.Total != 2 {
 		t.Fatalf("searched by name, second of two: %v of %d", got, page.Total)
 	}
 	for _, query := range []string{"status=lost", "sort=secret", "order=up", "limit=many", "offset=-1"} {
