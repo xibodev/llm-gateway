@@ -87,6 +87,8 @@ func handleUserUsage(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	// The filter always names the signed-in user, so every figure below is
+	// theirs, whatever key or project the request names.
 	filter, err := usageFilterFromRequest(r, principal.ID)
 	if err != nil {
 		writeError(w, 400, err.Error())
@@ -103,6 +105,18 @@ func handleUserUsage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	stats["series"] = series
+	controlPlane, err := iam.UsageStatsFor(filter)
+	if err != nil {
+		writeError(w, 500, "Usage store unavailable.")
+		return
+	}
+	stats["control_plane"] = controlPlane
+	usedProviders, err := iam.UsageProviders(filter)
+	if err != nil {
+		writeError(w, 500, "Usage store unavailable.")
+		return
+	}
+	stats["providers"] = usedProviders
 	quotaAdvisories, err := providerQuotaAdvisories(principal.ID)
 	if err != nil {
 		writeError(w, 500, "Provider quota store unavailable.")

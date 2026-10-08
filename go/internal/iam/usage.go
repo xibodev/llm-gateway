@@ -238,6 +238,33 @@ FROM usage_events `+where+` GROUP BY `+group.column+` ORDER BY COUNT(*) DESC LIM
 	return map[string]any{"totals": total, "groups": groups}, nil
 }
 
+// UsageProviders returns, in name order, the providers that served the usage
+// filter selects, whatever provider it names, so a report can offer each of
+// them as a filter.
+func UsageProviders(filter UsageTimeSeriesFilter) ([]string, error) {
+	db, err := DB()
+	if err != nil {
+		return nil, err
+	}
+	filter.Provider = ""
+	where, args := usageWhere(filter)
+	rows, err := db.Query(`SELECT DISTINCT provider FROM usage_events `+where+
+		` AND COALESCE(provider,'')<>'' ORDER BY provider LIMIT 500`, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	providers := []string{}
+	for rows.Next() {
+		var provider string
+		if err := rows.Scan(&provider); err != nil {
+			return nil, err
+		}
+		providers = append(providers, provider)
+	}
+	return providers, rows.Err()
+}
+
 func PrincipalUsageStats(since int64, principalID string) (map[string]any, error) {
 	db, err := DB()
 	if err != nil {

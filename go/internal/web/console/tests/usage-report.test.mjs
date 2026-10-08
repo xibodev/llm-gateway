@@ -123,3 +123,34 @@ test("the usage chart shows the chosen metric and the breakdown names its rows",
   assert.match(text(tree), /ci key/, "a key is named, not shown by ID");
   assert.match(text(tree), /Administrator or local/);
 });
+
+test("the portal filters by the providers the user's usage names and breaks it down", async () => {
+  const requests = [];
+  globalThis.__api = {
+    async getJSON(mode, path) {
+      requests.push([mode, path]);
+      return {
+        series: [], providers: ["alpha", "beta"],
+        control_plane: { groups: { provider: [{ provider: "alpha", requests: 2 }] } },
+      };
+    },
+  };
+  const render = mount(() => UsageQuotas({ data: { keys: [], projects: [] }, mode: "portal" }));
+  render();
+  await settle();
+  let tree = render();
+  const providerSelect = () => find(tree, (node) => node.type === "select" && findAll(node, (option) => option.props?.value === "all" && text(option) === "All providers").length);
+  const options = () => findAll(providerSelect(), (node) => node.type === "option").map((option) => option.props.value);
+  assert.deepEqual(options(), ["all", "alpha", "beta"]);
+  assert.match(text(tree), /alpha/);
+  assert.doesNotMatch(text(tree), /Nothing to break down/);
+
+  providerSelect().props.onInput(input("beta"));
+  tree = render();
+  find(tree, (node) => node.type === "button" && text(node) === "Apply filters").props.onClick();
+  await settle();
+  tree = render();
+  assert.deepEqual(requests.at(-1)[0], "portal");
+  assert.match(requests.at(-1)[1], /provider=beta/);
+  assert.deepEqual(options(), ["all", "alpha", "beta"]);
+});

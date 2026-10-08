@@ -7,7 +7,9 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"reflect"
 	"testing"
+	"time"
 
 	"llmgw/internal/config"
 	"llmgw/internal/iam"
@@ -205,5 +207,89 @@ func TestSSOUserHonorsDisabledAutoProvision(t *testing.T) {
 	}
 	if got := request(); got != http.StatusOK {
 		t.Fatalf("preprovisioned status=%d, want 200", got)
+	}
+}
+
+// The portal's usage report breaks the signed-in user's usage down by
+// provider, model, key and project, and lists every provider that usage
+// names for the filter, whichever one the request names. No other
+// principal's usage shows.
+func TestSSOUserUsageBreaksDownTheirOwnUsage(t *testing.T) {
+	t.Setenv("LLMGW_STATE_DIR", t.TempDir())
+	iam.ResetForTests()
+	t.Cleanup(iam.ResetForTests)
+	if _, err := iam.Initialize(); err != nil {
+		t.Fatal(err)
+	}
+	old := *config.Get()
+	t.Cleanup(func() { config.Update(func(s *config.Settings) { *s = old }) })
+	config.Update(func(s *config.Settings) {
+		s.SSOEnabled, s.SSOSharedSecret, s.SSOAutoProvision = true, "proxy-secret", true
+	})
+	server := httptest.NewServer(NewServer(Runtime{}))
+	defer server.Close()
+	status, me := ssoConnectionRequest(t, server.URL, "usage-user", http.MethodGet, "/user/api/me", nil)
+	if status != http.StatusOK {
+		t.Fatalf("me: %d %+v", status, me)
+	}
+	user := me["principal"].(map[string]any)["id"].(string)
+	other, err := iam.CreatePrincipal("human", "fixture:usage-other", "", "Other")
+	if err != nil {
+		t.Fatal(err)
+	}
+	project, err := iam.CreateProject("usage-project", "Usage Project")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := iam.SetMembership(project.ID, user, "member"); err != nil {
+		t.Fatal(err)
+	}
+	key, err := iam.IssueKey(iam.KeyCreate{ProjectID: project.ID, PrincipalID: user, Name: "usage key"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now().Unix()
+	for _, event := range []iam.UsageEvent{
+		{Timestamp: now - 90, Endpoint: "openai.chat", StatusCode: 200, Provider: "alpha", RoutedModel: "alpha-model", PrincipalID: user, ProjectID: project.ID, KeyID: key.ID},
+		{Timestamp: now - 60, Endpoint: "openai.chat", StatusCode: 502, Provider: "beta", RoutedModel: "beta-model", PrincipalID: user},
+		{Timestamp: now - 30, Endpoint: "openai.chat", StatusCode: 200, Provider: "gamma", RoutedModel: "gamma-model", PrincipalID: other.ID},
+	} {
+		if err := iam.RecordUsageEvent(event); err != nil {
+			t.Fatal(err)
+		}
+	}
+	status, report := ssoConnectionRequest(t, server.URL, "usage-user", http.MethodGet, "/user/api/usage?provider=alpha", nil)
+	if status != http.StatusOK {
+		t.Fatalf("usage: %d %+v", status, report)
+	}
+	values := func(rows any, field string) []string {
+		out := []string{}
+		list, _ := rows.([]any)
+		for _, row := range list {
+			out = append(out, row.(map[string]any)[field].(string))
+		}
+		return out
+	}
+	controlPlane, _ := report["control_plane"].(map[string]any)
+	groups, _ := controlPlane["groups"].(map[string]any)
+	if groups == nil {
+		t.Fatalf("the usage report has no breakdown: %+v", report)
+	}
+	for _, breakdown := range []struct {
+		group, field string
+		want         []string
+	}{
+		{"provider", "provider", []string{"alpha"}},
+		{"model", "model", []string{"alpha-model"}},
+		{"key", "key_id", []string{key.ID}},
+		{"project", "project_id", []string{project.ID}},
+		{"principal", "principal_id", []string{user}},
+	} {
+		if got := values(groups[breakdown.group], breakdown.field); !reflect.DeepEqual(got, breakdown.want) {
+			t.Errorf("%s breakdown = %v, want %v", breakdown.group, got, breakdown.want)
+		}
+	}
+	if got := report["providers"]; !reflect.DeepEqual(got, []any{"alpha", "beta"}) {
+		t.Errorf("providers = %v, want the user's alpha and beta", got)
 	}
 }
