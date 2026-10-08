@@ -361,6 +361,738 @@
     "docs_url": "https://inference-docs.cerebras.ai/api-reference"
   },
   {
+    "id": "deepseek",
+    "label": "DeepSeek",
+    "description": "DeepSeek models through DeepSeek's OpenAI-compatible API.",
+    "categories": [
+      "api-key",
+      "direct"
+    ],
+    "runtime_type": "openai_compatible",
+    "protocol": "openai",
+    "availability": "available",
+    "auth_methods": [
+      "api_key"
+    ],
+    "connection_scope": "system_or_personal",
+    "default_provider_id": "deepseek",
+    "default_base_url": "https://api.deepseek.com",
+    "requires_api_key": true,
+    "supports_api_adaptation": true,
+    "supports_model_discovery": true,
+    "onboarding_fields": [
+      "api_key"
+    ],
+    "risk_level": "green",
+    "docs_url": "https://api-docs.deepseek.com/"
+  },
+  {
+    "id": "moonshot",
+    "aliases": [
+      "kimi"
+    ],
+    "label": "Moonshot AI (Kimi)",
+    "description": "Kimi models through Moonshot AI's international OpenAI-compatible API.",
+    "categories": [
+      "api-key",
+      "direct"
+    ],
+    "runtime_type": "openai_compatible",
+    "protocol": "openai",
+    "availability": "available",
+    "auth_methods": [
+      "api_key"
+    ],
+    "connection_scope": "system_or_personal",
+    "default_provider_id": "moonshot",
+    "default_base_url": "https://api.moonshot.ai/v1",
+    "requires_api_key": true,
+    "supports_api_adaptation": true,
+    "supports_model_discovery": true,
+    "onboarding_fields": [
+      "api_key"
+    ],
+    "risk_level": "green",
+    "docs_url": "https://platform.kimi.ai/docs/api/overview"
+  },
+  {
+    "id": "moonshot_cn",
+    "aliases": [
+      "kimi-cn"
+    ],
+    "label": "Moonshot AI (Kimi), China",
+    "description": "Kimi models through Moonshot AI's OpenAI-compatible API in China, whose keys differ from the international platform's.",
+    "categories": [
+      "api-key",
+      "direct"
+    ],
+    "runtime_type": "openai_compatible",
+    "protocol": "openai",
+    "availability": "available",
+    "auth_methods": [
+      "api_key"
+    ],
+    "connection_scope": "system_or_personal",
+    "default_provider_id": "moonshot-cn",
+    "default_base_url": "https://api.moonshot.cn/v1",
+    "requires_api_key": true,
+    "supports_api_adaptation": true,
+    "supports_model_discovery": true,
+    "onboarding_fields": [
+      "api_key"
+    ],
+    "risk_level": "green",
+    "docs_url": "https://platform.kimi.com/docs/api/overview"
+  },
+  {
+    "id": "zhipu",
+    "aliases": [
+      "bigmodel"
+    ],
+    "label": "Zhipu BigModel",
+    "description": "GLM models through Zhipu's BigModel platform in China, over its OpenAI-compatible API. Model discovery is not offered.",
+    "categories": [
+      "api-key",
+      "direct"
+    ],
+    "runtime_type": "openai_compatible",
+    "protocol": "openai",
+    "availability": "available",
+    "auth_methods": [
+      "api_key"
+    ],
+    "connection_scope": "system_or_personal",
+    "default_provider_id": "zhipu",
+    "default_base_url": "https://open.bigmodel.cn/api/paas/v4",
+    "requires_api_key": true,
+    "supports_api_adaptation": true,
+    "onboarding_fields": [
+      "api_key"
+    ],
+    "risk_level": "green",
+    "docs_url": "https://docs.bigmodel.cn/cn/api/introduction"
+  },
+  {
+    "id": "zai",
+    "aliases": [
+      "z.ai"
+    ],
+    "label": "Z.ai",
+    "description": "GLM models through Z.ai, Zhipu's international platform, over its OpenAI-compatible API. Model discovery is not offered.",
+    "categories": [
+      "api-key",
+      "direct"
+    ],
+    "runtime_type": "openai_compatible",
+    "protocol": "openai",
+    "availability": "available",
+    "auth_methods": [
+      "api_key"
+    ],
+    "connection_scope": "system_or_personal",
+    "default_provider_id": "zai",
+    "default_base_url": "https://api.z.ai/api/paas/v4",
+    "requires_api_key": true,
+    "supports_api_adaptation": true,
+    "onboarding_fields": [
+      "api_key"
+    ],
+    "risk_level": "green",
+    "docs_url": "https://docs.z.ai/api-reference/introduction"
+  },
+  {
+    "id": "dashscope",
+    "aliases": [
+      "qwen",
+      "model-studio"
+    ],
+    "label": "Alibaba Cloud Model Studio (Qwen)",
+    "description": "Qwen and other models through Alibaba Cloud Model Studio's international (Singapore) OpenAI-compatible endpoint. Keys are bound to their region, and model discovery is not offered.",
+    "categories": [
+      "api-key",
+      "cloud"
+    ],
+    "runtime_type": "openai_compatible",
+    "protocol": "openai",
+    "availability": "available",
+    "auth_methods": [
+      "api_key"
+    ],
+    "connection_scope": "system_or_personal",
+    "default_provider_id": "dashscope",
+    "default_base_url": "https://dashscope-intl.aliyuncs.com/compatible-mode/v1",
+    "requires_api_key": true,
+    "supports_api_adaptation": true,
+    "onboarding_fields": [
+      "api_key"
+    ],
+    "risk_level": "green",
+    "docs_url": "https://www.alibabacloud.com/help/en/model-studio/compatibility-of-openai-with-dashscope"
+  },
+  {
+    "id": "dashscope_cn",
+    "aliases": [
+      "qwen-cn",
+      "bailian"
+    ],
+    "label": "Alibaba Cloud Model Studio (Qwen), China",
+    "description": "Qwen and other models through Alibaba Cloud Model Studio's China (Beijing) OpenAI-compatible endpoint. Keys are bound to their region, and model discovery is not offered.",
+    "categories": [
+      "api-key",
+      "cloud"
+    ],
+    "runtime_type": "openai_compatible",
+    "protocol": "openai",
+    "availability": "available",
+    "auth_methods": [
+      "api_key"
+    ],
+    "connection_scope": "system_or_personal",
+    "default_provider_id": "dashscope-cn",
+    "default_base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1",
+    "requires_api_key": true,
+    "supports_api_adaptation": true,
+    "onboarding_fields": [
+      "api_key"
+    ],
+    "risk_level": "green",
+    "docs_url": "https://help.aliyun.com/zh/model-studio/compatibility-of-openai-with-dashscope"
+  },
+  {
+    "id": "dashscope_us",
+    "aliases": [
+      "qwen-us"
+    ],
+    "label": "Alibaba Cloud Model Studio (Qwen), US",
+    "description": "Qwen and other models through Alibaba Cloud Model Studio's US (Virginia) OpenAI-compatible endpoint. Keys are bound to their region, and model discovery is not offered.",
+    "categories": [
+      "api-key",
+      "cloud"
+    ],
+    "runtime_type": "openai_compatible",
+    "protocol": "openai",
+    "availability": "available",
+    "auth_methods": [
+      "api_key"
+    ],
+    "connection_scope": "system_or_personal",
+    "default_provider_id": "dashscope-us",
+    "default_base_url": "https://dashscope-us.aliyuncs.com/compatible-mode/v1",
+    "requires_api_key": true,
+    "supports_api_adaptation": true,
+    "onboarding_fields": [
+      "api_key"
+    ],
+    "risk_level": "green",
+    "docs_url": "https://www.alibabacloud.com/help/en/model-studio/base-url"
+  },
+  {
+    "id": "alibaba_coding_plan",
+    "label": "Alibaba Cloud Coding Plan",
+    "description": "Coding models of an Alibaba Cloud Model Studio Coding Plan subscription, international site, over its OpenAI-compatible endpoint.",
+    "categories": [
+      "coding",
+      "subscription",
+      "api-key"
+    ],
+    "runtime_type": "openai_compatible",
+    "protocol": "openai",
+    "availability": "available",
+    "auth_methods": [
+      "api_key"
+    ],
+    "connection_scope": "personal",
+    "default_provider_id": "alibaba-coding-plan",
+    "default_base_url": "https://coding-intl.dashscope.aliyuncs.com/v1",
+    "requires_api_key": true,
+    "supports_api_adaptation": true,
+    "onboarding_fields": [
+      "api_key"
+    ],
+    "risk_level": "red",
+    "risk_notice": "Alibaba Cloud allows Coding Plan keys only in interactive coding tools, not in application backends or automated scripts, and may suspend a subscription that breaks its terms. Plan keys differ from pay-as-you-go keys.",
+    "docs_url": "https://www.alibabacloud.com/help/en/model-studio/coding-plan"
+  },
+  {
+    "id": "alibaba_coding_plan_anthropic",
+    "label": "Alibaba Cloud Coding Plan (Anthropic API)",
+    "description": "Coding models of an Alibaba Cloud Model Studio Coding Plan subscription, international site, over its Anthropic-compatible endpoint.",
+    "categories": [
+      "coding",
+      "subscription",
+      "api-key"
+    ],
+    "runtime_type": "anthropic",
+    "protocol": "anthropic",
+    "availability": "available",
+    "auth_methods": [
+      "api_key"
+    ],
+    "connection_scope": "personal",
+    "default_provider_id": "alibaba-coding-plan-anthropic",
+    "default_base_url": "https://coding-intl.dashscope.aliyuncs.com/apps/anthropic",
+    "requires_api_key": true,
+    "onboarding_fields": [
+      "api_key"
+    ],
+    "risk_level": "red",
+    "risk_notice": "Alibaba Cloud allows Coding Plan keys only in interactive coding tools, not in application backends or automated scripts, and may suspend a subscription that breaks its terms. Plan keys differ from pay-as-you-go keys.",
+    "docs_url": "https://www.alibabacloud.com/help/en/model-studio/coding-plan"
+  },
+  {
+    "id": "alibaba_coding_plan_cn",
+    "label": "Alibaba Cloud Coding Plan, China",
+    "description": "Coding models of an Alibaba Cloud Model Studio Coding Plan subscription in China, over its OpenAI-compatible endpoint.",
+    "categories": [
+      "coding",
+      "subscription",
+      "api-key"
+    ],
+    "runtime_type": "openai_compatible",
+    "protocol": "openai",
+    "availability": "available",
+    "auth_methods": [
+      "api_key"
+    ],
+    "connection_scope": "personal",
+    "default_provider_id": "alibaba-coding-plan-cn",
+    "default_base_url": "https://coding.dashscope.aliyuncs.com/v1",
+    "requires_api_key": true,
+    "supports_api_adaptation": true,
+    "onboarding_fields": [
+      "api_key"
+    ],
+    "risk_level": "red",
+    "risk_notice": "Alibaba Cloud allows Coding Plan keys only in interactive coding tools, not in application backends or automated scripts, and may suspend a subscription that breaks its terms. Plan keys differ from pay-as-you-go keys.",
+    "docs_url": "https://help.aliyun.com/zh/model-studio/coding-plan"
+  },
+  {
+    "id": "alibaba_coding_plan_cn_anthropic",
+    "label": "Alibaba Cloud Coding Plan, China (Anthropic API)",
+    "description": "Coding models of an Alibaba Cloud Model Studio Coding Plan subscription in China, over its Anthropic-compatible endpoint.",
+    "categories": [
+      "coding",
+      "subscription",
+      "api-key"
+    ],
+    "runtime_type": "anthropic",
+    "protocol": "anthropic",
+    "availability": "available",
+    "auth_methods": [
+      "api_key"
+    ],
+    "connection_scope": "personal",
+    "default_provider_id": "alibaba-coding-plan-cn-anthropic",
+    "default_base_url": "https://coding.dashscope.aliyuncs.com/apps/anthropic",
+    "requires_api_key": true,
+    "onboarding_fields": [
+      "api_key"
+    ],
+    "risk_level": "red",
+    "risk_notice": "Alibaba Cloud allows Coding Plan keys only in interactive coding tools, not in application backends or automated scripts, and may suspend a subscription that breaks its terms. Plan keys differ from pay-as-you-go keys.",
+    "docs_url": "https://help.aliyun.com/zh/model-studio/coding-plan"
+  },
+  {
+    "id": "volcengine_ark",
+    "aliases": [
+      "doubao"
+    ],
+    "label": "Volcengine Ark",
+    "description": "Doubao and other models through Volcengine Ark's OpenAI-compatible API in China. Model discovery is not offered.",
+    "categories": [
+      "api-key",
+      "cloud"
+    ],
+    "runtime_type": "openai_compatible",
+    "protocol": "openai",
+    "availability": "available",
+    "auth_methods": [
+      "api_key"
+    ],
+    "connection_scope": "system_or_personal",
+    "default_provider_id": "volcengine-ark",
+    "default_base_url": "https://ark.cn-beijing.volces.com/api/v3",
+    "requires_api_key": true,
+    "supports_api_adaptation": true,
+    "onboarding_fields": [
+      "api_key"
+    ],
+    "risk_level": "green",
+    "docs_url": "https://www.volcengine.com/docs/82379/1330626"
+  },
+  {
+    "id": "siliconflow",
+    "label": "SiliconFlow",
+    "description": "Open models through SiliconFlow's international OpenAI-compatible API.",
+    "categories": [
+      "aggregator",
+      "api-key"
+    ],
+    "runtime_type": "openai_compatible",
+    "protocol": "openai",
+    "availability": "available",
+    "auth_methods": [
+      "api_key"
+    ],
+    "connection_scope": "system_or_personal",
+    "default_provider_id": "siliconflow",
+    "default_base_url": "https://api.siliconflow.com/v1",
+    "requires_api_key": true,
+    "supports_api_adaptation": true,
+    "supports_model_discovery": true,
+    "onboarding_fields": [
+      "api_key"
+    ],
+    "risk_level": "green",
+    "docs_url": "https://docs.siliconflow.com/en/userguide/quickstart"
+  },
+  {
+    "id": "siliconflow_cn",
+    "label": "SiliconFlow, China",
+    "description": "Open models through SiliconFlow's OpenAI-compatible API in China, whose keys differ from the international site's.",
+    "categories": [
+      "aggregator",
+      "api-key"
+    ],
+    "runtime_type": "openai_compatible",
+    "protocol": "openai",
+    "availability": "available",
+    "auth_methods": [
+      "api_key"
+    ],
+    "connection_scope": "system_or_personal",
+    "default_provider_id": "siliconflow-cn",
+    "default_base_url": "https://api.siliconflow.cn/v1",
+    "requires_api_key": true,
+    "supports_api_adaptation": true,
+    "supports_model_discovery": true,
+    "onboarding_fields": [
+      "api_key"
+    ],
+    "risk_level": "green",
+    "docs_url": "https://docs.siliconflow.cn/docs/userguide/quickstart"
+  },
+  {
+    "id": "nvidia_nim",
+    "aliases": [
+      "nvidia"
+    ],
+    "label": "NVIDIA NIM",
+    "description": "Models of NVIDIA's hosted API catalog through its OpenAI-compatible endpoint.",
+    "categories": [
+      "api-key",
+      "cloud"
+    ],
+    "runtime_type": "openai_compatible",
+    "protocol": "openai",
+    "availability": "available",
+    "auth_methods": [
+      "api_key"
+    ],
+    "connection_scope": "system_or_personal",
+    "default_provider_id": "nvidia-nim",
+    "default_base_url": "https://integrate.api.nvidia.com/v1",
+    "requires_api_key": true,
+    "supports_api_adaptation": true,
+    "supports_model_discovery": true,
+    "onboarding_fields": [
+      "api_key"
+    ],
+    "risk_level": "yellow",
+    "risk_notice": "NVIDIA's hosted API catalog gives developer program members free access for prototyping; check NVIDIA's terms before production use.",
+    "docs_url": "https://docs.api.nvidia.com/nim/reference/llm-apis"
+  },
+  {
+    "id": "venice",
+    "aliases": [
+      "venice.ai"
+    ],
+    "label": "Venice",
+    "description": "Open models through Venice's private, OpenAI-compatible API.",
+    "categories": [
+      "api-key",
+      "direct"
+    ],
+    "runtime_type": "openai_compatible",
+    "protocol": "openai",
+    "availability": "available",
+    "auth_methods": [
+      "api_key"
+    ],
+    "connection_scope": "system_or_personal",
+    "default_provider_id": "venice",
+    "default_base_url": "https://api.venice.ai/api/v1",
+    "requires_api_key": true,
+    "supports_api_adaptation": true,
+    "supports_model_discovery": true,
+    "onboarding_fields": [
+      "api_key"
+    ],
+    "risk_level": "green",
+    "docs_url": "https://docs.venice.ai/"
+  },
+  {
+    "id": "near_ai",
+    "label": "NEAR AI Cloud",
+    "description": "Models served in confidential computing through NEAR AI Cloud's OpenAI-compatible gateway.",
+    "categories": [
+      "api-key",
+      "cloud"
+    ],
+    "runtime_type": "openai_compatible",
+    "protocol": "openai",
+    "availability": "available",
+    "auth_methods": [
+      "api_key"
+    ],
+    "connection_scope": "system_or_personal",
+    "default_provider_id": "near-ai",
+    "default_base_url": "https://cloud-api.near.ai/v1",
+    "requires_api_key": true,
+    "supports_api_adaptation": true,
+    "supports_model_discovery": true,
+    "onboarding_fields": [
+      "api_key"
+    ],
+    "risk_level": "green",
+    "docs_url": "https://docs.near.ai/cloud/quickstart"
+  },
+  {
+    "id": "minimax",
+    "label": "MiniMax",
+    "description": "MiniMax models through MiniMax's international OpenAI-compatible API.",
+    "categories": [
+      "api-key",
+      "direct"
+    ],
+    "runtime_type": "openai_compatible",
+    "protocol": "openai",
+    "availability": "available",
+    "auth_methods": [
+      "api_key"
+    ],
+    "connection_scope": "system_or_personal",
+    "default_provider_id": "minimax",
+    "default_base_url": "https://api.minimax.io/v1",
+    "requires_api_key": true,
+    "supports_api_adaptation": true,
+    "supports_model_discovery": true,
+    "onboarding_fields": [
+      "api_key"
+    ],
+    "risk_level": "green",
+    "docs_url": "https://platform.minimax.io/docs/api-reference/text-openai-api"
+  },
+  {
+    "id": "minimax_cn",
+    "label": "MiniMax, China",
+    "description": "MiniMax models through MiniMax's OpenAI-compatible API in China, whose keys differ from the international platform's.",
+    "categories": [
+      "api-key",
+      "direct"
+    ],
+    "runtime_type": "openai_compatible",
+    "protocol": "openai",
+    "availability": "available",
+    "auth_methods": [
+      "api_key"
+    ],
+    "connection_scope": "system_or_personal",
+    "default_provider_id": "minimax-cn",
+    "default_base_url": "https://api.minimax.cn/v1",
+    "requires_api_key": true,
+    "supports_api_adaptation": true,
+    "supports_model_discovery": true,
+    "onboarding_fields": [
+      "api_key"
+    ],
+    "risk_level": "green",
+    "docs_url": "https://platform.minimaxi.com/docs/api-reference/text-openai-api"
+  },
+  {
+    "id": "longcat",
+    "label": "LongCat",
+    "description": "Meituan's LongCat models through the LongCat API platform's OpenAI-compatible endpoint.",
+    "categories": [
+      "api-key",
+      "direct"
+    ],
+    "runtime_type": "openai_compatible",
+    "protocol": "openai",
+    "availability": "available",
+    "auth_methods": [
+      "api_key"
+    ],
+    "connection_scope": "system_or_personal",
+    "default_provider_id": "longcat",
+    "default_base_url": "https://api.longcat.chat/openai/v1",
+    "requires_api_key": true,
+    "supports_api_adaptation": true,
+    "supports_model_discovery": true,
+    "onboarding_fields": [
+      "api_key"
+    ],
+    "risk_level": "green",
+    "docs_url": "https://longcat.chat/platform/docs/"
+  },
+  {
+    "id": "modelscope",
+    "label": "ModelScope",
+    "description": "Open models through ModelScope's international API-Inference service.",
+    "categories": [
+      "free",
+      "api-key"
+    ],
+    "runtime_type": "openai_compatible",
+    "protocol": "openai",
+    "availability": "available",
+    "auth_methods": [
+      "api_key"
+    ],
+    "connection_scope": "system_or_personal",
+    "default_provider_id": "modelscope",
+    "default_base_url": "https://api-inference.modelscope.ai/v1",
+    "requires_api_key": true,
+    "supports_api_adaptation": true,
+    "supports_model_discovery": true,
+    "onboarding_fields": [
+      "api_key"
+    ],
+    "risk_level": "yellow",
+    "risk_notice": "API-Inference is free for non-commercial use, within per-model rate limits that change with load, and needs a ModelScope account linked to a verified Alibaba Cloud account.",
+    "docs_url": "https://www.modelscope.ai/docs/model-service/API-Inference/intro"
+  },
+  {
+    "id": "modelscope_cn",
+    "label": "ModelScope, China",
+    "description": "Open models through ModelScope's API-Inference service in China, whose access tokens differ from the international site's.",
+    "categories": [
+      "free",
+      "api-key"
+    ],
+    "runtime_type": "openai_compatible",
+    "protocol": "openai",
+    "availability": "available",
+    "auth_methods": [
+      "api_key"
+    ],
+    "connection_scope": "system_or_personal",
+    "default_provider_id": "modelscope-cn",
+    "default_base_url": "https://api-inference.modelscope.cn/v1",
+    "requires_api_key": true,
+    "supports_api_adaptation": true,
+    "supports_model_discovery": true,
+    "onboarding_fields": [
+      "api_key"
+    ],
+    "risk_level": "yellow",
+    "risk_notice": "API-Inference is free for non-commercial use, within per-model rate limits that change with load, and needs a ModelScope account linked to a verified Alibaba Cloud account.",
+    "docs_url": "https://www.modelscope.cn/docs/model-service/API-Inference/intro"
+  },
+  {
+    "id": "novita",
+    "label": "Novita AI",
+    "description": "Open models through Novita AI's OpenAI-compatible API.",
+    "categories": [
+      "aggregator",
+      "api-key"
+    ],
+    "runtime_type": "openai_compatible",
+    "protocol": "openai",
+    "availability": "available",
+    "auth_methods": [
+      "api_key"
+    ],
+    "connection_scope": "system_or_personal",
+    "default_provider_id": "novita",
+    "default_base_url": "https://api.novita.ai/openai/v1",
+    "requires_api_key": true,
+    "supports_api_adaptation": true,
+    "supports_model_discovery": true,
+    "onboarding_fields": [
+      "api_key"
+    ],
+    "risk_level": "green",
+    "docs_url": "https://novita.ai/docs/guides/llm-api"
+  },
+  {
+    "id": "avian",
+    "label": "Avian",
+    "description": "Open models through Avian's OpenAI-compatible inference API.",
+    "categories": [
+      "api-key",
+      "direct"
+    ],
+    "runtime_type": "openai_compatible",
+    "protocol": "openai",
+    "availability": "available",
+    "auth_methods": [
+      "api_key"
+    ],
+    "connection_scope": "system_or_personal",
+    "default_provider_id": "avian",
+    "default_base_url": "https://api.avian.io/v1",
+    "requires_api_key": true,
+    "supports_api_adaptation": true,
+    "supports_model_discovery": true,
+    "onboarding_fields": [
+      "api_key"
+    ],
+    "risk_level": "green",
+    "docs_url": "https://avian.io/docs"
+  },
+  {
+    "id": "vivgrid",
+    "label": "Vivgrid",
+    "description": "The models a Vivgrid project selects server-side, through Vivgrid's OpenAI-compatible API. Model discovery is not offered.",
+    "categories": [
+      "aggregator",
+      "api-key"
+    ],
+    "runtime_type": "openai_compatible",
+    "protocol": "openai",
+    "availability": "available",
+    "auth_methods": [
+      "api_key"
+    ],
+    "connection_scope": "system_or_personal",
+    "default_provider_id": "vivgrid",
+    "default_base_url": "https://api.vivgrid.com/v1",
+    "requires_api_key": true,
+    "supports_api_adaptation": true,
+    "onboarding_fields": [
+      "api_key"
+    ],
+    "risk_level": "green",
+    "docs_url": "https://www.vivgrid.com/docs/quick-start"
+  },
+  {
+    "id": "shengsuanyun",
+    "label": "ShengsuanYun",
+    "description": "Models of many vendors through the ShengsuanYun router's OpenAI-compatible API.",
+    "categories": [
+      "aggregator",
+      "api-key"
+    ],
+    "runtime_type": "openai_compatible",
+    "protocol": "openai",
+    "availability": "available",
+    "auth_methods": [
+      "api_key"
+    ],
+    "connection_scope": "system_or_personal",
+    "default_provider_id": "shengsuanyun",
+    "default_base_url": "https://router.shengsuanyun.com/api/v1",
+    "requires_api_key": true,
+    "supports_api_adaptation": true,
+    "supports_model_discovery": true,
+    "onboarding_fields": [
+      "api_key"
+    ],
+    "risk_level": "green",
+    "docs_url": "https://lean.shengsuanyun.com/apidocs/api/openai-api"
+  },
+  {
     "id": "bedrock",
     "label": "Amazon Bedrock",
     "description": "Amazon Bedrock model access using a bearer API key and AWS region.",
@@ -468,6 +1200,93 @@
     ],
     "risk_level": "green",
     "docs_url": "https://localai.io/features/openai-functions/"
+  },
+  {
+    "id": "litellm",
+    "label": "LiteLLM",
+    "description": "A self-hosted LiteLLM proxy through its OpenAI-compatible endpoint.",
+    "categories": [
+      "local",
+      "api-key",
+      "no-auth"
+    ],
+    "runtime_type": "openai_compatible",
+    "protocol": "openai",
+    "availability": "available",
+    "auth_methods": [
+      "api_key",
+      "none"
+    ],
+    "connection_scope": "system_or_personal",
+    "default_provider_id": "litellm",
+    "default_base_url": "http://127.0.0.1:4000/v1",
+    "supports_api_adaptation": true,
+    "supports_model_discovery": true,
+    "onboarding_fields": [
+      "base_url",
+      "api_key"
+    ],
+    "risk_level": "green",
+    "docs_url": "https://docs.litellm.ai/docs/proxy/quick_start"
+  },
+  {
+    "id": "vllm",
+    "label": "vLLM",
+    "description": "A self-hosted vLLM server through its OpenAI-compatible endpoint.",
+    "categories": [
+      "local",
+      "api-key",
+      "no-auth"
+    ],
+    "runtime_type": "openai_compatible",
+    "protocol": "openai",
+    "availability": "available",
+    "auth_methods": [
+      "api_key",
+      "none"
+    ],
+    "connection_scope": "system_or_personal",
+    "default_provider_id": "vllm",
+    "default_base_url": "http://127.0.0.1:8000/v1",
+    "supports_api_adaptation": true,
+    "supports_model_discovery": true,
+    "onboarding_fields": [
+      "base_url",
+      "api_key"
+    ],
+    "risk_level": "green",
+    "docs_url": "https://docs.vllm.ai/en/latest/serving/online_serving/openai_compatible_server/"
+  },
+  {
+    "id": "lmstudio",
+    "aliases": [
+      "lm-studio"
+    ],
+    "label": "LM Studio",
+    "description": "LM Studio's local server through its OpenAI-compatible endpoint.",
+    "categories": [
+      "local",
+      "api-key",
+      "no-auth"
+    ],
+    "runtime_type": "openai_compatible",
+    "protocol": "openai",
+    "availability": "available",
+    "auth_methods": [
+      "api_key",
+      "none"
+    ],
+    "connection_scope": "system_or_personal",
+    "default_provider_id": "lmstudio",
+    "default_base_url": "http://127.0.0.1:1234/v1",
+    "supports_api_adaptation": true,
+    "supports_model_discovery": true,
+    "onboarding_fields": [
+      "base_url",
+      "api_key"
+    ],
+    "risk_level": "green",
+    "docs_url": "https://lmstudio.ai/docs/developer/openai-compat"
   },
   {
     "id": "edge_tts",
