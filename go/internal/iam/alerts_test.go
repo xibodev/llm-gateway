@@ -293,8 +293,19 @@ func TestAlertRulesAndDeliveriesNameTheirPrincipal(t *testing.T) {
 		}
 	}
 	rules, err := ListAlertRules()
-	if err != nil || len(rules) != 2 || rules[0].PrincipalName != "Alerted Owner" || rules[1].PrincipalName != "" {
+	if err != nil || len(rules) != 2 {
 		t.Fatalf("rules=%+v err=%v", rules, err)
+	}
+	// Rules created in the same second list in the order of their random IDs,
+	// so each is told by its scope.
+	for _, rule := range rules {
+		want := ""
+		if rule.PrincipalID == principal.ID {
+			want = "Alerted Owner"
+		}
+		if rule.PrincipalName != want {
+			t.Fatalf("rule %+v names %q, want %q", rule, rule.PrincipalName, want)
+		}
 	}
 	db, err := DB()
 	if err != nil {
