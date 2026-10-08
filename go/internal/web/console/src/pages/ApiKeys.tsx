@@ -1,10 +1,11 @@
 import { useRef, useState } from "preact/hooks";
-import { Ban, Check, Copy, Eye, EyeOff, KeyRound, Pencil, Plus, Save, Trash2, X } from "lucide-preact";
+import { Ban, Check, Copy, Eye, EyeOff, Gauge, KeyRound, Pencil, Plus, Save, Trash2, X } from "lucide-preact";
 import { sendJSON, type JSONRecord } from "../lib/api";
 import type { ConsoleMode } from "../lib/mode";
 import { asList, asRecord, stringValue } from "../lib/records";
 import { EmptyState, PageHeading } from "../components/PageState";
 import { KeyScopeEditor, keyPolicySummary, keyQuotaLabels } from "../components/KeyScopeEditor";
+import { KeyLimitsDialog } from "../components/LimitUsage";
 import { keyQuotaDraftsFor, keyQuotaFields, keyQuotaPolicyFromDrafts } from "../lib/key-policy";
 import { formatKeyTime, keyExpiryFromInput, keyExpiryInputValue, keyTimes } from "../lib/key-dates";
 import { useDialogFocus } from "../components/useDialogFocus";
@@ -110,6 +111,8 @@ export function ApiKeys({ data, mode, onChanged, initialContext }: {
   const [scope, setScope] = useState<JSONRecord>(initialScope);
   const [quotaDrafts, setQuotaDrafts] = useState<Record<string, string>>(() => keyQuotaDraftsFor({}));
   const [secret, setSecret] = useState("");
+  // The key whose limits are open, and the button that opened them.
+  const [limitsOf, setLimitsOf] = useState<{ key: JSONRecord; opener: HTMLElement | null } | null>(null);
   const [revealed, setRevealed] = useState<Record<string, string>>({});
   const [revealingID, setRevealingID] = useState("");
   const [message, setMessage] = useState("");
@@ -327,7 +330,7 @@ export function ApiKeys({ data, mode, onChanged, initialContext }: {
       <p class="form-help">{mode === "admin" ? "Keys created or updated here are admin-managed. Their owners may reveal or revoke them in the portal, but cannot change policy or status." : "Admin-managed keys can be revealed or revoked here; policy and status changes require an administrator."}</p>
       <p class="form-help">{(creating ? mode === "portal" || selectedOwner?.kind === "human" : editing?.principal_kind === "human") ? "Human keys use the owner's eligible private connections first, with provider-specific fallback to shared or legacy credentials." : "Service keys use eligible shared or legacy credentials, not a human's private subscriptions."} Copilot service access requires an active project binding; Codex OAuth is human-private. Scope does not pin a credential account, and paid fallback may occur.</p>
       <div class="key-editor__limits">{keyQuotaFields.map((field) => <label key={field}>{keyQuotaLabels[field]}<input name={field} inputMode="numeric" value={quotaDrafts[field] ?? "0"} disabled={busy} onInput={(event) => setQuotaDrafts((current) => ({ ...current, [field]: event.currentTarget.value }))} /></label>)}</div>
-      <p class="form-help">Use 0 for no additional key limit. Project access rules and usage ceilings still apply; key settings cannot raise them. These are configured limits, not remaining balances.</p>
+      <p class="form-help">Use 0 for no additional key limit. Project access rules and usage ceilings still apply; key settings cannot raise them. These are configured limits; a key's limits action in the list shows how much of each its current window has used.</p>
       <KeyScopeEditor data={data} policy={{ ...scope, ...keyQuotaPolicyFromDrafts(quotaDrafts).policy }} onChange={setScope} />
       <footer><button class="button button--secondary" type="button" disabled={busy} onClick={() => { setCreating(false); setEditing(null); }}>Cancel</button><button class="button button--primary" type="submit" disabled={busy}>{editing ? <Save size={16} /> : <Plus size={16} />}{busy ? "Saving..." : editing ? "Save key" : "Create key"}</button></footer>
     </form> : null}
@@ -353,11 +356,12 @@ export function ApiKeys({ data, mode, onChanged, initialContext }: {
         <td class="technical">{formatKeyTime(times.created, "—")}</td>
         <td class="technical">{formatKeyTime(times.expires, "Never")}</td>
         <td class="technical">{formatKeyTime(times.lastUsed, "Never")}</td>
-        <td><div class="table-actions"><button class="icon-button" type="button" aria-label={`Edit ${stringValue(key.name)}`} title={locked ? "Only administrators can edit this key" : "Edit key"} disabled={busy || revoked || locked} onClick={() => edit(key)}><Pencil size={15} /></button>{!deletable ? <button class="button button--secondary" type="button" disabled={busy || locked} title={locked ? "Only administrators can change this key's status" : undefined} onClick={() => void update(key, active)}>{active ? "Disable" : "Enable"}</button> : null}{deletable
+        <td><div class="table-actions"><button class="icon-button" type="button" aria-label={`Limits of ${stringValue(key.name)}`} title="Limits and usage" onClick={(event) => setLimitsOf({ key, opener: event.currentTarget })}><Gauge size={15} /></button><button class="icon-button" type="button" aria-label={`Edit ${stringValue(key.name)}`} title={locked ? "Only administrators can edit this key" : "Edit key"} disabled={busy || revoked || locked} onClick={() => edit(key)}><Pencil size={15} /></button>{!deletable ? <button class="button button--secondary" type="button" disabled={busy || locked} title={locked ? "Only administrators can change this key's status" : undefined} onClick={() => void update(key, active)}>{active ? "Disable" : "Enable"}</button> : null}{deletable
           ? <button class="icon-button" type="button" aria-label={`Delete ${stringValue(key.name)}`} title="Delete: remove this key from the list; its usage and audit history keep its name" disabled={busy} onClick={() => void remove([id])}><Trash2 size={15} /></button>
           : <button class="icon-button" type="button" aria-label={`Revoke ${stringValue(key.name)}`} title="Revoke: stop this key for good" disabled={busy} onClick={() => void revoke(key)}><Ban size={15} /></button>}</div></td>
       </tr>;
     })}</tbody></table></section>}
     {secret ? <KeySecret token={secret} onDismiss={() => setSecret("")} returnFocus={createButtonRef.current} /> : null}
+    {limitsOf ? <KeyLimitsDialog mode={mode} apiKey={limitsOf.key} onClose={() => setLimitsOf(null)} returnFocus={limitsOf.opener} /> : null}
   </div>;
 }

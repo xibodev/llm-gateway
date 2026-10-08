@@ -774,3 +774,13 @@ td details pre { max-width: 34rem; margin: 6px 0 0; white-space: pre-wrap; font-
 .playground-progress { display: flex; align-items: center; gap: 8px; margin: 0; color: #68727e; font-size: 0.78rem; }
 :root[data-theme="dark"] .playground-media img, :root[data-theme="dark"] .playground-media video { border-color: #2c323a; }
 :root[data-theme="dark"] .playground-media figcaption, :root[data-theme="dark"] .playground-progress { color: #9aa4b1; }
+/* A limit's usage: a bar of the share its window has used, beside the amounts. */
+.key-limits-dialog { width: min(100%, 780px); }
+.key-limits-dialog .table-wrap { margin-bottom: 12px; }
+.limit-bar { display: block; width: 100%; max-width: 220px; height: 6px; margin-bottom: 6px; overflow: hidden; background: #e8edf2; border-radius: 3px; }
+.limit-bar__fill { display: block; height: 100%; background: #4777b9; }
+.limit-bar__fill--attention { background: #b48a35; }
+.limit-usage--closest td:first-child { font-weight: 650; }
+:root[data-theme="dark"] .limit-bar { background: #2a3038; }
+:root[data-theme="dark"] .limit-bar__fill { background: #6c91c2; }
+:root[data-theme="dark"] .limit-bar__fill--attention { background: #c9a25a; }

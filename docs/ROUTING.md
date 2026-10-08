@@ -127,6 +127,15 @@ each principal, and each service principal within a project. A failing or
 rate-limited credential therefore opens only its own scope's circuit, and
 answers in one scope do not end a failure streak in another.
 
+The console's provider pages show an open circuit with whose requests it
+refuses, its failures in a row and when it admits requests again. In the
+administrator state each provider instance lists its open circuits as
+`open_circuits`, with the `principal_id` and, for a service principal, the
+`project_id` whose requests each refuses; both are empty for callers on the
+gateway's shared credentials. A portal user's view lists only the circuit of
+the user's own requests. Circuits are process-local, so these are the
+answering process's.
+
 Each retry waits a random time between zero and the policy's exponential
 backoff (full jitter), so requests that failed together do not retry together.
 An upstream `Retry-After` lengthens that wait to at most 5 seconds; a target

@@ -268,3 +268,53 @@ func TestErrorsThatNeverReachedTheUpstreamLeaveTheStreak(t *testing.T) {
 		t.Fatalf("err=%v calls=%d, want the configuration error to keep the streak", err, inner.calls)
 	}
 }
+
+// Open circuits are listed with the callers each refuses, its failures and
+// when it admits requests again. A circuit below its threshold, one a success
+// closed and one whose cooldown has passed are not listed, and resetting the
+// provider forgets them all.
+func TestOpenCircuitsNameTheCallersTheyRefuse(t *testing.T) {
+	policy := config.ProviderPolicy{RetryMaxAttempts: 1, CircuitFailureThreshold: 2, CircuitCooldownSeconds: 60}
+	gateway, inner := circuitFixture(t, policy)
+	name := gateway.name
+	scoped := func(scope string) *ResilientProvider {
+		return &ResilientProvider{inner: inner, name: name, scope: scope, policy: policy}
+	}
+	human, service := scoped(name+"@prn_human"), scoped(name+"@prn_service#prj_tools")
+	_ = completeThrough(gateway)
+	if open := OpenCircuits(name, time.Now()); len(open) != 0 {
+		t.Fatalf("a circuit below its threshold is listed: %+v", open)
+	}
+	_ = completeThrough(gateway)
+	for range 2 {
+		_ = completeThrough(human)
+		_ = completeThrough(service)
+	}
+	now := time.Now()
+	open := OpenCircuits(name, now)
+	callers := []string{}
+	for _, circuit := range open {
+		callers = append(callers, circuit.PrincipalID+"#"+circuit.ProjectID)
+		if circuit.Failures != 2 || !circuit.OpenUntil.After(now) || circuit.OpenUntil.After(now.Add(time.Minute)) {
+			t.Fatalf("circuit %+v, want two failures and a minute's cooldown", circuit)
+		}
+	}
+	if strings.Join(callers, ",") != "#,prn_human#,prn_service#prj_tools" {
+		t.Fatalf("open circuits refuse %v", callers)
+	}
+	Current().circuits.record(name, human.scope, policy, nil)
+	if open := OpenCircuits(name, now); len(open) != 2 || open[1].PrincipalID != "prn_service" {
+		t.Fatalf("after a success closed one: %+v", open)
+	}
+	if open := OpenCircuits(name, now.Add(time.Minute+time.Second)); len(open) != 0 {
+		t.Fatalf("circuits past their cooldown are listed: %+v", open)
+	}
+	ResetCircuit(name)
+	circuits := &Current().circuits
+	circuits.mu.Lock()
+	failing := len(circuits.failing[name])
+	circuits.mu.Unlock()
+	if open := OpenCircuits(name, now); len(open) != 0 || failing != 0 {
+		t.Fatalf("after a reset: %+v, %d failing scopes kept", open, failing)
+	}
+}

@@ -48,6 +48,19 @@ func (l *callerRateLimiter) admit(caller string, limit int) (time.Duration, bool
 	return 0, true
 }
 
+// used reports how many requests caller has started in the current minute
+// on this process, and when that minute ends.
+func (l *callerRateLimiter) used(caller string) (int, time.Time) {
+	minute := l.now().Unix() / 60 * 60
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	count := 0
+	if minute == l.minute {
+		count = l.counts[caller]
+	}
+	return count, time.Unix(minute+60, 0).UTC()
+}
+
 // rateLimitCaller names what a request counts against: its gateway-issued
 // key, or for a caller without one, the caller the request was attributed
 // to: an external key, the static administrator key or local mode.

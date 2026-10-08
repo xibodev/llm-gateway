@@ -104,7 +104,7 @@ func TestAuthorizeKeyPolicy_LocalUnrestricted(t *testing.T) {
 	if st != 0 || len(ft) != 1 {
 		t.Fatalf("local principal must be unrestricted, got status=%d", st)
 	}
-	if st, _, _ := admitKeyPolicy(p, time.Now()); st != 0 {
+	if st, _, _, _ := admitKeyPolicy(p, time.Now()); st != 0 {
 		t.Fatalf("local principal must be unmetered, got status=%d", st)
 	}
 }

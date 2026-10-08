@@ -32,6 +32,7 @@ type configuredProviderSnapshot struct {
 	authentication     string
 	catalogEvidence    string
 	completionEvidence string
+	openCircuits       []providers.OpenCircuit
 }
 
 // Check history proves one model in one credential scope, never entitlement to
@@ -299,6 +300,7 @@ func providerStatusSnapshots(
 	if err != nil {
 		return nil, err
 	}
+	now := time.Now()
 
 	configured := make([]configuredProviderSnapshot, 0, len(settings.Providers))
 	byRegistry := map[string][]configuredProviderSnapshot{}
@@ -398,6 +400,7 @@ func providerStatusSnapshots(
 			configurationIssue: configurationIssue, readiness: readiness,
 			authentication: authentication, catalogEvidence: catalogEvidence,
 			completionEvidence: completionEvidence,
+			openCircuits:       visibleOpenCircuits(providerID, checkScope, now),
 		}
 		configured = append(configured, snapshot)
 		if registryID != "" {
@@ -454,7 +457,7 @@ func providerStatusSnapshots(
 				configurationIssues = append(configurationIssues, match.configurationIssue)
 			}
 			instanceStatusCounts[match.status]++
-			instances = append(instances, providerSnapshotRow(map[string]any{
+			instances = append(instances, withOpenCircuits(providerSnapshotRow(map[string]any{
 				"id": match.id, "status": match.status,
 				"model_count": match.modelCount, "connection_count": match.connectionCount,
 				"catalog_state": match.catalogState, "catalog_refreshed": match.catalogRefresh,
@@ -463,7 +466,7 @@ func providerStatusSnapshots(
 				"authentication_state": match.authentication,
 				"catalog_evidence":     match.catalogEvidence,
 				"completion_evidence":  match.completionEvidence,
-			}, match.lastCheck, match.lastVerify))
+			}, match.lastCheck, match.lastVerify), match.openCircuits))
 		}
 		snapshots = append(snapshots, providerSnapshotRow(map[string]any{
 			"id": entry.ID, "label": entry.Label, "description": entry.Description,
@@ -491,7 +494,7 @@ func providerStatusSnapshots(
 		// instance from a bare "configured" flag: every row that is configured
 		// carries the instance it is configured as, and the lifecycle table has
 		// a row to render for it.
-		instance := providerSnapshotRow(map[string]any{
+		instance := withOpenCircuits(providerSnapshotRow(map[string]any{
 			"id": snapshot.id, "status": snapshot.status,
 			"model_count": snapshot.modelCount, "connection_count": snapshot.connectionCount,
 			"catalog_state": snapshot.catalogState, "catalog_refreshed": snapshot.catalogRefresh,
@@ -500,7 +503,7 @@ func providerStatusSnapshots(
 			"authentication_state": snapshot.authentication,
 			"catalog_evidence":     snapshot.catalogEvidence,
 			"completion_evidence":  snapshot.completionEvidence,
-		}, snapshot.lastCheck, snapshot.lastVerify)
+		}, snapshot.lastCheck, snapshot.lastVerify), snapshot.openCircuits)
 		snapshots = append(snapshots, providerSnapshotRow(map[string]any{
 			"id": snapshot.id, "registry_id": snapshot.registryID, "label": snapshot.id, "description": "Custom configured provider.",
 			"protocol": "gateway", "availability": providers.ProviderAvailable,
@@ -554,6 +557,32 @@ func providerEvidenceSnapshot(
 		completion = "failed"
 	}
 	return authentication, catalog, completion
+}
+
+// visibleOpenCircuits lists providerID's open circuits a view may show: every
+// caller's in the administrator's, checkScope empty, and in a user's only the
+// circuit of the user's own requests.
+func visibleOpenCircuits(providerID, checkScope string, now time.Time) []providers.OpenCircuit {
+	open := providers.OpenCircuits(providerID, now)
+	if checkScope == "" {
+		return open
+	}
+	own := []providers.OpenCircuit{}
+	for _, circuit := range open {
+		if circuit.PrincipalID == checkScope {
+			own = append(own, circuit)
+		}
+	}
+	return own
+}
+
+// withOpenCircuits adds an instance's open circuits to its row, which omits
+// them while none is open.
+func withOpenCircuits(row map[string]any, open []providers.OpenCircuit) map[string]any {
+	if len(open) > 0 {
+		row["open_circuits"] = open
+	}
+	return row
 }
 
 func providerSnapshotRow(row map[string]any, lastCheck, lastVerify *iam.ProviderCheck) map[string]any {

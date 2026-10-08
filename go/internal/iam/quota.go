@@ -14,6 +14,10 @@ import (
 // does not admit. Reset is when the window the limit counts ends, after which
 // the same request may be admitted.
 type QuotaExceeded struct {
+	// Scope is whose limit refused the request: "key" or "project".
+	Scope string
+	// Field names the limit as policies do, such as "daily_requests".
+	Field  string
 	Metric string
 	Limit  int64
 	Reset  time.Time
@@ -21,6 +25,12 @@ type QuotaExceeded struct {
 
 func (e *QuotaExceeded) Error() string {
 	return fmt.Sprintf("%s quota exceeded (limit %d)", e.Metric, e.Limit)
+}
+
+// Code names the refusing limit as the request's usage records it:
+// "quota:<scope>:<field>", such as "quota:project:daily_requests".
+func (e *QuotaExceeded) Code() string {
+	return "quota:" + e.Scope + ":" + e.Field
 }
 
 type quotaCounter struct {
@@ -54,15 +64,7 @@ func CheckAndConsumeRequest(p *config.Principal, now time.Time) error {
 	defer func() { _ = tx.Rollback() }()
 
 	minuteStart, dayStart, monthStart := quotaPeriods(now)
-	minute, err := readCounterTx(tx, p.KeyID, "minute", minuteStart)
-	if err != nil {
-		return err
-	}
-	day, err := readCounterTx(tx, p.KeyID, "day", dayStart)
-	if err != nil {
-		return err
-	}
-	month, err := readCounterTx(tx, p.KeyID, "month", monthStart)
+	counters, err := readKeyCountersTx(tx, p.KeyID, now)
 	if err != nil {
 		return err
 	}
@@ -73,28 +75,18 @@ func CheckAndConsumeRequest(p *config.Principal, now time.Time) error {
 		DailyCostMicroUSD:  p.DailyCostMicroUSD, MonthlyCostMicroUSD: p.MonthlyCostMicroUSD,
 		DailyCreditsMilli: p.DailyCreditsMilli, MonthlyCreditsMilli: p.MonthlyCreditsMilli,
 	}
-	if err := checkPolicyCounters("", keyPolicy, minute, day, month, quotaWindowEnds(now)); err != nil {
+	if err := checkPolicyCounters("key", keyPolicy, counters, quotaWindowEnds(now)); err != nil {
 		return err
 	}
 	projectPolicy, err := projectPolicyTx(tx, p.ProjectID)
 	if err != nil {
 		return err
 	}
-	projectMinute, err := readProjectCounterTx(tx, p.ProjectID, "minute", minuteStart)
+	projectCounters, err := readProjectCountersTx(tx, p.ProjectID, now)
 	if err != nil {
 		return err
 	}
-	projectDay, err := readProjectCounterTx(tx, p.ProjectID, "day", dayStart)
-	if err != nil {
-		return err
-	}
-	projectMonth, err := readProjectCounterTx(tx, p.ProjectID, "month", monthStart)
-	if err != nil {
-		return err
-	}
-	if err := checkPolicyCounters(
-		"project ", projectPolicy.KeyPolicy, projectMinute, projectDay, projectMonth, quotaWindowEnds(now),
-	); err != nil {
+	if err := checkPolicyCounters("project", projectPolicy.KeyPolicy, projectCounters, quotaWindowEnds(now)); err != nil {
 		return err
 	}
 	for _, period := range []struct {
@@ -128,32 +120,65 @@ DO UPDATE SET requests=requests+1`, p.ProjectID, period.name, period.start); err
 	return tx.Commit()
 }
 
-func checkPolicyCounters(
-	prefix string, policy KeyPolicy, minute, day, month quotaCounter, ends quotaWindows,
-) error {
-	checks := []struct {
-		metric string
-		value  int64
-		limit  int64
-		reset  time.Time
-	}{
-		{prefix + "requests/minute", minute.Requests, int64(policy.RPM), ends.minute},
-		{prefix + "requests/day", day.Requests, int64(policy.DailyRequests), ends.day},
-		{prefix + "requests/month", month.Requests, int64(policy.MonthlyRequests), ends.month},
-		{prefix + "input tokens/day", day.InputTokens, policy.DailyInputTokens, ends.day},
-		{prefix + "output tokens/day", day.OutputTokens, policy.DailyOutputTokens, ends.day},
-		{prefix + "total tokens/month", month.InputTokens + month.OutputTokens, policy.MonthlyTotalTokens, ends.month},
-		{prefix + "estimated cost/day (micro-USD)", day.CostMicroUSD, policy.DailyCostMicroUSD, ends.day},
-		{prefix + "estimated cost/month (micro-USD)", month.CostMicroUSD, policy.MonthlyCostMicroUSD, ends.month},
-		{prefix + "credits/day (milli)", day.CreditsMilli, policy.DailyCreditsMilli, ends.day},
-		{prefix + "credits/month (milli)", month.CreditsMilli, policy.MonthlyCreditsMilli, ends.month},
+// checkPolicyCounters refuses a request when counters have reached a limit
+// policy sets, scope's "key" or "project". A refusal by a project's limit
+// says so in its message.
+func checkPolicyCounters(scope string, policy KeyPolicy, counters quotaCounters, ends quotaWindows) error {
+	prefix := ""
+	if scope == "project" {
+		prefix = "project "
 	}
-	for _, check := range checks {
-		if check.limit > 0 && check.value >= check.limit {
-			return &QuotaExceeded{Metric: check.metric, Limit: check.limit, Reset: check.reset}
+	for _, limit := range quotaLimits {
+		value := limit.of(policy)
+		if value > 0 && metricValue(counters.in(limit.period), limit.metric) >= value {
+			return &QuotaExceeded{
+				Scope: scope, Field: limit.field, Metric: prefix + limit.label,
+				Limit: value, Reset: ends.at(limit.period),
+			}
 		}
 	}
 	return nil
+}
+
+// quotaCounters are a key's or a project's counters of the minute, day and
+// month one time falls in.
+type quotaCounters struct{ minute, day, month quotaCounter }
+
+func (c quotaCounters) in(period string) quotaCounter {
+	switch period {
+	case "minute":
+		return c.minute
+	case "day":
+		return c.day
+	}
+	return c.month
+}
+
+func readKeyCountersTx(tx *sql.Tx, keyID string, now time.Time) (quotaCounters, error) {
+	return readCountersTx(tx, keyID, now, readCounterTx)
+}
+
+func readProjectCountersTx(tx *sql.Tx, projectID string, now time.Time) (quotaCounters, error) {
+	return readCountersTx(tx, projectID, now, readProjectCounterTx)
+}
+
+func readCountersTx(
+	tx *sql.Tx, id string, now time.Time,
+	read func(tx *sql.Tx, id, period string, start int64) (quotaCounter, error),
+) (quotaCounters, error) {
+	minuteStart, dayStart, monthStart := quotaPeriods(now)
+	var counters quotaCounters
+	var err error
+	if counters.minute, err = read(tx, id, "minute", minuteStart); err != nil {
+		return quotaCounters{}, err
+	}
+	if counters.day, err = read(tx, id, "day", dayStart); err != nil {
+		return quotaCounters{}, err
+	}
+	if counters.month, err = read(tx, id, "month", monthStart); err != nil {
+		return quotaCounters{}, err
+	}
+	return counters, nil
 }
 
 func readCounterTx(
@@ -226,6 +251,16 @@ func quotaPeriods(now time.Time) (minute, day, month int64) {
 // in: when a limit that refused it counts afresh.
 type quotaWindows struct{ minute, day, month time.Time }
 
+func (w quotaWindows) at(period string) time.Time {
+	switch period {
+	case "minute":
+		return w.minute
+	case "day":
+		return w.day
+	}
+	return w.month
+}
+
 func quotaWindowEnds(now time.Time) quotaWindows {
 	minute, day, month := quotaPeriods(now)
 	return quotaWindows{
@@ -258,19 +293,11 @@ func CheckAndConsumeProjectRequest(projectID string, now time.Time) error {
 		return err
 	}
 	minuteStart, dayStart, monthStart := quotaPeriods(now)
-	minute, err := readProjectCounterTx(tx, projectID, "minute", minuteStart)
+	counters, err := readProjectCountersTx(tx, projectID, now)
 	if err != nil {
 		return err
 	}
-	day, err := readProjectCounterTx(tx, projectID, "day", dayStart)
-	if err != nil {
-		return err
-	}
-	month, err := readProjectCounterTx(tx, projectID, "month", monthStart)
-	if err != nil {
-		return err
-	}
-	if err := checkPolicyCounters("project ", policy.KeyPolicy, minute, day, month, quotaWindowEnds(now)); err != nil {
+	if err := checkPolicyCounters("project", policy.KeyPolicy, counters, quotaWindowEnds(now)); err != nil {
 		return err
 	}
 	for _, period := range []struct {

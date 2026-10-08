@@ -3,6 +3,7 @@ import { Compass, LoaderCircle, Plug, RefreshCw, Search, ShieldCheck, Trash2, X,
 import { sendForm, sendJSON, type JSONRecord } from "../../lib/api";
 import type { ConsoleMode } from "../../lib/mode";
 import { asList, asRecord, numberValue, stringValue } from "../../lib/records";
+import { circuitSummary, openCircuitsOf } from "../../lib/limits";
 import { ProviderMark } from "../ProviderMark";
 import { EmptyState, PageHeading } from "../PageState";
 import { useDialogFocus } from "../useDialogFocus";
@@ -470,6 +471,8 @@ export function ProviderHub({ data, mode, onChanged, onOpenDetail, onOpenPlaygro
   // The configured providers the companion daemon serves, which the
   // administrator's state names.
   const daemonProviders = new Set(asList(data.companion_daemon_providers).map((providerID) => stringValue(providerID)));
+  // Names of the principals whose requests an open circuit refuses.
+  const principalNames = new Map(asList(data.principals).map(asRecord).map((principal) => [stringValue(principal.id), stringValue(principal.display_name, stringValue(principal.id))]));
   const closeExpansion = () => {
     const trigger = Array.from(shelfRef.current?.querySelectorAll<HTMLButtonElement>("[data-provider-trigger]") ?? []).find((button) => button.dataset.providerTrigger === expanded);
     setExpanded("");
@@ -873,6 +876,7 @@ export function ProviderHub({ data, mode, onChanged, onOpenDetail, onOpenPlaygro
                 const active = (operation: string) => busy === `${providerIDs[0] ?? id}-${operation}`;
                 const statusCounts = asRecord(entry.instance_status_counts);
                 const instanceCount = asList(entry.instances).length;
+                const openCircuits = openCircuitsOf(asList(entry.instances).map(asRecord));
                 // Offer "Add instance" only where a credential-based create can
                 // succeed. ConnectDialog posts the tile id as registry_id, so a custom
                 // tile is a guaranteed 400; and on an OAuth-only tile the action fell
@@ -899,6 +903,7 @@ export function ProviderHub({ data, mode, onChanged, onOpenDetail, onOpenPlaygro
                           {configured ? `${instanceCount} instance${instanceCount === 1 ? "" : "s"}` : isClient ? "Gateway client" : "Not configured"}
                           {boolValue(entry.custom) ? " · Custom integration" : ""}
                           {asList(entry.configured_provider_ids).some((providerID) => daemonProviders.has(stringValue(providerID))) ? " · Companion daemon" : ""}
+                          {openCircuits.length ? " · Circuit open" : ""}
                         </p>
                       </div>
                       <StatusBadge status={status} />
@@ -943,6 +948,12 @@ export function ProviderHub({ data, mode, onChanged, onOpenDetail, onOpenPlaygro
                           <dt>Catalog freshness</dt>
                           <dd class="technical">{stringValue(entry.catalog_refreshed, "Catalog not synced")}</dd>
                         </div>
+                        {openCircuits.length ? (
+                          <div>
+                            <dt>Circuit</dt>
+                            <dd>{circuitSummary(openCircuits, (principalID) => mode === "portal" ? "your requests" : `${principalNames.get(principalID) ?? principalID}'s requests`)}</dd>
+                          </div>
+                        ) : null}
                       </dl>
                       {stringValue(entry.risk_notice) ? <p class="form-help">{stringValue(entry.risk_notice)}</p> : null}
                       {safeRosterURL(entry.docs_url) ? (

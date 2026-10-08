@@ -6,7 +6,7 @@ import { bundle, find, findAll, input, mount, settle, text } from "./hook-harnes
 
 const dates = await bundle(fileURLToPath(new URL("../src/lib/key-dates.ts", import.meta.url)));
 const { ApiKeys } = await bundle(fileURLToPath(new URL("../src/pages/ApiKeys.tsx", import.meta.url)), [
-  { filter: /\/lib\/api$/, contents: "export const sendJSON = (...args) => globalThis.__api.sendJSON(...args);" },
+  { filter: /\/lib\/api$/, contents: "export const sendJSON = (...args) => globalThis.__api.sendJSON(...args);\nexport const getJSON = (...args) => globalThis.__api.getJSON(...args);" },
 ]);
 const now = new Date(2026, 9, 3, 12, 0).getTime();
 

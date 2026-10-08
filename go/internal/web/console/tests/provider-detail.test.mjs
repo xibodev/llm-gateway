@@ -110,6 +110,30 @@ test("other unknown entries never request the roster", async () => {
   assert.deepEqual(requests, []);
 });
 
+// An open circuit is named with the requests it refuses and until when: on
+// the page, and on the instance it belongs to.
+test("a provider whose circuit is open says whose requests it refuses", async () => {
+  fakeAPI({ "/models?diagnostics=1": { data: [] } });
+  const until = "2026-10-08T12:00:30Z";
+  const render = detail("openrouter", {
+    provider_registry: [{ id: "openrouter", label: "OpenRouter", auth_methods: ["api_key"], availability: "available" }],
+    provider_statuses: [{ id: "openrouter", configured_provider_ids: ["openrouter", "openrouter-2"], instances: [
+      { id: "openrouter", status: "verified", open_circuits: [{ principal_id: "user-1", failures: 4, open_until: until }] },
+      { id: "openrouter-2", status: "verified" },
+    ] }],
+    providers: [{ id: "openrouter" }, { id: "openrouter-2" }],
+    principals: [{ id: "user-1", kind: "human", status: "active", display_name: "Ada" }],
+  });
+  render();
+  await settle();
+  const tree = render();
+  const summary = `Refusing Ada's requests until ${new Date(Date.parse(until)).toLocaleTimeString()}, after 4 failures in a row.`;
+  assert.equal(text(find(tree, (node) => node.type === "p" && node.props?.role === "status")), `Circuit open ${summary}`);
+  const rows = findAll(tree, (node) => node.type === "tr" && typeof node.key === "string");
+  assert.match(text(rows.find((row) => row.key === "openrouter")), new RegExp(`Circuit open: ${summary.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`));
+  assert.doesNotMatch(text(rows.find((row) => row.key === "openrouter-2")), /Circuit open/);
+});
+
 test("a service account upload carries the API adaptation setting", async () => {
   for (const enabled of [true, false]) {
     const forms = [];

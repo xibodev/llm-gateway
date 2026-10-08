@@ -3,6 +3,7 @@ import { ArrowLeft, CheckCircle2, ExternalLink, Plug, Play, Power, RefreshCw, Se
 import { getJSON, sendJSON, type JSONRecord } from "../lib/api";
 import type { ConsoleMode } from "../lib/mode";
 import { asList, asRecord, numberValue, stringValue } from "../lib/records";
+import { circuitSummary, openCircuitsOf } from "../lib/limits";
 import { verifyModelChoices } from "../lib/models";
 import { ProviderMark } from "../components/ProviderMark";
 import { EmptyState, LoadingState, PageHeading } from "../components/PageState";
@@ -140,6 +141,9 @@ export function ProviderDetail({ entryID, data, mode, onChanged, onBack, onOpenP
     const principal = asList(data.principals).map(asRecord).find((candidate) => stringValue(candidate.id) === id);
     return principal ? stringValue(principal.display_name, id) : id;
   };
+  // A user sees only the circuit of their own requests.
+  const circuitCaller = (id: string) => mode === "portal" ? "your requests" : `${principalName(id)}'s requests`;
+  const openCircuits = openCircuitsOf(instances);
 
   // Per-provider model catalog, scoped to the selected owner when OAuth/private credentials apply.
   const [catalog, setCatalog] = useState<JSONRecord | null>(null);
@@ -239,6 +243,7 @@ export function ProviderDetail({ entryID, data, mode, onChanged, onBack, onOpenP
           {isZen ? <p class="form-help"><strong>Choose anonymous or personal.</strong> Anonymous access needs no key; add an optional private API key when you want account-backed access.</p> : null}
           {isOllama ? <p class="form-help"><strong>Native Ollama root:</strong> use the server root such as <span class="technical">http://127.0.0.1:11434</span>, not an OpenAI <span class="technical">/v1</span> path. Run Detect local, then Check reachability to confirm this gateway process can reach it.</p> : null}
           {tileConfigurationIssue ? <p class="form-error" role="alert">{tileConfigurationIssue}</p> : null}
+          {openCircuits.length ? <p class="form-help" role="status"><span class="status-pill status-pill--attention">Circuit open</span> {circuitSummary(openCircuits, circuitCaller)}</p> : null}
         </div>
         {mode === "admin" && !isClient && !unavailable ? <div class="detail-heading__actions">
           {supportsOAuth || configured ? <label class="owner-select">Catalog owner<select value={ownerID} onInput={(event) => setOwnerID((event.currentTarget as HTMLSelectElement).value)}><option value="">No private owner selected</option>{owners.map((owner) => <option value={stringValue(owner.id)} key={stringValue(owner.id)}>{stringValue(owner.display_name, stringValue(owner.id))}</option>)}</select></label> : null}
@@ -256,9 +261,10 @@ export function ProviderDetail({ entryID, data, mode, onChanged, onBack, onOpenP
         <div class="table-wrap"><table><thead><tr><th>Provider ID</th><th>Status</th><th>Evidence</th><th>Catalog</th><th>Freshness</th><th>Actions</th></tr></thead><tbody>
           {instances.map((instance) => {
             const providerID = stringValue(instance.id);
+            const circuits = openCircuitsOf([instance]);
             return <tr key={providerID}>
             <td><strong class="technical">{providerID}</strong>{boolValue(instance.disabled) ? <small class="table-subtitle">Disabled — requests 404 until re-enabled</small> : null}</td>
-            <td><StatusBadge status={stringValue(instance.status, "configured")} />{stringValue(instance.configuration_issue) ? <small class="table-subtitle">{stringValue(instance.configuration_issue)}</small> : null}</td>
+            <td><StatusBadge status={stringValue(instance.status, "configured")} />{stringValue(instance.configuration_issue) ? <small class="table-subtitle">{stringValue(instance.configuration_issue)}</small> : null}{circuits.length ? <small class="table-subtitle">Circuit open: {circuitSummary(circuits, circuitCaller)}</small> : null}</td>
             <td><dl class="evidence-list"><div><dt>Auth</dt><dd>{evidenceLabel("authentication", instance.authentication_state)}</dd></div><div><dt>Catalog</dt><dd>{evidenceLabel("catalog", instance.catalog_evidence)}</dd></div><div><dt>Completion</dt><dd>{evidenceLabel("completion", instance.completion_evidence)}</dd></div></dl></td>
             <td>{stringValue(instance.catalog_state) === "not_discoverable" ? "Catalog not discoverable" : `${numberValue(instance.model_count)} model${numberValue(instance.model_count) === 1 ? "" : "s"} · ${stringValue(instance.catalog_state, "unknown")}`}</td>
             <td class="technical">{stringValue(instance.catalog_refreshed, "Never synced")}</td>

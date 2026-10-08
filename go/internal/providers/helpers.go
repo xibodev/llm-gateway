@@ -46,6 +46,10 @@ func ResetCircuit(name string) {
 	Current().ResetCircuit(name)
 }
 
+func OpenCircuits(name string, now time.Time) []OpenCircuit {
+	return Current().OpenCircuits(name, now)
+}
+
 func ForgetProvider(pid string) {
 	Current().ForgetProvider(pid)
 }

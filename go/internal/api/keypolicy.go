@@ -55,26 +55,26 @@ func modelPolicyAllows(allowed []string, requestedModel, resolvedCategory string
 // validation error, and admits only after every check that can refuse the
 // request without contacting a provider, so a request the gateway rejects
 // itself spends no quota. A refusal by a limit reports how long until the
-// limit's window ends.
-func admitKeyPolicy(p *config.Principal, now time.Time) (int, string, time.Duration) {
+// limit's window ends and the error code that names the limit.
+func admitKeyPolicy(p *config.Principal, now time.Time) (int, string, time.Duration, string) {
 	if p == nil || p.Token == "" {
-		return 0, "", 0 // admin / unauthenticated-local: unmetered
+		return 0, "", 0, "" // admin / unauthenticated-local: unmetered
 	}
 	if err := iam.CheckAndConsumeRequest(p, now); err != nil {
 		var exceeded *iam.QuotaExceeded
 		if errors.As(err, &exceeded) {
-			return 429, exceeded.Error(), exceeded.Reset.Sub(now)
+			return 429, exceeded.Error(), exceeded.Reset.Sub(now), exceeded.Code()
 		}
-		return 500, "Quota store unavailable.", 0
+		return 500, "Quota store unavailable.", 0, ""
 	}
-	return 0, "", 0
+	return 0, "", 0, ""
 }
 
 // admitRequest admits a handler's request immediately before it is executed:
 // first under the process-wide per-caller rate limit, then under the key's
 // and project's quotas. It reports false once it has recorded and written the
 // refusal, so the handler only returns. A refusal by a limit carries
-// Retry-After.
+// Retry-After and is recorded with the code of the limit that refused it.
 func admitRequest(
 	w http.ResponseWriter, endpoint, requestedModel string,
 	p *config.Principal, errorCode string, started time.Time,
@@ -84,9 +84,12 @@ func admitRequest(
 		writeError(w, http.StatusTooManyRequests, message)
 		return false
 	}
-	status, message, wait := admitKeyPolicy(p, time.Now())
+	status, message, wait, limitCode := admitKeyPolicy(p, time.Now())
 	if status == 0 {
 		return true
+	}
+	if limitCode != "" {
+		errorCode = limitCode
 	}
 	setRetryAfter(w, wait)
 	recordFailureUsage(endpoint, requestedModel, p, status, errorCode, started)

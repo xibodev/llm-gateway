@@ -5,6 +5,8 @@ import (
 	"errors"
 	"math"
 	"math/rand/v2"
+	"sort"
+	"strings"
 	"sync"
 	"time"
 
@@ -33,7 +35,11 @@ import (
 type circuits struct {
 	mu       sync.Mutex
 	trackers map[string]*execution.HealthTracker
-	policy   execution.HealthPolicy
+	// failing names, per provider, the scopes whose circuits hold a failure
+	// streak, so the open ones can be listed: a tracker reports the state of
+	// a scope it is asked about but not which scopes it holds.
+	failing map[string]map[string]bool
+	policy  execution.HealthPolicy
 }
 
 // use puts policy in effect and returns the tracker of name's circuits. The
@@ -67,7 +73,22 @@ func (c *circuits) available(name, scope string, policy config.ProviderPolicy) (
 func (c *circuits) record(name, scope string, policy config.ProviderPolicy, err error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	c.use(name, policy).Record(scope, err)
+	tracker := c.use(name, policy)
+	tracker.Record(scope, err)
+	if state := tracker.State(scope); state.Streak > 0 || !state.OpenUntil.IsZero() {
+		if c.failing == nil {
+			c.failing = map[string]map[string]bool{}
+		}
+		if c.failing[name] == nil {
+			c.failing[name] = map[string]bool{}
+		}
+		c.failing[name][scope] = true
+		return
+	}
+	delete(c.failing[name], scope)
+	if len(c.failing[name]) == 0 {
+		delete(c.failing, name)
+	}
 }
 
 // reset forgets every circuit of name, whichever caller scope it keys, or
@@ -76,10 +97,58 @@ func (c *circuits) reset(name string) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if name == "" {
-		c.trackers = nil
+		c.trackers, c.failing = nil, nil
 		return
 	}
 	delete(c.trackers, name)
+	delete(c.failing, name)
+}
+
+// OpenCircuit is a circuit of a provider that refuses requests: whose
+// requests it refuses, the failures in a row that opened it, and when it
+// admits requests again.
+type OpenCircuit struct {
+	// PrincipalID is the principal whose requests the circuit refuses, and
+	// ProjectID the project of a service principal's. Both are empty for the
+	// callers without a principal, such as the static administrator key,
+	// which share the gateway's credential.
+	PrincipalID string    `json:"principal_id,omitempty"`
+	ProjectID   string    `json:"project_id,omitempty"`
+	Failures    int       `json:"failures"`
+	OpenUntil   time.Time `json:"open_until"`
+}
+
+// open lists name's circuits that refuse requests at now, ordered by caller.
+func (c *circuits) open(name string, now time.Time) []OpenCircuit {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	tracker := c.trackers[name]
+	if tracker == nil {
+		return nil
+	}
+	open := []OpenCircuit{}
+	for scope := range c.failing[name] {
+		state := tracker.State(scope)
+		if !now.Before(state.OpenUntil) {
+			continue
+		}
+		// A scope is the provider's cache key: the provider alone, or
+		// "<provider>@<principal>" with "#<project>" for a service principal.
+		principal, project, _ := strings.Cut(strings.TrimPrefix(scope, name+"@"), "#")
+		if scope == name {
+			principal, project = "", ""
+		}
+		open = append(open, OpenCircuit{
+			PrincipalID: principal, ProjectID: project, Failures: state.Streak, OpenUntil: state.OpenUntil,
+		})
+	}
+	sort.Slice(open, func(i, j int) bool {
+		if open[i].PrincipalID != open[j].PrincipalID {
+			return open[i].PrincipalID < open[j].PrincipalID
+		}
+		return open[i].ProjectID < open[j].ProjectID
+	})
+	return open
 }
 
 // circuitPolicy is the breaker a provider policy configures: its threshold
@@ -112,6 +181,12 @@ func observeCircuit(err error) execution.Observation {
 // ResetCircuit forgets every circuit of provider name, whatever caller scope
 // it keys, or every circuit when name is empty (test helper).
 func (rt *Runtime) ResetCircuit(name string) { rt.circuits.reset(name) }
+
+// OpenCircuits lists provider name's circuits that refuse requests at now.
+// Circuits are process-local, so these are this process's.
+func (rt *Runtime) OpenCircuits(name string, now time.Time) []OpenCircuit {
+	return rt.circuits.open(name, now)
+}
 
 // ResilientProvider wraps a Provider with retry + circuit-breaker behaviour.
 type ResilientProvider struct {

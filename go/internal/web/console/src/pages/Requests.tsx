@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "preact/hooks";
 import { RefreshCw } from "lucide-preact";
 import { getJSON, type JSONRecord } from "../lib/api";
 import { emptyRequestFilter, modelSummary, nextCursor, requestsPath, statusTone, tokenSummary, type RequestFilter } from "../lib/activity";
+import { errorCodeLabel } from "../lib/limits";
 import type { ConsoleMode } from "../lib/mode";
 import { asList, asRecord, numberValue, stringValue } from "../lib/records";
 import { EmptyState, ErrorState, LoadingState, PageHeading } from "../components/PageState";
@@ -90,7 +91,7 @@ export function Requests({ data, mode }: { data: JSONRecord; mode: ConsoleMode }
                 <td class="technical">{modelSummary(row)}</td>
                 <td>{stringValue(row.provider, "—")}</td>
                 <td>{keyID ? stringValue(row.key_name) || (keyNames.get(keyID) ?? keyID) : projectID ? projectNames.get(projectID) ?? projectID : portal ? "Portal" : "Administrator or local"}</td>
-                <td><span class={`status-pill status-pill--${statusTone(status)}`}>{status}{stringValue(row.error_code) ? ` ${stringValue(row.error_code)}` : ""}</span></td>
+                <td><span class={`status-pill status-pill--${statusTone(status)}`} title={stringValue(row.error_code) || undefined}>{status}{stringValue(row.error_code) ? ` ${errorCodeLabel(stringValue(row.error_code))}` : ""}</span></td>
                 <td>{numberValue(row.latency_ms).toLocaleString()} ms</td>
                 <td>{tokenSummary(row)}</td>
               </tr>;

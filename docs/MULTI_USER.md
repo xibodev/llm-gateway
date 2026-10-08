@@ -197,6 +197,23 @@ giving the seconds until the window of the limit that refused it ends.
 per-process ceiling for every caller, including the static administrator key and
 local mode, which no quota meters.
 
+`GET /admin/api/keys/{id}/limits` lists every limit a key's requests are
+admitted under: the key's own, its project's and the per-caller ceiling. Each
+names whose limit it is (`scope`: `key`, `project` or `caller`), the policy
+field that sets it, what it counts over which window, its `limit`, what the
+current window has `used` of it, and `resets_at`, the Unix time the window
+ends. The limit nearest to refusing a request carries `closest`: the one that
+has used the largest share of itself and, of limits used up alike, the one
+whose window ends last. A user reads the same for their own key with
+`GET /user/api/keys/{id}/limits`, and `GET /admin/api/projects/{id}/limits`
+lists a project's. The per-caller count is that of the process that answered.
+The console's **API keys** page shows a key's limits from its row.
+
+A request a limit refuses is recorded with an error code that names the limit:
+`quota:<scope>:<field>`, such as `quota:key:rpm` or
+`quota:project:daily_requests`, or `rate_limit` for the per-caller ceiling. The
+console's **Requests** page shows which limit refused a request.
+
 A model that neither the built-in price table nor
 [`savings.price_catalog`](CONFIGURATION.md#legacy-savings-ledger) prices records
 zero estimated cost, so cost limits never stop it. Keys from an external key

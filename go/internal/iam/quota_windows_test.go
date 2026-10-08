@@ -18,8 +18,8 @@ func TestQuotaWindowsEndAtTheirUTCBoundaries(t *testing.T) {
 			t.Fatalf("%s window ends %v, want %v", name, check.got, check.want)
 		}
 	}
-	exceeded := checkPolicyCounters("", KeyPolicy{RPM: 1, DailyRequests: 9}, quotaCounter{Requests: 1}, quotaCounter{Requests: 1}, quotaCounter{}, ends)
-	if refusal, ok := exceeded.(*QuotaExceeded); !ok || refusal.Metric != "requests/minute" || !refusal.Reset.Equal(ends.minute) {
+	exceeded := checkPolicyCounters("key", KeyPolicy{RPM: 1, DailyRequests: 9}, quotaCounters{minute: quotaCounter{Requests: 1}, day: quotaCounter{Requests: 1}}, ends)
+	if refusal, ok := exceeded.(*QuotaExceeded); !ok || refusal.Metric != "requests/minute" || refusal.Code() != "quota:key:rpm" || !refusal.Reset.Equal(ends.minute) {
 		t.Fatalf("refusal = %#v, want the minute limit resetting at the minute's end", exceeded)
 	}
 }
