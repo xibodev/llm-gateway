@@ -27,7 +27,7 @@ func extensionProviderFixture(t *testing.T, providerType, instance string) Provi
 	})
 	t.Cleanup(func() { config.Update(func(s *config.Settings) { s.Providers = configured }) })
 	runtime := newRuntime(func(bool) (core.CredentialStore, error) { return core.NewMemoryCredentialStore(), nil })
-	return runtime.newExtensionFacade(instance, providerType, core.Caller{})
+	return runtime.newExtensionFacade(instance, providerType, core.Caller{}, 0)
 }
 
 // extensionFacadeFixture is extensionProviderFixture for a provider type

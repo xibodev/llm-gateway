@@ -11,6 +11,8 @@ import (
 	"strings"
 	"testing"
 
+	"llmgw/internal/config"
+
 	"github.com/xibodev/llm-provider-auth/tokenstore"
 	core "github.com/xibodev/llmgw-core"
 	"github.com/xibodev/llmgw-core/oauthflow"
@@ -195,7 +197,7 @@ func TestExtensionFacadeReachesTheDaemonThroughTheSharedClient(t *testing.T) {
 	}
 	store.BindShared("tts", "tts-key")
 	rt := newRuntime(func(bool) (core.CredentialStore, error) { return store, nil })
-	facade := rt.newExtensionFacade("tts", ExtensionTypeEdgeTTS, core.Caller{}).(*ExtensionProviderFacade)
+	facade := rt.newExtensionFacade("tts", ExtensionTypeEdgeTTS, core.Caller{}, 0).(*ExtensionProviderFacade)
 
 	models, _, err := facade.ListModelsWithError()
 	if err != nil || len(models) != 1 || models[0].ID != "en-US-Voice" {
@@ -204,6 +206,78 @@ func TestExtensionFacadeReachesTheDaemonThroughTheSharedClient(t *testing.T) {
 	audio, format, err := facade.Synthesize("en-US-Voice", "hello", "")
 	if err != nil || string(audio) != "mp3-bytes" || format != "audio/mpeg" {
 		t.Fatalf("synthesize = %q (%s), %v", audio, format, err)
+	}
+}
+
+// A provider the companion daemon serves sends its timeout with every
+// invoke, stream and synthesis, so the daemon waits for the provider as long
+// as the provider's settings say: its own timeout, a GitHub Copilot
+// provider's setting, or the default.
+func TestExtensionProvidersSendTheirTimeout(t *testing.T) {
+	received := make(chan string, 8)
+	mux := http.NewServeMux()
+	for _, providerType := range []string{ExtensionTypeCodex, ExtensionTypeCopilot, ExtensionTypeEdgeTTS} {
+		mux.HandleFunc("POST /extension/v1/"+providerType+"/invoke", func(w http.ResponseWriter, r *http.Request) {
+			received <- providerType + " invoke " + r.Header.Get("X-Timeout")
+			writeExtensionJSON(t, w, http.StatusOK, map[string]any{"choices": []any{}})
+		})
+		mux.HandleFunc("POST /extension/v1/"+providerType+"/stream", func(w http.ResponseWriter, r *http.Request) {
+			received <- providerType + " stream " + r.Header.Get("X-Timeout")
+			w.Header().Set("Content-Type", core.ContentTypeEventStream)
+			_, _ = io.WriteString(w, "data: [DONE]\n\n")
+		})
+	}
+	extensionDaemon(t, mux)
+	own := 90.5
+	previous := *config.Get()
+	t.Cleanup(func() {
+		config.Update(func(s *config.Settings) {
+			s.Providers, s.GithubCopilotTimeoutSeconds = previous.Providers, previous.GithubCopilotTimeoutSeconds
+		})
+	})
+	config.Update(func(s *config.Settings) {
+		s.GithubCopilotTimeoutSeconds = 420
+		s.Providers = map[string]*config.ProviderConfig{
+			"codex-own":     {Type: "openai_compatible", RegistryID: ExtensionTypeCodex, Timeout: &own},
+			"codex-default": {Type: "openai_compatible", RegistryID: ExtensionTypeCodex},
+			"copilot":       {Type: ExtensionTypeCopilot},
+			"tts":           {Type: ExtensionTypeEdgeTTS},
+		}
+	})
+	runtime := newRuntime(func(bool) (core.CredentialStore, error) { return core.NewMemoryCredentialStore(), nil })
+	facade := func(instance string) *ExtensionProviderFacade {
+		t.Helper()
+		settings := config.Get()
+		provider, err := runtime.instantiate(settings, instance, settings.Providers[instance], core.Caller{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return provider.(*ExtensionProviderFacade)
+	}
+	messages := []Message{{"role": "user", "content": "hi"}}
+	for instance, want := range map[string]string{"codex-own": "90.5", "codex-default": "300", "copilot": "420"} {
+		chat := facade(instance)
+		if _, err := chat.Complete("model", messages, nil); err != nil {
+			t.Fatalf("%s invoke: %v", instance, err)
+		}
+		stream, err := chat.Stream("model", messages, nil)
+		if err != nil {
+			t.Fatalf("%s stream: %v", instance, err)
+		}
+		for _, ok := stream.Next(); ok; _, ok = stream.Next() {
+		}
+		_ = stream.Close()
+		for _, operation := range []string{"invoke", "stream"} {
+			if got, want := <-received, chat.providerID+" "+operation+" "+want; got != want {
+				t.Errorf("%s: the daemon received %q, want %q", instance, got, want)
+			}
+		}
+	}
+	if _, _, err := facade("tts").Synthesize("voice", "hello", ""); err != nil {
+		t.Fatal(err)
+	}
+	if got := <-received; got != "edge_tts invoke 300" {
+		t.Errorf("the daemon received %q, want the default timeout on a synthesis", got)
 	}
 }
 
@@ -370,7 +444,7 @@ func TestExtensionServesMessagesNativelyWhereTheDaemonDoes(t *testing.T) {
 	}
 
 	for _, providerType := range []string{ExtensionTypeCodex, ExtensionTypeCopilot, ExtensionTypeEdgeTTS} {
-		if SupportsAnthropicMessages((&Runtime{}).newExtensionFacade(providerType, providerType, core.Caller{})) {
+		if SupportsAnthropicMessages((&Runtime{}).newExtensionFacade(providerType, providerType, core.Caller{}, 0)) {
 			t.Errorf("%s answers Messages natively", providerType)
 		}
 	}

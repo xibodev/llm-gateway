@@ -5,10 +5,12 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"math"
 	"os"
 	"slices"
 	"strings"
 	"sync"
+	"time"
 
 	"llmgw/internal/config"
 
@@ -226,17 +228,45 @@ type ExtensionProviderFacade struct {
 	instance   string
 	providerID string
 	caller     core.Caller
+	// timeout is how long the daemon waits for the provider's answer to
+	// begin, and then between two reads of it; see extensionTimeout.
+	timeout time.Duration
+}
+
+// defaultExtensionTimeoutSeconds is the timeout of a provider the companion
+// daemon serves that sets none.
+const defaultExtensionTimeoutSeconds = 300.0
+
+// extensionTimeout is the timeout of instance cfg, which the daemon serves as
+// a provider of providerType: its own, or a GitHub Copilot provider's
+// setting, or the default. Every invoke and stream carries it, so the daemon
+// waits for the provider as long as other provider types wait for theirs,
+// and the client sets no bound of its own: without it, an invoke is cut
+// after the client's default however long the provider keeps answering.
+func extensionTimeout(settings *config.Settings, providerType string, cfg *config.ProviderConfig) time.Duration {
+	seconds := cfg.TimeoutOr(0)
+	if seconds <= 0 && providerType == ExtensionTypeCopilot && settings != nil {
+		seconds = settings.GithubCopilotTimeoutSeconds
+	}
+	if !(seconds > 0) {
+		seconds = defaultExtensionTimeoutSeconds
+	}
+	if seconds >= float64(math.MaxInt64)/float64(time.Second) {
+		return time.Duration(math.MaxInt64)
+	}
+	return time.Duration(seconds * float64(time.Second))
 }
 
 // newExtensionFacade returns the facade of instance, which the daemon serves
-// as a provider of type providerID. A provider the daemon serves over
-// Messages gets the facade that answers Messages natively.
-func (rt *Runtime) newExtensionFacade(instance, providerID string, caller core.Caller) Provider {
+// as a provider of type providerID with timeout. A provider the daemon serves
+// over Messages gets the facade that answers Messages natively.
+func (rt *Runtime) newExtensionFacade(instance, providerID string, caller core.Caller, timeout time.Duration) Provider {
 	facade := &ExtensionProviderFacade{
 		runtime:    rt,
 		instance:   instance,
 		providerID: providerID,
 		caller:     caller,
+		timeout:    timeout,
 	}
 	if facade.serves(core.ModelSurfaceMessages) {
 		return &extensionMessagesFacade{extensionChat: facade, facade: facade}
@@ -353,7 +383,7 @@ func (f *ExtensionProviderFacade) invoke(ctx context.Context, surface core.Model
 	if err != nil {
 		return core.Response{}, nil, err
 	}
-	ctx, collector := collectCredentials(ctx)
+	ctx, collector := collectCredentials(extension.WithTimeout(ctx, f.timeout))
 	response, err := f.runtime.core.Invoke(ctx, f.caller, f.instance, request)
 	if err != nil {
 		return core.Response{}, collector.Observation(), extensionFailure(ctx, f.instance, err)
@@ -385,7 +415,7 @@ func (f *ExtensionProviderFacade) stream(ctx context.Context, surface core.Model
 	if err != nil {
 		return nil, err
 	}
-	iter, err := f.runtime.core.Stream(ctx, f.caller, f.instance, request)
+	iter, err := f.runtime.core.Stream(extension.WithTimeout(ctx, f.timeout), f.caller, f.instance, request)
 	if err != nil {
 		return nil, extensionFailure(ctx, f.instance, err)
 	}
@@ -424,7 +454,7 @@ func (f *ExtensionProviderFacade) Synthesize(voice, text, speed string) ([]byte,
 	if err != nil {
 		return nil, "", extensionFailure(ctx, f.instance, err)
 	}
-	resp, err := client.Invoke(ctx, f.providerID, core.Request{
+	resp, err := client.Invoke(extension.WithTimeout(ctx, f.timeout), f.providerID, core.Request{
 		Surface: core.ModelSurfaceAudioSpeech,
 		Model:   voice,
 		Body:    []byte(text),

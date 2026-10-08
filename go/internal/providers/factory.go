@@ -53,7 +53,7 @@ func (rt *Runtime) instantiate(
 		extensionType = ExtensionTypeCodex
 	}
 	if isExtensionType(extensionType) {
-		return rt.newExtensionFacade(providerID, extensionType, caller), nil
+		return rt.newExtensionFacade(providerID, extensionType, caller, extensionTimeout(settings, extensionType, cfg)), nil
 	}
 	switch ptype {
 	case "ai_studio":
@@ -119,7 +119,8 @@ func (rt *Runtime) instantiate(
 	case "echo":
 		return EchoProvider{}, nil
 	case "google_antigravity", "github_copilot", "openai_codex", "edge_tts", "opencode_zen_anonymous":
-		return rt.newExtensionFacade(providerID, strings.ToLower(strings.TrimSpace(cfg.Type)), caller), nil
+		extensionType := strings.ToLower(strings.TrimSpace(cfg.Type))
+		return rt.newExtensionFacade(providerID, extensionType, caller, extensionTimeout(settings, extensionType, cfg)), nil
 	}
 	return nil, &ConfigError{Msg: fmt.Sprintf("provider '%s': unknown type '%s'", providerID, cfg.Type)}
 }
