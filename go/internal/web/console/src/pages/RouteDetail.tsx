@@ -4,6 +4,7 @@ import { sendJSON, type JSONRecord } from "../lib/api";
 import type { ConsoleMode } from "../lib/mode";
 import { asList, asRecord, endpointsOf, numberValue, stringValue } from "../lib/records";
 import { EmptyState, ErrorState, PageHeading } from "../components/PageState";
+import { SearchSelect } from "../components/DataTable";
 
 type RouteMember = { provider: string; model: string };
 
@@ -90,7 +91,7 @@ export function RouteDetail({ routeName, data, mode, onChanged, onBack }: {
         {!humans.length || !projects.length ? <EmptyState title="A human owner and a project are required" detail="Route tests are real project-attributed gateway requests. Create them on the Access page first." /> : <form class="route-test-form" onSubmit={runTest}>
           <div class="route-test-form__row">
             <label>Run as<select value={principalID} onInput={(event) => setPrincipalID((event.currentTarget as HTMLSelectElement).value)}>{humans.map((principal) => <option value={stringValue(principal.id)} key={stringValue(principal.id)}>{stringValue(principal.display_name, stringValue(principal.id))}</option>)}</select></label>
-            <label>Project<select value={projectID} onInput={(event) => setProjectID((event.currentTarget as HTMLSelectElement).value)}>{projects.map((project) => <option value={stringValue(project.id)} key={stringValue(project.id)}>{stringValue(project.name, stringValue(project.slug))}</option>)}</select></label>
+            <SearchSelect label="Project" noun="projects" value={projectID} options={projects.map((project) => ({ value: stringValue(project.id), label: stringValue(project.name, stringValue(project.slug)) }))} onChange={setProjectID} />
           </div>
           <label>Prompt<input value={prompt} onInput={(event) => setPrompt((event.currentTarget as HTMLInputElement).value)} /></label>
           {error ? <p class="form-error" role="alert">{error}</p> : null}

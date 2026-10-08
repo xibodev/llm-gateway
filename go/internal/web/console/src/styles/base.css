@@ -804,6 +804,8 @@ td details pre { max-width: 34rem; margin: 6px 0 0; white-space: pre-wrap; font-
 .short-id { display: inline-flex; align-items: center; gap: 4px; max-width: 100%; }
 .short-id code { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #6f7a86; font-size: 0.72rem; }
 .search-select input[type="search"] { margin-bottom: 4px; }
+.route-search { max-width: 440px; }
+.route-search input { flex: 1; min-height: 40px; border: 0; background: transparent; color: inherit; }
 @media (max-width: 720px) {
   .data-table__scroll { max-height: none; }
   .data-table table { min-width: 0; }

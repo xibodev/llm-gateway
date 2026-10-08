@@ -13,6 +13,9 @@ import { discoveryFilters, matchesDiscoveryFilter, mergeProviderRoster, provider
 import "./provider-hub.css";
 import { type ActionResult, ResultNotice, StatusBadge, boolValue, configuredProviderConfig, configuredProviderIDs, connectionChoices, tileStatus, useProviderLifecycle } from "./shared";
 
+// shelfLimit is how many providers a shelf shows until the user asks for all.
+const shelfLimit = 24;
+
 export function ConnectDialog({ entry, onClose, onConfigured, mode = "create", takenIDs = [] }: { entry: JSONRecord; onClose: () => void; onConfigured: (message?: string) => Promise<void>; mode?: "create" | "edit"; takenIDs?: string[] }) {
   const providerConfig = asRecord(entry.provider_config);
   // POST /admin/api/providers is an upsert keyed on the id alone. An id that is
@@ -466,6 +469,8 @@ export function ProviderHub({ data, mode, onChanged, onOpenDetail, onOpenPlaygro
   const [search, setSearch] = useState("");
   const [filter, setFilter] = useState("all");
   const [expanded, setExpanded] = useState("");
+  // Shelves the user opened past their first shelfLimit providers.
+  const [openShelves, setOpenShelves] = useState<Record<string, boolean>>({});
   const shelfRef = useRef<HTMLDivElement>(null);
   const roster = useProviderRoster(mode);
   // The configured providers the companion daemon serves, which the
@@ -809,7 +814,7 @@ export function ProviderHub({ data, mode, onChanged, onOpenDetail, onOpenPlaygro
               <span>{groupEntries.length}</span>
             </header>
             <div class="provider-shelf">
-              {groupEntries.map((entry) => {
+              {groupEntries.filter((entry, index) => openShelves[group] || index < shelfLimit || stringValue(entry.id) === expanded).map((entry) => {
                 const id = stringValue(entry.id);
                 const label = stringValue(entry.label, id);
                 return (
@@ -819,6 +824,7 @@ export function ProviderHub({ data, mode, onChanged, onOpenDetail, onOpenPlaygro
                   </button>
                 );
               })}
+              {groupEntries.length > shelfLimit ? <button class="button button--secondary provider-shelf__more" type="button" aria-expanded={openShelves[group] === true} onClick={() => setOpenShelves((current) => ({ ...current, [group]: !current[group] }))}>{openShelves[group] ? "Show fewer" : `Show all ${groupEntries.length}`}</button> : null}
               {groupEntries.map((entry) => {
                 const id = stringValue(entry.id);
                 if (expanded !== id) return null;

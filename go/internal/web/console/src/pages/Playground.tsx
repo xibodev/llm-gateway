@@ -5,6 +5,7 @@ import { APIError, getJSON, requestJSON, sendJSON, streamEvents, type JSONRecord
 import type { ConsoleMode } from "../lib/mode";
 import { asList, asRecord, numberValue, stringValue } from "../lib/records";
 import { EmptyState, ErrorState, PageHeading } from "../components/PageState";
+import { SearchSelect } from "../components/DataTable";
 import {
   ModelCombo,
   ModelFilters,
@@ -709,8 +710,8 @@ export function Playground({ data, mode, principalID, onPrincipalIDChange, prese
         </button>
         {settingsOpen ? <div class="playground-settings__body">
           <div class="playground-settings__scope">
-            {mode === "admin" ? <label>Human owner<select value={principalID} onInput={(event) => onPrincipalIDChange((event.currentTarget as HTMLSelectElement).value)}><option value="">Select a human owner</option>{humans.map((principal) => <option value={stringValue(principal.id)} key={stringValue(principal.id)}>{stringValue(principal.display_name, stringValue(principal.id))}</option>)}</select></label> : null}
-            <label>Project<select value={projectID} onInput={(event) => setProjectID((event.currentTarget as HTMLSelectElement).value)}><option value="">Select a project</option>{eligibleProjects.map((project) => <option value={stringValue(project.id)} key={stringValue(project.id)}>{stringValue(project.name, stringValue(project.slug))}</option>)}</select></label>
+            {mode === "admin" ? <SearchSelect label="Human owner" noun="owners" value={principalID} options={[{ value: "", label: "Select a human owner" }, ...humans.map((principal) => ({ value: stringValue(principal.id), label: stringValue(principal.display_name, stringValue(principal.id)) }))]} onChange={onPrincipalIDChange} /> : null}
+            <SearchSelect label="Project" noun="projects" value={projectID} options={[{ value: "", label: "Select a project" }, ...eligibleProjects.map((project) => ({ value: stringValue(project.id), label: stringValue(project.name, stringValue(project.slug)) }))]} onChange={setProjectID} />
             {surface === "tts" && locales.length > 1 ? <label>Language<select value={locale} onInput={(event) => setLocale((event.currentTarget as HTMLSelectElement).value)}><option value="all">All languages ({locales.length})</option>{locales.map((code) => <option value={code} key={code}>{code}</option>)}</select></label> : null}
 			{surface === "chat" && availableTextSurfaces.length > 1 ? <label>Text surface<select value={textSurface} onInput={(event) => setTextSurface((event.currentTarget as HTMLSelectElement).value as TextSurface)}>{textSurfaces.filter(({ path }) => availableTextSurfaces.includes(path)).map(({ path, label }) => <option value={path} key={path}>{label} · {transportForSurface(selected, path)}</option>)}</select></label> : null}
 			{availableModes.length > 1 ? <label>Operation<select value={surface} onInput={(event) => setOperationMode((event.currentTarget as HTMLSelectElement).value as PlaygroundMode)}>{availableModes.map((candidate) => <option value={candidate} key={candidate}>{capabilityLabels[candidate as keyof typeof capabilityLabels] ?? candidate}</option>)}</select></label> : null}

@@ -6,6 +6,7 @@ import { errorCodeLabel } from "../lib/limits";
 import type { ConsoleMode } from "../lib/mode";
 import { asList, asRecord, numberValue, stringValue } from "../lib/records";
 import { EmptyState, ErrorState, LoadingState, PageHeading } from "../components/PageState";
+import { SearchSelect } from "../components/DataTable";
 
 // Requests lists the requests the gateway recorded, newest first, with the
 // failover chains it kept, so an operator can find what happened to the
@@ -69,8 +70,8 @@ export function Requests({ data, mode }: { data: JSONRecord; mode: ConsoleMode }
         <label>Status<select value={draft.status} onInput={update("status")}><option value="all">All statuses</option><option value="ok">Succeeded</option><option value="error">Failed</option></select></label>
         <label>Provider<select value={draft.provider} onInput={update("provider")}><option value="all">All providers</option>{providerIDs.map((id) => <option value={id} key={id}>{id}</option>)}</select></label>
         <label>Model<input value={draft.model} onInput={update("model")} placeholder="Exact routed model" /></label>
-        <label>Key<select value={draft.keyID} onInput={update("keyID")}><option value="all">All keys</option>{keys.map((key) => <option value={stringValue(key.id)} key={stringValue(key.id)}>{stringValue(key.name, stringValue(key.prefix))}</option>)}</select></label>
-        <label>Project<select value={draft.projectID} onInput={update("projectID")}><option value="all">All projects</option>{projects.map((project) => <option value={stringValue(project.id)} key={stringValue(project.id)}>{stringValue(project.name, stringValue(project.slug))}</option>)}</select></label>
+        <SearchSelect label="Key" noun="keys" value={draft.keyID} options={[{ value: "all", label: "All keys" }, ...keys.map((key) => ({ value: stringValue(key.id), label: stringValue(key.name, stringValue(key.prefix)) }))]} onChange={(keyID) => setDraft((current) => ({ ...current, keyID }))} />
+        <SearchSelect label="Project" noun="projects" value={draft.projectID} options={[{ value: "all", label: "All projects" }, ...projects.map((project) => ({ value: stringValue(project.id), label: stringValue(project.name, stringValue(project.slug)) }))]} onChange={(projectID) => setDraft((current) => ({ ...current, projectID }))} />
         <label>Request ID<input value={draft.requestID} onInput={update("requestID")} placeholder="req_…" /></label>
         <button class="button button--primary" type="submit" disabled={busy}>Search</button>
       </form>

@@ -66,7 +66,7 @@ test("a project's page shows its limits, keys, members and usage", async () => {
   assert.ok(rows.some((row) => row.startsWith("notebookllmgw_abAdaactive")), "an active key of the project is listed");
   assert.ok(rows.some((row) => row.startsWith("retiredllmgw_cdAdarevoked")), "so is a revoked one");
   assert.ok(!rows.some((row) => row.includes("elsewhere")), "another project's key is not");
-  assert.ok(rows.some((row) => row.startsWith("AdahumanownerRemove")), "the project's member is listed");
+  assert.ok(rows.some((row) => row.startsWith("Adahumanowner")), "the project's member is listed");
   assert.ok(!rows.some((row) => row.startsWith("Batch")), "another project's member is not");
   assert.ok(text(tree).includes(`Requests40Failed2Tokens${(1500).toLocaleString()}Estimated cost$2.0000`), "the last 30 days are summed");
   assert.ok(rows.some((row) => row.startsWith(`notebook382${(1500).toLocaleString()}`)), "usage is broken down by key");
@@ -74,7 +74,7 @@ test("a project's page shows its limits, keys, members and usage", async () => {
 
   find(tree, (node) => node.type === "button" && text(node).includes("Manage keys")).props.onClick();
   assert.deepEqual(navigated.at(-1), ["keys", "project=prj%201"]);
-  find(tree, (node) => node.type === "button" && text(node) === "Remove").props.onClick();
+  find(tree, (node) => node.type === "button" && node.props?.["aria-label"] === "Remove Ada from Research").props.onClick();
   await settle();
   assert.deepEqual(sent, ["DELETE /memberships?project_id=prj%201&principal_id=prn-ada"]);
   assert.equal(changed, 1);

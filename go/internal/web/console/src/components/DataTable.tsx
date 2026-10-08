@@ -114,11 +114,18 @@ export function dataTable<T>(view: TableView<T>, columns: TableColumn<T>[], opti
         <tbody>{view.rows.map((row) => <tr key={options.rowKey(row)} class={options.rowClass?.(row)}>{columns.map((column) => <td key={column.id} class={column.class} data-label={column.header}>{column.cell(row)}</td>)}</tr>)}</tbody>
       </table>
     </div>
-    {view.total > view.pageSizes[0] ? <footer class="data-table__footer">
-      <label>Rows per page<select value={String(view.pageSize)} onChange={(event) => view.setPageSize(Number((event.currentTarget as HTMLSelectElement).value))}>{view.pageSizes.map((size) => <option key={size} value={String(size)}>{size}</option>)}</select></label>
-      <Pager total={view.total} page={view.page} pageSize={view.pageSize} onPage={view.setPage} />
-    </footer> : null}
+    {tableFooter(view)}
   </div>;
+}
+
+// tableFooter renders a view's paging, with a choice of page size, once its
+// rows outgrow the smallest. Tiles a view pages use it too.
+export function tableFooter<T>(view: TableView<T>, sizeLabel = "Rows per page") {
+  if (view.total <= view.pageSizes[0]) return null;
+  return <footer class="data-table__footer">
+    <label>{sizeLabel}<select value={String(view.pageSize)} onChange={(event) => view.setPageSize(Number((event.currentTarget as HTMLSelectElement).value))}>{view.pageSizes.map((size) => <option key={size} value={String(size)}>{size}</option>)}</select></label>
+    <Pager total={view.total} page={view.page} pageSize={view.pageSize} onPage={view.setPage} />
+  </footer>;
 }
 
 // shortID shows a long identifier by its two ends.
@@ -145,17 +152,17 @@ export type PickerOption = { value: string; label: string; disabled?: boolean };
 // SearchSelect is a select whose options a search narrows once there are
 // more than searchAt of them. The chosen option stays listed whatever the
 // search, so narrowing never changes the choice.
-export function SearchSelect({ label, value, options, onChange, disabled = false, searchAt = 8, noun = "options" }: {
+export function SearchSelect({ label, value, options, onChange, disabled = false, searchAt = 8, noun = "options", class: className }: {
   label: string; value: string; options: PickerOption[]; onChange: (value: string) => void;
-  disabled?: boolean; searchAt?: number; noun?: string;
+  disabled?: boolean; searchAt?: number; noun?: string; class?: string;
 }) {
   const [search, setSearch] = useState("");
   const id = useId();
   const needle = search.trim().toLowerCase();
   const shown = needle ? options.filter((option) => option.value === value || option.label.toLowerCase().includes(needle)) : options;
   const select = <select id={id} value={value} disabled={disabled} aria-label={label} onChange={(event) => onChange((event.currentTarget as HTMLSelectElement).value)}>{shown.map((option) => <option key={option.value} value={option.value} disabled={option.disabled}>{option.label}</option>)}</select>;
-  if (options.length <= searchAt) return <label>{label}{select}</label>;
-  return <label class="search-select">{label}
+  if (options.length <= searchAt) return <label class={className}>{label}{select}</label>;
+  return <label class={[className, "search-select"].filter(Boolean).join(" ")}>{label}
     <input type="search" value={search} disabled={disabled} placeholder={`Search ${options.length} ${noun}`} aria-label={`Search ${noun}`} aria-controls={id} onInput={(event) => setSearch((event.currentTarget as HTMLInputElement).value)} />
     {select}
   </label>;

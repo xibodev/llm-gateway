@@ -5,6 +5,7 @@ import type { ConsoleMode } from "../lib/mode";
 import { asList, asRecord, stringValue } from "../lib/records";
 import { EmptyState, ErrorState, LoadingState, PageHeading } from "../components/PageState";
 import { ModelFilters, catalogModels, filterModels, useModelFilter } from "../components/ModelPicker";
+import { SearchSelect, dataTable, useTableView, type TableColumn } from "../components/DataTable";
 
 function CopySnippet({ value }: { value: string }) {
   const [copied, setCopied] = useState(false);
@@ -79,6 +80,19 @@ export function ModelsEndpoints({ data, mode, principalID, onPrincipalIDChange }
   const models = useMemo(() => catalogModels(catalog), [catalog]);
   const visibleIDs = useMemo(() => new Set(filterModels(models, filter).map((model) => model.id)), [models, filter]);
   const filtered = useMemo(() => rows.filter((row) => visibleIDs.has(stringValue(row.id))), [rows, visibleIDs]);
+  const modelColumns: TableColumn<JSONRecord>[] = [
+    { id: "model", header: "Model", sortValue: (row) => stringValue(row.id), cell: (row) => <><strong class="technical">{stringValue(row.id)}</strong>{stringValue(row.display_name) ? <small class="table-subtitle">{stringValue(row.display_name)}</small> : null}</> },
+    { id: "provider", header: "Provider", sortValue: (row) => stringValue(row.owned_by), cell: (row) => stringValue(row.owned_by) },
+    {
+      id: "publication", header: "Publication", sortValue: (row) => stringValue(row.publication_state, "configured"), cell: (row) => {
+        const state = stringValue(row.publication_state);
+        return state ? <><span class={`status-pill ${state === "verified" ? "status-pill--success" : "status-pill--warning"}`}>{state}</span>{state !== "verified" ? <small class="table-subtitle">Disabled for public routing{stringValue(row.failure_code) ? ` · ${stringValue(row.failure_code)}` : ""}</small> : null}</> : "Configured";
+      },
+    },
+    { id: "capabilities", header: "Capabilities", cell: (row) => capabilityList(row.capabilities) || "Not supplied" },
+    { id: "surfaces", header: "Supported surfaces", class: "technical", cell: (row) => valueList(row.supported_surfaces ?? row.supported_endpoints) || "Catalog did not declare" },
+  ];
+  const modelView = useTableView(filtered, modelColumns);
   // The console is served BY the gateway, so its own origin is always the
   // correct base URL — a hardcoded localhost fails silently on any deployed host.
   const snippets = clientSnippets(window.location.origin);
@@ -89,7 +103,7 @@ export function ModelsEndpoints({ data, mode, principalID, onPrincipalIDChange }
         {snippets.map((snippet) => <article class="endpoint-card" key={snippet.title}><header><Terminal size={18} /><h2>{snippet.title}</h2><CopySnippet value={snippet.value} /></header><pre class="technical">{snippet.value}</pre></article>)}
       </section>
       <section class="surface endpoint-capabilities"><div class="section-heading"><div><p class="eyebrow">Gateway surfaces</p><h2>Documented endpoint capabilities</h2></div><span class="status-pill status-pill--muted">Gateway documented</span></div><div class="capability-list"><div><strong>OpenAI core</strong><span class="technical">/v1/models · /v1/chat/completions · /v1/responses · /v1/embeddings</span></div><div><strong>Anthropic core</strong><span class="technical">/v1/messages · /v1/messages/count_tokens</span></div><div><strong>Media</strong><span class="technical">/v1/audio/transcriptions · /v1/audio/speech · /v1/images/generations · /v1/videos/generations</span></div><div><strong>Codex</strong><span>Official owner-private connection routes through the gateway Responses surface.</span></div></div></section>
-      <section class="surface"><div class="section-heading"><div><p class="eyebrow">Real catalog</p><h2>Available models</h2></div><button class="button button--secondary" type="button" onClick={() => void load()}>Refresh list</button></div><div class="model-toolbar">{mode === "admin" ? <label>Catalog owner<select value={principalID} onInput={(event) => onPrincipalIDChange((event.currentTarget as HTMLSelectElement).value)}><option value="">Select a human owner</option>{humans.map((principal) => <option value={stringValue(principal.id)} key={stringValue(principal.id)}>{stringValue(principal.display_name, stringValue(principal.id))}</option>)}</select></label> : null}</div><ModelFilters models={models} filter={filter} onChange={setFilter} />{error ? <ErrorState title="Model catalog is unavailable" detail={error} action={<button class="button button--secondary" type="button" onClick={() => void load()}>Retry</button>} /> : catalog === null ? <LoadingState title="Loading configured model catalogs" /> : filtered.length === 0 ? <EmptyState title="No models match this filter" detail="Sync a provider catalog, or widen the provider and capability filters." /> : <div class="table-wrap"><table><thead><tr><th>Model</th><th>Provider</th><th>Publication</th><th>Capabilities</th><th>Supported surfaces</th></tr></thead><tbody>{filtered.map((row) => { const state = stringValue(row.publication_state); return <tr key={stringValue(row.id)}><td><strong class="technical">{stringValue(row.id)}</strong>{stringValue(row.display_name) ? <small class="table-subtitle">{stringValue(row.display_name)}</small> : null}</td><td>{stringValue(row.owned_by)}</td><td>{state ? <><span class={`status-pill ${state === "verified" ? "status-pill--success" : "status-pill--warning"}`}>{state}</span>{state !== "verified" ? <small class="table-subtitle">Disabled for public routing{stringValue(row.failure_code) ? ` · ${stringValue(row.failure_code)}` : ""}</small> : null}</> : "Configured"}</td><td>{capabilityList(row.capabilities) || "Not supplied"}</td><td class="technical">{valueList(row.supported_surfaces ?? row.supported_endpoints) || "Catalog did not declare"}</td></tr>; })}</tbody></table></div>}</section>
+      <section class="surface"><div class="section-heading"><div><p class="eyebrow">Real catalog</p><h2>Available models</h2></div><button class="button button--secondary" type="button" onClick={() => void load()}>Refresh list</button></div><div class="model-toolbar">{mode === "admin" ? <SearchSelect label="Catalog owner" noun="owners" value={principalID} options={[{ value: "", label: "Select a human owner" }, ...humans.map((principal) => ({ value: stringValue(principal.id), label: stringValue(principal.display_name, stringValue(principal.id)) }))]} onChange={onPrincipalIDChange} /> : null}</div><ModelFilters models={models} filter={filter} onChange={setFilter} />{error ? <ErrorState title="Model catalog is unavailable" detail={error} action={<button class="button button--secondary" type="button" onClick={() => void load()}>Retry</button>} /> : catalog === null ? <LoadingState title="Loading configured model catalogs" /> : filtered.length === 0 ? <EmptyState title="No models match this filter" detail="Sync a provider catalog, or widen the provider and capability filters." /> : dataTable(modelView, modelColumns, { label: "Available models", rowKey: (row) => stringValue(row.id) })}</section>
     </div>
   );
 }

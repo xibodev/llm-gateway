@@ -3,6 +3,7 @@ import {
   BellRing,
   CirclePlay,
   Plus,
+  Power,
   RefreshCw,
   Trash2,
   X,
@@ -10,6 +11,7 @@ import {
 import { getJSON, sendJSON, type JSONRecord } from "../lib/api";
 import { deliveriesPath, deliveryKindLabel, deliveryKinds, deliveryState, emptyDeliveryFilter, nextAttemptLabel, nextCursor, type DeliveryFilter } from "../lib/activity";
 import { asList, asRecord, numberValue, stringValue } from "../lib/records";
+import { SearchSelect, dataTable, useTableView, type TableColumn } from "../components/DataTable";
 import {
   EmptyState,
   ErrorState,
@@ -174,6 +176,30 @@ export function Alerts({ data }: { data: JSONRecord }) {
     stringValue(principal.display_name, stringValue(principal.email, stringValue(principal.id))),
   ]));
 
+  const ruleScope = (rule: JSONRecord) => {
+    const project = stringValue(rule.project_id);
+    const principal = stringValue(rule.principal_id);
+    return [project ? projectNames.get(project) : "", principal ? principalNames.get(principal) : ""].filter(Boolean).join(" · ") || "All eligible keys";
+  };
+  const ruleCondition = (rule: JSONRecord) => stringValue(rule.kind) === "key_expiry"
+    ? `${numberValue(rule.threshold)} day${numberValue(rule.threshold) === 1 ? "" : "s"} before expiry`
+    : `${numberValue(rule.threshold)}% of ${stringValue(rule.period)} ${metricLabel(stringValue(rule.metric))}`;
+  const ruleColumns: TableColumn<JSONRecord>[] = [
+    { id: "type", header: "Type", sortValue: (rule) => kindLabel(stringValue(rule.kind)), cell: (rule) => kindLabel(stringValue(rule.kind)) },
+    { id: "condition", header: "Condition", sortValue: ruleCondition, cell: ruleCondition },
+    { id: "scope", header: "Scope", sortValue: ruleScope, cell: ruleScope },
+    { id: "status", header: "Status", sortValue: (rule) => (rule.enabled === true ? "enabled" : "disabled"), cell: (rule) => <span class={`status-pill ${rule.enabled === true ? "status-pill--ready" : "status-pill--muted"}`}>{rule.enabled === true ? "enabled" : "disabled"}</span> },
+    {
+      id: "actions", header: "Actions", cell: (rule) => {
+        const id = stringValue(rule.id);
+        const enabled = rule.enabled === true;
+        const label = `${kindLabel(stringValue(rule.kind))} alert`;
+        return <div class="row-actions"><button class="icon-button icon-button--compact" type="button" aria-label={`${enabled ? "Disable" : "Enable"} ${label}`} title={enabled ? "Disable" : "Enable"} disabled={busy === id} onClick={() => void setEnabled(rule, !enabled)}><Power size={14} /></button><button class="icon-button icon-button--compact" type="button" aria-label={`Delete ${label}`} title="Delete" disabled={busy === id} onClick={() => void remove(rule)}><Trash2 size={14} /></button></div>;
+      },
+    },
+  ];
+  const ruleView = useTableView(rules ?? [], ruleColumns);
+
   return (
     <div class="page-stack">
       <PageHeading
@@ -207,8 +233,8 @@ export function Alerts({ data }: { data: JSONRecord }) {
             {kind === "quota_usage" ? <label>Metric<select value={metric} onInput={(event) => setMetric((event.currentTarget as HTMLSelectElement).value)}>{metricOptions.map(([value, label]) => <option value={value} key={value}>{label}</option>)}</select></label> : null}
             <label>{kind === "key_expiry" ? "Warning days" : "Threshold percent"}<input inputMode="numeric" value={threshold} onInput={(event) => setThreshold((event.currentTarget as HTMLInputElement).value)} /></label>
             {kind === "quota_usage" ? <label>Period<select value={period} onInput={(event) => setPeriod((event.currentTarget as HTMLSelectElement).value)}><option value="day">Daily</option><option value="month">Monthly</option></select></label> : null}
-            <label>Project scope<select value={projectID} onInput={(event) => setProjectID((event.currentTarget as HTMLSelectElement).value)}><option value="">All projects</option>{projects.map((project) => <option value={stringValue(project.id)} key={stringValue(project.id)}>{stringValue(project.name, stringValue(project.slug))}</option>)}</select></label>
-            <label>Principal scope<select value={principalID} onInput={(event) => setPrincipalID((event.currentTarget as HTMLSelectElement).value)}><option value="">All principals</option>{principals.map((principal) => <option value={stringValue(principal.id)} key={stringValue(principal.id)}>{stringValue(principal.display_name, stringValue(principal.email, stringValue(principal.id)))}</option>)}</select></label>
+            <SearchSelect label="Project scope" noun="projects" value={projectID} options={[{ value: "", label: "All projects" }, ...projects.map((project) => ({ value: stringValue(project.id), label: stringValue(project.name, stringValue(project.slug)) }))]} onChange={setProjectID} />
+            <SearchSelect label="Principal scope" noun="principals" value={principalID} options={[{ value: "", label: "All principals" }, ...principals.map((principal) => ({ value: stringValue(principal.id), label: stringValue(principal.display_name, stringValue(principal.email, stringValue(principal.id))) }))]} onChange={setPrincipalID} />
           </div>
           <p class="form-help">{kind === "key_expiry" ? "The scheduled evaluator enqueues one notification per matching active key before it expires." : "Quota rules trigger against configured key or project limits; a missing limit cannot produce an alert."}</p>
           <footer><button class="button button--secondary" type="button" onClick={() => setCreating(false)}>Cancel</button><button class="button button--primary" type="submit" disabled={busy === "create"}><BellRing size={16} /> Create rule</button></footer>
@@ -217,23 +243,9 @@ export function Alerts({ data }: { data: JSONRecord }) {
       {rules === null && !error ? <LoadingState title="Loading alert rules" /> : null}
       {rules?.length === 0 ? <EmptyState title="No alert rules configured" detail="Create a quota warning or key-expiry rule to populate the notification outbox." /> : null}
       {rules?.length ? (
-        <section class="surface table-wrap">
+        <section class="surface">
           <div class="section-heading"><div><p class="eyebrow">Configured rules</p><h2>Notification eligibility</h2></div><span>{rules.length} rule{rules.length === 1 ? "" : "s"}</span></div>
-          <table>
-            <thead><tr><th>Type</th><th>Condition</th><th>Scope</th><th>Status</th><th>Actions</th></tr></thead>
-            <tbody>{rules.map((rule) => {
-              const id = stringValue(rule.id);
-              const enabled = rule.enabled === true;
-              const ruleKind = stringValue(rule.kind);
-              const project = stringValue(rule.project_id);
-              const principal = stringValue(rule.principal_id);
-              const scope = [project ? projectNames.get(project) : "", principal ? principalNames.get(principal) : ""].filter(Boolean).join(" · ") || "All eligible keys";
-              const condition = ruleKind === "key_expiry"
-                ? `${numberValue(rule.threshold)} day${numberValue(rule.threshold) === 1 ? "" : "s"} before expiry`
-                : `${numberValue(rule.threshold)}% of ${stringValue(rule.period)} ${metricLabel(stringValue(rule.metric))}`;
-              return <tr key={id}><td>{kindLabel(ruleKind)}</td><td>{condition}</td><td>{scope}</td><td><span class={`status-pill ${enabled ? "status-pill--ready" : "status-pill--muted"}`}>{enabled ? "enabled" : "disabled"}</span></td><td><div class="table-actions"><button class="button button--secondary" type="button" disabled={busy === id} onClick={() => void setEnabled(rule, !enabled)}>{enabled ? "Disable" : "Enable"}</button><button class="icon-button" type="button" aria-label={`Delete ${kindLabel(ruleKind)} alert`} disabled={busy === id} onClick={() => void remove(rule)}><Trash2 size={15} /></button></div></td></tr>;
-            })}</tbody>
-          </table>
+          {dataTable(ruleView, ruleColumns, { label: "Alert rules", rowKey: (rule) => stringValue(rule.id) })}
         </section>
       ) : null}
       <section class="surface table-wrap">
