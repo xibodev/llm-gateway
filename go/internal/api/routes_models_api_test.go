@@ -618,10 +618,10 @@ func TestAdminCodexCatalogAndRouteValidationArePrincipalScoped(t *testing.T) {
 	if status != http.StatusOK || saved["members"] != float64(1) {
 		t.Fatalf("owner route status=%d payload=%+v", status, saved)
 	}
-	routeOnlyPayload, err := buildModelListWithDiagnostics(&config.Principal{
+	routeOnlyPayload, err := buildModelList(&config.Principal{
 		PrincipalID: owner.ID, PrincipalKind: owner.Kind, RoutesOnly: true,
 		AllowedRoutes: []string{"owner-codex"},
-	}, false)
+	})
 	if err != nil {
 		t.Fatal(err)
 	}

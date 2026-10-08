@@ -77,7 +77,7 @@ func TestAnonymousModelListPublishesOnlyExactVerifiedTargets(t *testing.T) {
 			t.Fatalf("public row exposed admin diagnostic %q: %+v", field, rows[0])
 		}
 	}
-	diagnostics, err := buildModelListWithDiagnostics(nil, true)
+	diagnostics, err := buildConsoleModelList(nil, true)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -256,6 +256,65 @@ func TestModelListAliasesAreDeterministicUniqueAndRoundTrip(t *testing.T) {
 	resolution, err := resolveAs(alias, principal)
 	if err != nil || !found || resolution.Targets[0] != (router.Target{Provider: "alpha", Model: "echo-strong"}) {
 		t.Fatalf("policy-unique alias found=%v resolution=%+v err=%v", found, resolution, err)
+	}
+}
+
+// The Claude Code discovery aliases are listed only by GET /v1/models, for
+// the clients whose model discovery needs them. The console's lists show the
+// models themselves.
+func TestDiscoveryAliasesAreListedOnlyByTheModelsAPI(t *testing.T) {
+	t.Setenv("LLMGW_STATE_DIR", t.TempDir())
+	iam.ResetForTests()
+	t.Cleanup(iam.ResetForTests)
+	old := *config.Get()
+	t.Cleanup(func() { config.Update(func(s *config.Settings) { *s = old }) })
+	config.Update(func(s *config.Settings) {
+		s.APIKey, s.AdminKeysOnDataPlane, s.AllowUnauthenticatedAPI = "admin-secret", true, false
+		s.SSOEnabled, s.SSOSharedSecret, s.SSOAutoProvision = true, "proxy-secret", true
+		s.AnthropicDiscoveryAliases, s.AnthropicDiscoveryAllModels = true, true
+		s.Providers = map[string]*config.ProviderConfig{"fixture": {Type: "echo"}}
+		s.Endpoints = map[string]*config.EndpointConfig{}
+	})
+	if _, err := iam.Initialize(); err != nil {
+		t.Fatal(err)
+	}
+	originalCatalog := catalogModelsForPrincipal
+	catalogModelsForPrincipal = func(string, *config.Principal) []providers.ModelInfo {
+		chat := map[string]any{"chat": true, "context_window": 32000}
+		return []providers.ModelInfo{{ID: "claude-fixture", Capabilities: chat}, {ID: "fixture-chat", Capabilities: chat}}
+	}
+	t.Cleanup(func() { catalogModelsForPrincipal = originalCatalog })
+	server := httptest.NewServer(NewServer(Runtime{}))
+	defer server.Close()
+
+	models := []string{"fixture/claude-fixture", "fixture/fixture-chat"}
+	for _, list := range []struct {
+		name string
+		want []string
+		get  func() (int, map[string]any)
+	}{
+		{"GET /v1/models", append([]string{"claude-fixture", "claude-fixture-chat"}, models...), func() (int, map[string]any) {
+			return jsonRequest(t, server.URL+"/v1/models", http.MethodGet, "admin-secret", nil)
+		}},
+		{"the administrator's list", models, func() (int, map[string]any) {
+			return jsonRequest(t, server.URL+"/admin/api/models", http.MethodGet, "admin-secret", nil)
+		}},
+		{"the administrator's diagnostics", models, func() (int, map[string]any) {
+			return jsonRequest(t, server.URL+"/admin/api/models?diagnostics=1", http.MethodGet, "admin-secret", nil)
+		}},
+		{"the portal's list", models, func() (int, map[string]any) {
+			return ssoConnectionRequest(t, server.URL, "fixture-user", http.MethodGet, "/user/api/models", nil)
+		}},
+	} {
+		status, payload := list.get()
+		rows, _ := payload["data"].([]any)
+		got := []string{}
+		for _, row := range rows {
+			got = append(got, row.(map[string]any)["id"].(string))
+		}
+		if status != http.StatusOK || !reflect.DeepEqual(got, list.want) {
+			t.Errorf("%s: status=%d models=%v, want %v", list.name, status, got, list.want)
+		}
 	}
 }
 

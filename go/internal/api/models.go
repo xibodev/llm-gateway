@@ -55,7 +55,7 @@ func handleUserModels(w http.ResponseWriter, r *http.Request) {
 		selected.Project = project.Slug
 		selected.Role = role
 	}
-	response, err := buildModelList(selected)
+	response, err := buildConsoleModelList(selected, false)
 	if err != nil {
 		writeError(w, 500, "Model catalog unavailable.")
 		return
@@ -105,7 +105,7 @@ func handleAdminModels(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	includeUnpublished := r.URL.Query().Get("diagnostics") == "1"
-	response, err := buildModelListWithDiagnostics(principal, includeUnpublished)
+	response, err := buildConsoleModelList(principal, includeUnpublished)
 	if err != nil {
 		writeError(w, 500, "Model catalog unavailable.")
 		return
@@ -129,11 +129,33 @@ func hasEndpointCaseFold(endpoints map[string]*config.EndpointConfig, name strin
 	return false
 }
 
-func buildModelList(principal *config.Principal) (map[string]any, error) {
-	return buildModelListWithDiagnostics(principal, false)
+// modelListOptions select what a model list adds to the models and routes a
+// principal may call.
+type modelListOptions struct {
+	// unpublished adds the models an automation-managed provider has not
+	// published, with their publication state, for the console's diagnostics.
+	unpublished bool
+	// discoveryAliases adds the Claude Code discovery aliases when the
+	// settings enable them. Only GET /v1/models lists them, for the clients
+	// whose model discovery needs them: the console lists the models
+	// themselves, and an alias there is a model row without capabilities.
+	discoveryAliases bool
 }
 
-func buildModelListWithDiagnostics(principal *config.Principal, includeUnpublished bool) (map[string]any, error) {
+// buildModelList is GET /v1/models for principal.
+func buildModelList(principal *config.Principal) (map[string]any, error) {
+	return listModels(principal, modelListOptions{discoveryAliases: true})
+}
+
+// buildConsoleModelList is the console's model list for principal, with
+// includeUnpublished also the models an automation-managed provider has not
+// published.
+func buildConsoleModelList(principal *config.Principal, includeUnpublished bool) (map[string]any, error) {
+	return listModels(principal, modelListOptions{unpublished: includeUnpublished})
+}
+
+func listModels(principal *config.Principal, options modelListOptions) (map[string]any, error) {
+	includeUnpublished := options.unpublished
 	data := []any{}
 	seen := map[string]bool{}
 	s := config.Get()
@@ -330,7 +352,7 @@ func buildModelListWithDiagnostics(principal *config.Principal, includeUnpublish
 	// aliased id routes via the resolver's native-name normalization. Deduped.
 	// Only chat/coding models are aliased â€” embeddings, audio (TTS/STT), and other
 	// non-chat models are kept out of Claude Code's /model picker.
-	if s.AnthropicDiscoveryAliases && (principal == nil || !principal.RoutesOnly) {
+	if options.discoveryAliases && s.AnthropicDiscoveryAliases && (principal == nil || !principal.RoutesOnly) {
 		candidates := router.NativeAliasCandidatesFromSnapshot(
 			modelSnapshot, s.AnthropicDiscoveryAllModels,
 		)
