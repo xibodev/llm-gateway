@@ -34,6 +34,7 @@ type ProviderConnection struct {
 	ID                 string `json:"id"`
 	PrincipalID        string `json:"principal_id"`
 	PrincipalKind      string `json:"principal_kind,omitempty"`
+	PrincipalName      string `json:"principal_name,omitempty"`
 	ProviderID         string `json:"provider_id"`
 	Name               string `json:"connection_name"`
 	Kind               string `json:"credential_kind"`
@@ -267,7 +268,7 @@ func ListProviderConnections(principalID, providerID string) ([]ProviderConnecti
 		return nil, err
 	}
 	query := `
-SELECT c.id,c.principal_id,p.kind,c.provider_id,c.connection_name,
+SELECT c.id,c.principal_id,p.kind,p.display_name,c.provider_id,c.connection_name,
        c.credential_kind,c.source,c.private_to_principal,c.is_default,c.status,
        c.created_at,c.updated_at,COALESCE(c.last_used_at,0)
 FROM provider_connections c
@@ -316,7 +317,7 @@ func ProviderConnectionByName(
 		return ProviderConnection{}, false, err
 	}
 	row := db.QueryRow(`
-SELECT c.id,c.principal_id,p.kind,c.provider_id,c.connection_name,
+SELECT c.id,c.principal_id,p.kind,p.display_name,c.provider_id,c.connection_name,
        c.credential_kind,c.source,c.private_to_principal,c.is_default,c.status,
        c.created_at,c.updated_at,COALESCE(c.last_used_at,0)
 FROM provider_connections c
@@ -702,7 +703,7 @@ func defaultProviderConnection(
 		return ProviderConnection{}, false, err
 	}
 	row := db.QueryRow(`
-SELECT c.id,c.principal_id,p.kind,c.provider_id,c.connection_name,
+SELECT c.id,c.principal_id,p.kind,p.display_name,c.provider_id,c.connection_name,
        c.credential_kind,c.source,c.private_to_principal,c.is_default,c.status,
        c.created_at,c.updated_at,COALESCE(c.last_used_at,0)
 FROM provider_connections c
@@ -779,7 +780,7 @@ func scanProviderConnection(scanner interface{ Scan(...any) error }) (ProviderCo
 	var connection ProviderConnection
 	var private, isDefault int
 	err := scanner.Scan(
-		&connection.ID, &connection.PrincipalID, &connection.PrincipalKind,
+		&connection.ID, &connection.PrincipalID, &connection.PrincipalKind, &connection.PrincipalName,
 		&connection.ProviderID, &connection.Name, &connection.Kind, &connection.Source,
 		&private, &isDefault, &connection.Status, &connection.CreatedAt,
 		&connection.UpdatedAt, &connection.LastUsedAt,

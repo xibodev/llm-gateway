@@ -39,7 +39,9 @@ func TestOAuthConnectionsEncryptTokensAndExposeOnlySafeMetadata(t *testing.T) {
 			t.Fatalf("connection response leaked secret %q: %s", secret, serialized)
 		}
 	}
-	if listed[0].OAuthAccountLabel != "Owner account" || listed[0].OAuthExpiresAt != expiresAt {
+	// A listed connection names its owner, so the console can show whose it
+	// is without the list of every principal.
+	if listed[0].OAuthAccountLabel != "Owner account" || listed[0].OAuthExpiresAt != expiresAt || listed[0].PrincipalName != "OAuth Owner" {
 		t.Fatalf("listed metadata=%+v", listed[0])
 	}
 

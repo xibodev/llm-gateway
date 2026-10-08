@@ -7,8 +7,10 @@ import (
 	"time"
 )
 
-// A page of keys is chosen by status, owner, project, route grant and search,
-// in the order asked for, and counts every key its filter selects.
+// A page of keys is chosen by status, owner, project, route, grant and
+// search, in the order asked for, and counts every key its filter selects. A
+// route keeps the keys whose allowed routes name it, and a grant those whose
+// allowed routes or allowed models do.
 func TestListAPIKeysPageFiltersSortsAndPages(t *testing.T) {
 	t.Setenv("LLMGW_STATE_DIR", t.TempDir())
 	ResetForTests()
@@ -49,8 +51,8 @@ func TestListAPIKeysPageFiltersSortsAndPages(t *testing.T) {
 	if err := UpdateAPIKey(paused, KeyUpdate{Status: &disabled, Admin: true}); err != nil {
 		t.Fatal(err)
 	}
-	issue(research.ID, ada.ID, "lapsed", now.Add(-time.Minute).Unix(), KeyPolicy{})
-	retired := issue(ops.ID, bob.ID, "retired", 0, KeyPolicy{})
+	issue(research.ID, ada.ID, "lapsed", now.Add(-time.Minute).Unix(), KeyPolicy{AllowedModels: []string{"coding"}})
+	retired := issue(ops.ID, bob.ID, "retired", 0, KeyPolicy{AllowedRoutes: []string{"coding"}})
 	if err := RevokeAPIKey(retired); err != nil {
 		t.Fatal(err)
 	}
@@ -81,6 +83,9 @@ func TestListAPIKeysPageFiltersSortsAndPages(t *testing.T) {
 		"an owner's":                     {KeyListFilter{Status: "all", PrincipalID: bob.ID, Sort: "name"}, []string{"Batch_Job", "retired"}},
 		"a project's":                    {KeyListFilter{Status: "all", ProjectID: research.ID, Sort: "name", Descending: true}, []string{"paused", "notebook", "lapsed"}},
 		"a route's":                      {KeyListFilter{Route: "coding", Sort: "name"}, []string{"Batch_Job", "notebook"}},
+		"unrevoked":                      {KeyListFilter{Status: "unrevoked", Sort: "name"}, []string{"Batch_Job", "lapsed", "notebook", "paused"}},
+		"a grant's, unrevoked":           {KeyListFilter{Grant: "coding", Status: "unrevoked", Sort: "name"}, []string{"Batch_Job", "lapsed", "notebook"}},
+		"a grant's, any status":          {KeyListFilter{Grant: "coding", Status: "all", Sort: "name"}, []string{"Batch_Job", "lapsed", "notebook", "retired"}},
 		"a search, ignoring case":        {KeyListFilter{Status: "all", Search: "batch_"}, []string{"Batch_Job"}},
 		"a search of the owner":          {KeyListFilter{Status: "all", Search: "BOB", Sort: "name"}, []string{"Batch_Job", "retired"}},
 		"a search's wildcard is literal": {KeyListFilter{Status: "all", Search: "%"}, []string{}},

@@ -25,11 +25,17 @@ type Project struct {
 	UpdatedAt int64  `json:"updated_at"`
 }
 
+// Membership is a principal's role in a project. A listed membership names
+// its principal too, so a reader can show and choose members without the
+// list of every principal.
 type Membership struct {
-	ProjectID   string `json:"project_id"`
-	PrincipalID string `json:"principal_id"`
-	Role        string `json:"role"`
-	CreatedAt   int64  `json:"created_at"`
+	ProjectID       string `json:"project_id"`
+	PrincipalID     string `json:"principal_id"`
+	Role            string `json:"role"`
+	CreatedAt       int64  `json:"created_at"`
+	PrincipalName   string `json:"principal_name,omitempty"`
+	PrincipalKind   string `json:"principal_kind,omitempty"`
+	PrincipalStatus string `json:"principal_status,omitempty"`
 }
 
 type KeyPolicy struct {

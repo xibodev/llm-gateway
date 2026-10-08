@@ -11,9 +11,12 @@ type KeyListFilter struct {
 	ProjectID   string
 	// Route keeps the keys whose allowed routes name it.
 	Route string
+	// Grant keeps the keys whose allowed routes or allowed models name it,
+	// as a route's name does in the grants of the keys that may call it.
+	Grant string
 	// Status is "usable", the default: active and disabled keys that have
-	// not expired; "ended": revoked and expired ones; "active",
-	// "disabled", "expired" or "revoked"; or "all".
+	// not expired; "ended": revoked and expired ones; "unrevoked": all but
+	// the revoked; "active", "disabled", "expired" or "revoked"; or "all".
 	Status string
 	// Search keeps the keys whose name, prefix or ID, project slug or name,
 	// or owner's name holds it, ignoring case.
@@ -73,6 +76,8 @@ func ListAPIKeysPage(filter KeyListFilter) ([]APIKey, int, error) {
 		add("k.status IN ('active','disabled') AND NOT "+expired, filter.Now)
 	case "ended":
 		add("(k.status='revoked' OR "+expired+")", filter.Now)
+	case "unrevoked":
+		add("k.status<>'revoked'")
 	case "active", "disabled":
 		add("k.status=? AND NOT "+expired, filter.Status, filter.Now)
 	case "expired":
@@ -81,7 +86,7 @@ func ListAPIKeysPage(filter KeyListFilter) ([]APIKey, int, error) {
 		add("k.status='revoked'")
 	case "all":
 	default:
-		return nil, 0, &InvalidFilterError{Message: "status must be usable, ended, active, disabled, expired, revoked or all"}
+		return nil, 0, &InvalidFilterError{Message: "status must be usable, ended, unrevoked, active, disabled, expired, revoked or all"}
 	}
 	if id := strings.TrimSpace(filter.PrincipalID); id != "" {
 		add("k.principal_id=?", id)
@@ -91,6 +96,10 @@ func ListAPIKeysPage(filter KeyListFilter) ([]APIKey, int, error) {
 	}
 	if route := strings.TrimSpace(filter.Route); route != "" {
 		add(`EXISTS (SELECT 1 FROM json_each(COALESCE(json_extract(k.scope_json,'$.allowed_routes'),'[]')) WHERE value=?)`, route)
+	}
+	if grant := strings.TrimSpace(filter.Grant); grant != "" {
+		add(`(EXISTS (SELECT 1 FROM json_each(COALESCE(json_extract(k.scope_json,'$.allowed_routes'),'[]')) WHERE value=?)
+  OR EXISTS (SELECT 1 FROM json_each(COALESCE(k.allowed_models_json,'[]')) WHERE value=?))`, grant, grant)
 	}
 	if search := strings.ToLower(strings.TrimSpace(filter.Search)); search != "" {
 		pattern := "%" + strings.NewReplacer(`\`, `\\`, "%", `\%`, "_", `\_`).Replace(search) + "%"

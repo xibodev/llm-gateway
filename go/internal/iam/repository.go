@@ -405,61 +405,27 @@ WHERE project_id=? AND principal_id=? AND status!='revoked'`,
 }
 
 func ListMemberships(projectID string) ([]Membership, error) {
-	db, err := DB()
-	if err != nil {
-		return nil, err
-	}
-
-	rows, err := db.Query(`
-SELECT project_id,principal_id,role,created_at
-FROM project_memberships WHERE project_id=? ORDER BY role,principal_id`, projectID)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	out := []Membership{}
-	for rows.Next() {
-		var m Membership
-		if err := rows.Scan(&m.ProjectID, &m.PrincipalID, &m.Role, &m.CreatedAt); err != nil {
-			return nil, err
-		}
-		out = append(out, m)
-	}
-	return out, rows.Err()
+	return listMemberships("WHERE m.project_id=? ORDER BY m.role,m.principal_id", projectID)
 }
 
 func ListAllMemberships() ([]Membership, error) {
-	db, err := DB()
-	if err != nil {
-		return nil, err
-	}
-
-	rows, err := db.Query(`
-SELECT project_id,principal_id,role,created_at
-FROM project_memberships ORDER BY project_id,role,principal_id`)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	out := []Membership{}
-	for rows.Next() {
-		var m Membership
-		if err := rows.Scan(&m.ProjectID, &m.PrincipalID, &m.Role, &m.CreatedAt); err != nil {
-			return nil, err
-		}
-		out = append(out, m)
-	}
-	return out, rows.Err()
+	return listMemberships("ORDER BY m.project_id,m.role,m.principal_id")
 }
 
 func ListPrincipalMemberships(principalID string) ([]Membership, error) {
+	return listMemberships("WHERE m.principal_id=? ORDER BY m.role,m.project_id", principalID)
+}
+
+// listMemberships lists the memberships clause selects, in its order, each
+// with its principal's name, kind and status.
+func listMemberships(clause string, args ...any) ([]Membership, error) {
 	db, err := DB()
 	if err != nil {
 		return nil, err
 	}
 	rows, err := db.Query(`
-SELECT project_id,principal_id,role,created_at
-FROM project_memberships WHERE principal_id=? ORDER BY role,project_id`, principalID)
+SELECT m.project_id,m.principal_id,m.role,m.created_at,n.display_name,n.kind,n.status
+FROM project_memberships m JOIN principals n ON n.id=m.principal_id `+clause, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -467,7 +433,7 @@ FROM project_memberships WHERE principal_id=? ORDER BY role,project_id`, princip
 	out := []Membership{}
 	for rows.Next() {
 		var m Membership
-		if err := rows.Scan(&m.ProjectID, &m.PrincipalID, &m.Role, &m.CreatedAt); err != nil {
+		if err := rows.Scan(&m.ProjectID, &m.PrincipalID, &m.Role, &m.CreatedAt, &m.PrincipalName, &m.PrincipalKind, &m.PrincipalStatus); err != nil {
 			return nil, err
 		}
 		out = append(out, m)
