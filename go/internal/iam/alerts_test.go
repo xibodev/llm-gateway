@@ -272,3 +272,41 @@ func TestOutboxErrorsSanitizePersistenceAndHistoricalRows(t *testing.T) {
 		t.Fatalf("historical claimed event unsafe or changed: %+v", claimed[0])
 	}
 }
+
+// A listed alert rule and a listed delivery name the principal they concern,
+// so the console can show their scope without the list of every principal;
+// an unscoped one names none.
+func TestAlertRulesAndDeliveriesNameTheirPrincipal(t *testing.T) {
+	t.Setenv("LLMGW_STATE_DIR", t.TempDir())
+	ResetForTests()
+	t.Cleanup(ResetForTests)
+	principal, err := CreatePrincipal("human", "fixture:alerted", "", "Alerted Owner")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, rule := range []AlertRule{
+		{PrincipalID: principal.ID, Kind: "key_expiry", Threshold: 7, Period: "day"},
+		{Kind: "key_expiry", Threshold: 3, Period: "day"},
+	} {
+		if _, err := CreateAlertRule(rule); err != nil {
+			t.Fatal(err)
+		}
+	}
+	rules, err := ListAlertRules()
+	if err != nil || len(rules) != 2 || rules[0].PrincipalName != "Alerted Owner" || rules[1].PrincipalName != "" {
+		t.Fatalf("rules=%+v err=%v", rules, err)
+	}
+	db, err := DB()
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now().Unix()
+	if _, err := db.Exec(`INSERT INTO outbox_events(ts,kind,principal_id,payload_json,status,attempts,available_at)
+		VALUES(?,'key_expiring',?,'{}','pending',0,?)`, now, principal.ID, now); err != nil {
+		t.Fatal(err)
+	}
+	deliveries, _, err := ListOutboxDeliveries(OutboxFilter{})
+	if err != nil || len(deliveries) != 1 || deliveries[0].PrincipalID != principal.ID || deliveries[0].PrincipalName != "Alerted Owner" {
+		t.Fatalf("deliveries=%+v err=%v", deliveries, err)
+	}
+}

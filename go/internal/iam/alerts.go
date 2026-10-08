@@ -14,13 +14,15 @@ type AlertRule struct {
 	ID          string `json:"id"`
 	ProjectID   string `json:"project_id,omitempty"`
 	PrincipalID string `json:"principal_id,omitempty"`
-	Kind        string `json:"kind"`
-	Metric      string `json:"metric"`
-	Threshold   int    `json:"threshold"`
-	Period      string `json:"period"`
-	Enabled     bool   `json:"enabled"`
-	CreatedAt   int64  `json:"created_at"`
-	UpdatedAt   int64  `json:"updated_at"`
+	// PrincipalName names the principal a listed rule is scoped to.
+	PrincipalName string `json:"principal_name,omitempty"`
+	Kind          string `json:"kind"`
+	Metric        string `json:"metric"`
+	Threshold     int    `json:"threshold"`
+	Period        string `json:"period"`
+	Enabled       bool   `json:"enabled"`
+	CreatedAt     int64  `json:"created_at"`
+	UpdatedAt     int64  `json:"updated_at"`
 }
 
 type OutboxEvent struct {
@@ -124,8 +126,9 @@ func ListAlertRules() ([]AlertRule, error) {
 		return nil, err
 	}
 	rows, err := db.Query(`
-SELECT id,COALESCE(project_id,''),COALESCE(principal_id,''),kind,metric,
-       threshold,period,enabled,created_at,updated_at
+SELECT id,COALESCE(project_id,''),COALESCE(principal_id,''),
+       COALESCE((SELECT display_name FROM principals WHERE principals.id=alert_rules.principal_id),''),
+       kind,metric,threshold,period,enabled,created_at,updated_at
 FROM alert_rules ORDER BY created_at,id`)
 	if err != nil {
 		return nil, err
@@ -136,7 +139,7 @@ FROM alert_rules ORDER BY created_at,id`)
 		var rule AlertRule
 		var enabled int
 		if err := rows.Scan(
-			&rule.ID, &rule.ProjectID, &rule.PrincipalID, &rule.Kind, &rule.Metric,
+			&rule.ID, &rule.ProjectID, &rule.PrincipalID, &rule.PrincipalName, &rule.Kind, &rule.Metric,
 			&rule.Threshold, &rule.Period, &enabled, &rule.CreatedAt, &rule.UpdatedAt,
 		); err != nil {
 			return nil, err
@@ -345,6 +348,8 @@ FROM outbox_events WHERE id=?`, id).Scan(
 // event, the attempts its delivery may make, and when the next one is due.
 type OutboxDelivery struct {
 	OutboxEvent
+	// PrincipalName names the principal a listed event concerns.
+	PrincipalName string `json:"principal_name,omitempty"`
 	// MaxAttempts is how many delivery attempts an event may make.
 	MaxAttempts int `json:"max_attempts"`
 	// Exhausted reports an undelivered event that used every attempt, which
@@ -414,7 +419,8 @@ func ListOutboxDeliveries(filter OutboxFilter) ([]OutboxDelivery, int64, error) 
 	rows, err := db.Query(`
 SELECT id,ts,kind,COALESCE(project_id,''),COALESCE(principal_id,''),
        payload_json,status,attempts,available_at,COALESCE(delivered_at,0),
-       COALESCE(last_error,''),COALESCE(claimed_by,''),COALESCE(lease_until,0)
+       COALESCE(last_error,''),COALESCE(claimed_by,''),COALESCE(lease_until,0),
+       COALESCE((SELECT display_name FROM principals WHERE principals.id=outbox_events.principal_id),'')
 FROM outbox_events WHERE `+strings.Join(where, " AND ")+` ORDER BY id DESC LIMIT ?`,
 		append(args, filter.Limit+1)...)
 	if err != nil {
@@ -430,7 +436,7 @@ FROM outbox_events WHERE `+strings.Join(where, " AND ")+` ORDER BY id DESC LIMIT
 			&event.ID, &event.Timestamp, &event.Kind, &event.ProjectID,
 			&event.PrincipalID, &payload, &event.Status, &event.Attempts,
 			&event.AvailableAt, &event.DeliveredAt, &event.LastError,
-			&event.ClaimedBy, &event.LeaseUntil,
+			&event.ClaimedBy, &event.LeaseUntil, &delivery.PrincipalName,
 		); err != nil {
 			return nil, 0, err
 		}
