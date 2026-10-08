@@ -1,0 +1,190 @@
+{
+  "schema_version": "1.0.0",
+  "mode": "change",
+  "contract": {
+    "digest": "da05219969e051b692980ada8e8066ac909bf88d11ad6a5af6338834a8cc384f"
+  },
+  "authoring_provenance": {
+    "status": "established",
+    "path": ".release-harness/drafts/llm-gateway.record.json",
+    "digest": "e819045146db82b3754d02e0950d13ca8527706a2b478ada58c176c24e706d2b"
+  },
+  "sources": [
+    {
+      "source_id": "primary",
+      "status": "established",
+      "repository_identity": "https://github.com/xibodev/llm-gateway.git",
+      "base_ref": "v1.9.0",
+      "base_commit": "ef192c3a4259a2b82f5c56873620da0710b1769a",
+      "merge_base": "ef192c3a4259a2b82f5c56873620da0710b1769a",
+      "head_commit": "1b3ba722cb594cc7c545d179da09fe99fb7d3c4e",
+      "head_tree": "1043dfd64c646f9b40ca554a9af18680061b9413",
+      "reviewed_source_digest": "6f5aaa3fef5c5d3ebbdfa126e6108035b68c6afb6ae2963010d4570d5d4516f3",
+      "changed_paths": [
+        {
+          "status": "modified",
+          "path": "go/internal/iam/alerts_test.go",
+          "old_blob": "c465f0d6437e403100e0c091c648096b31e813ec",
+          "new_blob": "e213533205788dc9a1a1396c75a88175151fe43a"
+        }
+      ]
+    }
+  ],
+  "facts": [
+    {
+      "id": "alerts-test",
+      "claim": "go/internal/iam/alerts_test.go is the only path that changed since v1.9.0. TestAlertRulesAndDeliveriesNameTheirPrincipal finds each listed alert rule by its scope instead of its position, because rules created in the same second list in the order of their random IDs. The release run for v1.9.0 failed on that test before it published anything: it staged no release and pushed no image.",
+      "status": "observed",
+      "evidence": {
+        "source": "git diff v1.9.0..HEAD; go/internal/iam/alerts_test.go; release workflow run for v1.9.0"
+      }
+    },
+    {
+      "id": "prior-review",
+      "claim": "The confirmed review release-v1.9.0 covers v1.8.0..55e7790c1ef5, and v1.9.0 adds only that review's own files to 55e7790, so the review's facts describe every non-test change this source carries since v1.8.0: refusal routing, the principal listing, the administrator state's counts, the principal names on listed rows, the console's move to the listings, its marks and shelves, and llmgw-core v1.9.1.",
+      "status": "observed",
+      "evidence": {
+        "source": ".release-harness/reviews/release-v1.9.0.review.json; git diff --stat 55e7790..v1.9.0"
+      }
+    },
+    {
+      "id": "untouched-surfaces",
+      "claim": "No file other than go/internal/iam/alerts_test.go changed since v1.9.0, so a binary built from this source runs the code a binary built from v1.9.0 runs, and the console bundle it embeds is v1.9.0's.",
+      "status": "observed",
+      "evidence": {
+        "source": "git diff --name-only v1.9.0..HEAD"
+      }
+    },
+    {
+      "id": "exploratory-run",
+      "claim": "Exploratory run run-20261008T233330-yedz78 of draft llm-gateway, the draft that became contract da05219969e0, against a binary built from 1b3ba722cb59 and served with LLMGW_ALLOW_UNAUTHENTICATED_API=1 as the release smoke serves it, passed all ten assertions.",
+      "status": "observed",
+      "evidence": {
+        "source": "local exploratory run"
+      }
+    },
+    {
+      "id": "verification",
+      "claim": "For source revision 1b3ba722cb594cc7c545d179da09fe99fb7d3c4e: go vet and go test pass for every package, the fixed test passes 30 runs in a row where its previous assertion failed within 30, and go test -race passes for every package on linux/amd64 with Go 1.26.8. On 55e7790c1ef5, which differs only in that test file and the v1.9.0 review's files: go build, staticcheck, gofmt, govulncheck, go mod tidy -diff and go mod verify pass, as do the console's typecheck, 212 tests, npm audit and dist rebuild check, the documentation check, actionlint, the acceptance-policy tests (19) and the roster script tests (78 passed, 1 skipped); the deterministic Docker acceptance passes all 31 checks against an image built from it on a Linux engine, where its digest policy does not apply to a locally built candidate.",
+      "status": "observed",
+      "evidence": {
+        "source": "local and remote Linux test execution"
+      }
+    }
+  ],
+  "impact": {
+    "assertions": [
+      {
+        "id": "A1",
+        "impact": "unchanged",
+        "supported_by": [
+          "untouched-surfaces",
+          "prior-review",
+          "verification",
+          "exploratory-run"
+        ]
+      },
+      {
+        "id": "A2",
+        "impact": "unchanged",
+        "supported_by": [
+          "untouched-surfaces",
+          "prior-review",
+          "verification",
+          "exploratory-run"
+        ]
+      },
+      {
+        "id": "A3",
+        "impact": "unchanged",
+        "supported_by": [
+          "untouched-surfaces",
+          "prior-review",
+          "verification",
+          "exploratory-run"
+        ]
+      },
+      {
+        "id": "A4",
+        "impact": "unchanged",
+        "supported_by": [
+          "untouched-surfaces",
+          "prior-review",
+          "verification",
+          "exploratory-run"
+        ]
+      },
+      {
+        "id": "A5",
+        "impact": "unchanged",
+        "supported_by": [
+          "untouched-surfaces",
+          "prior-review",
+          "verification",
+          "exploratory-run"
+        ]
+      },
+      {
+        "id": "A6",
+        "impact": "unchanged",
+        "supported_by": [
+          "untouched-surfaces",
+          "prior-review",
+          "verification",
+          "exploratory-run"
+        ]
+      },
+      {
+        "id": "A7",
+        "impact": "unchanged",
+        "supported_by": [
+          "untouched-surfaces",
+          "prior-review",
+          "verification",
+          "exploratory-run"
+        ]
+      },
+      {
+        "id": "A8",
+        "impact": "unchanged",
+        "supported_by": [
+          "untouched-surfaces",
+          "prior-review",
+          "verification",
+          "exploratory-run"
+        ]
+      },
+      {
+        "id": "A9",
+        "impact": "unchanged",
+        "supported_by": [
+          "untouched-surfaces",
+          "prior-review",
+          "verification",
+          "exploratory-run"
+        ]
+      },
+      {
+        "id": "A10",
+        "impact": "unchanged",
+        "supported_by": [
+          "untouched-surfaces",
+          "prior-review",
+          "verification",
+          "exploratory-run"
+        ]
+      }
+    ],
+    "requires": [],
+    "possible_binding_changes": []
+  },
+  "questions": [],
+  "conclusion": {
+    "action": "reuse_contract",
+    "summary": "The release ships v1.9.0's source, which was tagged but never published, with one test fixed: it told listed alert rules apart by position, which rules created in the same second do not keep. No code changed since v1.9.0, and the confirmed release-v1.9.0 review describes the changes since v1.8.0. Every accepted proposition holds for this source, and the exploratory run, the unit tests and the race run exercise them."
+  },
+  "proposed": {
+    "by": "release operator",
+    "at": "2026-10-08T23:34:09.824Z"
+  }
+}
