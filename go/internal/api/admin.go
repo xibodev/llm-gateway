@@ -7,6 +7,7 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -192,8 +193,16 @@ func handleState(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// The console builds its provider lists from this one, so it keeps a
+	// stable order: a map's would change from one request to the next.
+	providerIDs := make([]string, 0, len(s.Providers))
+	for pid := range s.Providers {
+		providerIDs = append(providerIDs, pid)
+	}
+	sort.Strings(providerIDs)
 	provList := []map[string]any{}
-	for pid, pc := range s.Providers {
+	for _, pid := range providerIDs {
+		pc := s.Providers[pid]
 		models, refreshed := providers.CatalogCached(pid)
 		systemConnection, err := iam.SystemProviderConnectionExists(pid)
 		if err != nil {
