@@ -146,6 +146,18 @@ to 500 keys; the answer lists the keys deleted and why any others were not.
 Each deletion is audited as `api_key.delete`. The console hides revoked and
 expired keys unless its status filter shows them.
 
+`GET /admin/api/keys` lists keys a page at a time, and `GET /user/api/keys`
+the signed-in user's. `status` is `usable`, the default: active and disabled
+keys that have not expired; `ended`: revoked and expired ones; `active`,
+`disabled`, `expired`, `revoked` or `all`. `principal_id`, `project_id` and
+`route`, a route the key's allowed routes name, narrow the list, and `q`
+searches key names, prefixes and IDs, project slugs and names, and owners'
+names. `sort` is `created`, `name`, `project`, `owner`, `status`, `expires` or
+`last_used`, in the `order` `asc` or `desc`; without a sort, keys are listed
+newest first. `limit` is 1 to 200, 50 by default, and `offset` skips that many
+keys. The answer carries the page's `keys` and the `total` the filters select.
+The console's **API keys** page reads its list this way.
+
 Removing a principal from a project revokes that principal's keys in the
 project, including disabled ones; adding the membership back does not restore
 them.

@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { fileURLToPath } from "node:url";
 import test from "node:test";
 import { bundle, find, findAll, mount, settle, text } from "./hook-harness.mjs";
+import { fakeKeyListing } from "./key-listing.mjs";
 
 const limits = await bundle(fileURLToPath(new URL("../src/lib/limits.ts", import.meta.url)));
 const apiStub = { filter: /\/lib\/api$/, contents: "export const getJSON = (...args) => globalThis.__api.getJSON(...args);\nexport const sendJSON = (...args) => globalThis.__api.sendJSON(...args);" };
@@ -100,8 +101,7 @@ test("a key without limits says none applies", () => {
 
 const isLimitsDialog = (node) => typeof node.type === "function" && node.props?.apiKey !== undefined;
 
-test("every key in the list opens its limits", () => {
-  globalThis.__api = { async getJSON() { return report; }, async sendJSON() { return {}; } };
+test("every key in the list opens its limits", async () => {
   const data = {
     projects: [{ id: "project-1", name: "Project one", status: "active" }],
     principals: [{ id: "user-1", kind: "human", status: "active", display_name: "Ada" }],
@@ -111,12 +111,18 @@ test("every key in the list opens its limits", () => {
       { id: "key-2", name: "old", status: "revoked", project_id: "project-1", principal_id: "user-1" },
     ],
   };
+  const listing = fakeKeyListing(data.keys);
+  globalThis.__api = { async getJSON(mode, path) { return path.startsWith("/keys?") ? listing.answer(path) : report; }, async sendJSON() { return {}; } };
   const render = mount(() => ApiKeys({ data, mode: "admin", onChanged: async () => {} }));
+  render();
+  await settle();
   let tree = render();
   const opener = find(tree, (node) => node.type === "button" && node.props?.["aria-label"] === "Limits of ci");
   assert.ok(opener, "an active key offers its limits");
   const statuses = find(tree, (node) => node.type === "select" && findAll(node, (option) => option.props?.value === "revoked").length);
   statuses.props.onChange({ currentTarget: { value: "all" } });
+  render();
+  await settle();
   tree = render();
   assert.ok(find(tree, (node) => node.type === "button" && node.props?.["aria-label"] === "Limits of old"), "so does a revoked one, whose usage still counts");
   const button = { tagName: "BUTTON" };

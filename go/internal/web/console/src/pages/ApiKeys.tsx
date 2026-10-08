@@ -1,11 +1,12 @@
-import { useRef, useState } from "preact/hooks";
+import { useEffect, useRef, useState } from "preact/hooks";
 import { Ban, Check, Copy, Eye, EyeOff, Gauge, KeyRound, Pencil, Plus, Save, Trash2, X } from "lucide-preact";
-import { sendJSON, type JSONRecord } from "../lib/api";
+import { getJSON, sendJSON, type JSONRecord } from "../lib/api";
 import type { ConsoleMode } from "../lib/mode";
-import { asList, asRecord, stringValue } from "../lib/records";
-import { EmptyState, PageHeading } from "../components/PageState";
+import { asList, asRecord, numberValue, stringValue } from "../lib/records";
+import { EmptyState, ErrorState, LoadingState, PageHeading } from "../components/PageState";
 import { KeyScopeEditor, keyPolicySummary, keyQuotaLabels } from "../components/KeyScopeEditor";
 import { KeyLimitsDialog } from "../components/LimitUsage";
+import { SearchSelect, dataTable, serverTableView, tablePageSizes, type ServerTableState, type TableColumn } from "../components/DataTable";
 import { keyQuotaDraftsFor, keyQuotaFields, keyQuotaPolicyFromDrafts } from "../lib/key-policy";
 import { formatKeyTime, keyExpiryFromInput, keyExpiryInputValue, keyTimes } from "../lib/key-dates";
 import { useDialogFocus } from "../components/useDialogFocus";
@@ -33,16 +34,16 @@ function keyDeletable(key: JSONRecord): boolean {
   return ["revoked", "expired"].includes(keyStatus(key));
 }
 
-// The status filters of the list. The first, the default, hides the keys that
-// no longer work.
-const statusFilters: { id: string; label: string; keeps: (status: string) => boolean }[] = [
-  { id: "usable", label: "Active and disabled", keeps: (status) => status === "active" || status === "disabled" },
-  { id: "ended", label: "Revoked or expired", keeps: (status) => status === "revoked" || status === "expired" },
-  { id: "active", label: "Active", keeps: (status) => status === "active" },
-  { id: "disabled", label: "Disabled", keeps: (status) => status === "disabled" },
-  { id: "expired", label: "Expired", keeps: (status) => status === "expired" },
-  { id: "revoked", label: "Revoked", keeps: (status) => status === "revoked" },
-  { id: "all", label: "All statuses", keeps: () => true },
+// The status filters of the list, which the server applies. The first, the
+// default, hides the keys that no longer work.
+const statusFilters: { id: string; label: string }[] = [
+  { id: "usable", label: "Active and disabled" },
+  { id: "ended", label: "Revoked or expired" },
+  { id: "active", label: "Active" },
+  { id: "disabled", label: "Disabled" },
+  { id: "expired", label: "Expired" },
+  { id: "revoked", label: "Revoked" },
+  { id: "all", label: "All statuses" },
 ];
 
 function policyFor(key: JSONRecord): JSONRecord {
@@ -78,7 +79,6 @@ export function ApiKeys({ data, mode, onChanged, initialContext }: {
   data: JSONRecord; mode: ConsoleMode; onChanged: () => Promise<void>;
   initialContext?: { ownerID?: string; projectID?: string; routeName?: string };
 }) {
-  const keys = asList(data.keys).map(asRecord);
   const projects = asList(data.projects).map(asRecord);
   const principals = asList(data.principals).map(asRecord);
   const memberships = asList(data.memberships).map(asRecord);
@@ -119,23 +119,61 @@ export function ApiKeys({ data, mode, onChanged, initialContext }: {
   const [busy, setBusy] = useState(false);
   const createButtonRef = useRef<HTMLButtonElement | null>(null);
   const editorFormRef = useRef<HTMLFormElement | null>(null);
+  // The server pages, sorts and filters the list; listing is its answer
+  // for the page shown.
+  const [listing, setListing] = useState<{ keys: JSONRecord[]; total: number } | null>(null);
+  const [listError, setListError] = useState("");
+  const [table, setTable] = useState<ServerTableState>({ page: 0, pageSize: tablePageSizes[0], sort: null });
+  const [reload, setReload] = useState(0);
+  const listRequest = useRef(0);
+  const listQuery = new URLSearchParams({ status: statusFilter, limit: String(table.pageSize), offset: String(table.page * table.pageSize) });
+  if (mode === "admin" && ownerFilter) listQuery.set("principal_id", ownerFilter);
+  if (projectFilter) listQuery.set("project_id", projectFilter);
+  if (routeFilter) listQuery.set("route", routeFilter);
+  if (search.trim()) listQuery.set("q", search.trim());
+  if (table.sort) {
+    listQuery.set("sort", table.sort.id);
+    listQuery.set("order", table.sort.descending ? "desc" : "asc");
+  }
+  const listPath = `/keys?${listQuery.toString()}`;
+  useEffect(() => {
+    // A page that arrives after a newer request must not replace its answer.
+    const request = ++listRequest.current;
+    setListError("");
+    getJSON<JSONRecord>(mode, listPath).then((payload) => {
+      if (request === listRequest.current) setListing({ keys: asList(payload.keys).map(asRecord), total: numberValue(payload.total) });
+    }).catch((cause) => {
+      if (request === listRequest.current) setListError(cause instanceof Error ? cause.message : "Keys could not load.");
+    });
+  }, [mode, listPath, reload]);
+  // A page emptied, as deleting the last keys of the last page leaves it,
+  // gives way to the last page that has keys.
+  useEffect(() => {
+    if (listing && !listing.keys.length && listing.total > 0 && table.page > 0) {
+      setTable((current) => ({ ...current, page: Math.max(0, Math.ceil(listing.total / current.pageSize) - 1) }));
+    }
+  }, [listing]);
+  const keys = listing?.keys ?? [];
+  // filtered changes a filter of the list, which then shows its first page
+  // and nothing selected.
+  const filtered = (change: () => void) => {
+    change();
+    setTable((current) => ({ ...current, page: 0 }));
+    setSelected({});
+  };
+  // changed reloads the list and the console's state after a change.
+  const changed = async () => {
+    setReload((current) => current + 1);
+    await onChanged();
+  };
   const owners = eligibleOwners(projectID);
   const selectedOwner = owners.find((owner) => owner.id === principalID);
   const ownerNames = new Map(principals.map((principal) => [stringValue(principal.id), stringValue(principal.display_name, stringValue(principal.id))]));
   for (const key of keys) if (!ownerNames.has(stringValue(key.principal_id))) ownerNames.set(stringValue(key.principal_id), stringValue(key.principal, stringValue(key.principal_id)));
   if (ownerFilter && !ownerNames.has(ownerFilter)) ownerNames.set(ownerFilter, `${ownerFilter} (unavailable owner)`);
-  const statusKeeps = (statusFilters.find((filter) => filter.id === statusFilter) ?? statusFilters[0]).keeps;
-  const filteredKeys = keys.filter((key) => {
-    if (!statusKeeps(keyStatus(key))) return false;
-    if (mode === "admin" && ownerFilter && key.principal_id !== ownerFilter) return false;
-    if (projectFilter && key.project_id !== projectFilter) return false;
-    if (routeFilter && !asList(policyFor(key).allowed_routes).includes(routeFilter)) return false;
-    return [key.name, key.prefix, key.id, key.project, key.project_id, key.principal, key.principal_id, ownerNames.get(stringValue(key.principal_id))]
-      .map((value) => stringValue(value)).join(" ").toLowerCase().includes(search.trim().toLowerCase());
-  });
   // Only the deletable keys the list shows can be selected, so a filter never
   // hides a key it would delete.
-  const deletableShown = filteredKeys.filter(keyDeletable).map((key) => stringValue(key.id));
+  const deletableShown = keys.filter(keyDeletable).map((key) => stringValue(key.id));
   const selectedIDs = deletableShown.filter((id) => selected[id]);
   const editablePolicy = (): JSONRecord | null => {
     // Read text drafts from the form too: Enter can submit before Preact renders input state.
@@ -184,7 +222,7 @@ export function ApiKeys({ data, mode, onChanged, initialContext }: {
       if (!token) throw new Error("The server did not return the key value.");
       setSecret(token);
       setCreating(false);
-      await onChanged();
+      await changed();
     } catch (cause) { setMessage(cause instanceof Error ? cause.message : "Key could not be created."); }
     finally { setBusy(false); }
   };
@@ -223,7 +261,7 @@ export function ApiKeys({ data, mode, onChanged, initialContext }: {
       await sendJSON<JSONRecord>(mode, mode === "admin" ? "/keys/update" : `/keys/${encodeURIComponent(id)}/update`, "POST", payload);
       setEditing(null);
       setMessage(disabled === undefined ? "Key updated." : "Key status updated.");
-      await onChanged();
+      await changed();
     } catch (cause) { setMessage(cause instanceof Error ? cause.message : "Key could not be updated."); }
     finally { setBusy(false); }
   };
@@ -236,7 +274,7 @@ export function ApiKeys({ data, mode, onChanged, initialContext }: {
       setRevealed((current) => { const next = { ...current }; delete next[id]; return next; });
       if (editing?.id === id) setEditing(null);
       setMessage("Key revoked.");
-      await onChanged();
+      await changed();
     } catch (cause) { setMessage(cause instanceof Error ? cause.message : "Key could not be revoked."); }
     finally { setBusy(false); }
   };
@@ -254,7 +292,7 @@ export function ApiKeys({ data, mode, onChanged, initialContext }: {
       setSelected({});
       if (editing && ids.includes(stringValue(editing.id))) setEditing(null);
       setMessage(`${deleted === 1 ? "Key" : `${deleted} keys`} deleted.${refused.length ? ` ${refused.length} not deleted: ${stringValue(refused[0].error)}` : ""}`);
-      await onChanged();
+      await changed();
     } catch (cause) { setMessage(cause instanceof Error ? cause.message : "Keys could not be deleted."); }
     finally { setBusy(false); }
   };
@@ -295,26 +333,86 @@ export function ApiKeys({ data, mode, onChanged, initialContext }: {
     setMessage("");
   };
 
+  // Whether any key exists, which tells an empty filtered list from an empty
+  // workspace.
+  const anyKeys = asList(data.keys).length > 0;
+  const columns: TableColumn<JSONRecord>[] = [
+    {
+      id: "select", header: "Select",
+      headerCell: <input type="checkbox" aria-label="Select every revoked or expired key shown" disabled={busy || !deletableShown.length} checked={deletableShown.length > 0 && selectedIDs.length === deletableShown.length} onChange={(event) => toggleSelected(deletableShown, event.currentTarget.checked)} />,
+      cell: (key) => {
+        const deletable = keyDeletable(key);
+        const id = stringValue(key.id);
+        return <input type="checkbox" aria-label={`Select ${stringValue(key.name, "API key")}`} title={deletable ? undefined : "Only a revoked or expired key can be deleted"} disabled={busy || !deletable} checked={deletable && Boolean(selected[id])} onChange={(event) => toggleSelected([id], event.currentTarget.checked)} />;
+      },
+    },
+    { id: "name", header: "Name", sortable: true, cell: (key) => <><KeyRound size={15} /> {stringValue(key.name, "Gateway key")}</> },
+    {
+      id: "prefix", header: "Prefix", cell: (key) => {
+        const id = stringValue(key.id);
+        const visible = Boolean(revealed[id]);
+        return <span class="key-value"><span class="technical">{visible ? revealed[id] : stringValue(key.prefix, "Hidden")}</span>{key.revealable === true ? <button class="icon-button" type="button" aria-label={`${visible ? "Hide" : "Reveal"} ${stringValue(key.name, "API key")}`} title={visible ? "Hide key" : "Reveal key"} disabled={busy || Boolean(revealingID)} onClick={() => void reveal(key)}>{visible ? <EyeOff size={15} /> : <Eye size={15} />}</button> : null}</span>;
+      },
+    },
+    { id: "project", header: "Project", sortable: true, cell: (key) => stringValue(key.project, stringValue(key.project_id)) },
+    { id: "owner", header: "Owner", sortable: true, cell: (key) => stringValue(key.principal, ownerNames.get(stringValue(key.principal_id)) ?? stringValue(key.principal_id)) },
+    {
+      id: "policy", header: "Policy", class: "key-policy-summary", cell: (key) => {
+        const policy = policyFor(key);
+        const managed = policy.admin_managed === true;
+        const locked = mode === "portal" && managed;
+        return <>{keyPolicySummary(policy)}{managed ? <small>Admin-managed{locked ? ": ask an administrator to change policy or status." : ""}</small> : null}</>;
+      },
+    },
+    {
+      id: "status", header: "Status", sortable: true, cell: (key) => {
+        const revoked = stringValue(key.status) === "revoked";
+        const expired = keyExpired(key);
+        const active = stringValue(key.status, "active") === "active";
+        return <span class={`status-pill ${revoked || expired ? "status-pill--attention" : active ? "status-pill--ready" : "status-pill--muted"}`} title={revoked ? "Permanently revoked" : expired ? "This key has expired and stays expired; create a new key to replace it." : undefined}>{keyStatus(key)}</span>;
+      },
+    },
+    { id: "created", header: "Created", sortable: true, class: "technical", cell: (key) => formatKeyTime(keyTimes(key).created, "—") },
+    { id: "expires", header: "Expires", sortable: true, class: "technical", cell: (key) => formatKeyTime(keyTimes(key).expires, "Never") },
+    { id: "last_used", header: "Last used", sortable: true, class: "technical", cell: (key) => formatKeyTime(keyTimes(key).lastUsed, "Never") },
+    {
+      id: "actions", header: "Actions", cell: (key) => {
+        const active = stringValue(key.status, "active") === "active";
+        const revoked = stringValue(key.status) === "revoked";
+        const deletable = keyDeletable(key);
+        const locked = mode === "portal" && policyFor(key).admin_managed === true;
+        const id = stringValue(key.id);
+        return <div class="table-actions"><button class="icon-button" type="button" aria-label={`Limits of ${stringValue(key.name)}`} title="Limits and usage" onClick={(event) => setLimitsOf({ key, opener: event.currentTarget })}><Gauge size={15} /></button><button class="icon-button" type="button" aria-label={`Edit ${stringValue(key.name)}`} title={locked ? "Only administrators can edit this key" : "Edit key"} disabled={busy || revoked || locked} onClick={() => edit(key)}><Pencil size={15} /></button>{!deletable ? <button class="button button--secondary" type="button" disabled={busy || locked} title={locked ? "Only administrators can change this key's status" : undefined} onClick={() => void update(key, active)}>{active ? "Disable" : "Enable"}</button> : null}{deletable
+          ? <button class="icon-button" type="button" aria-label={`Delete ${stringValue(key.name)}`} title="Delete: remove this key from the list; its usage and audit history keep its name" disabled={busy} onClick={() => void remove([id])}><Trash2 size={15} /></button>
+          : <button class="icon-button" type="button" aria-label={`Revoke ${stringValue(key.name)}`} title="Revoke: stop this key for good" disabled={busy} onClick={() => void revoke(key)}><Ban size={15} /></button>}</div>;
+      },
+    },
+  ];
+
   return <div class="page-stack">
     <PageHeading eyebrow="Credential governance" title="API keys" detail="Scope gateway keys by owner and project, inspect policy, revoke a key that should stop working, and delete keys that no longer work." actions={<button ref={createButtonRef} class="button button--primary" type="button" disabled={busy} onClick={startCreate}><Plus size={16} /> Create key</button>} />
     {message ? <p class="route-message" role="status">{message}</p> : null}
     <section class="surface key-list-filters" aria-label="Filter API keys">
-      {mode === "admin" ? <label>Owner<select value={ownerFilter} onChange={(event) => setOwnerFilter(event.currentTarget.value)}><option value="">All owners</option>{[...ownerNames].filter(([id]) => id).map(([id, label]) => <option key={id} value={id}>{label}</option>)}</select></label> : <p class="form-help">Owner: {stringValue(self.display_name, "you")}. Only your keys are shown.</p>}
-      <label>Project<select value={projectFilter} onChange={(event) => setProjectFilter(event.currentTarget.value)}><option value="">All projects</option>{projects.map((project) => <option key={stringValue(project.id)} value={stringValue(project.id)}>{stringValue(project.name, stringValue(project.slug, stringValue(project.id)))}</option>)}</select></label>
-      <label>Status<select value={statusFilter} onChange={(event) => { setStatusFilter(event.currentTarget.value); setSelected({}); }}>{statusFilters.map((filter) => <option key={filter.id} value={filter.id}>{filter.label}</option>)}</select></label>
-      <label>Search keys<input type="search" value={search} onInput={(event) => setSearch(event.currentTarget.value)} placeholder="Name, prefix, owner or project" /></label>
+      {mode === "admin" ? <SearchSelect label="Owner" noun="owners" value={ownerFilter} options={[{ value: "", label: "All owners" }, ...[...ownerNames].filter(([id]) => id).map(([id, label]) => ({ value: id, label }))]} onChange={(value) => filtered(() => setOwnerFilter(value))} /> : <p class="form-help">Owner: {stringValue(self.display_name, "you")}. Only your keys are shown.</p>}
+      <SearchSelect label="Project" noun="projects" value={projectFilter} options={[{ value: "", label: "All projects" }, ...projects.map((project) => ({ value: stringValue(project.id), label: stringValue(project.name, stringValue(project.slug, stringValue(project.id))) }))]} onChange={(value) => filtered(() => setProjectFilter(value))} />
+      <label>Status<select value={statusFilter} onChange={(event) => { const value = event.currentTarget.value; filtered(() => setStatusFilter(value)); }}>{statusFilters.map((filter) => <option key={filter.id} value={filter.id}>{filter.label}</option>)}</select></label>
+      <label>Search keys<input type="search" value={search} onInput={(event) => { const value = event.currentTarget.value; filtered(() => setSearch(value)); }} placeholder="Name, prefix, owner or project" /></label>
       {selectedIDs.length ? <button class="button button--secondary" type="button" disabled={busy} onClick={() => void remove(selectedIDs)}><Trash2 size={15} /> Delete {selectedIDs.length} selected</button> : null}
-      {routeFilter ? <button class="button button--secondary" type="button" onClick={() => setRouteFilter("")}>Explicit route grant: {routeFilter} <X size={14} aria-label="Clear route filter" /></button> : null}
+      {routeFilter ? <button class="button button--secondary" type="button" onClick={() => filtered(() => setRouteFilter(""))}>Explicit route grant: {routeFilter} <X size={14} aria-label="Clear route filter" /></button> : null}
     </section>
     {creating || editing ? <form ref={editorFormRef} class="surface key-editor" onSubmit={(event) => { if (editing) { event.preventDefault(); void update(editing); } else void create(event); }}>
       <header><div><p class="eyebrow">{editing ? "Key edit" : "New key"}</p><h2>{editing ? stringValue(editing.name, "Gateway key") : "Issue credential"}</h2></div><button class="icon-button" type="button" disabled={busy} aria-label="Close key editor" onClick={() => { setCreating(false); setEditing(null); }}><X size={17} /></button></header>
       {creating ? <>
-        <label>Project<select value={projectID} disabled={busy} onChange={(event) => { const id = event.currentTarget.value; setProjectID(id); if (principalID && !eligibleOwners(id).some((owner) => owner.id === principalID)) setPrincipalID(ownerDecisionRequired); }}><option value="">Select project</option>{creatableProjects.map((project) => <option value={stringValue(project.id)} key={stringValue(project.id)}>{stringValue(project.name, stringValue(project.slug))}</option>)}</select></label>
+        <SearchSelect label="Project" noun="projects" value={projectID} disabled={busy} options={[{ value: "", label: "Select project" }, ...creatableProjects.map((project) => ({ value: stringValue(project.id), label: stringValue(project.name, stringValue(project.slug)) }))]} onChange={(id) => { setProjectID(id); if (principalID && !eligibleOwners(id).some((owner) => owner.id === principalID)) setPrincipalID(ownerDecisionRequired); }} />
         <label>Name<input value={name} disabled={busy} onInput={(event) => setName(event.currentTarget.value)} /></label>
         <label>Expires (optional)<input type="datetime-local" name="expires_at" value={expiryDraft} disabled={busy} onInput={(event) => setExpiryDraft(event.currentTarget.value)} /></label>
         <p class="form-help">Leave blank for a key that does not expire. The time is in this browser's time zone, and an expired key stays expired.</p>
         {mode === "admin" ? <>
-          <label>Acts as<select value={principalID} disabled={busy} onChange={(event) => setPrincipalID(event.currentTarget.value)}><option value={ownerDecisionRequired} disabled>Choose an owner for this project</option><option value="">Create or reuse a service identity for this project and key name</option>{owners.map((principal) => <option value={stringValue(principal.id)} key={stringValue(principal.id)}>{stringValue(principal.display_name, stringValue(principal.id))} ({stringValue(principal.kind)})</option>)}</select></label>
+          <SearchSelect label="Acts as" noun="owners" value={principalID} disabled={busy} options={[
+            { value: ownerDecisionRequired, label: "Choose an owner for this project", disabled: true },
+            { value: "", label: "Create or reuse a service identity for this project and key name" },
+            ...owners.map((principal) => ({ value: stringValue(principal.id), label: `${stringValue(principal.display_name, stringValue(principal.id))} (${stringValue(principal.kind)})` })),
+          ]} onChange={setPrincipalID} />
           <p class="form-help">Administrators can issue keys for active human and service members, including viewers. Portal self-service creation excludes viewers. Selecting the service default can reuse an identity created for the same project and key name.</p>
           {principalID === ownerDecisionRequired ? <p class="form-error" role="alert">The requested owner is unavailable in this project. Choose an owner or explicitly select the service identity option before creating a key.</p> : null}
         </> : <p class="form-help">Acts as {stringValue(self.display_name, "your signed-in identity")}.</p>}
@@ -334,33 +432,10 @@ export function ApiKeys({ data, mode, onChanged, initialContext }: {
       <KeyScopeEditor data={data} policy={{ ...scope, ...keyQuotaPolicyFromDrafts(quotaDrafts).policy }} onChange={setScope} />
       <footer><button class="button button--secondary" type="button" disabled={busy} onClick={() => { setCreating(false); setEditing(null); }}>Cancel</button><button class="button button--primary" type="submit" disabled={busy}>{editing ? <Save size={16} /> : <Plus size={16} />}{busy ? "Saving..." : editing ? "Save key" : "Create key"}</button></footer>
     </form> : null}
-    {!filteredKeys.length ? <EmptyState title={keys.length ? "No keys match these filters" : "No API keys in this workspace"} detail={keys.length ? "Clear or change the status, owner, project, route or search filter. Revoked and expired keys are hidden unless the status filter shows them." : "Create a key for an active project with key-management permission."} /> : <section class="surface table-wrap"><table class="key-list-table"><thead><tr><th><input type="checkbox" aria-label="Select every revoked or expired key shown" disabled={busy || !deletableShown.length} checked={deletableShown.length > 0 && selectedIDs.length === deletableShown.length} onChange={(event) => toggleSelected(deletableShown, event.currentTarget.checked)} /></th><th>Name</th><th>Prefix</th><th>Project</th><th>Owner</th><th>Policy</th><th>Status</th><th>Created</th><th>Expires</th><th>Last used</th><th>Actions</th></tr></thead><tbody>{filteredKeys.map((key) => {
-      const policy = policyFor(key);
-      const active = stringValue(key.status, "active") === "active";
-      const revoked = stringValue(key.status) === "revoked";
-      const times = keyTimes(key);
-      const expired = keyExpired(key);
-      const status = keyStatus(key);
-      const deletable = keyDeletable(key);
-      const managed = policy.admin_managed === true;
-      const locked = mode === "portal" && managed;
-      const id = stringValue(key.id);
-      const visible = Boolean(revealed[id]);
-      return <tr key={id}>
-        <td><input type="checkbox" aria-label={`Select ${stringValue(key.name, "API key")}`} title={deletable ? undefined : "Only a revoked or expired key can be deleted"} disabled={busy || !deletable} checked={deletable && Boolean(selected[id])} onChange={(event) => toggleSelected([id], event.currentTarget.checked)} /></td>
-        <td><KeyRound size={15} /> {stringValue(key.name, "Gateway key")}</td>
-        <td><span class="key-value"><span class="technical">{visible ? revealed[id] : stringValue(key.prefix, "Hidden")}</span>{key.revealable === true ? <button class="icon-button" type="button" aria-label={`${visible ? "Hide" : "Reveal"} ${stringValue(key.name, "API key")}`} title={visible ? "Hide key" : "Reveal key"} disabled={busy || Boolean(revealingID)} onClick={() => void reveal(key)}>{visible ? <EyeOff size={15} /> : <Eye size={15} />}</button> : null}</span></td>
-        <td>{stringValue(key.project, stringValue(key.project_id))}</td><td>{stringValue(key.principal, ownerNames.get(stringValue(key.principal_id)) ?? stringValue(key.principal_id))}</td>
-        <td class="key-policy-summary">{keyPolicySummary(policy)}{managed ? <small>Admin-managed{locked ? ": ask an administrator to change policy or status." : ""}</small> : null}</td>
-        <td><span class={`status-pill ${revoked || expired ? "status-pill--attention" : active ? "status-pill--ready" : "status-pill--muted"}`} title={revoked ? "Permanently revoked" : expired ? "This key has expired and stays expired; create a new key to replace it." : undefined}>{status}</span></td>
-        <td class="technical">{formatKeyTime(times.created, "—")}</td>
-        <td class="technical">{formatKeyTime(times.expires, "Never")}</td>
-        <td class="technical">{formatKeyTime(times.lastUsed, "Never")}</td>
-        <td><div class="table-actions"><button class="icon-button" type="button" aria-label={`Limits of ${stringValue(key.name)}`} title="Limits and usage" onClick={(event) => setLimitsOf({ key, opener: event.currentTarget })}><Gauge size={15} /></button><button class="icon-button" type="button" aria-label={`Edit ${stringValue(key.name)}`} title={locked ? "Only administrators can edit this key" : "Edit key"} disabled={busy || revoked || locked} onClick={() => edit(key)}><Pencil size={15} /></button>{!deletable ? <button class="button button--secondary" type="button" disabled={busy || locked} title={locked ? "Only administrators can change this key's status" : undefined} onClick={() => void update(key, active)}>{active ? "Disable" : "Enable"}</button> : null}{deletable
-          ? <button class="icon-button" type="button" aria-label={`Delete ${stringValue(key.name)}`} title="Delete: remove this key from the list; its usage and audit history keep its name" disabled={busy} onClick={() => void remove([id])}><Trash2 size={15} /></button>
-          : <button class="icon-button" type="button" aria-label={`Revoke ${stringValue(key.name)}`} title="Revoke: stop this key for good" disabled={busy} onClick={() => void revoke(key)}><Ban size={15} /></button>}</div></td>
-      </tr>;
-    })}</tbody></table></section>}
+    {listError ? <ErrorState title="Keys are unavailable" detail={listError} action={<button class="button button--secondary" type="button" onClick={() => setReload((current) => current + 1)}>Retry</button>} />
+      : listing === null ? <LoadingState title="Loading keys" />
+      : listing.total === 0 ? <EmptyState title={anyKeys ? "No keys match these filters" : "No API keys in this workspace"} detail={anyKeys ? "Clear or change the status, owner, project, route or search filter. Revoked and expired keys are hidden unless the status filter shows them." : "Create a key for an active project with key-management permission."} />
+      : <section class="surface">{dataTable(serverTableView(keys, listing.total, table, setTable), columns, { label: "API keys", rowKey: (key) => stringValue(key.id), class: "key-list-table" })}</section>}
     {secret ? <KeySecret token={secret} onDismiss={() => setSecret("")} returnFocus={createButtonRef.current} /> : null}
     {limitsOf ? <KeyLimitsDialog mode={mode} apiKey={limitsOf.key} onClose={() => setLimitsOf(null)} returnFocus={limitsOf.opener} /> : null}
   </div>;

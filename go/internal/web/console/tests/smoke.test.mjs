@@ -601,8 +601,9 @@ test("compact providers preserve the complete discovery and onboarding surface",
 test("keys expose scopes, owner filters and admin management without unrestricted claims", () => {
   const keys = readFileSync(resolve(root, "src/pages/ApiKeys.tsx"), "utf8");
   const scope = readFileSync(resolve(root, "src/components/KeyScopeEditor.tsx"), "utf8");
-  assert.match(keys, /key\.principal_id !== ownerFilter/);
-  assert.match(keys, /key\.project_id !== projectFilter/);
+  // The server filters the list by owner and project.
+  assert.match(keys, /listQuery\.set\("principal_id", ownerFilter\)/);
+  assert.match(keys, /listQuery\.set\("project_id", projectFilter\)/);
   assert.match(keys, /eligibleOwners/);
   assert.match(keys, /routes_only: scope\.routes_only === true/);
   assert.match(keys, /mode === "portal" && managed/);

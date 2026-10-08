@@ -174,6 +174,7 @@ func (s *server) handler() http.Handler {
 	mux.HandleFunc("GET /user/api/models", handleUserModels)
 	mux.HandleFunc("GET /user/api/provider-roster", handleUserRoster)
 	mux.HandleFunc("POST /user/api/providers/{id}/test", handleUserTestProvider)
+	mux.HandleFunc("GET /user/api/keys", handleUserListKeys)
 	mux.HandleFunc("POST /user/api/keys", handleUserCreateKey)
 	mux.HandleFunc("POST /user/api/keys/delete", handleUserDeleteKeys)
 	mux.HandleFunc("POST /user/api/keys/{id}/reveal", handleUserRevealKey)
@@ -225,6 +226,7 @@ func (s *server) handler() http.Handler {
 	// client evidence and a documented release boundary make removal safe.
 	mux.HandleFunc("POST /admin/api/categories", handleUpsertEndpoint)
 	mux.HandleFunc("DELETE /admin/api/categories/{name}", handleDeleteEndpoint)
+	mux.HandleFunc("GET /admin/api/keys", handleListKeys)
 	mux.HandleFunc("POST /admin/api/keys", handleCreateKey)
 	mux.HandleFunc("POST /admin/api/keys/{id}/reveal", handleRevealKey)
 	mux.HandleFunc("POST /admin/api/keys/update", handleUpdateKey)

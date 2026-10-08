@@ -241,29 +241,7 @@ func handleState(w http.ResponseWriter, r *http.Request) {
 	}
 	keyRows := make([]map[string]any, 0, len(keys))
 	for _, k := range keys {
-		keyRows = append(keyRows, map[string]any{
-			"id": k.ID, "prefix": k.Prefix, "project_id": k.ProjectID,
-			"project": k.Project, "principal_id": k.PrincipalID,
-			"principal": k.Principal, "principal_kind": k.Kind,
-			"name": k.Name, "status": k.Status, "disabled": k.Status == "disabled", "revoked": k.Status == "revoked",
-			"expired": k.Expired, "created": k.CreatedAt, "expires_at": k.ExpiresAt,
-			"last_used_at":      k.LastUsedAt,
-			"allowed_models":    k.Policy.AllowedModels,
-			"allowed_routes":    k.Policy.AllowedRoutes,
-			"routes_only":       k.Policy.RoutesOnly,
-			"admin_managed":     k.Policy.AdminManaged,
-			"allowed_providers": k.Policy.AllowedProviders,
-			"rpm":               k.Policy.RPM, "daily_requests": k.Policy.DailyRequests,
-			"monthly_requests":      k.Policy.MonthlyRequests,
-			"daily_input_tokens":    k.Policy.DailyInputTokens,
-			"daily_output_tokens":   k.Policy.DailyOutputTokens,
-			"monthly_total_tokens":  k.Policy.MonthlyTotalTokens,
-			"daily_cost_microusd":   k.Policy.DailyCostMicroUSD,
-			"monthly_cost_microusd": k.Policy.MonthlyCostMicroUSD,
-			"daily_credits_milli":   k.Policy.DailyCreditsMilli,
-			"monthly_credits_milli": k.Policy.MonthlyCreditsMilli,
-			"revealable":            k.Revealable,
-		})
+		keyRows = append(keyRows, adminKeyRow(k))
 	}
 	principals, err := iam.ListPrincipals()
 	if err != nil {

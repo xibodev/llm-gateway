@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import test from "node:test";
 import { bundle, find, findAll, input, mount, settle, text } from "./hook-harness.mjs";
+import { fakeKeyListing } from "./key-listing.mjs";
 
 const dates = await bundle(fileURLToPath(new URL("../src/lib/key-dates.ts", import.meta.url)));
 const { ApiKeys } = await bundle(fileURLToPath(new URL("../src/pages/ApiKeys.tsx", import.meta.url)), [
@@ -52,7 +53,11 @@ const data = {
 
 function keysPage() {
   const sent = [];
-  globalThis.__api = { sendJSON: async (mode, path, method, body) => { sent.push({ path, method, body }); return { token: "fixture-token" }; } };
+  const listing = fakeKeyListing(data.keys);
+  globalThis.__api = {
+    getJSON: async (mode, path) => listing.answer(path),
+    sendJSON: async (mode, path, method, body) => { sent.push({ path, method, body }); return { token: "fixture-token" }; },
+  };
   const render = mount(() => ApiKeys({ data, mode: "admin", onChanged: async () => {}, initialContext: { projectID: "project-1" } }));
   return { sent, render };
 }
@@ -80,6 +85,8 @@ test("a new key carries the chosen expiry and an invalid one is never sent", asy
 
 test("a key without an expiry omits it, and the list shows created, expiry and last use", async () => {
   const { sent, render } = keysPage();
+  render();
+  await settle();
   const tree = render();
   submit(tree);
   await settle();
@@ -94,11 +101,13 @@ test("a key without an expiry omits it, and the list shows created, expiry and l
 // A narrow keys table scrolls: its prefixes stay on one line and its row
 // actions keep their width, with rules that outrank base.css, which loads
 // after the keys styles.
-test("the keys table keeps prefixes on one line and its actions within it", () => {
+test("the keys table keeps prefixes on one line and its actions within it", async () => {
   const css = readFileSync(new URL("../src/styles/keys.css", import.meta.url), "utf8");
   assert.match(css, /\.key-list-table \.key-value \.technical \{[^}]*white-space: nowrap/);
   assert.match(css, /\.key-list-table \.table-actions \{[^}]*width: max-content/);
   const { render } = keysPage();
+  render();
+  await settle();
   const table = find(render(), (node) => node.type === "table");
   assert.equal(table.props.class, "key-list-table");
   assert.ok(findAll(table, (node) => node.props?.class === "key-value").length > 0);
@@ -114,8 +123,14 @@ test("an active key's expiry can change and an expired key's cannot", async () =
     { id: "key-gone", name: "gone", status: "active", project_id: "project-1", principal_id: "user-1", created: 1798700000, expires_at: 1000000000 },
   ];
   const sent = [];
-  globalThis.__api = { sendJSON: async (mode, path, method, body) => { sent.push({ path, method, body }); return { ok: true }; } };
+  const listing = fakeKeyListing(keys);
+  globalThis.__api = {
+    getJSON: async (mode, path) => listing.answer(path),
+    sendJSON: async (mode, path, method, body) => { sent.push({ path, method, body }); return { ok: true }; },
+  };
   const render = mount(() => ApiKeys({ data: { ...data, keys }, mode: "admin", onChanged: async () => {} }));
+  render();
+  await settle();
   let tree = render();
   const editKey = (name) => { find(tree, (node) => node.type === "button" && node.props?.["aria-label"] === `Edit ${name}`).props.onClick(); tree = render(); };
   const field = () => find(tree, (node) => node.props?.name === "expires_at");
@@ -143,6 +158,8 @@ test("an active key's expiry can change and an expired key's cannot", async () =
 
   // Expired keys are listed once the status filter shows them.
   find(tree, (node) => node.type === "select" && findAll(node, (option) => option.props?.value === "all").length).props.onChange(input("all"));
+  render();
+  await settle();
   tree = render();
   editKey("gone");
   assert.equal(findAll(tree, (node) => node.props?.name === "expires_at").length, 0);
