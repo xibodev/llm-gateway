@@ -180,3 +180,40 @@ test("brand artwork notices stay in the artifact rather than provider mark UI", 
     assert.equal(elements(tree, "img").length, 0);
   }
 });
+
+// The registry entries added with the core library's wider manifest show their
+// brand's mark where Simple Icons carries one, and a provider's regional sites
+// and other wires share its mark. Entries without an available mark keep the
+// initials of their label.
+test("newer registry entries show their brand's mark, shared across a provider's sites and wires", () => {
+  const registry = JSON.parse(readFileSync(new URL("../../../providers/registry_snapshot.json", import.meta.url), "utf8"));
+  const entries = Array.isArray(registry) ? registry : registry.entries;
+  const ids = new Set(entries.map((entry) => entry.id));
+  const brands = {
+    deepseek: "deepseek", moonshot: "moonshot", moonshot_cn: "moonshot", zai: "zai", zhipu: "zai",
+    dashscope: "alibaba", dashscope_cn: "alibaba", dashscope_us: "alibaba",
+    alibaba_coding_plan: "alibaba", alibaba_coding_plan_anthropic: "alibaba",
+    alibaba_coding_plan_cn: "alibaba", alibaba_coding_plan_cn_anthropic: "alibaba",
+    nvidia_nim: "nvidia", near_ai: "near_ai", minimax: "minimax", minimax_cn: "minimax",
+    modelscope: "modelscope", modelscope_cn: "modelscope", litellm: "litellm", vllm: "vllm", lmstudio: "lmstudio",
+  };
+  for (const [id, brand] of Object.entries(brands)) {
+    assert.ok(ids.has(id), `${id} is a registry entry`);
+    assert.equal(ui.providerBrandID(id), brand, id);
+  }
+  for (const id of ["siliconflow", "siliconflow_cn", "venice", "novita", "avian", "vivgrid", "shengsuanyun", "volcengine_ark", "longcat"]) {
+    assert.ok(ids.has(id), `${id} is a registry entry`);
+    assert.equal(ui.hasProviderMark(id), false, `${id} has no mark to show, so its label's initials stand in`);
+  }
+  for (const entry of entries.filter((candidate) => brands[candidate.id])) {
+    assert.equal(ui.providerBrandForEndpoint(entry.default_base_url) ?? brands[entry.id], brands[entry.id], `${entry.id}'s host names its own brand`);
+  }
+  for (const [baseURL, brand] of [
+    ["https://api.z.ai/api/paas/v4", "zai"], ["https://open.bigmodel.cn/api/paas/v4", "zai"], ["https://api.minimax.cn/v1", "minimax"],
+    ["https://api-inference.modelscope.cn/v1", "modelscope"], ["https://cloud-api.near.ai/v1", "near_ai"],
+    ["https://coding.dashscope.aliyuncs.com/apps/anthropic", "alibaba"],
+  ]) assert.equal(ui.providerBrandForEndpoint(baseURL), brand, baseURL);
+  for (const lookalike of ["https://api.z.ai.example.com/v1", "https://evil-api.z.ai/v1", "https://modelscope.cn/v1", "https://near.ai.example/v1"]) {
+    assert.equal(ui.providerBrandForEndpoint(lookalike), undefined, lookalike);
+  }
+});

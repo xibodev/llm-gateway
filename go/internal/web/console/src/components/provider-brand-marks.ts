@@ -1,8 +1,8 @@
 import {
   siAlibabacloud, siAnthropic, siCloudflare, siDeepseek, siGithubcopilot,
   siGooglecloud, siGooglegemini, siHuggingface, siLmstudio, siMinimax,
-  siMistralai, siMoonshotai, siNvidia, siOllama, siOpenrouter, siPerplexity,
-  siReplicate, siVllm, type SimpleIcon,
+  siMistralai, siModelscope, siMoonshotai, siNear, siNvidia, siOllama, siOpenrouter,
+  siPerplexity, siReplicate, siVllm, siZdotai, type SimpleIcon,
 } from "simple-icons";
 
 export interface ProviderBrandMark {
@@ -66,6 +66,7 @@ const marks: Record<string, ProviderBrandMark> = {
   alibaba: simple(siAlibabacloud), replicate: simple(siReplicate), huggingface: simple(siHuggingface),
   perplexity: simple(siPerplexity), lmstudio: simple(siLmstudio), vllm: simple(siVllm),
   minimax: simple(siMinimax), moonshot: simple(siMoonshotai),
+  zai: simple(siZdotai), modelscope: simple(siModelscope), near_ai: simple(siNear),
   deepgram, fishaudio, github, scaleway, ovh, google,
   // These are explicit textual identifiers, not architecture-kit brand assets.
   azure_openai: { initials: "AZ" }, bedrock: { initials: "AWS" },
@@ -88,6 +89,13 @@ const aliases: Record<string, string> = {
   scaleway: "scaleway", ovh: "ovh", "ovh-ai-endpoints": "ovh", ovh_ai_endpoints: "ovh",
   opencode: "opencode_zen", zen: "opencode_zen", "opencode-zen": "opencode_zen",
   opencode_zen: "opencode_zen",
+  // A provider's regional sites and other wires share its mark. Zhipu BigModel,
+  // Zhipu's platform in China, shares Z.ai's, its international platform's.
+  moonshot_cn: "moonshot", minimax_cn: "minimax", modelscope_cn: "modelscope",
+  dashscope_cn: "alibaba", dashscope_us: "alibaba", alibaba_coding_plan: "alibaba",
+  alibaba_coding_plan_anthropic: "alibaba", alibaba_coding_plan_cn: "alibaba",
+  alibaba_coding_plan_cn_anthropic: "alibaba", zhipu: "zai", bigmodel: "zai", "z.ai": "zai",
+  near: "near_ai",
 };
 
 const endpointBrands: Record<string, string> = {
@@ -104,6 +112,10 @@ const endpointBrands: Record<string, string> = {
   "api.business.githubcopilot.com": "github_copilot", "api.enterprise.githubcopilot.com": "github_copilot",
   "api.deepgram.com": "deepgram", "api.fish.audio": "fishaudio", "api.scaleway.ai": "scaleway",
   "endpoints.ai.cloud.ovh.net": "ovh", "opencode.ai": "opencode_zen",
+  "api.z.ai": "zai", "open.bigmodel.cn": "zai", "api.minimax.cn": "minimax",
+  "api-inference.modelscope.ai": "modelscope", "api-inference.modelscope.cn": "modelscope",
+  "cloud-api.near.ai": "near_ai", "coding-intl.dashscope.aliyuncs.com": "alibaba",
+  "coding.dashscope.aliyuncs.com": "alibaba",
 };
 
 /** Match endpoint hosts, never display names, paths, or arbitrary suffixes. */

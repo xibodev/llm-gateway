@@ -316,9 +316,12 @@ gateway-wide options.
 The console's lists page, sort by a column's header and keep their headers in
 view as their rows scroll; on a narrow screen each row stacks with its cells
 labelled. Long identifiers show their ends, with a button that copies them
-whole, and a long list of owners, keys or projects to choose from can be
-searched. Route tiles page and are searched by route or member, and a shelf of
-many providers shows its first 24 until asked for all.
+whole. Owners, principals and keys to choose from are searched on the server, a
+page at a time, and a long list of projects can be searched. Route tiles page
+and are searched by route or member. The Providers page shelves providers by
+what they are, such as local servers, aggregators, cloud platforms, coding plans
+and free tiers, and otherwise by the protocol they speak; a shelf of many
+providers shows its first 24 until asked for all.
 
 The playground streams Chat Completions, Responses and Messages answers into
 the conversation as they arrive, unless **Stream the answer** is off or the

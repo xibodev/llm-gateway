@@ -19,6 +19,12 @@ software license does not grant rights to these marks.
 - **Other supplied brand icons:** the installed [Simple Icons](https://simpleicons.org/)
   package. Its per-icon source and license metadata remain authoritative; a
   package license is not a trademark license.
+- **Shared marks:** a provider's regional sites and other wires show its mark,
+  such as Alibaba Cloud's for Model Studio and the Coding Plan. NEAR AI Cloud is
+  identified by NEAR's mark, and Zhipu BigModel, Zhipu's platform in China, by
+  the mark of Z.ai, its international platform. Providers these sources carry
+  no mark for, such as SiliconFlow, Venice, Novita, Avian, Vivgrid, ShengsuanYun,
+  Volcengine Ark and LongCat, show the initials of their label.
 
 Public availability of first-party artwork is not a blanket redistribution grant.
 Use remains subject to the owners' applicable brand terms. Azure OpenAI and

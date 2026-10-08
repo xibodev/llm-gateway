@@ -141,3 +141,29 @@ test("degraded sources are readable and ordinary metadata has no logo attributio
   assert.doesNotMatch(text(metadata), /LICENSE-NOTICE/);
   assert.match(text(metadata), /public GitHub issue/);
 });
+
+// The registry's categories place an entry on a shelf before the protocol it
+// speaks does, so the local servers sit with the other local providers and
+// aggregators, cloud platforms, coding plans and free tiers have shelves of
+// their own; a model maker's own API stays on its protocol's shelf.
+test("registry entries are shelved by their categories, then by their protocol", async () => {
+  const { readFileSync } = await import("node:fs");
+  const registry = JSON.parse(readFileSync(new URL("../../../providers/registry_snapshot.json", import.meta.url), "utf8"));
+  const entries = new Map((Array.isArray(registry) ? registry : registry.entries).map((entry) => [entry.id, entry]));
+  for (const [shelf, ids] of Object.entries({
+    "Local & self-hosted": ["ollama", "litellm", "vllm", "lmstudio"],
+    "Aggregators & routers": ["openrouter", "siliconflow", "siliconflow_cn", "novita", "vivgrid", "shengsuanyun"],
+    "Cloud platforms": ["dashscope", "dashscope_cn", "dashscope_us", "volcengine_ark", "nvidia_nim", "near_ai"],
+    "Coding plans & subscriptions": ["github_copilot", "openai_codex", "alibaba_coding_plan", "alibaba_coding_plan_anthropic"],
+    "Free tiers": ["modelscope", "modelscope_cn"],
+    "OpenAI-compatible": ["openai", "deepseek", "moonshot", "zai", "minimax", "venice", "longcat", "avian"],
+    "Anthropic-compatible": ["anthropic"],
+  })) {
+    for (const id of ids) {
+      assert.ok(entries.has(id), `${id} is a registry entry`);
+      assert.equal(ui.shelfFor(entries.get(id)), shelf, id);
+    }
+    assert.ok(ui.providerShelves.includes(shelf), shelf);
+  }
+  assert.equal(ui.shelfFor({ id: "candidate", protocol: "openai", category: "local" }), "Local & self-hosted", "a candidate may name one category");
+});

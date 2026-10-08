@@ -6,7 +6,7 @@ import { asList, asRecord, numberValue, stringValue } from "../../lib/records";
 import { ProviderMark, hasProviderMark } from "../ProviderMark";
 import { boolValue } from "./shared";
 
-export const providerShelves = ["Experimental", "OpenAI-compatible", "Anthropic-compatible", "Google native & cloud", "Local & self-hosted", "Embeddings, speech & media", "Client setup", "Other candidates"];
+export const providerShelves = ["Experimental", "OpenAI-compatible", "Anthropic-compatible", "Aggregators & routers", "Cloud platforms", "Google native & cloud", "Coding plans & subscriptions", "Free tiers", "Local & self-hosted", "Embeddings, speech & media", "Client setup", "Other candidates"];
 export const discoveryFilters = [
   ["all", "All providers"],
   ["configured", "Your accounts"],
@@ -19,14 +19,22 @@ export const discoveryFilters = [
   ["unavailable", "Unavailable"],
 ];
 
+// shelfFor places an entry on the Providers page: by what it is, then by the
+// registry's categories, and last by the protocol it speaks. The registry
+// lists an entry's categories; a roster candidate may name one category.
 export function shelfFor(entry: JSONRecord): string {
   const id = stringValue(entry.id);
-  if (asList(entry.categories).map(String).includes("experimental")) return "Experimental";
+  const categories = asList(entry.categories).map(String);
+  if (categories.includes("experimental")) return "Experimental";
   if (boolValue(entry.client_only)) return "Client setup";
-  if (["ollama", "localai"].includes(id) || stringValue(entry.category) === "local") return "Local & self-hosted";
+  if (["ollama", "localai"].includes(id) || categories.includes("local") || stringValue(entry.category) === "local") return "Local & self-hosted";
   if (["gemini", "ai_studio", "vertex_ai", "bedrock", "azure_openai"].includes(id)) return "Google native & cloud";
   if (id === "edge_tts" || ["embeddings", "speech", "images", "audio", "video"].includes(stringValue(entry.protocol))) return "Embeddings, speech & media";
   if (boolValue(entry.remote_roster) && !["openai", "anthropic"].includes(stringValue(entry.protocol))) return "Other candidates";
+  if (categories.includes("subscription") || categories.includes("coding")) return "Coding plans & subscriptions";
+  if (categories.includes("aggregator")) return "Aggregators & routers";
+  if (categories.includes("cloud")) return "Cloud platforms";
+  if (categories.includes("free")) return "Free tiers";
   return stringValue(entry.protocol) === "anthropic" ? "Anthropic-compatible" : "OpenAI-compatible";
 }
 
