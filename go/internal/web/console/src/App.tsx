@@ -177,7 +177,7 @@ export function App() {
         content = <ApiKeys key={route.detail} data={data} mode={mode} onChanged={refresh} initialContext={initialContext} />;
         break;
       }
-      case "access": content = <Access data={data} mode={mode} onChanged={refresh} onNavigate={navigate} />; break;
+      case "access": content = <Access data={data} mode={mode} detail={route.detail} onChanged={refresh} onNavigate={navigate} />; break;
       case "usage": content = <UsageQuotas data={data} mode={mode} />; break;
       case "requests": content = <Requests data={data} mode={mode} />; break;
       case "audit": content = <AuditLog mode={mode} />; break;

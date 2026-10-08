@@ -4,7 +4,7 @@ import test from "node:test";
 import { bundle, find, findAll, input, mount, settle, text } from "./hook-harness.mjs";
 
 const { Access } = await bundle(fileURLToPath(new URL("../src/pages/Access.tsx", import.meta.url)), [
-  { filter: /\/lib\/api$/, contents: "export const sendJSON = (...args) => globalThis.__api.sendJSON(...args);" },
+  { filter: /\/lib\/api$/, contents: "export const sendJSON = (...args) => globalThis.__api.sendJSON(...args);\nexport const getJSON = (...args) => globalThis.__api.getJSON(...args);" },
   // Dialog focus needs a DOM; the dialog's behaviour does not.
   { filter: /\/useDialogFocus$/, contents: "export const useDialogFocus = () => ({ current: null });" },
 ]);

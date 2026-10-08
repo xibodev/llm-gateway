@@ -46,7 +46,7 @@ const adminNavigation: NavigationItem[] = [
   { id: "requests", label: "Requests", description: "Recorded requests and failover", Icon: Activity },
   { id: "alerts", label: "Alerts", description: "Quota and expiry notifications", Icon: BellRing },
   { id: "audit", label: "Audit log", description: "Administrative activity", Icon: ScrollText },
-  { id: "settings", label: "Settings", description: "Access and audit", Icon: Settings },
+  { id: "settings", label: "Settings", description: "Gateway-wide options", Icon: Settings },
 ];
 
 const portalNavigation: NavigationItem[] = adminNavigation.filter((item) =>

@@ -322,7 +322,7 @@ test("playground uses typed capabilities and does not expose portal media routes
 });
 
 test("access page manages principals, projects, and memberships over the IAM API", () => {
-  const access = readFileSync(resolve(root, "src/pages/Access.tsx"), "utf8");
+  const access = readFileSync(resolve(root, "src/pages/Access.tsx"), "utf8") + readFileSync(resolve(root, "src/components/AddMembershipDialog.tsx"), "utf8");
   const navigation = readFileSync(resolve(root, "src/lib/navigation.ts"), "utf8");
   const app = readFileSync(resolve(root, "src/App.tsx"), "utf8");
   assert.match(navigation, /id: "access"/);
@@ -490,8 +490,8 @@ test("setup snippets use the console's own origin, not a hardcoded localhost", (
   assert.match(page, /\/v1\/videos\/generations/);
 });
 
-test("settings editor covers every writable project policy field", () => {
-  const settings = readFileSync(resolve(root, "src/pages/Settings.tsx"), "utf8");
+test("the project policy editor covers every writable project policy field", () => {
+  const settings = readFileSync(resolve(root, "src/pages/ProjectDetail.tsx"), "utf8");
   const models = readFileSync(resolve(root, "../../iam/models.go"), "utf8");
   const keyPolicy = models.match(/type KeyPolicy struct \{([\s\S]*?)\n\}/);
   assert.ok(keyPolicy, "iam.KeyPolicy struct not found");
@@ -522,9 +522,11 @@ test("settings editor covers every writable project policy field", () => {
   assert.match(settings, /ProjectPolicyEditor/);
   assert.match(settings, /\/policy`/);
   assert.match(settings, /Save project policy/);
-  assert.match(settings, /managed on the Access page/);
-  assert.match(settings, /onNavigate\("access"\)/);
-  assert.doesNotMatch(settings, /grouped here rather than mixed into provider and routing workflows/);
+  const gatewaySettings = readFileSync(resolve(root, "src/pages/Settings.tsx"), "utf8");
+  assert.match(gatewaySettings, /managed on the Access page/);
+  assert.match(gatewaySettings, /onNavigate\("access"\)/);
+  assert.doesNotMatch(gatewaySettings, /ProjectPolicyEditor|\/policy`/, "settings keeps gateway-wide options only");
+  assert.doesNotMatch(gatewaySettings, /grouped here rather than mixed into provider and routing workflows/);
 });
 
 test("provider automation is admin-only, inherited, explicit, and non-destructive", () => {

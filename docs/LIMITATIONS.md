@@ -56,8 +56,6 @@ future installed client release.
 
 ## Console gaps
 
-- The primary key editor exposes common RPM/daily fields; the project policy
-  editor and APIs cover the full policy model.
 - Shared Copilot binding APIs exist without a complete primary-console editor.
 - Provider `force_api_support` is configurable through YAML/API but not every UI
   form exposes it.

@@ -207,7 +207,8 @@ has used the largest share of itself and, of limits used up alike, the one
 whose window ends last. A user reads the same for their own key with
 `GET /user/api/keys/{id}/limits`, and `GET /admin/api/projects/{id}/limits`
 lists a project's. The per-caller count is that of the process that answered.
-The console's **API keys** page shows a key's limits from its row.
+The console's **API keys** page shows a key's limits from its row, and a
+project's page under **Access** shows the project's.
 
 A request a limit refuses is recorded with an error code that names the limit:
 `quota:<scope>:<field>`, such as `quota:key:rpm` or
@@ -282,6 +283,11 @@ The primary console supports provider lifecycle, models, endpoint routes,
 playground, keys, access, usage, alerts, project policy, and retained audit
 history. Management APIs exist for shared Copilot bindings even though the
 primary console does not yet expose every binding control.
+
+Each project has a page, opened from its row on the **Access** page: the
+project's limits with their usage, the budgets and allowlists that set them,
+its keys, its members, and its usage over the last 30 days. **Settings** holds
+gateway-wide options.
 
 ## Storage and recovery
 

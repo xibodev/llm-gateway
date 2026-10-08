@@ -3,10 +3,10 @@ import { fileURLToPath } from "node:url";
 import test from "node:test";
 import { bundle, find, input, mount, settle, text } from "./hook-harness.mjs";
 
-const { ProjectPolicyEditor } = await bundle(fileURLToPath(new URL("../src/pages/Settings.tsx", import.meta.url)), [
+const { ProjectPolicyEditor } = await bundle(fileURLToPath(new URL("../src/pages/ProjectDetail.tsx", import.meta.url)), [
   { filter: /\/lib\/api$/, contents: "export const getJSON = (...args) => globalThis.__api.getJSON(...args); export const sendJSON = (...args) => globalThis.__api.sendJSON(...args);" },
+  { filter: /\/useDialogFocus$/, contents: "export const useDialogFocus = () => ({ current: null });" },
 ]);
-const projects = [{ id: "alpha", name: "Alpha" }, { id: "beta", name: "Beta" }];
 
 function fakeAPI() {
   const pending = new Map();
@@ -22,9 +22,10 @@ const submit = (tree) => find(tree, (node) => node.type === "form").props.onSubm
 
 test("a late policy response for a project the operator left is discarded", async () => {
   const { pending, sent } = fakeAPI();
-  const render = mount(() => ProjectPolicyEditor({ projects, onSaved() {} }));
+  let projectID = "alpha";
+  const render = mount(() => ProjectPolicyEditor({ projectID, onSaved() {} }));
   let tree = render();
-  find(tree, (node) => node.type === "select").props.onInput(input("beta"));
+  projectID = "beta";
   tree = render();
   pending.get("/projects/beta/policy")({ rpm: 20 });
   await settle();
@@ -44,7 +45,7 @@ test("a late policy response for a project the operator left is discarded", asyn
 
 test("project limits accept only plain non-negative whole numbers", async () => {
   const { pending, sent } = fakeAPI();
-  const render = mount(() => ProjectPolicyEditor({ projects, onSaved() {} }));
+  const render = mount(() => ProjectPolicyEditor({ projectID: "alpha", onSaved() {} }));
   render();
   pending.get("/projects/alpha/policy")({});
   await settle();
@@ -68,21 +69,24 @@ test("project limits accept only plain non-negative whole numbers", async () => 
   assert.equal(sent[0].body.rpm, 0, "a blank limit is sent as no limit");
 });
 
-test("the project selector is locked while a save is in flight", async () => {
+test("a policy is saved once while its save is in flight", async () => {
   const { pending } = fakeAPI();
+  const sent = [];
   let release;
-  globalThis.__api.sendJSON = () => new Promise((resolve) => { release = resolve; });
-  const render = mount(() => ProjectPolicyEditor({ projects, onSaved() {} }));
+  globalThis.__api.sendJSON = (mode, path) => { sent.push(path); return new Promise((resolve) => { release = resolve; }); };
+  const render = mount(() => ProjectPolicyEditor({ projectID: "alpha", onSaved() {} }));
   render();
   pending.get("/projects/alpha/policy")({});
   await settle();
   let tree = render();
   submit(tree);
   tree = render();
-  assert.equal(find(tree, (node) => node.type === "select").props.disabled, true);
+  assert.equal(find(tree, (node) => node.type === "button" && node.props?.type === "submit").props.disabled, true);
+  submit(tree);
+  assert.equal(sent.length, 1, "a second submit while saving sends nothing");
   release({});
   await settle();
   pending.get("/projects/alpha/policy")({});
   await settle();
-  assert.equal(find(render(), (node) => node.type === "select").props.disabled, false);
+  assert.equal(find(render(), (node) => node.type === "button" && node.props?.type === "submit").props.disabled, false);
 });

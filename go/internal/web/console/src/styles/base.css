@@ -781,6 +781,7 @@ td details pre { max-width: 34rem; margin: 6px 0 0; white-space: pre-wrap; font-
 .limit-bar__fill { display: block; height: 100%; background: #4777b9; }
 .limit-bar__fill--attention { background: #b48a35; }
 .limit-usage--closest td:first-child { font-weight: 650; }
+.policy-editor__heading { margin: 22px 0 6px; font-size: 0.95rem; }
 :root[data-theme="dark"] .limit-bar { background: #2a3038; }
 :root[data-theme="dark"] .limit-bar__fill { background: #6c91c2; }
 :root[data-theme="dark"] .limit-bar__fill--attention { background: #c9a25a; }

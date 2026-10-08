@@ -1,10 +1,13 @@
 import { useState } from "preact/hooks";
-import { LoaderCircle, PencilLine, ShieldCheck, UserPlus, Users, FolderPlus, X } from "lucide-preact";
+import { FolderOpen, LoaderCircle, PencilLine, UserPlus, Users, FolderPlus, X } from "lucide-preact";
 import { sendJSON, type JSONRecord } from "../lib/api";
 import type { ConsoleMode } from "../lib/mode";
+import type { PageID } from "../lib/navigation";
 import { asList, asRecord, stringValue } from "../lib/records";
+import { AddMembershipDialog } from "../components/AddMembershipDialog";
 import { EmptyState, PageHeading } from "../components/PageState";
 import { useDialogFocus } from "../components/useDialogFocus";
+import { ProjectDetail } from "./ProjectDetail";
 
 type ActionResult = { title: string; success: boolean; detail: string } | null;
 
@@ -80,30 +83,7 @@ function CreateProjectDialog({ onClose, onCreated }: { onClose: () => void; onCr
   return <div class="dialog-backdrop" role="presentation"><section ref={dialogRef} class="dialog" role="dialog" aria-modal="true" aria-labelledby="create-project-title" tabIndex={-1}><header><div><p class="eyebrow">Access</p><h2 id="create-project-title">New project</h2></div><button class="icon-button" type="button" aria-label="Close dialog" onClick={onClose}><X size={18} /></button></header><form class="form-stack" onSubmit={submit}><p class="muted-copy">Projects scope API keys, budgets, and memberships. Keys are always minted inside a project.</p><label>Slug<input value={slug} onInput={(event) => setSlug((event.currentTarget as HTMLInputElement).value)} placeholder="my-team" autoComplete="off" /></label><label>Name (optional)<input value={name} onInput={(event) => setName((event.currentTarget as HTMLInputElement).value)} placeholder="My Team" autoComplete="off" /></label>{error ? <p class="form-error" role="alert">{error}</p> : null}<footer><button class="button button--secondary" type="button" onClick={onClose}>Cancel</button><button class="button button--primary" type="submit" disabled={busy}>{busy ? <LoaderCircle class="spin" size={16} /> : <FolderPlus size={16} />} Create project</button></footer></form></section></div>;
 }
 
-function AddMembershipDialog({ project, principals, onClose, onCreated }: { project: JSONRecord; principals: JSONRecord[]; onClose: () => void; onCreated: () => Promise<void> }) {
-  const [principalID, setPrincipalID] = useState(stringValue(principals[0]?.id));
-  const [role, setRole] = useState("member");
-  const [error, setError] = useState("");
-  const [busy, setBusy] = useState(false);
-  const dialogRef = useDialogFocus(onClose);
-  const projectID = stringValue(project.id);
-  const submit = async (event: Event) => {
-    event.preventDefault();
-    if (!principalID) { setError("Select a principal."); return; }
-    setBusy(true);
-    setError("");
-    try {
-      await sendJSON<JSONRecord>("admin", "/memberships", "POST", { project_id: projectID, principal_id: principalID, role });
-      await onCreated();
-      onClose();
-    } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "Membership could not be saved.");
-    } finally { setBusy(false); }
-  };
-  return <div class="dialog-backdrop" role="presentation"><section ref={dialogRef} class="dialog" role="dialog" aria-modal="true" aria-labelledby="add-membership-title" tabIndex={-1}><header><div><p class="eyebrow">{stringValue(project.name, stringValue(project.slug))}</p><h2 id="add-membership-title">Add member</h2></div><button class="icon-button" type="button" aria-label="Close dialog" onClick={onClose}><X size={18} /></button></header><form class="form-stack" onSubmit={submit}><label>Principal<select value={principalID} onInput={(event) => setPrincipalID((event.currentTarget as HTMLSelectElement).value)}>{principals.map((principal) => <option value={stringValue(principal.id)} key={stringValue(principal.id)}>{stringValue(principal.display_name, stringValue(principal.id))} ({stringValue(principal.kind)})</option>)}</select></label><label>Role<select value={role} onInput={(event) => setRole((event.currentTarget as HTMLSelectElement).value)}><option value="owner">Owner</option><option value="admin">Admin</option><option value="member">Member</option><option value="viewer">Viewer</option></select></label>{error ? <p class="form-error" role="alert">{error}</p> : null}<footer><button class="button button--secondary" type="button" onClick={onClose}>Cancel</button><button class="button button--primary" type="submit" disabled={busy}>{busy ? <LoaderCircle class="spin" size={16} /> : <ShieldCheck size={16} />} Save membership</button></footer></form></section></div>;
-}
-
-export function Access({ data, mode, onChanged, onNavigate }: { data: JSONRecord; mode: ConsoleMode; onChanged: () => Promise<void>; onNavigate?: (page: "keys", detail?: string) => void }) {
+export function Access({ data, mode, detail = "", onChanged, onNavigate }: { data: JSONRecord; mode: ConsoleMode; detail?: string; onChanged: () => Promise<void>; onNavigate?: (page: PageID, detail?: string) => void }) {
   const [createPrincipal, setCreatePrincipal] = useState(false);
   const [renamePrincipal, setRenamePrincipal] = useState<JSONRecord | null>(null);
   const [createProject, setCreateProject] = useState(false);
@@ -148,6 +128,10 @@ export function Access({ data, mode, onChanged, onNavigate }: { data: JSONRecord
   if (mode !== "admin") {
     return <div class="page-stack"><PageHeading eyebrow="Access" title="Access" detail="Workspace access is administered from the admin console." /><EmptyState title="Administrator area" detail="Ask a gateway administrator to manage principals, projects, and memberships." /></div>;
   }
+  // A detail names the project whose page is open.
+  if (detail) {
+    return <ProjectDetail projectID={detail} data={data} onChanged={onChanged} onNavigate={(page, next) => onNavigate?.(page, next)} onBack={() => onNavigate?.("access")} />;
+  }
 
   return (
     <div class="page-stack">
@@ -164,11 +148,12 @@ export function Access({ data, mode, onChanged, onNavigate }: { data: JSONRecord
       </section>
       <section class="surface">
         <div class="section-heading"><div><p class="eyebrow">Projects</p><h2>Key and budget scopes</h2></div><span>{projects.length} project{projects.length === 1 ? "" : "s"}</span></div>
+        <p class="muted-copy">Open a project for its limits and the budgets and allowlists that set them, its keys, its members and its usage.</p>
         {projects.length === 0 ? <EmptyState title="No projects yet" detail="Create a project before minting API keys — every key is scoped to a project." /> : <div class="table-wrap"><table><thead><tr><th>Project</th><th>Slug</th><th>Status</th><th>Members</th><th>Actions</th></tr></thead><tbody>{projects.map((project) => {
           const id = stringValue(project.id);
           const status = stringValue(project.status, "active");
           const memberCount = memberships.filter((membership) => stringValue(membership.project_id) === id).length;
-          return <tr key={id}><td><strong>{stringValue(project.name, stringValue(project.slug))}</strong><small class="table-subtitle technical">{id}</small></td><td class="technical">{stringValue(project.slug)}</td><td><span class={`status-pill ${status === "active" ? "status-pill--ready" : "status-pill--muted"}`}>{status}</span></td><td>{memberCount}</td><td><div class="provider-actions">{onNavigate ? <button class="button button--secondary" type="button" onClick={() => onNavigate("keys", `project=${encodeURIComponent(id)}`)}>Keys</button> : null}<button class="button button--secondary" type="button" disabled={!activePrincipals.length} title={activePrincipals.length ? undefined : "Create an active principal first"} onClick={() => setMembershipProject(project)}><Users size={15} /> Add member</button><button class="button button--secondary" type="button" disabled={busy === `projects-${id}`} onClick={() => void setStatus("projects", project)}>{status === "active" ? "Disable" : "Enable"}</button></div></td></tr>;
+          return <tr key={id}><td><strong>{stringValue(project.name, stringValue(project.slug))}</strong><small class="table-subtitle technical">{id}</small></td><td class="technical">{stringValue(project.slug)}</td><td><span class={`status-pill ${status === "active" ? "status-pill--ready" : "status-pill--muted"}`}>{status}</span></td><td>{memberCount}</td><td><div class="provider-actions">{onNavigate ? <button class="button button--secondary" type="button" aria-label={`Open ${stringValue(project.name, stringValue(project.slug, id))}`} title="Its limits, keys, members and usage" onClick={() => onNavigate("access", id)}><FolderOpen size={15} /> Open</button> : null}{onNavigate ? <button class="button button--secondary" type="button" onClick={() => onNavigate("keys", `project=${encodeURIComponent(id)}`)}>Keys</button> : null}<button class="button button--secondary" type="button" disabled={!activePrincipals.length} title={activePrincipals.length ? undefined : "Create an active principal first"} onClick={() => setMembershipProject(project)}><Users size={15} /> Add member</button><button class="button button--secondary" type="button" disabled={busy === `projects-${id}`} onClick={() => void setStatus("projects", project)}>{status === "active" ? "Disable" : "Enable"}</button></div></td></tr>;
         })}</tbody></table></div>}
       </section>
       <section class="surface">
