@@ -24,6 +24,13 @@
 .key-scope__preview li { padding: 4px 0; }
 .key-policy-summary { min-width: 200px; max-width: 420px; white-space: normal; overflow-wrap: anywhere; }
 .key-policy-summary small { display: block; margin-top: 5px; color: #626d79; }
+/* A prefix stays on one line and the row actions keep their width, so a
+   table narrower than its content scrolls instead of wrapping a prefix after
+   every character or pushing the actions past its edge. Times break only
+   between words. These outrank base.css, which loads after this file. */
+.key-list-table .key-value .technical { white-space: nowrap; overflow-wrap: normal; word-break: normal; }
+.key-list-table td.technical { overflow-wrap: normal; word-break: normal; }
+.key-list-table .table-actions { flex-wrap: nowrap; width: max-content; }
 :root[data-theme="dark"] .key-list-filters input, :root[data-theme="dark"] .key-list-filters select { border-color: #394350; background: #20262f; color: #e0e4e9; }
 :root[data-theme="dark"] .key-scope fieldset, :root[data-theme="dark"] .key-scope__preview { border-color: #394350; }
 :root[data-theme="dark"] .key-scope__preview { background: #20262f; }

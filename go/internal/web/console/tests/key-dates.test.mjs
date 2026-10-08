@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import test from "node:test";
 import { bundle, find, findAll, input, mount, settle, text } from "./hook-harness.mjs";
@@ -88,6 +89,20 @@ test("a key without an expiry omits it, and the list shows created, expiry and l
   assert.deepEqual(headings.slice(5, 9), ["Status", "Created", "Expires", "Last used"]);
   const cells = findAll(find(tree, (node) => node.type === "tr" && node.key === "key-1"), (node) => node.type === "td").map(text);
   assert.deepEqual(cells.slice(6, 9), [dates.formatKeyTime(1798700000, "—"), "Never", dates.formatKeyTime(1798783140, "Never")]);
+});
+
+// A narrow keys table scrolls: its prefixes stay on one line and its row
+// actions keep their width, with rules that outrank base.css, which loads
+// after the keys styles.
+test("the keys table keeps prefixes on one line and its actions within it", () => {
+  const css = readFileSync(new URL("../src/styles/keys.css", import.meta.url), "utf8");
+  assert.match(css, /\.key-list-table \.key-value \.technical \{[^}]*white-space: nowrap/);
+  assert.match(css, /\.key-list-table \.table-actions \{[^}]*width: max-content/);
+  const { render } = keysPage();
+  const table = find(render(), (node) => node.type === "table");
+  assert.equal(table.props.class, "key-list-table");
+  assert.ok(findAll(table, (node) => node.props?.class === "key-value").length > 0);
+  assert.ok(findAll(table, (node) => node.props?.class === "table-actions").length > 0);
 });
 
 // An active key's expiry is edited with its policy and sent only when it
