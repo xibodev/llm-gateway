@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"crypto/subtle"
+	"log"
 	"net/http"
 	"net/url"
 	"strings"
@@ -77,6 +78,7 @@ func requireAdmin(w http.ResponseWriter, r *http.Request) bool {
 			writeError(w, http.StatusForbidden, "SSO principal is not provisioned.")
 			return false
 		}
+		principal = refreshSSOPrincipal(principal, identity)
 		if principal.Status != "active" {
 			writeError(w, http.StatusForbidden, "Principal is disabled.")
 			return false
@@ -141,11 +143,38 @@ func requireSSOUser(w http.ResponseWriter, r *http.Request) (iam.Principal, bool
 			return iam.Principal{}, false
 		}
 	}
+	principal = refreshSSOPrincipal(principal, identity)
 	if principal.Status != "active" {
 		writeError(w, http.StatusForbidden, "Principal is disabled.")
 		return iam.Principal{}, false
 	}
 	return principal, true
+}
+
+// refreshSSOPrincipal keeps principal as the identity provider describes it
+// at this sign-in: its email, and its name from the identity's name,
+// username or email, unless an administrator named it. The subject is an
+// opaque ID, never a name, so a proxy that sends only the subject leaves the
+// name as it is. A failed refresh leaves the principal as it was rather than
+// refusing the sign-in.
+func refreshSSOPrincipal(principal iam.Principal, identity ssoIdentity) iam.Principal {
+	refreshed, err := iam.RefreshPrincipalIdentity(principal, identity.Email, identity.reportedName())
+	if err != nil {
+		log.Printf("warning: could not refresh the name and email of SSO principal %s: %v", principal.ID, err)
+		return principal
+	}
+	return refreshed
+}
+
+// reportedName is the name the identity provider reports for identity: its
+// name, username or email, or nothing. firstNonEmpty would make one up.
+func (identity ssoIdentity) reportedName() string {
+	for _, name := range []string{identity.Name, identity.Username, identity.Email} {
+		if name = strings.TrimSpace(name); name != "" {
+			return name
+		}
+	}
+	return ""
 }
 
 func mutatingMethod(method string) bool {

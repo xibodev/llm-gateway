@@ -1,5 +1,5 @@
 import { useState } from "preact/hooks";
-import { LoaderCircle, ShieldCheck, UserPlus, Users, FolderPlus, X } from "lucide-preact";
+import { LoaderCircle, PencilLine, ShieldCheck, UserPlus, Users, FolderPlus, X } from "lucide-preact";
 import { sendJSON, type JSONRecord } from "../lib/api";
 import type { ConsoleMode } from "../lib/mode";
 import { asList, asRecord, stringValue } from "../lib/records";
@@ -34,6 +34,28 @@ function CreatePrincipalDialog({ onClose, onCreated }: { onClose: () => void; on
     } finally { setBusy(false); }
   };
   return <div class="dialog-backdrop" role="presentation"><section ref={dialogRef} class="dialog" role="dialog" aria-modal="true" aria-labelledby="create-principal-title" tabIndex={-1}><header><div><p class="eyebrow">Access</p><h2 id="create-principal-title">New principal</h2></div><button class="icon-button" type="button" aria-label="Close dialog" onClick={onClose}><X size={18} /></button></header><form class="form-stack" onSubmit={submit}><p class="muted-copy">Human principals can own private provider connections and catalogs. Service principals identify automated callers and cannot hold OAuth subscriptions.</p><label>Display name<input value={displayName} onInput={(event) => setDisplayName((event.currentTarget as HTMLInputElement).value)} autoComplete="off" /></label><label>Kind<select value={kind} onInput={(event) => setKind((event.currentTarget as HTMLSelectElement).value)}><option value="human">Human</option><option value="service">Service</option></select></label><label>Email (optional)<input type="email" value={email} onInput={(event) => setEmail((event.currentTarget as HTMLInputElement).value)} autoComplete="off" /></label>{error ? <p class="form-error" role="alert">{error}</p> : null}<footer><button class="button button--secondary" type="button" onClick={onClose}>Cancel</button><button class="button button--primary" type="submit" disabled={busy}>{busy ? <LoaderCircle class="spin" size={16} /> : <UserPlus size={16} />} Create principal</button></footer></form></section></div>;
+}
+
+function RenamePrincipalDialog({ principal, onClose, onRenamed }: { principal: JSONRecord; onClose: () => void; onRenamed: (name: string) => Promise<void> }) {
+  const [displayName, setDisplayName] = useState(stringValue(principal.display_name));
+  const [error, setError] = useState("");
+  const [busy, setBusy] = useState(false);
+  const dialogRef = useDialogFocus(onClose);
+  const submit = async (event: Event) => {
+    event.preventDefault();
+    const name = displayName.trim();
+    if (!name) { setError("A display name is required."); return; }
+    setBusy(true);
+    setError("");
+    try {
+      await sendJSON<JSONRecord>("admin", `/principals/${encodeURIComponent(stringValue(principal.id))}/rename`, "POST", { display_name: name });
+      await onRenamed(name);
+      onClose();
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "Principal could not be renamed.");
+    } finally { setBusy(false); }
+  };
+  return <div class="dialog-backdrop" role="presentation"><section ref={dialogRef} class="dialog" role="dialog" aria-modal="true" aria-labelledby="rename-principal-title" tabIndex={-1}><header><div><p class="eyebrow">Access</p><h2 id="rename-principal-title">Rename principal</h2></div><button class="icon-button" type="button" aria-label="Close dialog" onClick={onClose}><X size={18} /></button></header><form class="form-stack" onSubmit={submit}><p class="muted-copy">The name you choose sticks: signing in no longer replaces it with the name the identity provider reports.</p><label>Display name<input value={displayName} maxLength={200} onInput={(event) => setDisplayName((event.currentTarget as HTMLInputElement).value)} autoComplete="off" /></label>{error ? <p class="form-error" role="alert">{error}</p> : null}<footer><button class="button button--secondary" type="button" onClick={onClose}>Cancel</button><button class="button button--primary" type="submit" disabled={busy}>{busy ? <LoaderCircle class="spin" size={16} /> : <PencilLine size={16} />} Save name</button></footer></form></section></div>;
 }
 
 function CreateProjectDialog({ onClose, onCreated }: { onClose: () => void; onCreated: () => Promise<void> }) {
@@ -83,6 +105,7 @@ function AddMembershipDialog({ project, principals, onClose, onCreated }: { proj
 
 export function Access({ data, mode, onChanged, onNavigate }: { data: JSONRecord; mode: ConsoleMode; onChanged: () => Promise<void>; onNavigate?: (page: "keys", detail?: string) => void }) {
   const [createPrincipal, setCreatePrincipal] = useState(false);
+  const [renamePrincipal, setRenamePrincipal] = useState<JSONRecord | null>(null);
   const [createProject, setCreateProject] = useState(false);
   const [membershipProject, setMembershipProject] = useState<JSONRecord | null>(null);
   const [result, setResult] = useState<ActionResult>(null);
@@ -136,7 +159,7 @@ export function Access({ data, mode, onChanged, onNavigate }: { data: JSONRecord
           const id = stringValue(principal.id);
           const status = stringValue(principal.status, "active");
           const system = stringValue(principal.kind) === "system";
-          return <tr key={id}><td><strong>{stringValue(principal.display_name, id)}</strong><small class="table-subtitle technical">{id}</small></td><td>{stringValue(principal.kind)}</td><td>{stringValue(principal.email, "—")}</td><td><span class={`status-pill ${status === "active" ? "status-pill--ready" : "status-pill--muted"}`}>{status}</span></td><td>{system ? <span class="provider-card__meta">Built-in</span> : <div class="provider-actions">{onNavigate ? <button class="button button--secondary" type="button" onClick={() => onNavigate("keys", `owner=${encodeURIComponent(id)}`)}>Keys</button> : null}<button class="button button--secondary" type="button" disabled={busy === `principals-${id}`} onClick={() => void setStatus("principals", principal)}>{status === "active" ? "Disable" : "Enable"}</button></div>}</td></tr>;
+          return <tr key={id}><td><strong>{stringValue(principal.display_name, id)}</strong><small class="table-subtitle technical">{id}</small>{principal.name_set_by_admin === true && stringValue(principal.external_subject) ? <small class="table-subtitle">Named by an administrator</small> : null}</td><td>{stringValue(principal.kind)}</td><td>{stringValue(principal.email, "—")}</td><td><span class={`status-pill ${status === "active" ? "status-pill--ready" : "status-pill--muted"}`}>{status}</span></td><td>{system ? <span class="provider-card__meta">Built-in</span> : <div class="provider-actions">{onNavigate ? <button class="button button--secondary" type="button" onClick={() => onNavigate("keys", `owner=${encodeURIComponent(id)}`)}>Keys</button> : null}<button class="button button--secondary" type="button" aria-label={`Rename ${stringValue(principal.display_name, id)}`} onClick={() => setRenamePrincipal(principal)}><PencilLine size={15} /> Rename</button><button class="button button--secondary" type="button" disabled={busy === `principals-${id}`} onClick={() => void setStatus("principals", principal)}>{status === "active" ? "Disable" : "Enable"}</button></div>}</td></tr>;
         })}</tbody></table></div>}
       </section>
       <section class="surface">
@@ -158,6 +181,7 @@ export function Access({ data, mode, onChanged, onNavigate }: { data: JSONRecord
         })}</tbody></table></div>}
       </section>
       {createPrincipal ? <CreatePrincipalDialog onClose={() => setCreatePrincipal(false)} onCreated={onChanged} /> : null}
+      {renamePrincipal ? <RenamePrincipalDialog principal={renamePrincipal} onClose={() => setRenamePrincipal(null)} onRenamed={async (name) => { setResult({ title: "Renamed", success: true, detail: `${stringValue(renamePrincipal.display_name, stringValue(renamePrincipal.id))} is now ${name}.` }); await onChanged(); }} /> : null}
       {createProject ? <CreateProjectDialog onClose={() => setCreateProject(false)} onCreated={onChanged} /> : null}
       {membershipProject ? <AddMembershipDialog project={membershipProject} principals={activePrincipals} onClose={() => setMembershipProject(null)} onCreated={onChanged} /> : null}
     </div>

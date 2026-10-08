@@ -1,6 +1,7 @@
 package api
 
 import (
+	"errors"
 	"net/http"
 	"strings"
 
@@ -37,7 +38,7 @@ func handleCreatePrincipal(w http.ResponseWriter, r *http.Request) {
 		writeError(w, 400, "invalid body")
 		return
 	}
-	principal, err := iam.CreatePrincipal(
+	principal, err := iam.CreatePrincipalNamedByAdmin(
 		strings.TrimSpace(body.Kind), strings.TrimSpace(body.ExternalSubject),
 		strings.TrimSpace(body.Email), strings.TrimSpace(body.DisplayName),
 	)
@@ -47,6 +48,32 @@ func handleCreatePrincipal(w http.ResponseWriter, r *http.Request) {
 	}
 	auditAdmin(r, "principal.create", "principal", principal.ID, map[string]any{"kind": principal.Kind})
 	writeJSON(w, 201, principal)
+}
+
+// POST /admin/api/principals/{id}/rename names a principal. The name sticks:
+// sign-ins no longer refresh it from the identity provider.
+func handleRenamePrincipal(w http.ResponseWriter, r *http.Request) {
+	if !adminAuthed(w, r) {
+		return
+	}
+	var body struct {
+		DisplayName string `json:"display_name"`
+	}
+	if !decodeBody(r, &body) {
+		writeError(w, 400, "invalid body")
+		return
+	}
+	before, after, err := iam.RenamePrincipal(r.PathValue("id"), body.DisplayName)
+	if errors.Is(err, iam.ErrPrincipalNotFound) {
+		writeError(w, 404, "unknown principal")
+		return
+	}
+	if err != nil {
+		writeError(w, 400, err.Error())
+		return
+	}
+	auditAdmin(r, "principal.rename", "principal", after.ID, map[string]any{"from": before.DisplayName, "to": after.DisplayName})
+	writeJSON(w, 200, after)
 }
 
 type statusBody struct {

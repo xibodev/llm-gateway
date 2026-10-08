@@ -58,6 +58,16 @@ The included Caddy example is a TLS/static-admin starting point, not a turnkey
 Authentik deployment. Add and test your own identity middleware before enabling
 multi-user access.
 
+A human principal is created at its first sign-in. At every sign-in its email
+follows the email the proxy sends, and its display name the first of the name,
+username and email the proxy sends. A sign-in that sends none of them keeps the
+stored name, and a principal first named after its opaque subject takes a real
+name once the proxy sends one. An administrator can rename a principal in the
+console or with `POST /admin/api/principals/{id}/rename` and a body of
+`{"display_name": "..."}`; that name, like the name of a principal an
+administrator creates, then stays as chosen. Renames are audited as
+`principal.rename`.
+
 ## Provider connections
 
 Humans can own multiple named private connections for a provider. One active

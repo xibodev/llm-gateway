@@ -2,12 +2,33 @@ package iam
 
 import (
 	"database/sql"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
+	"unicode/utf8"
 )
 
+// maxPrincipalNameRunes bounds the display name an administrator gives a
+// principal.
+const maxPrincipalNameRunes = 200
+
+// ErrPrincipalNotFound reports a principal that does not exist.
+var ErrPrincipalNotFound = errors.New("principal not found")
+
+// CreatePrincipal creates a principal whose display name sign-ins may
+// refresh, as an SSO sign-in provisions one.
 func CreatePrincipal(kind, externalSubject, email, displayName string) (Principal, error) {
+	return createPrincipal(kind, externalSubject, email, displayName, false)
+}
+
+// CreatePrincipalNamedByAdmin creates a principal with the display name an
+// administrator chose, which sign-ins do not refresh.
+func CreatePrincipalNamedByAdmin(kind, externalSubject, email, displayName string) (Principal, error) {
+	return createPrincipal(kind, externalSubject, email, displayName, true)
+}
+
+func createPrincipal(kind, externalSubject, email, displayName string, nameSetByAdmin bool) (Principal, error) {
 	switch kind {
 	case "human", "service", "system":
 	default:
@@ -24,7 +45,7 @@ func CreatePrincipal(kind, externalSubject, email, displayName string) (Principa
 	now := time.Now().Unix()
 	p := Principal{
 		ID: id, Kind: kind, ExternalSubject: strings.TrimSpace(externalSubject),
-		Email: strings.TrimSpace(email), DisplayName: displayName,
+		Email: strings.TrimSpace(email), DisplayName: displayName, NameSetByAdmin: nameSetByAdmin,
 		Status: "active", CreatedAt: now, UpdatedAt: now,
 	}
 	db, err := DB()
@@ -32,15 +53,100 @@ func CreatePrincipal(kind, externalSubject, email, displayName string) (Principa
 		return Principal{}, err
 	}
 	_, err = db.Exec(`
-INSERT INTO principals(id,kind,external_subject,email,display_name,status,created_at,updated_at)
-VALUES(?,?,?,?,?,?,?,?)`,
+INSERT INTO principals(id,kind,external_subject,email,display_name,display_name_locked,status,created_at,updated_at)
+VALUES(?,?,?,?,?,?,?,?,?)`,
 		p.ID, p.Kind, nullable(p.ExternalSubject), nullable(p.Email), p.DisplayName,
-		p.Status, p.CreatedAt, p.UpdatedAt,
+		boolInt(p.NameSetByAdmin), p.Status, p.CreatedAt, p.UpdatedAt,
 	)
 	if err != nil {
 		return Principal{}, fmt.Errorf("create principal: %w", err)
 	}
 	return p, nil
+}
+
+// RenamePrincipal gives principal id the display name an administrator
+// chose and returns the principal before and after. Sign-ins no longer
+// refresh the name of a principal an administrator named. The built-in
+// system principal keeps its name.
+func RenamePrincipal(id, displayName string) (Principal, Principal, error) {
+	displayName = strings.TrimSpace(displayName)
+	if displayName == "" {
+		return Principal{}, Principal{}, fmt.Errorf("display name is required")
+	}
+	if utf8.RuneCountInString(displayName) > maxPrincipalNameRunes {
+		return Principal{}, Principal{}, fmt.Errorf("display name is longer than %d characters", maxPrincipalNameRunes)
+	}
+	before, found, err := PrincipalByID(strings.TrimSpace(id))
+	if err != nil {
+		return Principal{}, Principal{}, err
+	}
+	if !found {
+		return Principal{}, Principal{}, ErrPrincipalNotFound
+	}
+	if before.Kind == "system" {
+		return Principal{}, Principal{}, fmt.Errorf("the built-in system principal keeps its name")
+	}
+	db, err := DB()
+	if err != nil {
+		return Principal{}, Principal{}, err
+	}
+	after := before
+	after.DisplayName, after.NameSetByAdmin, after.UpdatedAt = displayName, true, time.Now().Unix()
+	res, err := db.Exec(
+		"UPDATE principals SET display_name=?,display_name_locked=1,updated_at=? WHERE id=?",
+		after.DisplayName, after.UpdatedAt, after.ID,
+	)
+	if err != nil {
+		return Principal{}, Principal{}, err
+	}
+	if err := requireAffected(res, "principal"); err != nil {
+		return Principal{}, Principal{}, err
+	}
+	return before, after, nil
+}
+
+// RefreshPrincipalIdentity keeps principal p as its identity provider
+// describes it at sign-in: a non-empty email replaces the stored one, and a
+// non-empty display name the stored name, unless an administrator named the
+// principal. Empty values change nothing, so a sign-in that reports less
+// keeps what an earlier one reported. It writes only when something changed
+// and returns the principal as stored.
+func RefreshPrincipalIdentity(p Principal, email, displayName string) (Principal, error) {
+	email, displayName = strings.TrimSpace(email), strings.TrimSpace(displayName)
+	emailChanged := email != "" && email != p.Email
+	nameChanged := displayName != "" && displayName != p.DisplayName && !p.NameSetByAdmin
+	if !emailChanged && !nameChanged {
+		return p, nil
+	}
+	db, err := DB()
+	if err != nil {
+		return p, err
+	}
+	next := p
+	if emailChanged {
+		next.Email = email
+	}
+	if nameChanged {
+		next.DisplayName = displayName
+	}
+	next.UpdatedAt = time.Now().Unix()
+	// The name changes only while no administrator has named the principal,
+	// however a rename races this sign-in.
+	if _, err := db.Exec(`
+UPDATE principals SET email=?,
+    display_name=CASE WHEN display_name_locked=0 THEN ? ELSE display_name END,
+    updated_at=?
+WHERE id=?`, nullable(next.Email), next.DisplayName, next.UpdatedAt, p.ID); err != nil {
+		return p, err
+	}
+	stored, found, err := PrincipalByID(p.ID)
+	if err != nil {
+		return p, err
+	}
+	if !found {
+		return p, ErrPrincipalNotFound
+	}
+	return stored, nil
 }
 
 func EnsurePrincipalBySubject(kind, externalSubject, email, displayName string) (Principal, error) {
@@ -71,7 +177,7 @@ func PrincipalBySubject(subject string) (Principal, bool, error) {
 		return Principal{}, false, err
 	}
 	row := db.QueryRow(`
-SELECT id,kind,external_subject,email,display_name,status,created_at,updated_at
+SELECT id,kind,external_subject,email,display_name,display_name_locked,status,created_at,updated_at
 FROM principals WHERE external_subject=?`, strings.TrimSpace(subject))
 	p, err := scanPrincipal(row)
 	if err == sql.ErrNoRows {
@@ -86,7 +192,7 @@ func PrincipalByID(id string) (Principal, bool, error) {
 		return Principal{}, false, err
 	}
 	row := db.QueryRow(`
-SELECT id,kind,external_subject,email,display_name,status,created_at,updated_at
+SELECT id,kind,external_subject,email,display_name,display_name_locked,status,created_at,updated_at
 FROM principals WHERE id=?`, id)
 	p, err := scanPrincipal(row)
 	if err == sql.ErrNoRows {
@@ -101,7 +207,7 @@ func ListPrincipals() ([]Principal, error) {
 		return nil, err
 	}
 	rows, err := db.Query(`
-SELECT id,kind,external_subject,email,display_name,status,created_at,updated_at
+SELECT id,kind,external_subject,email,display_name,display_name_locked,status,created_at,updated_at
 FROM principals ORDER BY display_name,id`)
 	if err != nil {
 		return nil, err
@@ -392,12 +498,14 @@ type rowScanner interface {
 func scanPrincipal(row rowScanner) (Principal, error) {
 	var p Principal
 	var subject, email sql.NullString
+	var nameLocked int
 	err := row.Scan(
-		&p.ID, &p.Kind, &subject, &email, &p.DisplayName, &p.Status,
+		&p.ID, &p.Kind, &subject, &email, &p.DisplayName, &nameLocked, &p.Status,
 		&p.CreatedAt, &p.UpdatedAt,
 	)
 	p.ExternalSubject = subject.String
 	p.Email = email.String
+	p.NameSetByAdmin = nameLocked != 0
 	return p, err
 }
 

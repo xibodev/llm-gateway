@@ -8,9 +8,12 @@ type Principal struct {
 	ExternalSubject string `json:"external_subject,omitempty"`
 	Email           string `json:"email,omitempty"`
 	DisplayName     string `json:"display_name"`
-	Status          string `json:"status"`
-	CreatedAt       int64  `json:"created_at"`
-	UpdatedAt       int64  `json:"updated_at"`
+	// NameSetByAdmin reports a display name an administrator chose, at
+	// creation or by renaming, which sign-ins no longer refresh.
+	NameSetByAdmin bool   `json:"name_set_by_admin,omitempty"`
+	Status         string `json:"status"`
+	CreatedAt      int64  `json:"created_at"`
+	UpdatedAt      int64  `json:"updated_at"`
 }
 
 type Project struct {

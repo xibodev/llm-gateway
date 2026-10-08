@@ -231,6 +231,7 @@ func (s *server) handler() http.Handler {
 	mux.HandleFunc("GET /admin/api/principals", handleListPrincipals)
 	mux.HandleFunc("POST /admin/api/principals", handleCreatePrincipal)
 	mux.HandleFunc("POST /admin/api/principals/status", handlePrincipalStatus)
+	mux.HandleFunc("POST /admin/api/principals/{id}/rename", handleRenamePrincipal)
 	mux.HandleFunc("GET /admin/api/projects", handleListProjects)
 	mux.HandleFunc("POST /admin/api/projects", handleCreateProject)
 	mux.HandleFunc("POST /admin/api/projects/status", handleProjectStatus)

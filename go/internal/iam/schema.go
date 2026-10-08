@@ -562,6 +562,13 @@ WHERE status!='revoked'
 		version: 22,
 		sql:     `ALTER TABLE api_keys ADD COLUMN deleted_at INTEGER;`,
 	},
+	{
+		// A principal an administrator named, at creation or by renaming,
+		// keeps that name: sign-ins refresh only the names the identity
+		// provider set.
+		version: 23,
+		sql:     `ALTER TABLE principals ADD COLUMN display_name_locked INTEGER NOT NULL DEFAULT 0;`,
+	},
 }
 
 func SchemaVersion() int { return len(migrations) }
