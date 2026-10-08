@@ -81,11 +81,11 @@ func TestIAMAdminAndKeyAuthenticationE2E(t *testing.T) {
 	if err != nil || !found || resolved.KeyID == "" || resolved.ProjectID == "" {
 		t.Fatalf("issued key did not resolve with IAM ids: %+v found=%v err=%v", resolved, found, err)
 	}
-	status, state := admin("GET", "/admin/api/state", nil)
+	status, listing := admin("GET", "/admin/api/keys?status=all", nil)
 	if status != http.StatusOK {
-		t.Fatalf("state: %d %+v", status, state)
+		t.Fatalf("key listing: %d %+v", status, listing)
 	}
-	keys := state["keys"].([]any)
+	keys := listing["keys"].([]any)
 	listed := keys[0].(map[string]any)
 	if listed["prefix"] == "" || listed["token"] != nil {
 		t.Fatalf("listed key leaks token or lacks prefix: %+v", listed)

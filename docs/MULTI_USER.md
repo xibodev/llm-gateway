@@ -167,7 +167,8 @@ and external subjects. `sort` is `name`, `kind`, `email`, `status` or
 `created`. The answer carries the page's `principals` and their `total`. The
 console lists, picks and names principals this way, and project memberships,
 provider connections and open circuits name their principal as
-`principal_name`.
+`principal_name`. The administrator state lists neither keys nor principals: it
+counts them in `counts`.
 
 Removing a principal from a project revokes that principal's keys in the
 project, including disabled ones; adding the membership back does not restore

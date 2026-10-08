@@ -129,6 +129,13 @@ in through the companion daemon, which the OAuth connection routes reach.
 `DELETE /admin/api/principals/{id}/copilot` and `DELETE /user/api/copilot` still
 revoke a Copilot connection.
 
+`GET /admin/api/state` no longer lists `keys` and `principals`. It reports how
+many there are in `counts`, and names the first active person by name as
+`default_owner`. Read keys from `GET /admin/api/keys` and principals from
+`GET /admin/api/principals`, which now answers a page at a time, 50 by default
+and at most 200, with the `total` its filters select; step `offset` to read
+every principal.
+
 ## Legacy state migration
 
 On startup, applicable old state is migrated:

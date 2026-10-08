@@ -234,20 +234,8 @@ func handleState(w http.ResponseWriter, r *http.Request) {
 		}
 		cats[name] = map[string]any{"failover": fo}
 	}
-	keys, err := iam.ListAPIKeys("")
-	if err != nil {
-		writeError(w, 500, "Identity store unavailable.")
-		return
-	}
-	keyRows := make([]map[string]any, 0, len(keys))
-	for _, k := range keys {
-		keyRows = append(keyRows, adminKeyRow(k))
-	}
-	principals, err := iam.ListPrincipals()
-	if err != nil {
-		writeError(w, 500, "Identity store unavailable.")
-		return
-	}
+	// Keys and principals are listed a page at a time by their own routes;
+	// the state counts them instead (see counts below).
 	projects, err := iam.ListProjects()
 	if err != nil {
 		writeError(w, 500, "Identity store unavailable.")
@@ -307,8 +295,6 @@ func handleState(w http.ResponseWriter, r *http.Request) {
 		"provider_statuses":            statusSnapshots,
 		"companion_daemon_providers":   providers.CompanionDaemonProviders(s),
 		"startup_warnings":             StartupWarnings(ListenHost()),
-		"keys":                         keyRows,
-		"principals":                   principals,
 		"projects":                     projects,
 		"provider_credentials":         credentials,
 		"provider_credential_bindings": credentialBindings,

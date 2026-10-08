@@ -712,10 +712,17 @@ async function setupDocker() {
 }
 
 async function restartAndCheck(identity, healthy, plans) {
-  const before = await request("/admin/api/state");
+  // The state counts principals rather than listing them, so their records
+  // are read from the principal listing.
+  const snapshot = async () => {
+    const state = await request("/admin/api/state");
+    const principals = await request("/admin/api/principals?limit=200");
+    return { json: { ...state.json, principals: principals.json?.principals } };
+  };
+  const before = await snapshot();
   await docker("restart", container);
   await waitHealth();
-  const after = await request("/admin/api/state");
+  const after = await snapshot();
   const size = (value) => Array.isArray(value) ? value.length : value && typeof value === "object" ? Object.keys(value).length : 0;
   const count = (state, key) => key === "endpoints"
     ? size(state?.endpoints || state?.categories)

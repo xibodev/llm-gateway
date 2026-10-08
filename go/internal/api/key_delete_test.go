@@ -102,9 +102,9 @@ func TestDeletingKeysTakesOnlyRevokedOrExpiredOnes(t *testing.T) {
 		names[revoked] != want[revoked] || names[expired] != want[expired] || names[othersRevoked] != want[othersRevoked] {
 		t.Fatalf("deletion audit names=%v, want %v", names, want)
 	}
-	_, state := jsonRequest(t, server.URL+"/admin/api/state", http.MethodGet, "admin-secret", nil)
+	_, listing := jsonRequest(t, server.URL+"/admin/api/keys?status=all", http.MethodGet, "admin-secret", nil)
 	listed := []string{}
-	for _, key := range state["keys"].([]any) {
+	for _, key := range listing["keys"].([]any) {
 		listed = append(listed, key.(map[string]any)["id"].(string))
 	}
 	if !slices.Equal(listed, []string{live}) {

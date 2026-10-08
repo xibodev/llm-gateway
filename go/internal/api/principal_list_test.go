@@ -106,8 +106,9 @@ func TestPrincipalListingPagesPrincipals(t *testing.T) {
 }
 
 // The administrator state counts the keys and principals the console shows
-// in place of their lists, and names the default owner, the first active
-// person by name, whose catalog the console shows until another is chosen.
+// in place of their lists, which it no longer carries, and names the
+// default owner, the first active person by name, whose catalog the console
+// shows until another is chosen.
 func TestAdminStateCountsIdentitiesAndNamesTheDefaultOwner(t *testing.T) {
 	handler, ids, project := principalListingFixture(t)
 	for _, name := range []string{"kept", "revoked"} {
@@ -138,5 +139,14 @@ func TestAdminStateCountsIdentitiesAndNamesTheDefaultOwner(t *testing.T) {
 	}
 	if state.DefaultOwner.ID != ids["Ada"] || state.DefaultOwner.DisplayName != "Ada" {
 		t.Fatalf("default owner=%+v", state.DefaultOwner)
+	}
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(w.Body.Bytes(), &fields); err != nil {
+		t.Fatal(err)
+	}
+	for _, list := range []string{"keys", "principals"} {
+		if _, listed := fields[list]; listed {
+			t.Fatalf("the state lists %s", list)
+		}
 	}
 }

@@ -201,29 +201,6 @@ FROM principals WHERE id=?`, id)
 	return p, err == nil, err
 }
 
-func ListPrincipals() ([]Principal, error) {
-	db, err := DB()
-	if err != nil {
-		return nil, err
-	}
-	rows, err := db.Query(`
-SELECT id,kind,external_subject,email,display_name,display_name_locked,status,created_at,updated_at
-FROM principals ORDER BY display_name,id`)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	out := []Principal{}
-	for rows.Next() {
-		p, err := scanPrincipal(rows)
-		if err != nil {
-			return nil, err
-		}
-		out = append(out, p)
-	}
-	return out, rows.Err()
-}
-
 func SetPrincipalStatus(id, status string) error {
 	if status != "active" && status != "disabled" {
 		return fmt.Errorf("invalid principal status %q", status)
