@@ -1,0 +1,542 @@
+{
+  "schema_version": "1.0.0",
+  "mode": "change",
+  "contract": {
+    "digest": "da05219969e051b692980ada8e8066ac909bf88d11ad6a5af6338834a8cc384f"
+  },
+  "authoring_provenance": {
+    "status": "established",
+    "path": ".release-harness/drafts/llm-gateway.record.json",
+    "digest": "e819045146db82b3754d02e0950d13ca8527706a2b478ada58c176c24e706d2b"
+  },
+  "sources": [
+    {
+      "source_id": "primary",
+      "status": "established",
+      "repository_identity": "https://github.com/xibodev/llm-gateway.git",
+      "base_ref": "v1.5.0",
+      "base_commit": "b0ef5aadb369239bf1935c5fb622441fffcad4de",
+      "merge_base": "b0ef5aadb369239bf1935c5fb622441fffcad4de",
+      "head_commit": "9f247ceace7b675b944d8e46317f6e8bbd6884ad",
+      "head_tree": "ea2970ba5e50fac232c006e83978c9b8f34d8e6f",
+      "reviewed_source_digest": "cd480228d8dea0284d4c4292aa5105ddd7b39e8c0116c73bc6fc3dfbdda1645e",
+      "changed_paths": [
+        {
+          "status": "modified",
+          "path": "docs/CONFIGURATION.md",
+          "old_blob": "b42e12376885078c68d5bc7e77a4252724262ad1",
+          "new_blob": "af2927265f98c6f4aea512c33be1148869147acd"
+        },
+        {
+          "status": "modified",
+          "path": "docs/MULTI_USER.md",
+          "old_blob": "2b3c854f8612461ef8732c9236f90db9a2d8fc1d",
+          "new_blob": "1eec74bea151b37d04e2220a7c007945a3db783f"
+        },
+        {
+          "status": "modified",
+          "path": "go/go.mod",
+          "old_blob": "c4a8fe37f63539113ff1eb1498c90f44850bd8b0",
+          "new_blob": "8a96426d153e97c56a195f5430424af79fc29494"
+        },
+        {
+          "status": "modified",
+          "path": "go/go.sum",
+          "old_blob": "21a611818bdd24fd6a780f8f429ad2bac00233d5",
+          "new_blob": "166e1c77079ad8d996873d396da439873179aa8e"
+        },
+        {
+          "status": "added",
+          "path": "go/internal/api/admin_state_test.go",
+          "old_blob": "0000000000000000000000000000000000000000",
+          "new_blob": "1c27980d72f2c1475446c7ec83ef183c224cc49c"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/api/admin.go",
+          "old_blob": "66596b761629524aa668eac17a3796a01db0d9cc",
+          "new_blob": "98c98cdd708eb7c13a69d20ecaddad0425443a9b"
+        },
+        {
+          "status": "added",
+          "path": "go/internal/api/key_delete_test.go",
+          "old_blob": "0000000000000000000000000000000000000000",
+          "new_blob": "134006a9d0e89d0ffbc7a55baede714574f23ad5"
+        },
+        {
+          "status": "added",
+          "path": "go/internal/api/key_delete.go",
+          "old_blob": "0000000000000000000000000000000000000000",
+          "new_blob": "df5246b1d984e83f320548195e1e272e81f9827c"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/api/models_test.go",
+          "old_blob": "e125a6008049e21615af4983cc2223078412a307",
+          "new_blob": "b558d7e0369443e5c91ce453f25366c162f4ecd1"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/api/models.go",
+          "old_blob": "2385c14a576c7791073d58e0d79be9105dac5c9a",
+          "new_blob": "dce9d3781c7b10f4c71a7acb3f2769741762849b"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/api/oauth_test.go",
+          "old_blob": "198cc838fb9c7d3f9b45a901fa153531c842e421",
+          "new_blob": "d7b4851721ce626d513b9dff4e00c0c434820cf4"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/api/oauth.go",
+          "old_blob": "12089149f6bacb156427a9eef680e2b9698f09de",
+          "new_blob": "93b6086d9f2c393604277b09747445ccddaad15d"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/api/routes_models_api_test.go",
+          "old_blob": "16ace432c2e01f27f019fdd5cd56b55591e64e39",
+          "new_blob": "75a72ab43feef808c48e4e8890ba09587a02c0cb"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/api/server.go",
+          "old_blob": "00290f9caec45c177ce3fcfaf771277199fd5d2e",
+          "new_blob": "51495f19ba7c7b690a31ad4b27c75cdccbd78f6d"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/api/user_test.go",
+          "old_blob": "64be4f36f4ede09d37548be50add767f9bc42896",
+          "new_blob": "5516124cace2636a3e4625c137a133860fcbfd0f"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/api/user.go",
+          "old_blob": "bbabeb7013796ce1cb4a4122c7f8655630e3bb9e",
+          "new_blob": "3ec30b1733ad490e1631c3ea1e6abaadaa21aef1"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/iam/keys_test.go",
+          "old_blob": "6e90b2e7808b6a086a03cc653fc5a9691f6dc6d2",
+          "new_blob": "b715ad79253b007bd36d124f00043b3f3b2667d5"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/iam/keys.go",
+          "old_blob": "64a9852c65160200bf011589f84f57172a4e8136",
+          "new_blob": "c01d8cbf88af45bd412b76bf42264372185d1bb3"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/iam/schema.go",
+          "old_blob": "1df9bc53d72e5efc8a68c0577b0d0408e3c27522",
+          "new_blob": "a386ee13bd97e827f73e2677d20c3f4e52bcffac"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/iam/usage_events.go",
+          "old_blob": "147cfb50719fb028a62bd04a1c1172315c410196",
+          "new_blob": "fbd9d6999f2aaa32b8bd37d9947eeb5265aebe6e"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/iam/usage.go",
+          "old_blob": "7a7c3bec78bc68c05e698bf99acd9c21c591e1c4",
+          "new_blob": "b03e17c33fd91db0a1ee6d9420c717b14bff7d84"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/providers/chat_fields_test.go",
+          "old_blob": "5b48c49f4feac1a8422e90fab9a2a53548c50516",
+          "new_blob": "804e8969ad16bade437bd444e9e7f78d43e1f0db"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/providers/chat_fields.go",
+          "old_blob": "0322ea9a4380eb6bb4c6b65f508895647b8a7fdc",
+          "new_blob": "14a2cec5960adbbac8ede33975c41d03eaf194e3"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/providers/extension_failure_test.go",
+          "old_blob": "6af51c8873be1ec18728c249298ec5fac878c178",
+          "new_blob": "66612344b13de40e35e752ac121bceabb421d286"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/providers/extension_vertical_test.go",
+          "old_blob": "da342504182e0373cfa9ddf7d94af34b69e4f98e",
+          "new_blob": "32b4b9b7e0f2c4229ca266db4f8bbcb6a8aeff71"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/providers/extension_vertical.go",
+          "old_blob": "8517d1fc6442a20a40a67e19aa064b7af6b30185",
+          "new_blob": "1d0a693b677833fe152003852afbef4d3326d319"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/providers/factory.go",
+          "old_blob": "370630b82154e5b84e04f45c2edf4d59fd8d8cb4",
+          "new_blob": "94868b5ede2ca16e71d3766867c7a83d9b1dcb72"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/providers/oauth_drivers.go",
+          "old_blob": "0fdae88c3e857ccea24b9a32cd8d8e41fa997cd6",
+          "new_blob": "3128606717bd0d339f7a77018ad84af6da0d3535"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/providers/policy_circuit_test.go",
+          "old_blob": "ec8481184d0bae9e9d719de50203a12dc18d3500",
+          "new_blob": "b323a8e81e71e3c56c7f78ed1b310c731b210daa"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/providers/policy.go",
+          "old_blob": "7a8805d0e4a060eee24fbe057621e3e612e2f2f4",
+          "new_blob": "e4d1f06174543678a1db8a8019f8078e71e7e442"
+        },
+        {
+          "status": "deleted",
+          "path": "go/internal/web/console/dist/assets/index-Bmj5Ro5R.css",
+          "old_blob": "fbe3893032bd749b21516e0e3094222d37ca23ea",
+          "new_blob": "0000000000000000000000000000000000000000"
+        },
+        {
+          "status": "added",
+          "path": "go/internal/web/console/dist/assets/index-Bx2fp7DV.js",
+          "old_blob": "0000000000000000000000000000000000000000",
+          "new_blob": "1d0b4ff359db141f8a84f9a34bd9afc68a90f539"
+        },
+        {
+          "status": "deleted",
+          "path": "go/internal/web/console/dist/assets/index-D224xWlm.js",
+          "old_blob": "20b28227e056c8ccc5b654962bffa4063bef8232",
+          "new_blob": "0000000000000000000000000000000000000000"
+        },
+        {
+          "status": "added",
+          "path": "go/internal/web/console/dist/assets/index-Dek1mTls.css",
+          "old_blob": "0000000000000000000000000000000000000000",
+          "new_blob": "7d59f93c483eeb09c33afec57c0e46e5f6192f6d"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/web/console/dist/index.html",
+          "old_blob": "28c732072177b7f6fe54ce3f958b3ef76fcfaea6",
+          "new_blob": "68bcec017b4ce8edbd5a6d273700a5e3f44d3402"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/web/console/package-lock.json",
+          "old_blob": "beb9d720043a3575383e690add45afeedd36bc7d",
+          "new_blob": "98310496827d494888f69e879ce8ea0ecc492bef"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/web/console/src/lib/key-dates.ts",
+          "old_blob": "36f344ba0cd4cb0eff0c98806f8d661caaea895b",
+          "new_blob": "7e527a8932cd51565aeda27399e02121d0261c24"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/web/console/src/pages/ApiKeys.tsx",
+          "old_blob": "8807aac764e439240dafbbdb6672e3cd3edcb88c",
+          "new_blob": "3c81d6a9a12049110275d08175abe1c6724a338c"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/web/console/src/pages/Requests.tsx",
+          "old_blob": "62df158e3e47a66a555dc6bb1f143f75ed7a8117",
+          "new_blob": "a7bce3e95f0b768874dde90ee37ad3ff73040a26"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/web/console/src/pages/UsageQuotas.tsx",
+          "old_blob": "2c0f23693d125a45906888297ed4f2a7cf58b86d",
+          "new_blob": "0a34d2c90613094d2a62838ea0f1e83c53244b75"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/web/console/src/styles/keys.css",
+          "old_blob": "f4241a10c3e596d5a065b5ca9348723e9299b32b",
+          "new_blob": "564ebdf282a1bece8494bb80b961a5b9a24e04a9"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/web/console/tests/activity.test.mjs",
+          "old_blob": "b84b56616f7e05e5a171ef2046bea450a80c143c",
+          "new_blob": "d6c2402375309463d2cc8e2058f29f5fa901c573"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/web/console/tests/key-dates.test.mjs",
+          "old_blob": "91614f867508f30b065251707fc8f269dd9b4e12",
+          "new_blob": "8cf155d1140db0800265484174c4b60f2e2f04df"
+        },
+        {
+          "status": "added",
+          "path": "go/internal/web/console/tests/key-lifecycle.test.mjs",
+          "old_blob": "0000000000000000000000000000000000000000",
+          "new_blob": "4bdc1dbff2bb4ec1b49e0c967bb248578ecd7b19"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/web/console/tests/smoke.test.mjs",
+          "old_blob": "6dd6b842821ef10b088b34a031e68e9b0b7ac994",
+          "new_blob": "8ce67494740aed8aa6f13ed820837f2f31a047df"
+        },
+        {
+          "status": "modified",
+          "path": "go/internal/web/console/tests/usage-report.test.mjs",
+          "old_blob": "00fc24c3cd50444db3fa7065e9f363846d770e80",
+          "new_blob": "d5d0662d6f82b21cf1562dad820d8580e421b8c5"
+        }
+      ]
+    }
+  ],
+  "facts": [
+    {
+      "id": "device-sign-in",
+      "claim": "A device sign-in poll answers pending while the flow awaits its owner, slow_down when the provider asks for a longer interval, denied when the owner or provider refuses, and expired when the flow expires; a poll after the flow ended reports it no longer active without asking the provider. An ended browser sign-in's message names browser authorization.",
+      "status": "observed",
+      "evidence": {
+        "source": "go/internal/api/oauth.go; go/internal/api/oauth_test.go; go/internal/providers/oauth_drivers.go"
+      }
+    },
+    {
+      "id": "model-lists",
+      "claim": "GET /v1/models lists the Claude Code discovery aliases, now only for models an automation-managed provider has published; GET /admin/api/models, with or without diagnostics, and GET /user/api/models list none.",
+      "status": "observed",
+      "evidence": {
+        "source": "go/internal/api/models.go; go/internal/api/models_test.go; go/internal/api/routes_models_api_test.go"
+      }
+    },
+    {
+      "id": "daemon-timeouts",
+      "claim": "Every invoke, stream and synthesis to a provider type the companion daemon serves carries a timeout in the X-Timeout header through llmgw-core 1.6.0's extension.WithTimeout: the provider's timeout, else LLMGW_GITHUB_COPILOT_TIMEOUT_SECONDS for github_copilot, else 300 seconds. llmgw-core 1.6.0 bounds such an operation by nothing but its context, and keeps DefaultTimeout for an operation without a timeout.",
+      "status": "observed",
+      "evidence": {
+        "source": "go/internal/providers/extension_vertical.go; go/internal/providers/factory.go; go/internal/providers/extension_vertical_test.go; go/go.mod; go/go.sum"
+      }
+    },
+    {
+      "id": "daemon-chat-fields",
+      "claim": "Routing weighs Codex as sending tool_choice and parallel_tool_calls, Antigravity as sending the fields daemonChatField names except tool_choice, and anonymous OpenCode Zen as sending the OpenAI transport's fields; other companion-daemon types are weighed by daemonChatField.",
+      "status": "observed",
+      "evidence": {
+        "source": "go/internal/providers/chat_fields.go; go/internal/providers/chat_fields_test.go"
+      }
+    },
+    {
+      "id": "portal-usage",
+      "claim": "GET /user/api/usage adds control_plane, the signed-in user's totals and groups by project, principal, key, provider and model for the request's filter, and providers, the providers the user's usage in the range names whatever provider the filter names; the portal usage page offers those providers as its filter and shows the breakdown.",
+      "status": "observed",
+      "evidence": {
+        "source": "go/internal/api/user.go; go/internal/api/user_test.go; go/internal/iam/usage.go; go/internal/web/console/src/pages/UsageQuotas.tsx; go/internal/web/console/tests/usage-report.test.mjs"
+      }
+    },
+    {
+      "id": "admin-state-order",
+      "claim": "GET /admin/api/state lists providers in ID order.",
+      "status": "observed",
+      "evidence": {
+        "source": "go/internal/api/admin.go; go/internal/api/admin_state_test.go"
+      }
+    },
+    {
+      "id": "circuit-message",
+      "claim": "An open circuit's refusal states its remaining time as one Go duration, such as 29.9s.",
+      "status": "observed",
+      "evidence": {
+        "source": "go/internal/providers/policy.go; go/internal/providers/policy_circuit_test.go"
+      }
+    },
+    {
+      "id": "key-expiry",
+      "claim": "UpdateAPIKey refuses a different expiry for an expired key with ErrAPIKeyExpired, from the administrator and the portal routes alike; an active key's expiry can be changed or cleared, and the console key editor shows it and sends it only when its field changed.",
+      "status": "observed",
+      "evidence": {
+        "source": "go/internal/iam/keys.go; go/internal/iam/keys_test.go; go/internal/web/console/src/pages/ApiKeys.tsx; go/internal/web/console/src/lib/key-dates.ts; go/internal/web/console/tests/key-dates.test.mjs"
+      }
+    },
+    {
+      "id": "key-deletion",
+      "claim": "IAM migration 22 adds api_keys.deleted_at. POST /admin/api/keys/delete and POST /user/api/keys/delete take {\"ids\": [...]}, at most 500, delete only revoked or expired keys, the portal route only the signed-in user's own, and record api_key.delete with the key's name for each deletion; a deleted key leaves key listings, lookups, reveal and authentication and loses its encrypted copy, while usage groups and recorded requests carry its name as key_name.",
+      "status": "observed",
+      "evidence": {
+        "source": "go/internal/iam/schema.go; go/internal/iam/keys.go; go/internal/iam/usage.go; go/internal/iam/usage_events.go; go/internal/api/key_delete.go; go/internal/api/server.go; go/internal/api/key_delete_test.go; go/internal/iam/keys_test.go; docs/MULTI_USER.md"
+      }
+    },
+    {
+      "id": "schema-forward",
+      "claim": "A binary refuses a database whose newest applied migration it does not include, so a database migrated by this source opens only with binaries that include migration 22; going back to an earlier release needs the pre-upgrade backup that docs/UPGRADING.md describes.",
+      "status": "observed",
+      "evidence": {
+        "source": "go/internal/iam/schema.go:754-765; docs/UPGRADING.md#rollback"
+      }
+    },
+    {
+      "id": "console",
+      "claim": "The console's keys page filters keys by status, hiding revoked and expired ones by default, offers Revoke for keys that work and Delete, single or bulk, for revoked or expired ones, and keeps prefixes on one line with the row actions inside the table; the usage and requests pages name a key by key_name when the server reports it. The committed bundle is rebuilt: dist/assets/index-Bx2fp7DV.js and dist/assets/index-Dek1mTls.css replace index-D224xWlm.js and index-Bmj5Ro5R.css.",
+      "status": "observed",
+      "evidence": {
+        "source": "git diff --name-status v1.5.0..HEAD -- go/internal/web/console"
+      }
+    },
+    {
+      "id": "dependencies",
+      "claim": "go/go.mod requires llmgw-core v1.6.0 in place of v1.5.0; the console lockfile takes source-map-js 1.2.2 in place of 1.2.1, which carried a high-severity advisory.",
+      "status": "observed",
+      "evidence": {
+        "source": "go/go.mod; go/go.sum; go/internal/web/console/package-lock.json"
+      }
+    },
+    {
+      "id": "docs",
+      "claim": "docs/CONFIGURATION.md documents the timeout of companion-daemon providers and lists LLMGW_GITHUB_COPILOT_TIMEOUT_SECONDS as the github_copilot default rather than among variables without effect; docs/MULTI_USER.md documents key expiry and key deletion.",
+      "status": "observed",
+      "evidence": {
+        "source": "docs/CONFIGURATION.md; docs/MULTI_USER.md"
+      }
+    },
+    {
+      "id": "untouched-surfaces",
+      "claim": "go/cmd/llmgw, go/internal/buildinfo, go/internal/operations, go/internal/web/console/index.html and go/internal/api/openai.go, responses_api.go, anthropic.go, errors.go, sso.go, metrics.go and observe.go did not change since v1.5.0; handleHealth in go/internal/api/models.go did not change.",
+      "status": "observed",
+      "evidence": {
+        "source": "git diff --stat v1.5.0..HEAD for those paths"
+      }
+    },
+    {
+      "id": "admin-authentication",
+      "claim": "handleState and the new handleDeleteKeys call adminAuthed before anything else, and adminAuthed in go/internal/api/sso.go did not change since v1.5.0.",
+      "status": "observed",
+      "evidence": {
+        "source": "go/internal/api/admin.go; go/internal/api/key_delete.go; go/internal/api/sso.go"
+      }
+    },
+    {
+      "id": "exploratory-run",
+      "claim": "Exploratory run run-20261008T091935-7xmwc0 of draft llm-gateway, the draft that became contract da05219969e0, against a binary built from 9f247ceace7b and served with LLMGW_ALLOW_UNAUTHENTICATED_API=1 as the release smoke serves it, passed all ten assertions.",
+      "status": "observed",
+      "evidence": {
+        "source": "local exploratory run"
+      }
+    },
+    {
+      "id": "verification",
+      "claim": "For source revision 9f247ceace7b675b944d8e46317f6e8bbd6884ad: go build, go vet, staticcheck, gofmt, go test for every package, govulncheck, go mod tidy -diff and go mod verify pass (run on 9679890, which differs only in go/internal/web/console/package-lock.json); console typecheck, 167 tests, npm audit and the dist rebuild check pass; the documentation check, actionlint, the acceptance-policy tests (18) and the roster script tests (78 passed, 1 skipped) pass; go test -race over every package passes on linux/amd64 with Go 1.26.8; the deterministic Docker acceptance passes all 31 checks against an image built from that revision on a Linux engine, where its digest policy does not apply to a locally built candidate.",
+      "status": "observed",
+      "evidence": {
+        "source": "local and remote Linux test execution"
+      }
+    }
+  ],
+  "impact": {
+    "assertions": [
+      {
+        "id": "A1",
+        "impact": "unchanged",
+        "supported_by": [
+          "untouched-surfaces",
+          "verification",
+          "exploratory-run"
+        ]
+      },
+      {
+        "id": "A2",
+        "impact": "unchanged",
+        "supported_by": [
+          "untouched-surfaces",
+          "verification",
+          "exploratory-run"
+        ]
+      },
+      {
+        "id": "A3",
+        "impact": "unchanged",
+        "supported_by": [
+          "untouched-surfaces",
+          "verification",
+          "exploratory-run"
+        ]
+      },
+      {
+        "id": "A4",
+        "impact": "changed",
+        "supported_by": [
+          "model-lists",
+          "verification",
+          "exploratory-run"
+        ]
+      },
+      {
+        "id": "A5",
+        "impact": "unchanged",
+        "supported_by": [
+          "untouched-surfaces",
+          "exploratory-run"
+        ]
+      },
+      {
+        "id": "A6",
+        "impact": "unchanged",
+        "supported_by": [
+          "untouched-surfaces",
+          "exploratory-run"
+        ]
+      },
+      {
+        "id": "A7",
+        "impact": "unchanged",
+        "supported_by": [
+          "untouched-surfaces",
+          "exploratory-run"
+        ]
+      },
+      {
+        "id": "A8",
+        "impact": "changed",
+        "supported_by": [
+          "admin-authentication",
+          "admin-state-order",
+          "exploratory-run"
+        ]
+      },
+      {
+        "id": "A9",
+        "impact": "changed",
+        "supported_by": [
+          "console",
+          "untouched-surfaces",
+          "exploratory-run"
+        ]
+      },
+      {
+        "id": "A10",
+        "impact": "unchanged",
+        "supported_by": [
+          "untouched-surfaces",
+          "exploratory-run"
+        ]
+      }
+    ],
+    "requires": [],
+    "possible_binding_changes": []
+  },
+  "questions": [],
+  "conclusion": {
+    "action": "reuse_contract",
+    "summary": "The release fixes device sign-in polling, discovery aliases in console model lists, companion-daemon timeouts and Chat field weighing, the portal usage breakdown, provider ordering, the open-circuit message and the expiry of expired keys, and adds deletion of revoked or expired keys with a status-filtered key list and IAM migration 22. Every accepted proposition holds for this source; the model list, administrator state and console propositions rest on changed implementations, which the exploratory run, the unit tests and the Docker acceptance exercise."
+  },
+  "proposed": {
+    "by": "release operator",
+    "at": "2026-10-08T09:22:48.647Z"
+  }
+}
