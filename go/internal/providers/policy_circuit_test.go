@@ -67,6 +67,12 @@ func streamThrough(provider *ResilientProvider) error {
 	return err
 }
 
+// durationText reports text that reads as one duration, such as "59.9s".
+func durationText(text string) bool {
+	_, err := time.ParseDuration(text)
+	return err == nil
+}
+
 // An open circuit refuses before the retry loop with a retryable 503 that
 // names the provider, so nothing is sent and a chain moves past it.
 func TestOpenCircuitRefusesBeforeTheRetryLoop(t *testing.T) {
@@ -81,6 +87,9 @@ func TestOpenCircuitRefusesBeforeTheRetryLoop(t *testing.T) {
 		if err == nil || !strings.HasPrefix(err.Error(), provider.name+": circuit breaker open for another ") ||
 			UpstreamStatus(err) != http.StatusServiceUnavailable || !InvocationFailoverEligible(err) {
 			t.Fatalf("refusal=%v", err)
+		}
+		if remaining := strings.TrimPrefix(err.Error(), provider.name+": circuit breaker open for another "); !durationText(remaining) {
+			t.Fatalf("refusal=%v, want the time the circuit stays open as a duration", err)
 		}
 	}
 	if inner.calls != 3 {

@@ -138,7 +138,7 @@ func (r *ResilientProvider) checkCircuit() error {
 	if available, until := Current().circuits.available(r.name, r.circuitScope(), r.policy); !available {
 		remaining := time.Until(until).Seconds()
 		return invocationStatus(r.name+": circuit breaker open for another "+
-			formatSeconds(remaining)+"s", 503)
+			formatSeconds(remaining), 503)
 	}
 	return nil
 }
