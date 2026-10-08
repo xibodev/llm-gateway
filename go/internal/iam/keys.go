@@ -37,6 +37,10 @@ var ErrAPIKeyNotRevealable = errors.New("API key was issued before encrypted key
 var ErrAPIKeyAdminManaged = errors.New("admin-managed API keys can only be changed by an administrator; owners may revoke them")
 var ErrAPIKeyConflict = errors.New("API key policy changed; reload and retry")
 
+// ErrAPIKeyExpired refuses a new expiry for a key that has expired: an
+// expired key stays expired, and a new key replaces it.
+var ErrAPIKeyExpired = errors.New("an expired API key keeps its expiry; issue a new key instead")
+
 func HasAPIKeys() (bool, error) {
 	db, err := DB()
 	if err != nil {
@@ -357,7 +361,12 @@ func UpdateAPIKey(id string, update KeyUpdate) error {
 			return fmt.Errorf("invalid key status %q", *update.Status)
 		}
 	}
-	if update.ExpiresAt != nil {
+	if update.ExpiresAt != nil && *update.ExpiresAt != key.ExpiresAt {
+		// A key that expired stays expired: a later expiry, or none, would
+		// make it authenticate again.
+		if key.IsExpired() {
+			return ErrAPIKeyExpired
+		}
 		key.ExpiresAt = *update.ExpiresAt
 	}
 	if update.Policy != nil {

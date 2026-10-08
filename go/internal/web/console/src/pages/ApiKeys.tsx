@@ -6,11 +6,18 @@ import { asList, asRecord, stringValue } from "../lib/records";
 import { EmptyState, PageHeading } from "../components/PageState";
 import { KeyScopeEditor, keyPolicySummary, keyQuotaLabels } from "../components/KeyScopeEditor";
 import { keyQuotaDraftsFor, keyQuotaFields, keyQuotaPolicyFromDrafts } from "../lib/key-policy";
-import { formatKeyTime, keyExpiryFromInput, keyTimes } from "../lib/key-dates";
+import { formatKeyTime, keyExpiryFromInput, keyExpiryInputValue, keyTimes } from "../lib/key-dates";
 import { useDialogFocus } from "../components/useDialogFocus";
 import "../styles/keys.css";
 
 const ownerDecisionRequired = "__select_owner__";
+
+// keyExpired reports a key whose expiry has passed. It stays expired: its
+// expiry can no longer change, and a new key replaces it.
+function keyExpired(key: JSONRecord): boolean {
+  const expires = keyTimes(key).expires;
+  return key.expired === true || (expires > 0 && expires * 1000 <= Date.now());
+}
 
 function policyFor(key: JSONRecord): JSONRecord {
   // Admin state flattens policy; portal keys nest it. Never treat timestamps as quotas.
@@ -169,12 +176,17 @@ export function ApiKeys({ data, mode, onChanged, initialContext }: {
     if (mode === "portal" && policyFor(key).admin_managed === true) { setMessage("Only an administrator can edit this key. You can still reveal or revoke it."); return; }
     const payload: JSONRecord | null = disabled === undefined ? editablePolicy() : { disabled };
     if (!payload) return;
+    if (disabled === undefined) {
+      const expiry = editedExpiry(key);
+      if (expiry.error) { setMessage(expiry.error); return; }
+      if (expiry.changed) payload.expires_at = expiry.expiresAt;
+    }
     setBusy(true);
     try {
       if (mode === "admin") payload.id = id;
       await sendJSON<JSONRecord>(mode, mode === "admin" ? "/keys/update" : `/keys/${encodeURIComponent(id)}/update`, "POST", payload);
       setEditing(null);
-      setMessage(disabled === undefined ? "Key policy updated." : "Key status updated.");
+      setMessage(disabled === undefined ? "Key updated." : "Key status updated.");
       await onChanged();
     } catch (cause) { setMessage(cause instanceof Error ? cause.message : "Key could not be updated."); }
     finally { setBusy(false); }
@@ -197,9 +209,19 @@ export function ApiKeys({ data, mode, onChanged, initialContext }: {
     if (stringValue(key.status) === "revoked" || (mode === "portal" && policy.admin_managed === true)) return;
     setQuotaDrafts(keyQuotaDraftsFor(policy));
     setScope(policy);
+    setExpiryDraft(keyExpiryInputValue(keyTimes(key).expires));
     setCreating(false);
     setEditing(key);
     setMessage("");
+  };
+  // The expiry the editor asks of key, sent only when the field changed: an
+  // untouched one would drop the seconds of the stored expiry, and an expired
+  // key keeps its own.
+  const editedExpiry = (key: JSONRecord): { changed: boolean; expiresAt: number; error: string } => {
+    const field = editorFormRef.current ? new FormData(editorFormRef.current).get("expires_at") : null;
+    const draft = typeof field === "string" ? field : expiryDraft;
+    if (keyExpired(key) || draft.trim() === keyExpiryInputValue(keyTimes(key).expires)) return { changed: false, expiresAt: 0, error: "" };
+    return { changed: true, ...keyExpiryFromInput(draft) };
   };
   const startCreate = () => {
     const nextProject = projectFilter || (ownerFilter ? stringValue(creatableProjects.find((project) =>
@@ -224,31 +246,39 @@ export function ApiKeys({ data, mode, onChanged, initialContext }: {
       {routeFilter ? <button class="button button--secondary" type="button" onClick={() => setRouteFilter("")}>Explicit route grant: {routeFilter} <X size={14} aria-label="Clear route filter" /></button> : null}
     </section>
     {creating || editing ? <form ref={editorFormRef} class="surface key-editor" onSubmit={(event) => { if (editing) { event.preventDefault(); void update(editing); } else void create(event); }}>
-      <header><div><p class="eyebrow">{editing ? "Policy edit" : "New key"}</p><h2>{editing ? stringValue(editing.name, "Gateway key") : "Issue credential"}</h2></div><button class="icon-button" type="button" disabled={busy} aria-label="Close key editor" onClick={() => { setCreating(false); setEditing(null); }}><X size={17} /></button></header>
+      <header><div><p class="eyebrow">{editing ? "Key edit" : "New key"}</p><h2>{editing ? stringValue(editing.name, "Gateway key") : "Issue credential"}</h2></div><button class="icon-button" type="button" disabled={busy} aria-label="Close key editor" onClick={() => { setCreating(false); setEditing(null); }}><X size={17} /></button></header>
       {creating ? <>
         <label>Project<select value={projectID} disabled={busy} onChange={(event) => { const id = event.currentTarget.value; setProjectID(id); if (principalID && !eligibleOwners(id).some((owner) => owner.id === principalID)) setPrincipalID(ownerDecisionRequired); }}><option value="">Select project</option>{creatableProjects.map((project) => <option value={stringValue(project.id)} key={stringValue(project.id)}>{stringValue(project.name, stringValue(project.slug))}</option>)}</select></label>
         <label>Name<input value={name} disabled={busy} onInput={(event) => setName(event.currentTarget.value)} /></label>
         <label>Expires (optional)<input type="datetime-local" name="expires_at" value={expiryDraft} disabled={busy} onInput={(event) => setExpiryDraft(event.currentTarget.value)} /></label>
-        <p class="form-help">Leave blank for a key that does not expire. The time is in this browser's time zone, and an expired key cannot be re-enabled.</p>
+        <p class="form-help">Leave blank for a key that does not expire. The time is in this browser's time zone, and an expired key stays expired.</p>
         {mode === "admin" ? <>
           <label>Acts as<select value={principalID} disabled={busy} onChange={(event) => setPrincipalID(event.currentTarget.value)}><option value={ownerDecisionRequired} disabled>Choose an owner for this project</option><option value="">Create or reuse a service identity for this project and key name</option>{owners.map((principal) => <option value={stringValue(principal.id)} key={stringValue(principal.id)}>{stringValue(principal.display_name, stringValue(principal.id))} ({stringValue(principal.kind)})</option>)}</select></label>
           <p class="form-help">Administrators can issue keys for active human and service members, including viewers. Portal self-service creation excludes viewers. Selecting the service default can reuse an identity created for the same project and key name.</p>
           {principalID === ownerDecisionRequired ? <p class="form-error" role="alert">The requested owner is unavailable in this project. Choose an owner or explicitly select the service identity option before creating a key.</p> : null}
         </> : <p class="form-help">Acts as {stringValue(self.display_name, "your signed-in identity")}.</p>}
-      </> : <p class="form-help">Owner: {stringValue(editing?.principal, stringValue(editing?.principal_id))}. Project: {stringValue(editing?.project, stringValue(editing?.project_id))}. All key quota limits can be edited below.</p>}
+      </> : <>
+        <p class="form-help">Owner: {stringValue(editing?.principal, stringValue(editing?.principal_id))}. Project: {stringValue(editing?.project, stringValue(editing?.project_id))}. All key quota limits can be edited below.</p>
+        {editing && keyExpired(editing)
+          ? <p class="form-help">This key expired {formatKeyTime(keyTimes(editing).expires, "")}. An expired key stays expired; create a new key to replace it.</p>
+          : <>
+            <label>Expires (optional)<input type="datetime-local" name="expires_at" value={expiryDraft} disabled={busy} onInput={(event) => setExpiryDraft(event.currentTarget.value)} /></label>
+            <p class="form-help">Leave blank for a key that does not expire. The time is in this browser's time zone.</p>
+          </>}
+      </>}
       <p class="form-help">{mode === "admin" ? "Keys created or updated here are admin-managed. Their owners may reveal or revoke them in the portal, but cannot change policy or status." : "Admin-managed keys can be revealed or revoked here; policy and status changes require an administrator."}</p>
       <p class="form-help">{(creating ? mode === "portal" || selectedOwner?.kind === "human" : editing?.principal_kind === "human") ? "Human keys use the owner's eligible private connections first, with provider-specific fallback to shared or legacy credentials." : "Service keys use eligible shared or legacy credentials, not a human's private subscriptions."} Copilot service access requires an active project binding; Codex OAuth is human-private. Scope does not pin a credential account, and paid fallback may occur.</p>
       <div class="key-editor__limits">{keyQuotaFields.map((field) => <label key={field}>{keyQuotaLabels[field]}<input name={field} inputMode="numeric" value={quotaDrafts[field] ?? "0"} disabled={busy} onInput={(event) => setQuotaDrafts((current) => ({ ...current, [field]: event.currentTarget.value }))} /></label>)}</div>
       <p class="form-help">Use 0 for no additional key limit. Project access rules and usage ceilings still apply; key settings cannot raise them. These are configured limits, not remaining balances.</p>
       <KeyScopeEditor data={data} policy={{ ...scope, ...keyQuotaPolicyFromDrafts(quotaDrafts).policy }} onChange={setScope} />
-      <footer><button class="button button--secondary" type="button" disabled={busy} onClick={() => { setCreating(false); setEditing(null); }}>Cancel</button><button class="button button--primary" type="submit" disabled={busy}>{editing ? <Save size={16} /> : <Plus size={16} />}{busy ? "Saving..." : editing ? "Save policy" : "Create key"}</button></footer>
+      <footer><button class="button button--secondary" type="button" disabled={busy} onClick={() => { setCreating(false); setEditing(null); }}>Cancel</button><button class="button button--primary" type="submit" disabled={busy}>{editing ? <Save size={16} /> : <Plus size={16} />}{busy ? "Saving..." : editing ? "Save key" : "Create key"}</button></footer>
     </form> : null}
     {!filteredKeys.length ? <EmptyState title={keys.length ? "No keys match these filters" : "No API keys in this workspace"} detail={keys.length ? "Clear or change the owner, project, route or search filter." : "Create a key for an active project with key-management permission."} /> : <section class="surface table-wrap"><table><thead><tr><th>Name</th><th>Prefix</th><th>Project</th><th>Owner</th><th>Policy</th><th>Status</th><th>Created</th><th>Expires</th><th>Last used</th><th>Actions</th></tr></thead><tbody>{filteredKeys.map((key) => {
       const policy = policyFor(key);
       const active = stringValue(key.status, "active") === "active";
       const revoked = stringValue(key.status) === "revoked";
       const times = keyTimes(key);
-      const expired = key.expired === true || (times.expires > 0 && times.expires * 1000 <= Date.now());
+      const expired = keyExpired(key);
       const status = revoked ? "revoked" : expired ? "expired" : stringValue(key.status, "active");
       const managed = policy.admin_managed === true;
       const locked = mode === "portal" && managed;
@@ -263,7 +293,7 @@ export function ApiKeys({ data, mode, onChanged, initialContext }: {
         <td class="technical">{formatKeyTime(times.created, "—")}</td>
         <td class="technical">{formatKeyTime(times.expires, "Never")}</td>
         <td class="technical">{formatKeyTime(times.lastUsed, "Never")}</td>
-        <td><div class="table-actions"><button class="icon-button" type="button" aria-label={`Edit ${stringValue(key.name)}`} title={locked ? "Only administrators can edit this key" : "Edit policy"} disabled={busy || revoked || locked} onClick={() => edit(key)}><Pencil size={15} /></button>{!revoked ? <button class="button button--secondary" type="button" disabled={busy || locked || expired} title={expired ? "Expired keys cannot be re-enabled here" : locked ? "Only administrators can change this key's status" : undefined} onClick={() => void update(key, active)}>{active ? "Disable" : "Enable"}</button> : null}<button class="icon-button" type="button" aria-label={`Revoke ${stringValue(key.name)}`} disabled={busy || revoked} onClick={() => void revoke(key)}><Trash2 size={15} /></button></div></td>
+        <td><div class="table-actions"><button class="icon-button" type="button" aria-label={`Edit ${stringValue(key.name)}`} title={locked ? "Only administrators can edit this key" : "Edit key"} disabled={busy || revoked || locked} onClick={() => edit(key)}><Pencil size={15} /></button>{!revoked ? <button class="button button--secondary" type="button" disabled={busy || locked || expired} title={expired ? "Expired keys cannot be re-enabled here" : locked ? "Only administrators can change this key's status" : undefined} onClick={() => void update(key, active)}>{active ? "Disable" : "Enable"}</button> : null}<button class="icon-button" type="button" aria-label={`Revoke ${stringValue(key.name)}`} disabled={busy || revoked} onClick={() => void revoke(key)}><Trash2 size={15} /></button></div></td>
       </tr>;
     })}</tbody></table></section>}
     {secret ? <KeySecret token={secret} onDismiss={() => setSecret("")} returnFocus={createButtonRef.current} /> : null}

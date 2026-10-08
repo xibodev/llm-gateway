@@ -79,6 +79,72 @@ func TestIssueResolveAndDisableHashedKey(t *testing.T) {
 	}
 }
 
+// An expired key stays expired: a later expiry, or none, would make it
+// authenticate again, so a new one is refused, and a new key replaces it.
+// An active key's expiry still changes, and an expired key's other settings
+// still save with its expiry as it is.
+func TestAnExpiredKeyKeepsItsExpiry(t *testing.T) {
+	t.Setenv("LLMGW_STATE_DIR", t.TempDir())
+	ResetForTests()
+	t.Cleanup(ResetForTests)
+	principal, err := CreatePrincipal("human", "fixture:expiry", "", "Expiry Owner")
+	if err != nil {
+		t.Fatal(err)
+	}
+	project, err := CreateProject("expiry-project", "Expiry Project")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := SetMembership(project.ID, principal.ID, "owner"); err != nil {
+		t.Fatal(err)
+	}
+	issue := func(expiresAt int64) IssuedKey {
+		t.Helper()
+		key, err := IssueKey(KeyCreate{ProjectID: project.ID, PrincipalID: principal.ID, ExpiresAt: expiresAt})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return key
+	}
+	expired := issue(time.Now().Add(-time.Minute).Unix())
+	active := issue(time.Now().Add(time.Hour).Unix())
+
+	for _, expiresAt := range []int64{time.Now().Add(time.Hour).Unix(), 0} {
+		for _, update := range []KeyUpdate{
+			{ExpiresAt: &expiresAt, Admin: true},
+			{ExpiresAt: &expiresAt, OwnerPrincipalID: principal.ID},
+		} {
+			if err := UpdateAPIKey(expired.ID, update); !errors.Is(err, ErrAPIKeyExpired) {
+				t.Fatalf("a new expiry %d for an expired key: err=%v, want it refused", expiresAt, err)
+			}
+		}
+	}
+	if _, ok, err := ResolveAPIKey(expired.Token); err != nil || ok {
+		t.Fatalf("the expired key authenticates: ok=%v err=%v", ok, err)
+	}
+	unchanged, disabled := expired.ExpiresAt, "disabled"
+	if err := UpdateAPIKey(expired.ID, KeyUpdate{ExpiresAt: &unchanged, Status: &disabled, Admin: true}); err != nil {
+		t.Fatalf("an expired key's other settings with its expiry as it is: %v", err)
+	}
+
+	later := time.Now().Add(2 * time.Hour).Unix()
+	if err := UpdateAPIKey(active.ID, KeyUpdate{ExpiresAt: &later, OwnerPrincipalID: principal.ID}); err != nil {
+		t.Fatalf("an active key's new expiry: %v", err)
+	}
+	keys, err := ListAPIKeys(project.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, key := range keys {
+		if key.ID == active.ID && key.ExpiresAt != later {
+			t.Fatalf("active key expires at %d, want %d", key.ExpiresAt, later)
+		}
+	}
+	if _, ok, err := ResolveAPIKey(active.Token); err != nil || !ok {
+		t.Fatalf("the active key does not authenticate: ok=%v err=%v", ok, err)
+	}
+}
+
 func TestIssueAndRevealEncryptedAPIKey(t *testing.T) {
 	t.Setenv("LLMGW_STATE_DIR", t.TempDir())
 	ResetForTests()

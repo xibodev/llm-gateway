@@ -34,6 +34,14 @@ test("key timestamps read both the admin and the portal field names", () => {
   assert.equal(dates.formatKeyTime(1798783140, "Never"), new Date(1798783140000).toLocaleString([], { dateStyle: "medium", timeStyle: "short" }));
 });
 
+test("an expiry shows in the field as the local date and time it reads back as", () => {
+  assert.equal(dates.keyExpiryInputValue(0), "");
+  const expiry = new Date(2026, 11, 31, 23, 59).getTime() / 1000;
+  assert.equal(dates.keyExpiryInputValue(expiry), "2026-12-31T23:59");
+  assert.equal(dates.keyExpiryFromInput(dates.keyExpiryInputValue(expiry), now).expiresAt, expiry);
+  assert.equal(dates.keyExpiryInputValue(new Date(2027, 0, 2, 3, 4, 59).getTime() / 1000), "2027-01-02T03:04");
+});
+
 const data = {
   projects: [{ id: "project-1", name: "Project one", status: "active" }],
   principals: [{ id: "user-1", kind: "human", status: "active", display_name: "Ada" }],
@@ -80,4 +88,49 @@ test("a key without an expiry omits it, and the list shows created, expiry and l
   assert.deepEqual(headings.slice(5, 9), ["Status", "Created", "Expires", "Last used"]);
   const cells = findAll(find(tree, (node) => node.type === "tr" && node.key === "key-1"), (node) => node.type === "td").map(text);
   assert.deepEqual(cells.slice(6, 9), [dates.formatKeyTime(1798700000, "—"), "Never", dates.formatKeyTime(1798783140, "Never")]);
+});
+
+// An active key's expiry is edited with its policy and sent only when it
+// changed; an expired key stays expired, so its editor offers no expiry.
+test("an active key's expiry can change and an expired key's cannot", async () => {
+  const later = new Date(2999, 0, 1, 10, 30).getTime() / 1000;
+  const keys = [
+    { id: "key-live", name: "live", status: "active", project_id: "project-1", principal_id: "user-1", created: 1798700000, expires_at: later },
+    { id: "key-gone", name: "gone", status: "active", project_id: "project-1", principal_id: "user-1", created: 1798700000, expires_at: 1000000000 },
+  ];
+  const sent = [];
+  globalThis.__api = { sendJSON: async (mode, path, method, body) => { sent.push({ path, method, body }); return { ok: true }; } };
+  const render = mount(() => ApiKeys({ data: { ...data, keys }, mode: "admin", onChanged: async () => {} }));
+  let tree = render();
+  const editKey = (name) => { find(tree, (node) => node.type === "button" && node.props?.["aria-label"] === `Edit ${name}`).props.onClick(); tree = render(); };
+  const field = () => find(tree, (node) => node.props?.name === "expires_at");
+
+  editKey("live");
+  assert.equal(field().props.value, "2999-01-01T10:30");
+  submit(tree);
+  await settle();
+  assert.equal(sent.at(-1).path, "/keys/update");
+  assert.equal("expires_at" in sent.at(-1).body, false, "an untouched expiry is not sent");
+
+  editKey("live");
+  field().props.onInput(input("2999-06-01T08:00"));
+  tree = render();
+  submit(tree);
+  await settle();
+  assert.equal(sent.at(-1).body.expires_at, new Date(2999, 5, 1, 8, 0).getTime() / 1000);
+
+  editKey("live");
+  field().props.onInput(input(""));
+  tree = render();
+  submit(tree);
+  await settle();
+  assert.equal(sent.at(-1).body.expires_at, 0, "a cleared expiry means the key never expires");
+
+  editKey("gone");
+  assert.equal(findAll(tree, (node) => node.props?.name === "expires_at").length, 0);
+  assert.match(text(tree), /An expired key stays expired; create a new key to replace it\./);
+  submit(tree);
+  await settle();
+  assert.equal(sent.at(-1).body.id, "key-gone");
+  assert.equal("expires_at" in sent.at(-1).body, false);
 });

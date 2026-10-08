@@ -18,6 +18,15 @@ export function keyExpiryFromInput(value: string, now = Date.now()): { expiresAt
   return { expiresAt: Math.floor(date.getTime() / 1000), error: "" };
 }
 
+// keyExpiryInputValue is the datetime-local value of an expiry in Unix
+// seconds, to the minute in this browser's time zone: blank for none.
+export function keyExpiryInputValue(seconds: number): string {
+  if (!(seconds > 0)) return "";
+  const date = new Date(seconds * 1000);
+  const pad = (value: number) => String(value).padStart(2, "0");
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`;
+}
+
 // keyTimes reads a key's Unix-second timestamps. Admin state names the
 // creation time "created" and portal state "created_at"; zero means unset.
 export function keyTimes(key: JSONRecord): { created: number; expires: number; lastUsed: number } {
