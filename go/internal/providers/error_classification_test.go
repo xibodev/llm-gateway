@@ -62,9 +62,10 @@ func TestInvocationErrorClassification(t *testing.T) {
 		case http.StatusUnauthorized:
 			plain.class = core.ProviderErrorAuth
 		case http.StatusPaymentRequired:
-			// Core's class for health only: the gateway's routing reads the
-			// status, so a 402 ends the chain as any definitive refusal does.
+			// A 402 is a billing refusal: it moves the chain on and counts
+			// against the circuit, but it is never repeated.
 			plain.class = core.ProviderErrorBilling
+			plain.disposition, plain.circuit = core.DispositionFailover, true
 		case http.StatusForbidden:
 			plain.class = core.ProviderErrorForbidden
 		case http.StatusTooManyRequests:
@@ -88,6 +89,24 @@ func TestInvocationErrorClassification(t *testing.T) {
 	}
 	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) { assertClassified(t, tc.err, tc.want) })
+	}
+}
+
+// A refusal that gives a reason routing acts on is read by that reason, not
+// by its status: billing moves the chain on and counts against the circuit,
+// a refused request shape moves it on and leaves the circuit alone, and
+// neither is repeated, a 429 included, nor held back as a rejected credential
+// would be, a 403 included.
+func TestRefusalReasonsDecideTheirRouting(t *testing.T) {
+	reasons := []core.ProviderErrorClass{
+		core.ProviderErrorBilling, core.ProviderErrorContextOverflow, core.ProviderErrorToolsUnsupported, core.ProviderErrorMediaUnsupported,
+	}
+	for _, status := range []int{400, 403, 404, 429} {
+		for _, reason := range reasons {
+			err := &InvocationError{Msg: "fixture", Status: status, Reason: reason}
+			want := classified{status: status, disposition: core.DispositionFailover, circuit: reason == core.ProviderErrorBilling, class: reason}
+			t.Run(fmt.Sprintf("%d %s", status, reason), func(t *testing.T) { assertClassified(t, err, want) })
+		}
 	}
 }
 

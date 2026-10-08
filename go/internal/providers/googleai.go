@@ -34,6 +34,8 @@ import (
 	"net/url"
 	"strings"
 	"time"
+
+	core "github.com/xibodev/llmgw-core"
 )
 
 const (
@@ -263,7 +265,8 @@ func googleRetryAfter(header http.Header, decoded map[string]any, now time.Time)
 // upstreamError turns Google's error envelope into a gateway error that names
 // the real cause and keeps the wait Google asked for. Billing exhaustion and
 // missing model access are distinct operator problems and must not both
-// surface as "upstream error".
+// surface as "upstream error"; exhausted billing also moves an endpoint on
+// and counts against the circuit, as core's reading of it does.
 func (p GoogleAIProvider) upstreamError(decoded map[string]any, raw []byte, status int, retryAfter string) error {
 	message := strings.TrimSpace(string(raw))
 	googleStatus := ""
@@ -277,7 +280,8 @@ func (p GoogleAIProvider) upstreamError(decoded map[string]any, raw []byte, stat
 	}
 	switch {
 	case googleStatus == "RESOURCE_EXHAUSTED" && strings.Contains(strings.ToLower(message), "credit"):
-		return invocationStatusRetryAfter(p.label()+": provider billing exhausted — "+message, status, retryAfter)
+		return &InvocationError{Msg: p.label() + ": provider billing exhausted — " + message, Status: status,
+			RetryAfter: strings.TrimSpace(retryAfter), Reason: core.ProviderErrorBilling}
 	case status == http.StatusNotFound:
 		return invocationStatusRetryAfter(p.label()+": model not available to this project or location — "+message, status, retryAfter)
 	case status == http.StatusUnauthorized || status == http.StatusForbidden:

@@ -98,22 +98,31 @@ func TestModelURLDiffersPerSurface(t *testing.T) {
 }
 
 // Google's refusals keep the message and status the transport gave them, and
-// its routing: the status decides, whatever reason core reads in the refusal,
-// billing and a context overflow included. The Retry-After Google sent is
-// kept for the resilience wrapper, the router and the client.
+// the Retry-After Google sent, for the resilience wrapper, the router and the
+// client. The status decides their routing, unless core reads billing or a
+// request shape in the refusal: exhausted credits move the chain on and count
+// against the circuit without a repeat, a context overflow moves it on alone,
+// and a quota refusal that names no billing stays a rate limit.
 func TestUpstreamErrorsNameTheRealCause(t *testing.T) {
 	cases := []struct {
-		name, body string
-		status     int
-		want       string
-		retryable  bool
+		name, body                   string
+		status                       int
+		want                         string
+		retryable, failover, circuit bool
 	}{
 		{
-			name:      "billing exhausted",
+			name:     "billing exhausted",
+			status:   429,
+			body:     `{"error":{"code":429,"status":"RESOURCE_EXHAUSTED","message":"Your prepayment credits are depleted."}}`,
+			want:     "ai_studio: provider billing exhausted — Your prepayment credits are depleted.",
+			failover: true, circuit: true,
+		},
+		{
+			name:      "rate limited",
 			status:    429,
-			body:      `{"error":{"code":429,"status":"RESOURCE_EXHAUSTED","message":"Your prepayment credits are depleted."}}`,
-			want:      "ai_studio: provider billing exhausted — Your prepayment credits are depleted.",
-			retryable: true,
+			body:      `{"error":{"code":429,"status":"RESOURCE_EXHAUSTED","message":"Quota exceeded."}}`,
+			want:      "ai_studio: Quota exceeded.",
+			retryable: true, failover: true, circuit: true,
 		},
 		{
 			name:   "model not available",
@@ -134,10 +143,11 @@ func TestUpstreamErrorsNameTheRealCause(t *testing.T) {
 			want:   "ai_studio: bad request",
 		},
 		{
-			name:   "context overflow",
-			status: 400,
-			body:   `{"error":{"code":400,"status":"INVALID_ARGUMENT","message":"The input token count exceeds the maximum number of tokens allowed."}}`,
-			want:   "ai_studio: The input token count exceeds the maximum number of tokens allowed.",
+			name:     "context overflow",
+			status:   400,
+			body:     `{"error":{"code":400,"status":"INVALID_ARGUMENT","message":"The input token count exceeds the maximum number of tokens allowed."}}`,
+			want:     "ai_studio: The input token count exceeds the maximum number of tokens allowed.",
+			failover: true,
 		},
 	}
 	for _, testCase := range cases {
@@ -154,11 +164,36 @@ func TestUpstreamErrorsNameTheRealCause(t *testing.T) {
 				t.Fatalf("error = %v (status %d), want %q with status %d", err, UpstreamStatus(err), testCase.want, testCase.status)
 			}
 			if InvocationRetryAfter(err) != "7" || InvocationRetryable(err) != testCase.retryable ||
-				InvocationFailoverEligible(err) != testCase.retryable || InvocationCircuitFailure(err) != testCase.retryable {
+				InvocationFailoverEligible(err) != testCase.failover || InvocationCircuitFailure(err) != testCase.circuit {
 				t.Fatalf("status %d: retry-after=%q retryable=%v failover=%v circuit=%v", testCase.status, InvocationRetryAfter(err),
 					InvocationRetryable(err), InvocationFailoverEligible(err), InvocationCircuitFailure(err))
 			}
 		})
+	}
+}
+
+// The gateway's own Google transport, which serves video generation, reads
+// exhausted prepaid credits as billing as well, and a quota refusal that
+// names no billing as a rate limit.
+func TestGoogleTransportReadsExhaustedCreditsAsBilling(t *testing.T) {
+	for _, fixture := range []struct {
+		message, want string
+		billing       bool
+	}{
+		{"Your prepayment credits are depleted.", "ai_studio: provider billing exhausted — Your prepayment credits are depleted.", true},
+		{"Quota exceeded.", "ai_studio: Quota exceeded.", false},
+	} {
+		raw := []byte(`{"error":{"code":429,"status":"RESOURCE_EXHAUSTED","message":"` + fixture.message + `"}}`)
+		var decoded map[string]any
+		if err := json.Unmarshal(raw, &decoded); err != nil {
+			t.Fatal(err)
+		}
+		err := GoogleAIProvider{}.upstreamError(decoded, raw, http.StatusTooManyRequests, "7")
+		if err.Error() != fixture.want || UpstreamStatus(err) != http.StatusTooManyRequests || InvocationRetryAfter(err) != "7" ||
+			InvocationRetryable(err) == fixture.billing || !InvocationFailoverEligible(err) || !InvocationCircuitFailure(err) {
+			t.Fatalf("%q: err=%v retryable=%v failover=%v circuit=%v", fixture.message, err,
+				InvocationRetryable(err), InvocationFailoverEligible(err), InvocationCircuitFailure(err))
+		}
 	}
 }
 

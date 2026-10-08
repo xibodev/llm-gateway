@@ -99,7 +99,7 @@ func (p *openAICompatibleProvider) failure(err error, words openAIWords) error {
 	case errors.As(err, &surface):
 		return ErrResponsesUnsupported
 	case errors.As(err, &refused) && refused.Status != 0:
-		return p.refusal(refused, words)
+		return p.refusal(err, refused, words)
 	case !errors.As(err, &failure):
 		if isContextError(err) {
 			return err
@@ -133,11 +133,12 @@ func (p *openAICompatibleProvider) failure(err error, words openAIWords) error {
 
 // refusal is the transport's error for a status the upstream answered with:
 // its words for the operation, the upstream's own as core redacted and
-// bounded them, and the Retry-After the transport passed on, in seconds.
-func (p *openAICompatibleProvider) refusal(refused *coreproviders.InvocationError, words openAIWords) error {
+// bounded them, the Retry-After the transport passed on, in seconds, and the
+// reason core read in the refusal, err, which routing acts on.
+func (p *openAICompatibleProvider) refusal(err error, refused *coreproviders.InvocationError, words openAIWords) error {
 	upstream := strings.TrimPrefix(refused.Msg, fmt.Sprintf("%s: upstream returned %d: ", p.label, refused.Status))
 	message := fmt.Sprintf("%s %d: %s", words.refusal, refused.Status, upstream)
-	return invocationStatusRetryAfter(message, refused.Status, retryAfterSeconds(refused.RetryAfter))
+	return refusedInvocation(message, refused.Status, retryAfterSeconds(refused.RetryAfter), err)
 }
 
 // transportError is the transport's error for a failure core reports

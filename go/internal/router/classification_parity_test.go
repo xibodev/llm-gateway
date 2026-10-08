@@ -61,10 +61,11 @@ func TestCoreClassificationMatchesGatewayRouting(t *testing.T) {
 	// Each InvocationError constructor in provider.go sets a subset of these
 	// fields: invocation none, retryableInvocation Retryable and CircuitFailure,
 	// circuitFailureInvocation CircuitFailure, invocationStatus and
-	// invocationStatusRetryAfter a Status, and failoverInvocationStatus a Status
-	// and FailoverEligible. Walking every combination covers them all, and the
-	// literals other code builds.
-	for _, status := range []int{0, 400, 401, 403, 404, 408, 409, 429, 500, 502, 503, 504, 520, 521, 522, 523, 524, 529} {
+	// invocationStatusRetryAfter a Status, failoverInvocationStatus a Status
+	// and FailoverEligible, and refusedInvocation a Status and the Reason core
+	// read. Walking every combination covers them all, and the literals other
+	// code builds.
+	for _, status := range []int{0, 400, 401, 402, 403, 404, 408, 409, 429, 500, 502, 503, 504, 520, 521, 522, 523, 524, 529} {
 		for flags := range 8 {
 			invocation := &providers.InvocationError{
 				Msg: "fixture", Status: status,
@@ -75,6 +76,9 @@ func TestCoreClassificationMatchesGatewayRouting(t *testing.T) {
 		}
 		if status != 0 {
 			cases["HTTPInvocationError "+strconv.Itoa(status)] = providers.HTTPInvocationError("fixture", status, nil)
+			for _, reason := range []core.ProviderErrorClass{core.ProviderErrorBilling, core.ProviderErrorContextOverflow} {
+				cases[fmt.Sprintf("status %d reason %s", status, reason)] = &providers.InvocationError{Msg: "fixture", Status: status, Reason: reason}
+			}
 		}
 	}
 	for name, err := range cases {

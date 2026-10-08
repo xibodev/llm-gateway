@@ -255,10 +255,15 @@ func SupportsAnthropicMessagesStream(provider Provider) bool {
 // InvocationRetryable selects the upstream failures safe to repeat: explicitly
 // retryable statusless failures, 408, 429, and transient 500/502/503/504
 // responses, the 520-524 a CDN edge answers for an origin it cannot reach, and
-// the 529 Anthropic answers while overloaded.
+// the 529 Anthropic answers while overloaded. A refusal that gives a reason
+// routing acts on is never repeated, a 429 included: the same request would
+// meet the same refusal.
 func InvocationRetryable(err error) bool {
 	var invocationError *InvocationError
 	if !asError(err, &invocationError) {
+		return false
+	}
+	if refusalReason(invocationError) != "" {
 		return false
 	}
 	if invocationError.Status == 0 {
@@ -275,11 +280,16 @@ func InvocationRetryable(err error) bool {
 // InvocationFailoverEligible selects provider failures that an ordered endpoint
 // may move past. A statusless invocation can identify a broken response or local
 // provider state that should not repeat against the same target, but it must not
-// block a different target from serving the request.
+// block a different target from serving the request. A refusal for billing or of
+// the request's shape moves on too, whatever its status: another member's
+// account or model may take the request.
 func InvocationFailoverEligible(err error) bool {
 	var invocationError *InvocationError
 	if !asError(err, &invocationError) {
 		return false
+	}
+	if refusalReason(invocationError) != "" {
+		return true
 	}
 	if invocationError.Status == 401 || invocationError.Status == 403 {
 		return false
@@ -290,13 +300,32 @@ func InvocationFailoverEligible(err error) bool {
 	return InvocationRetryable(invocationError)
 }
 
+// refusalReason is the reason a refusal gives that routing acts on: the one
+// core read in its body, and billing for any 402. Billing counts against the
+// circuit, so an instance whose account has run dry is held back for the
+// circuit's cooldown rather than refusing request after request; a request
+// shape its model does not take says nothing against the instance.
+func refusalReason(e *InvocationError) core.ProviderErrorClass {
+	switch {
+	case e.Reason != "":
+		return e.Reason
+	case e.Status == 402:
+		return core.ProviderErrorBilling
+	}
+	return ""
+}
+
 // InvocationCircuitFailure reports whether an invocation represents upstream
 // instability that should advance the provider circuit. Definitive request or
-// credential rejections reset the transient streak instead.
+// credential rejections reset the transient streak instead. A billing refusal
+// advances it and a refused request shape resets it; see refusalReason.
 func InvocationCircuitFailure(err error) bool {
 	var invocationError *InvocationError
 	if !asError(err, &invocationError) {
 		return false
+	}
+	if reason := refusalReason(invocationError); reason != "" {
+		return reason == core.ProviderErrorBilling
 	}
 	return invocationError.CircuitFailure || InvocationRetryable(invocationError)
 }
@@ -662,7 +691,9 @@ func listModelsContext(
 // InvocationError is an upstream call failure. Status and Retryable determine
 // same-target retries; routing may still use it to advance an eligible chain.
 // Status carries the upstream HTTP status (0 if none) so the gateway can pass
-// the real status through instead of masking it as a generic 502.
+// the real status through instead of masking it as a generic 502. Reason is
+// the reason core read in a refusal that routing acts on: billing, or a
+// request shape the target's model does not take (see refusalReason).
 type InvocationError struct {
 	Msg              string
 	Status           int
@@ -670,6 +701,7 @@ type InvocationError struct {
 	Retryable        bool
 	FailoverEligible bool
 	CircuitFailure   bool
+	Reason           core.ProviderErrorClass
 }
 
 func (e *InvocationError) Error() string {
@@ -705,6 +737,12 @@ func invocationStatus(msg string, status int) error {
 
 func invocationStatusRetryAfter(msg string, status int, retryAfter string) error {
 	return &InvocationError{Msg: msg, Status: status, RetryAfter: strings.TrimSpace(retryAfter)}
+}
+
+// refusedInvocation is invocationStatusRetryAfter for a refusal core reported
+// as cause, keeping the reason core read in it, which routing acts on.
+func refusedInvocation(msg string, status int, retryAfter string, cause error) error {
+	return &InvocationError{Msg: msg, Status: status, RetryAfter: strings.TrimSpace(retryAfter), Reason: coreRefusalReason(cause)}
 }
 
 // retryAfterSeconds is a Retry-After delay core read from an upstream answer
@@ -755,9 +793,15 @@ func IsConfig(err error) bool {
 	return errors.As(err, &providerErr) && providerErr.Class == core.ProviderErrorConfiguration
 }
 
-// IsThrottle inspects an error message for throttle/rate-limit signals.
+// IsThrottle inspects an error message for throttle/rate-limit signals. A
+// billing refusal is no throttle, although OpenAI sends insufficient_quota as
+// a 429: waiting does not mend it.
 func IsThrottle(err error) bool {
 	if err == nil {
+		return false
+	}
+	var invocationError *InvocationError
+	if asError(err, &invocationError) && refusalReason(invocationError) == core.ProviderErrorBilling {
 		return false
 	}
 	s := strings.ToLower(err.Error())

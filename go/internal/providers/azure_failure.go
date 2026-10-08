@@ -20,7 +20,8 @@ import (
 // never read, so a client the refusal reaches learns when to retry. Keeping
 // it holds no request for long: the resilience wrapper waits out at most
 // maxRetryAfterWait of it and leaves a longer one to the router, which tries
-// the next target.
+// the next target. It keeps the reason core read in it too, which routing
+// acts on.
 func azureFailure(err error, transport, instance string) error {
 	var configErr *ConfigError
 	if errors.As(err, &configErr) {
@@ -28,7 +29,7 @@ func azureFailure(err error, transport, instance string) error {
 	}
 	var refused *coreproviders.InvocationError
 	if errors.As(err, &refused) {
-		return invocationStatusRetryAfter(refused.Msg, refused.Status, retryAfterSeconds(refused.RetryAfter))
+		return refusedInvocation(refused.Msg, refused.Status, retryAfterSeconds(refused.RetryAfter), err)
 	}
 	var failure *core.ProviderError
 	if !errors.As(err, &failure) {

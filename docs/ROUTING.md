@@ -50,15 +50,34 @@ Unknown IDs return `404`. Read `GET /v1/models` and select an advertised ID.
 
 For Chat, Responses-compatible fallback, and adapted Messages paths, endpoint
 members can advance after supported upstream failures such as throttling, server
-errors, or timeouts.
+errors, timeouts, and [billing and request-shape refusals](#billing-and-request-shape-refusals).
 
 Streaming has a hard boundary: a request can move to the next target only before
 the first response byte. Once output starts, a later failure is surfaced to the
 client; the gateway does not replay partial output through another model.
 
-Native Anthropic Messages advances past retryable upstream statuses and
-statusless provider failures such as malformed responses. It does not hide
-definitive client/request HTTP errors by trying another model.
+Native Anthropic Messages advances past retryable upstream statuses, statusless
+provider failures such as malformed responses, and billing and request-shape
+refusals. It does not hide other definitive client/request HTTP errors by trying
+another model.
+
+### Billing and request-shape refusals
+
+Some refusals say why the request was refused, and the gateway routes on that
+reason rather than on the status alone:
+
+- A billing refusal, for want of credit or paid quota, is a `402`, or a refusal
+  whose body names billing, such as OpenAI's `insufficient_quota` or Anthropic's
+  low credit balance. It moves an endpoint to its next member and counts against
+  the provider's circuit, so once the circuit's failure threshold is reached the
+  provider is held back for its cooldown instead of refusing every request.
+- A request-shape refusal says the request is longer than the model's context,
+  or carries tools or images the model does not take. It moves an endpoint to its
+  next member without counting against the circuit: the provider is healthy, and
+  another member may take the request.
+
+Neither is repeated against the same target, a `429` included. When every member
+refuses, the request fails with the last refusal's status and message.
 
 ## Failover budget and affinity
 
@@ -117,9 +136,9 @@ cooldowns remain process-local. See the
 Retries happen inside one provider target. Endpoint failover moves between
 targets. Retryable transport failures, 408, 429, and transient 500/502/503/504,
 520-524 (CDN edge) and 529 (overloaded) responses can repeat; malformed
-responses, local credential-state failures, and definitive upstream 4xx
-responses do not repeat against the same target. Circuit state is process-local
-and resets on restart.
+responses, local credential-state failures, definitive upstream 4xx responses,
+and billing and request-shape refusals, a 429 among them, do not repeat against
+the same target. Circuit state is process-local and resets on restart.
 
 A provider keeps a separate circuit for each caller scope that resolves its
 credentials separately: callers limited to the gateway's shared credentials,

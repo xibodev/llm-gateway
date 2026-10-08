@@ -1,6 +1,7 @@
 package providers
 
 import (
+	"errors"
 	"math"
 	"net/http"
 	"strconv"
@@ -54,8 +55,12 @@ func (e *InvocationError) ProviderErrorClassification() core.ProviderErrorClassi
 // use, such as invalid JSON, which core calls upstream. Any other statusless
 // invocation keeps no class: it is the gateway's catch-all for request
 // validation, an empty model result, a canceled request and local provider
-// state, and no one core class describes them all.
+// state, and no one core class describes them all. A refusal that gives a
+// reason routing acts on has that reason as its class.
 func (e *InvocationError) errorClass() core.ProviderErrorClass {
+	if reason := refusalReason(e); reason != "" {
+		return reason
+	}
 	if e.Status == 0 && !InvocationRetryable(e) {
 		if InvocationCircuitFailure(e) {
 			return core.ProviderErrorUpstream
@@ -63,6 +68,22 @@ func (e *InvocationError) errorClass() core.ProviderErrorClass {
 		return ""
 	}
 	return core.ClassifyProviderFailure(core.ProviderFailure{StatusCode: e.Status, Err: e}).ErrorClass
+}
+
+// coreRefusalReason is the reason core read in a refusal that routing acts
+// on, billing or a request shape the model does not take, or "" for any
+// other failure. Core reads it from the refusal's status and body.
+func coreRefusalReason(err error) core.ProviderErrorClass {
+	var failure *core.ProviderError
+	if !errors.As(err, &failure) {
+		return ""
+	}
+	switch failure.Class {
+	case core.ProviderErrorBilling, core.ProviderErrorContextOverflow,
+		core.ProviderErrorToolsUnsupported, core.ProviderErrorMediaUnsupported:
+		return failure.Class
+	}
+	return ""
 }
 
 // ProviderErrorClassification is terminal, although core.NewConfigurationError

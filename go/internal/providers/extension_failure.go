@@ -50,7 +50,7 @@ func extensionFailure(ctx context.Context, instance string, err error) error {
 		if errors.As(failure, &answer) && answer.Failure.RetryAfter != "" {
 			retryAfter = answer.Failure.RetryAfter
 		}
-		return invocationStatusRetryAfter(failure.Message, status, retryAfter)
+		return refusedInvocation(failure.Message, status, retryAfter, err)
 	}
 	switch failure.Class {
 	case core.ProviderErrorTransport:

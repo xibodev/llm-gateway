@@ -244,7 +244,7 @@ func TestExecuteCompleteFailover(t *testing.T) {
 }
 
 func TestGenericFailoverUsesInvocationEligibility(t *testing.T) {
-	for _, status := range []int{http.StatusUnauthorized, http.StatusForbidden, http.StatusTooManyRequests, http.StatusInternalServerError} {
+	for _, status := range []int{http.StatusUnauthorized, http.StatusPaymentRequired, http.StatusForbidden, http.StatusTooManyRequests, http.StatusInternalServerError} {
 		t.Run(http.StatusText(status), func(t *testing.T) {
 			useStateDir(t)
 			ResetTelemetryState()
@@ -266,7 +266,7 @@ func TestGenericFailoverUsesInvocationEligibility(t *testing.T) {
 			providers.ResetProviders()
 			t.Cleanup(providers.ResetProviders)
 			_, served, err := ExecuteComplete([]Target{{Provider: "upstream", Model: "model"}, {Provider: "echo", Model: "echo-default"}}, []providers.Message{{"role": "user", "content": "hi"}}, "route", anonymous, nil)
-			eligible := status == http.StatusTooManyRequests || status == http.StatusInternalServerError
+			eligible := status == http.StatusPaymentRequired || status == http.StatusTooManyRequests || status == http.StatusInternalServerError
 			if eligible && (err != nil || served == nil || served.Provider != "echo") {
 				t.Fatalf("eligible status did not fail over: served=%+v err=%v", served, err)
 			}
@@ -305,6 +305,59 @@ func TestOverloadedAndEdgeStatusesAdvanceTheChain(t *testing.T) {
 			_, served, err := ExecuteComplete([]Target{{Provider: "upstream", Model: "model"}, {Provider: "echo", Model: "echo-default"}}, []providers.Message{{"role": "user", "content": "hi"}}, "route", anonymous, nil)
 			if err != nil || served == nil || served.Provider != "echo" {
 				t.Fatalf("status %d ended the chain: served=%+v err=%v", status, served, err)
+			}
+		})
+	}
+}
+
+// A refusal that gives a reason routing acts on moves the chain on, whatever
+// its status, and is never repeated. Billing also counts against the
+// instance's circuit, so with a threshold of one the next request skips the
+// instance until the cooldown ends; a refused request shape leaves the
+// circuit alone, so the next request reaches the instance again.
+func TestRefusalsWithAReasonAdvanceTheChain(t *testing.T) {
+	for _, refusal := range []struct {
+		name    string
+		status  int
+		body    string
+		billing bool
+	}{
+		{"payment required", http.StatusPaymentRequired, `{"error":{"message":"fixture"}}`, true},
+		{"insufficient quota", http.StatusTooManyRequests, `{"error":{"message":"fixture","code":"insufficient_quota"}}`, true},
+		{"context length", http.StatusBadRequest, `{"error":{"message":"fixture","code":"context_length_exceeded"}}`, false},
+		{"tools", http.StatusBadRequest, `{"error":{"message":"fixture-model does not support tools"}}`, false},
+	} {
+		t.Run(refusal.name, func(t *testing.T) {
+			useStateDir(t)
+			ResetTelemetryState()
+			t.Cleanup(ResetTelemetryState)
+			providers.ResetCircuit("upstream")
+			t.Cleanup(func() { providers.ResetCircuit("upstream") })
+			requests := 0
+			upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				requests++
+				w.WriteHeader(refusal.status)
+				_, _ = w.Write([]byte(refusal.body))
+			}))
+			defer upstream.Close()
+			config.Update(func(settings *config.Settings) {
+				settings.Providers = map[string]*config.ProviderConfig{
+					"upstream": {Type: "openai_compatible", BaseURL: upstream.URL},
+					"echo":     {Type: "echo"},
+				}
+				settings.Policies.Defaults = config.ProviderPolicy{RetryMaxAttempts: 3, CircuitFailureThreshold: 1, CircuitCooldownSeconds: 60}
+			})
+			providers.ResetProviders()
+			t.Cleanup(providers.ResetProviders)
+			targets := []Target{{Provider: "upstream", Model: "model"}, {Provider: "echo", Model: "echo-default"}}
+			for range 2 {
+				_, served, err := ExecuteComplete(targets, []providers.Message{{"role": "user", "content": "hi"}}, "route", anonymous, nil)
+				if err != nil || served == nil || served.Provider != "echo" {
+					t.Fatalf("the chain stopped at the refusal: served=%+v err=%v", served, err)
+				}
+			}
+			if want := map[bool]int{true: 1, false: 2}[refusal.billing]; requests != want {
+				t.Fatalf("requests=%d want=%d", requests, want)
 			}
 		})
 	}

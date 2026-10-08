@@ -136,8 +136,8 @@ func ollamaFailure(ctx context.Context, err error) error {
 		// Core quotes the daemon as "Ollama: upstream returned <status>:
 		// <words>", already redacted and bounded.
 		words := strings.TrimPrefix(refusal.Msg, fmt.Sprintf("Ollama: upstream returned %d: ", refusal.Status))
-		return invocationStatusRetryAfter(fmt.Sprintf("ollama: request failed (%d): %s", refusal.Status, words), refusal.Status,
-			retryAfterSeconds(refusal.RetryAfter))
+		return refusedInvocation(fmt.Sprintf("ollama: request failed (%d): %s", refusal.Status, words), refusal.Status,
+			retryAfterSeconds(refusal.RetryAfter), err)
 	}
 	var failure *core.ProviderError
 	if !errors.As(err, &failure) {

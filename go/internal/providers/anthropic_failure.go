@@ -63,7 +63,8 @@ func anthropicTransportError(message, cause string) error {
 // never read, so a client the refusal reaches learns when to retry. Keeping
 // it holds no request for long: the resilience wrapper waits out at most
 // maxRetryAfterWait of it and leaves a longer one to the router, which tries
-// the next target.
+// the next target. It keeps the reason core read in it too, billing or a
+// request shape the model does not take, which routing acts on.
 func anthropicFailure(err error, transport, instance string) error {
 	var configErr *ConfigError
 	if errors.As(err, &configErr) {
@@ -71,7 +72,7 @@ func anthropicFailure(err error, transport, instance string) error {
 	}
 	var refused *coreproviders.InvocationError
 	if errors.As(err, &refused) {
-		return invocationStatusRetryAfter(refused.Msg, refused.Status, retryAfterSeconds(refused.RetryAfter))
+		return refusedInvocation(refused.Msg, refused.Status, retryAfterSeconds(refused.RetryAfter), err)
 	}
 	var failure *core.ProviderError
 	if !errors.As(err, &failure) {
@@ -123,7 +124,7 @@ func anthropicCountFailure(err error, instance string) error {
 	var refused *coreproviders.InvocationError
 	if errors.As(err, &refused) {
 		message := strings.Replace(refused.Msg, "anthropic token count: upstream returned", "anthropic: token count returned", 1)
-		return invocationStatusRetryAfter(message, refused.Status, retryAfterSeconds(refused.RetryAfter))
+		return refusedInvocation(message, refused.Status, retryAfterSeconds(refused.RetryAfter), err)
 	}
 	var failure *core.ProviderError
 	if errors.As(err, &failure) && failure.Message == "anthropic returned an invalid token count" {

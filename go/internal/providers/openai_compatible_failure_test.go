@@ -81,15 +81,15 @@ func TestOpenAICompatibleFailuresKeepTheTransportsErrors(t *testing.T) {
 	}
 }
 
-// Core names a refusal by the reason its body gives when a product may route
-// on it: a 402 is billing whatever it says, and a 4xx citing quota, the
-// context length, or tools or images the model does not take is billing or a
-// refused request shape. The facade reads every refusal by its status, as the
-// transport did, so such a refusal reaches the router as any other definitive
-// refusal: with its status and the upstream's words, neither repeated nor
-// failed over, and counted against nothing. Read by core's class first, it
-// would end as a configuration error.
-func TestOpenAICompatibleRefusalsAreReadByStatusWhateverReasonTheyGive(t *testing.T) {
+// Core reads the reason a refusal gives when a product may route on it: a 402
+// is billing whatever it says, and a refusal citing quota, the context
+// length, or tools or images the model does not take is billing or a refused
+// request shape. The facade keeps that reason with the refusal's status and
+// the upstream's words: billing moves the chain on and counts against the
+// circuit, a refused shape moves it on and leaves the circuit alone, and
+// neither is repeated, OpenAI's 429 insufficient_quota included, which is no
+// throttle either.
+func TestOpenAICompatibleRefusalsRouteOnTheReasonCoreReads(t *testing.T) {
 	var status int
 	var body string
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
@@ -101,12 +101,14 @@ func TestOpenAICompatibleRefusalsAreReadByStatusWhateverReasonTheyGive(t *testin
 	for _, refusal := range []struct {
 		status        int
 		code, message string
+		billing       bool
 	}{
-		{http.StatusPaymentRequired, "fixture_code", "add credit to continue"},
-		{http.StatusBadRequest, "insufficient_quota", "the fixture quota is spent"},
-		{http.StatusBadRequest, "context_length_exceeded", "the request is longer than the model takes"},
-		{http.StatusBadRequest, "fixture_code", "fixture-model does not support tools"},
-		{http.StatusBadRequest, "fixture_code", "image input is not supported by fixture-model"},
+		{http.StatusPaymentRequired, "fixture_code", "add credit to continue", true},
+		{http.StatusTooManyRequests, "insufficient_quota", "the fixture quota is spent", true},
+		{http.StatusBadRequest, "insufficient_quota", "the fixture quota is spent", true},
+		{http.StatusBadRequest, "context_length_exceeded", "the request is longer than the model takes", false},
+		{http.StatusBadRequest, "fixture_code", "fixture-model does not support tools", false},
+		{http.StatusBadRequest, "fixture_code", "image input is not supported by fixture-model", false},
 	} {
 		status, body = refusal.status, fmt.Sprintf(`{"error":{"message":%q,"code":%q}}`, refusal.message, refusal.code)
 		for name, call := range openAIOperations(provider) {
@@ -116,8 +118,10 @@ func TestOpenAICompatibleRefusalsAreReadByStatusWhateverReasonTheyGive(t *testin
 			}
 			err := call()
 			if err == nil || err.Error() != want || UpstreamStatus(err) != refusal.status || IsConfig(err) ||
-				InvocationRetryable(err) || InvocationFailoverEligible(err) || InvocationCircuitFailure(err) {
-				t.Fatalf("%s %d %s: err=%v", name, refusal.status, refusal.code, err)
+				InvocationRetryable(err) || !InvocationFailoverEligible(err) || InvocationCircuitFailure(err) != refusal.billing ||
+				(refusal.billing && IsThrottle(err)) {
+				t.Fatalf("%s %d %s: err=%v retryable=%v failover=%v circuit=%v throttle=%v", name, refusal.status, refusal.code, err,
+					InvocationRetryable(err), InvocationFailoverEligible(err), InvocationCircuitFailure(err), IsThrottle(err))
 			}
 		}
 	}

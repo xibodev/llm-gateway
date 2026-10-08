@@ -594,7 +594,7 @@ func TestFirstIntSafeNumericTypes(t *testing.T) {
 }
 
 func TestAnthropicMessagesFailoverEligibility(t *testing.T) {
-	for _, status := range []int{400, 401, 403, 404, 503} {
+	for _, status := range []int{400, 401, 402, 403, 404, 503} {
 		t.Run(strconv.Itoa(status), func(t *testing.T) {
 			t.Setenv("LLMGW_STATE_DIR", t.TempDir())
 			var first, second atomic.Int32
@@ -625,7 +625,9 @@ func TestAnthropicMessagesFailoverEligibility(t *testing.T) {
 			providers.ResetProviders()
 			response := anthropicFixtureRequest(t, map[string]any{"model": "route", "max_tokens": 1, "messages": []any{map[string]any{"role": "user", "content": "hi"}}})
 			wantSecond, wantStatus := int32(0), status
-			if status == 503 {
+			// A 402 is a billing refusal, which moves the chain on as an
+			// unavailable target does.
+			if status == 503 || status == 402 {
 				wantSecond, wantStatus = 1, 200
 			}
 			if response.Code != wantStatus || first.Load() != 1 || second.Load() != wantSecond {
