@@ -74,6 +74,15 @@ anonymous OpenCode Zen answer Chat Completions, over which the gateway serves
 Responses and Messages. Edge TTS answers speech, and the setup-token Anthropic
 provider answers non-streaming Messages natively and no Chat Completions.
 
+The console's **Providers** page shows the daemon to administrators once a
+configured provider depends on it or `LLMGW_EXTENSION_URL` names it: where the
+gateway reaches it, whether the shared secret is set, which providers depend on
+it, whether it answers, with its version and the provider types it serves, and
+what keeps a dependent provider from working, such as a missing secret or a
+provider type the daemon does not serve. `GET /admin/api/companion-daemon`
+returns the same report. The **Overview** page lists the warnings the gateway
+logged when it started.
+
 ## Connection resolution
 
 Generic API-key providers resolve:

@@ -154,7 +154,7 @@ func serve() error {
 	routerRuntime := router.NewRuntime(providerRuntime)
 	router.Install(routerRuntime)
 
-	host := getenv("LLMGW_HOST", "127.0.0.1")
+	host := api.ListenHost()
 	port := getenv("LLMGW_PORT", "8787")
 	if _, err := strconv.Atoi(port); err != nil {
 		port = "8787"

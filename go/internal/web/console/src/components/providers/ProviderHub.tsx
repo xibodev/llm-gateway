@@ -7,6 +7,7 @@ import { ProviderMark } from "../ProviderMark";
 import { EmptyState, PageHeading } from "../PageState";
 import { useDialogFocus } from "../useDialogFocus";
 import { OAuthConnectDialog } from "./OAuthConnectDialog";
+import { CompanionDaemonPanel } from "./CompanionDaemonPanel";
 import { discoveryFilters, matchesDiscoveryFilter, mergeProviderRoster, providerShelves, RosterMark, RosterMetadata, RosterStatus, rosterCandidateSetup, rosterSetupEntry, rosterSetupUnavailableReason, safeRosterURL, shelfFor, useProviderRoster } from "./ProviderRoster";
 import "./provider-hub.css";
 import { type ActionResult, ResultNotice, StatusBadge, boolValue, configuredProviderConfig, configuredProviderIDs, connectionChoices, tileStatus, useProviderLifecycle } from "./shared";
@@ -466,6 +467,9 @@ export function ProviderHub({ data, mode, onChanged, onOpenDetail, onOpenPlaygro
   const [expanded, setExpanded] = useState("");
   const shelfRef = useRef<HTMLDivElement>(null);
   const roster = useProviderRoster(mode);
+  // The configured providers the companion daemon serves, which the
+  // administrator's state names.
+  const daemonProviders = new Set(asList(data.companion_daemon_providers).map((providerID) => stringValue(providerID)));
   const closeExpansion = () => {
     const trigger = Array.from(shelfRef.current?.querySelectorAll<HTMLButtonElement>("[data-provider-trigger]") ?? []).find((button) => button.dataset.providerTrigger === expanded);
     setExpanded("");
@@ -733,6 +737,7 @@ export function ProviderHub({ data, mode, onChanged, onOpenDetail, onOpenPlaygro
           ) : undefined
         }
       />
+      {mode === "admin" ? <CompanionDaemonPanel /> : null}
       <section class="provider-toolbar surface" aria-label="Provider filters">
         <label class="search-field">
           <Search size={17} />
@@ -893,6 +898,7 @@ export function ProviderHub({ data, mode, onChanged, onOpenDetail, onOpenPlaygro
                         <p>
                           {configured ? `${instanceCount} instance${instanceCount === 1 ? "" : "s"}` : isClient ? "Gateway client" : "Not configured"}
                           {boolValue(entry.custom) ? " · Custom integration" : ""}
+                          {asList(entry.configured_provider_ids).some((providerID) => daemonProviders.has(stringValue(providerID))) ? " · Companion daemon" : ""}
                         </p>
                       </div>
                       <StatusBadge status={status} />

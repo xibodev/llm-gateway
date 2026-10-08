@@ -111,10 +111,14 @@ export function Overview({ data, mode, onNavigate }: { data: JSONRecord; mode: "
   const totalProviders = isPortal ? connections.length : providers.length;
   const routes = isPortal ? projects.length : Object.keys(endpoints).length;
   const nextStep = nextStepFor(data, mode);
+  // What the gateway warned of when it started, which otherwise only its log
+  // shows.
+  const startupWarnings = isPortal ? [] : asList(data.startup_warnings).map((warning) => String(warning));
 
   return (
     <div class="page-stack">
       <PageHeading eyebrow={isPortal ? "Private workspace" : "Gateway operations"} title="Overview" detail="A concise view of configured access, routing, and operational state." />
+      {startupWarnings.length ? <section class="action-notice action-notice--warning startup-warnings" role="alert"><strong>{startupWarnings.length === 1 ? "Startup warning" : `${startupWarnings.length} startup warnings`}</strong><ul>{startupWarnings.map((warning) => <li key={warning}>{warning}</li>)}</ul></section> : null}
       {!isPortal ? <GetStartedGuide data={data} onNavigate={onNavigate} /> : null}
       <section class="metric-grid">
         <Metric icon={<Plug size={19} />} label={isPortal ? "Private connections" : "Configured providers"} value={String(totalProviders)} detail="Current connection records" onOpen={() => onNavigate("providers")} />

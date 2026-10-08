@@ -72,12 +72,48 @@ func CompanionDaemonProviders(settings *config.Settings) []string {
 	}
 	var served []string
 	for id, cfg := range settings.Providers {
-		if cfg != nil && (isExtensionType(cfg.Type) || strings.EqualFold(strings.TrimSpace(cfg.RegistryID), ExtensionTypeCodex)) {
+		if CompanionDaemonType(cfg) != "" {
 			served = append(served, id)
 		}
 	}
 	slices.Sort(served)
 	return served
+}
+
+// CompanionDaemonType returns the provider type the companion daemon serves
+// cfg as, or "" for a provider it does not serve: a type of its own, or Codex
+// by its registry entry, as the provider factory chooses them.
+func CompanionDaemonType(cfg *config.ProviderConfig) string {
+	if cfg == nil {
+		return ""
+	}
+	if strings.EqualFold(strings.TrimSpace(cfg.RegistryID), ExtensionTypeCodex) {
+		return ExtensionTypeCodex
+	}
+	if providerType := strings.ToLower(strings.TrimSpace(cfg.Type)); isExtensionType(providerType) {
+		return providerType
+	}
+	return ""
+}
+
+// CompanionDaemonAddress returns the address the gateway reaches the
+// companion daemon at, and whether LLMGW_EXTENSION_URL names it rather than
+// the default.
+func CompanionDaemonAddress() (string, bool) {
+	if url := strings.TrimSpace(os.Getenv("LLMGW_EXTENSION_URL")); url != "" {
+		return url, true
+	}
+	return defaultExtensionURL, false
+}
+
+// CompanionDaemonInfo asks the companion daemon which providers it serves,
+// through the client every daemon-served request shares.
+func (rt *Runtime) CompanionDaemonInfo(ctx context.Context) (extension.InfoResponse, error) {
+	client, err := rt.extensionClient()
+	if err != nil {
+		return extension.InfoResponse{}, err
+	}
+	return client.Info(ctx)
 }
 
 // CompanionDaemonSecretSet reports whether LLMGW_EXTENSION_SECRET names the
@@ -106,10 +142,7 @@ type extensionClients struct {
 // use is a configuration error, which permits failover without marking the
 // provider unhealthy.
 func (rt *Runtime) extensionClient() (*extension.Client, error) {
-	url := strings.TrimSpace(os.Getenv("LLMGW_EXTENSION_URL"))
-	if url == "" {
-		url = defaultExtensionURL
-	}
+	url, _ := CompanionDaemonAddress()
 	secret := extensionSecret()
 
 	cache := &rt.extensions

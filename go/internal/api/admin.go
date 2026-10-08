@@ -310,6 +310,8 @@ func handleState(w http.ResponseWriter, r *http.Request) {
 		"provider_types":               providers.ProviderTypes,
 		"provider_registry":            providers.ProviderRegistry(),
 		"provider_statuses":            statusSnapshots,
+		"companion_daemon_providers":   providers.CompanionDaemonProviders(s),
+		"startup_warnings":             StartupWarnings(ListenHost()),
 		"keys":                         keyRows,
 		"principals":                   principals,
 		"projects":                     projects,
