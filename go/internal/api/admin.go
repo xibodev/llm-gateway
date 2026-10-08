@@ -1458,29 +1458,38 @@ func handleRequests(w http.ResponseWriter, r *http.Request) {
 	if !adminAuthed(w, r) {
 		return
 	}
+	if listing, ok := recordedRequests(w, r, r.URL.Query().Get("principal_id")); ok {
+		writeJSON(w, 200, listing)
+	}
+}
+
+// recordedRequests answers a listing of the recorded requests the query's
+// filters select, of principalID when it is set, and the cursor of the next
+// page. It writes the error of a listing it cannot answer.
+func recordedRequests(w http.ResponseWriter, r *http.Request, principalID string) (map[string]any, bool) {
 	query := r.URL.Query()
 	filter := iam.UsageEventFilter{
 		Provider: query.Get("provider"), Model: query.Get("model"), KeyID: query.Get("key_id"),
-		ProjectID: query.Get("project_id"), PrincipalID: query.Get("principal_id"),
+		ProjectID: query.Get("project_id"), PrincipalID: principalID,
 		RequestID: query.Get("request_id"), Status: query.Get("status"),
 	}
 	filter.Limit, _ = strconv.Atoi(query.Get("limit"))
 	var err error
 	if filter.From, filter.To, filter.BeforeID, err = listingBounds(query); err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
-		return
+		return nil, false
 	}
 	requests, next, err := iam.ListUsageEvents(filter)
 	var invalid *iam.InvalidFilterError
 	switch {
 	case errors.As(err, &invalid):
 		writeError(w, http.StatusBadRequest, invalid.Message)
-		return
+		return nil, false
 	case err != nil:
 		writeError(w, 500, "Usage store unavailable.")
-		return
+		return nil, false
 	}
-	writeJSON(w, 200, map[string]any{"requests": requests, "next_before_id": next})
+	return map[string]any{"requests": requests, "next_before_id": next}, true
 }
 
 // ---- helpers ------------------------------------------------------------ //

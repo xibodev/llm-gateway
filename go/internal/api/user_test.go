@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"reflect"
+	"strconv"
 	"testing"
 	"time"
 
@@ -102,6 +103,83 @@ func TestSSOUserSelfServiceKeyLifecycle(t *testing.T) {
 	)
 	if status != http.StatusOK || revoked["ok"] != true {
 		t.Fatalf("revoke: %d %+v", status, revoked)
+	}
+}
+
+// The portal's request listing shows only the signed-in user's requests,
+// whatever principal the query names, with the administrator's filters and
+// paging, and names the providers the user's requests used.
+func TestSSOUserListsOnlyTheirOwnRequests(t *testing.T) {
+	t.Setenv("LLMGW_STATE_DIR", t.TempDir())
+	iam.ResetForTests()
+	t.Cleanup(iam.ResetForTests)
+	if _, err := iam.Initialize(); err != nil {
+		t.Fatal(err)
+	}
+	old := *config.Get()
+	t.Cleanup(func() { config.Update(func(s *config.Settings) { *s = old }) })
+	config.Update(func(s *config.Settings) {
+		s.SSOEnabled, s.SSOSharedSecret, s.SSOAutoProvision = true, "proxy-secret", true
+	})
+	server := httptest.NewServer(NewServer(Runtime{}))
+	defer server.Close()
+	_, me := ssoConnectionRequest(t, server.URL, "requests-user", http.MethodGet, "/user/api/me", nil)
+	user := me["principal"].(map[string]any)["id"].(string)
+	other, err := iam.CreatePrincipal("human", "fixture:requests-other", "", "Other")
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now().Unix()
+	for _, event := range []iam.UsageEvent{
+		{RequestID: "req_mine_ok", Timestamp: now - 90, Endpoint: "openai.chat", StatusCode: 200, Provider: "alpha", RoutedModel: "alpha-model", PrincipalID: user},
+		{RequestID: "req_mine_failed", Timestamp: now - 60, Endpoint: "openai.chat", StatusCode: 502, Provider: "beta", RoutedModel: "beta-model", PrincipalID: user},
+		{RequestID: "req_theirs", Timestamp: now - 30, Endpoint: "openai.chat", StatusCode: 200, Provider: "gamma", RoutedModel: "gamma-model", PrincipalID: other.ID},
+	} {
+		if err := iam.RecordUsageEvent(event); err != nil {
+			t.Fatal(err)
+		}
+	}
+	list := func(query string) ([]string, map[string]any) {
+		t.Helper()
+		status, body := ssoConnectionRequest(t, server.URL, "requests-user", http.MethodGet, "/user/api/requests?"+query, nil)
+		if status != http.StatusOK {
+			t.Fatalf("%s: status=%d body=%+v", query, status, body)
+		}
+		ids := []string{}
+		for _, row := range body["requests"].([]any) {
+			ids = append(ids, row.(map[string]any)["request_id"].(string))
+		}
+		return ids, body
+	}
+	ids, body := list("")
+	if !reflect.DeepEqual(ids, []string{"req_mine_failed", "req_mine_ok"}) {
+		t.Fatalf("listed requests=%v, want only the user's, newest first", ids)
+	}
+	if !reflect.DeepEqual(body["providers"], []any{"alpha", "beta"}) {
+		t.Fatalf("providers=%v, want the user's alpha and beta", body["providers"])
+	}
+	if ids, _ := list("principal_id=" + other.ID); !reflect.DeepEqual(ids, []string{"req_mine_failed", "req_mine_ok"}) {
+		t.Fatalf("a query naming another principal listed %v", ids)
+	}
+	if ids, _ := list("request_id=req_theirs"); len(ids) != 0 {
+		t.Fatalf("another principal's request was found: %v", ids)
+	}
+	if ids, _ := list("status=error"); !reflect.DeepEqual(ids, []string{"req_mine_failed"}) {
+		t.Fatalf("failed requests=%v", ids)
+	}
+	ids, body = list("limit=1")
+	next, _ := body["next_before_id"].(float64)
+	if !reflect.DeepEqual(ids, []string{"req_mine_failed"}) || next == 0 {
+		t.Fatalf("first page=%v next=%v", ids, body["next_before_id"])
+	}
+	if ids, _ := list("limit=1&before_id=" + strconv.FormatInt(int64(next), 10)); !reflect.DeepEqual(ids, []string{"req_mine_ok"}) {
+		t.Fatalf("second page=%v", ids)
+	}
+	if status, _ := ssoConnectionRequest(t, server.URL, "requests-user", http.MethodGet, "/user/api/requests?status=sometimes", nil); status != http.StatusBadRequest {
+		t.Fatalf("an invalid filter: status=%d, want 400", status)
+	}
+	if status, _ := jsonRequest(t, server.URL+"/user/api/requests", http.MethodGet, "", nil); status != http.StatusUnauthorized {
+		t.Fatalf("without a sign-in: status=%d, want 401", status)
 	}
 }
 

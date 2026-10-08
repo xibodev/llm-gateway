@@ -170,6 +170,7 @@ func (s *server) handler() http.Handler {
 	mux.HandleFunc("GET /portal/{$}", servePortal)
 	mux.HandleFunc("GET /user/api/me", handleUserMe)
 	mux.HandleFunc("GET /user/api/usage", handleUserUsage)
+	mux.HandleFunc("GET /user/api/requests", handleUserRequests)
 	mux.HandleFunc("GET /user/api/models", handleUserModels)
 	mux.HandleFunc("GET /user/api/provider-roster", handleUserRoster)
 	mux.HandleFunc("POST /user/api/providers/{id}/test", handleUserTestProvider)

@@ -186,6 +186,9 @@ request:
   `request_id` is the ID. The console's **Requests** page finds it by that ID,
   as `GET /admin/api/requests?request_id=<ID>` does. A request refused before
   its model is resolved, such as one with an invalid key, may have no row.
+  Signed-in portal users find their own requests the same way on the portal's
+  **Requests** page and with `GET /user/api/requests`, which takes the same
+  filters and paging but lists only the user's requests.
 - **Request log.** With request logging on, the request's entry in
   `<state>/requests.jsonl`, or in its `.1` generation, carries the ID as
   `request_id`.

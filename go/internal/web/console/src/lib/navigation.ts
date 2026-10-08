@@ -50,8 +50,8 @@ const adminNavigation: NavigationItem[] = [
 ];
 
 const portalNavigation: NavigationItem[] = adminNavigation.filter((item) =>
-  ["overview", "providers", "models", "playground", "keys", "usage", "settings"].includes(item.id),
-);
+  ["overview", "providers", "models", "playground", "keys", "usage", "requests", "settings"].includes(item.id),
+).map((item) => item.id === "requests" ? { ...item, description: "Your recorded requests" } : item);
 
 export function navigationFor(mode: "admin" | "portal"): NavigationItem[] {
   return mode === "portal" ? portalNavigation : adminNavigation;

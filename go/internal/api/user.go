@@ -126,6 +126,28 @@ func handleUserUsage(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 200, stats)
 }
 
+// GET /user/api/requests lists the signed-in user's recorded requests, with
+// the filters and paging of the administrator's listing. Whatever principal
+// the query names, only the user's own requests are listed. providers names
+// the providers the user's requests used, for the provider filter.
+func handleUserRequests(w http.ResponseWriter, r *http.Request) {
+	principal, ok := requireSSOUser(w, r)
+	if !ok {
+		return
+	}
+	listing, ok := recordedRequests(w, r, principal.ID)
+	if !ok {
+		return
+	}
+	used, err := iam.UsageProviders(iam.UsageTimeSeriesFilter{PrincipalID: principal.ID})
+	if err != nil {
+		writeError(w, 500, "Usage store unavailable.")
+		return
+	}
+	listing["providers"] = used
+	writeJSON(w, 200, listing)
+}
+
 func handleUserCreateKey(w http.ResponseWriter, r *http.Request) {
 	principal, ok := requireSSOUser(w, r)
 	if !ok {

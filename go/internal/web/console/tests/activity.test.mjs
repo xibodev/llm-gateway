@@ -38,13 +38,36 @@ test("statuses, results, models, tokens and actors read as an operator needs the
   assert.deepEqual(activity.safeAuditDetail({ provider: "x", api_key_hint: "y", refresh_token: "z" }), { provider: "x" });
 });
 
-test("requests and the audit log are administrator pages", () => {
+test("the audit log is an administrator page and the requests page serves both", () => {
   const admin = navigation.navigationFor("admin").map((item) => item.id);
   const portal = navigation.navigationFor("portal").map((item) => item.id);
-  for (const page of ["requests", "audit"]) {
-    assert.ok(admin.includes(page), page);
-    assert.ok(!portal.includes(page), page);
-  }
+  assert.ok(admin.includes("audit"));
+  assert.ok(!portal.includes("audit"));
+  assert.ok(admin.includes("requests"));
+  assert.ok(portal.includes("requests"));
+});
+
+test("the portal requests page lists the user's requests without the gateway's failover chains", async () => {
+  const paths = [];
+  globalThis.__api = {
+    async getJSON(mode, path) {
+      paths.push(`${mode} ${path}`);
+      return {
+        requests: [{ id: 2, ts: 2, request_id: "req_mine", endpoint: "chat", status_code: 502, provider: "beta" }],
+        next_before_id: 0, providers: ["alpha", "beta"],
+      };
+    },
+  };
+  const render = mount(() => Requests({ data: { keys: [], projects: [] }, mode: "portal" }));
+  render();
+  await settle();
+  let tree = render();
+  assert.deepEqual(paths, ["portal /requests?limit=50"], "the portal asks for nothing but its own listing");
+  assert.match(text(tree), /req_mine/);
+  assert.match(text(tree), /Portal/, "a request without a key or project came from the portal");
+  assert.doesNotMatch(text(tree), /Recent failover chains/);
+  const providerSelect = find(tree, (node) => node.type === "select" && findAll(node, (option) => option.props?.value === "beta").length);
+  assert.deepEqual(findAll(providerSelect, (node) => node.type === "option").map((option) => option.props.value), ["all", "alpha", "beta"]);
 });
 
 test("the requests page lists, filters and pages recorded requests", async () => {

@@ -8,18 +8,24 @@ import { EmptyState, ErrorState, LoadingState, PageHeading } from "../components
 
 // Requests lists the requests the gateway recorded, newest first, with the
 // failover chains it kept, so an operator can find what happened to the
-// request a client reports by its X-Request-Id.
+// request a client reports by its X-Request-Id. In the portal it lists the
+// signed-in user's own requests; failover chains span every caller, so only
+// administrators see them.
 export function Requests({ data, mode }: { data: JSONRecord; mode: ConsoleMode }) {
+  const portal = mode === "portal";
   const [draft, setDraft] = useState<RequestFilter>(emptyRequestFilter);
   const [applied, setApplied] = useState<RequestFilter>(emptyRequestFilter);
   const [rows, setRows] = useState<JSONRecord[] | null>(null);
   const [cursor, setCursor] = useState(0);
   const [failovers, setFailovers] = useState<JSONRecord[]>([]);
+  // The providers the user's requests used, which the portal listing names.
+  const [usedProviders, setUsedProviders] = useState<string[]>([]);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
   // A page that arrives after a newer search must not mix into its rows.
   const search = useRef(0);
-  const providers = asList(data.providers).map(asRecord);
+  const providerIDs = portal ? usedProviders : asList(data.providers).map((item) => stringValue(asRecord(item).id));
+  if (draft.provider !== "all" && !providerIDs.includes(draft.provider)) providerIDs.push(draft.provider);
   const keys = asList(data.keys).map(asRecord);
   const projects = asList(data.projects).map(asRecord);
   const keyNames = new Map(keys.map((key) => [stringValue(key.id), stringValue(key.name, stringValue(key.prefix))]));
@@ -36,6 +42,7 @@ export function Requests({ data, mode }: { data: JSONRecord; mode: ConsoleMode }
       setRows((current) => beforeID && current ? [...current, ...page] : page);
       setCursor(nextCursor(listing));
       setApplied(filter);
+      if (portal) setUsedProviders(asList(listing.providers).map((item) => stringValue(item)));
     } catch (cause) {
       if (request === search.current) setError(cause instanceof Error ? cause.message : "Requests could not load.");
     } finally {
@@ -43,6 +50,7 @@ export function Requests({ data, mode }: { data: JSONRecord; mode: ConsoleMode }
     }
   };
   const loadFailovers = async () => {
+    if (portal) return;
     try { setFailovers(asList((await getJSON<JSONRecord>(mode, "/telemetry")).recent).map(asRecord)); }
     catch { setFailovers([]); }
   };
@@ -55,10 +63,10 @@ export function Requests({ data, mode }: { data: JSONRecord; mode: ConsoleMode }
 
   return (
     <div class="page-stack">
-      <PageHeading eyebrow="Traffic" title="Requests" detail="Requests the gateway recorded, newest first, kept for the usage retention window. Find one a client reports by the X-Request-Id its response carried." actions={<button class="button button--secondary" type="button" onClick={refresh}><RefreshCw size={16} /> Refresh</button>} />
+      <PageHeading eyebrow="Traffic" title="Requests" detail={portal ? "Your requests the gateway recorded, newest first, kept for the usage retention window. Find one by the X-Request-Id its response carried." : "Requests the gateway recorded, newest first, kept for the usage retention window. Find one a client reports by the X-Request-Id its response carried."} actions={<button class="button button--secondary" type="button" onClick={refresh}><RefreshCw size={16} /> Refresh</button>} />
       <form class="usage-filter surface activity-filter" onSubmit={(event) => { event.preventDefault(); void load(draft); }}>
         <label>Status<select value={draft.status} onInput={update("status")}><option value="all">All statuses</option><option value="ok">Succeeded</option><option value="error">Failed</option></select></label>
-        <label>Provider<select value={draft.provider} onInput={update("provider")}><option value="all">All providers</option>{providers.map((item) => <option value={stringValue(item.id)} key={stringValue(item.id)}>{stringValue(item.id)}</option>)}</select></label>
+        <label>Provider<select value={draft.provider} onInput={update("provider")}><option value="all">All providers</option>{providerIDs.map((id) => <option value={id} key={id}>{id}</option>)}</select></label>
         <label>Model<input value={draft.model} onInput={update("model")} placeholder="Exact routed model" /></label>
         <label>Key<select value={draft.keyID} onInput={update("keyID")}><option value="all">All keys</option>{keys.map((key) => <option value={stringValue(key.id)} key={stringValue(key.id)}>{stringValue(key.name, stringValue(key.prefix))}</option>)}</select></label>
         <label>Project<select value={draft.projectID} onInput={update("projectID")}><option value="all">All projects</option>{projects.map((project) => <option value={stringValue(project.id)} key={stringValue(project.id)}>{stringValue(project.name, stringValue(project.slug))}</option>)}</select></label>
@@ -81,7 +89,7 @@ export function Requests({ data, mode }: { data: JSONRecord; mode: ConsoleMode }
                 <td>{stringValue(row.endpoint)}</td>
                 <td class="technical">{modelSummary(row)}</td>
                 <td>{stringValue(row.provider, "—")}</td>
-                <td>{keyID ? stringValue(row.key_name) || (keyNames.get(keyID) ?? keyID) : projectID ? projectNames.get(projectID) ?? projectID : "Administrator or local"}</td>
+                <td>{keyID ? stringValue(row.key_name) || (keyNames.get(keyID) ?? keyID) : projectID ? projectNames.get(projectID) ?? projectID : portal ? "Portal" : "Administrator or local"}</td>
                 <td><span class={`status-pill status-pill--${statusTone(status)}`}>{status}{stringValue(row.error_code) ? ` ${stringValue(row.error_code)}` : ""}</span></td>
                 <td>{numberValue(row.latency_ms).toLocaleString()} ms</td>
                 <td>{tokenSummary(row)}</td>
@@ -90,7 +98,7 @@ export function Requests({ data, mode }: { data: JSONRecord; mode: ConsoleMode }
           </table>
           {cursor ? <footer class="activity-more"><button class="button button--secondary" type="button" disabled={busy} onClick={() => void load(applied, cursor)}>Load older requests</button></footer> : null}
         </section>}
-      <section class="surface table-wrap">
+      {portal ? null : <section class="surface table-wrap">
         <div class="section-heading"><div><p class="eyebrow">Failover</p><h2>Recent failover chains</h2></div><span>{failovers.length} kept</span></div>
         {failovers.length === 0 ? <p class="muted-copy">No request has needed more than one attempt or failed an attempt recently.</p> : <table>
           <thead><tr><th>Time</th><th>Requested</th><th>Served by</th><th>Attempts</th></tr></thead>
@@ -101,7 +109,7 @@ export function Requests({ data, mode }: { data: JSONRecord; mode: ConsoleMode }
             <td>{asList(chain.attempts).map(asRecord).map((attempt) => `${stringValue(attempt.provider)}/${stringValue(attempt.model)} ${attempt.ok === true ? "ok" : stringValue(attempt.error, "failed")}`).join("; ")}</td>
           </tr>)}</tbody>
         </table>}
-      </section>
+      </section>}
     </div>
   );
 }
