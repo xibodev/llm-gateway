@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"reflect"
+	"sort"
 	"strings"
 	"testing"
 	"time"
@@ -92,6 +93,63 @@ func TestAnonymousModelListPublishesOnlyExactVerifiedTargets(t *testing.T) {
 		profile.ProviderID + "/sibling": "unverified",
 	}) {
 		t.Fatalf("diagnostic states=%+v", states)
+	}
+}
+
+// The router resolves a discovery alias only to a published model, so a
+// model an automation-managed provider has not published gets no alias.
+func TestDiscoveryAliasesNameOnlyPublishedModels(t *testing.T) {
+	t.Setenv("LLMGW_STATE_DIR", t.TempDir())
+	iam.ResetForTests()
+	t.Cleanup(iam.ResetForTests)
+	if _, err := iam.Initialize(); err != nil {
+		t.Fatal(err)
+	}
+	profile := providers.AnonymousProviderProfiles()[0]
+	old := *config.Get()
+	t.Cleanup(func() { config.Update(func(s *config.Settings) { *s = old }) })
+	config.Update(func(s *config.Settings) {
+		s.AnthropicDiscoveryAliases, s.AnthropicDiscoveryAllModels = true, false
+		s.Providers = map[string]*config.ProviderConfig{profile.ProviderID: {
+			Type: profile.RuntimeType, RegistryID: profile.RegistryID, BaseURL: profile.BaseURL,
+		}}
+		s.Endpoints = map[string]*config.EndpointConfig{}
+	})
+	if err := iam.MarkAnonymousProviderManaged(profile.ProviderID); err != nil {
+		t.Fatal(err)
+	}
+	generation, err := iam.ProviderCheckGeneration(profile.ProviderID, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for model, state := range map[string]string{"claude-working": "verified", "claude-broken": "failed"} {
+		if err := iam.RecordProviderModelEvidence(iam.ProviderModelEvidence{
+			ProviderID: profile.ProviderID, Model: model, Operation: iam.ModelEvidenceCompletion, State: state, Generation: generation,
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	originalCatalog := catalogModelsForPrincipal
+	catalogModelsForPrincipal = func(string, *config.Principal) []providers.ModelInfo {
+		chat := map[string]any{"chat": true, "context_window": 32000}
+		return []providers.ModelInfo{
+			{ID: "claude-working", Capabilities: chat}, {ID: "claude-broken", Capabilities: chat}, {ID: "claude-sibling", Capabilities: chat},
+		}
+	}
+	t.Cleanup(func() { catalogModelsForPrincipal = originalCatalog })
+
+	list, err := buildModelList(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := []string{}
+	for _, row := range list["data"].([]any) {
+		got = append(got, row.(map[string]any)["id"].(string))
+	}
+	want := []string{"claude-working", profile.ProviderID + "/claude-working"}
+	sort.Strings(want)
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("models=%v, want %v", got, want)
 	}
 }
 

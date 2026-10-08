@@ -180,6 +180,9 @@ func listModels(principal *config.Principal, options modelListOptions) (map[stri
 	}
 	sort.Strings(providerIDs)
 	modelSnapshot := map[string][]providers.ModelInfo{}
+	// publishedSnapshot holds the models the router resolves under a
+	// discovery alias: an automation-managed provider's published ones only.
+	publishedSnapshot := map[string][]providers.ModelInfo{}
 	eligibleProviders := map[string]bool{}
 	for _, providerID := range providerIDs {
 		if s.Providers[providerID].Disabled || !providerAllowed(principal, projectPolicy, providerID) {
@@ -218,6 +221,9 @@ func listModels(principal *config.Principal, options modelListOptions) (map[stri
 			}
 			publication := publicationEvidence[row.ID]
 			published := !automationManaged || publication.State == "verified"
+			if published {
+				publishedSnapshot[providerID] = append(publishedSnapshot[providerID], row)
+			}
 			if !published && !includeUnpublished {
 				continue
 			}
@@ -345,16 +351,17 @@ func listModels(principal *config.Principal, options modelListOptions) (map[stri
 	}
 
 	// Discovery aliases: also list Claude-family models under their bare id
-	// (claude-â€¦ / anthropic-â€¦) so Claude Code's gateway model discovery, which
+	// (claude-... / anthropic-...) so Claude Code's gateway model discovery, which
 	// ignores ids not beginning with "claude"/"anthropic", surfaces them. With
 	// AnthropicDiscoveryAllModels, non-Claude models are surfaced too under a
 	// "claude-<id>" alias (the resolver strips the prefix to route). The bare/
 	// aliased id routes via the resolver's native-name normalization. Deduped.
-	// Only chat/coding models are aliased â€” embeddings, audio (TTS/STT), and other
-	// non-chat models are kept out of Claude Code's /model picker.
+	// Only published chat/coding models are aliased, since only those resolve:
+	// embeddings, audio (TTS/STT), and other non-chat models are kept out of
+	// Claude Code's /model picker.
 	if options.discoveryAliases && s.AnthropicDiscoveryAliases && (principal == nil || !principal.RoutesOnly) {
 		candidates := router.NativeAliasCandidatesFromSnapshot(
-			modelSnapshot, s.AnthropicDiscoveryAllModels,
+			publishedSnapshot, s.AnthropicDiscoveryAllModels,
 		)
 		reserved := map[string]bool{}
 		for _, name := range endpointNames {
@@ -364,7 +371,7 @@ func listModels(principal *config.Principal, options modelListOptions) (map[stri
 			reserved[nativeAliasKey(providerID)] = true
 		}
 		for _, providerID := range providerIDs {
-			for _, row := range modelSnapshot[providerID] {
+			for _, row := range publishedSnapshot[providerID] {
 				if row.ID == "" || !isChatModel(row) {
 					continue
 				}
