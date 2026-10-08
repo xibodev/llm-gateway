@@ -157,7 +157,7 @@ func responsesDispatch(
 	ctx := fallbackContext(r, request.FallbackTimeoutMS, request.AffinityKey)
 	if request.Stream {
 		streamResponsesSSE(
-			w, ctx, targets, payload, publicPayload, request.Model, principal, started,
+			w, ctx, targets, payload, publicPayload, request.Model, principal, started, "openai.responses",
 		)
 		return
 	}
@@ -277,6 +277,8 @@ func responsesPayloadContainsType(value any, types ...string) bool {
 	return false
 }
 
+// streamResponsesSSE streams a Responses request, recording its usage under
+// endpoint.
 func streamResponsesSSE(
 	w http.ResponseWriter,
 	ctx context.Context,
@@ -285,17 +287,18 @@ func streamResponsesSSE(
 	requested string,
 	principal *config.Principal,
 	started time.Time,
+	endpoint string,
 ) {
 	execution, served, err := router.ExecuteResponsesStreamContext(
 		governed(ctx, principal), targets, payload, requested, callerOf(principal),
 	)
 	if err != nil {
 		if ctx.Err() != nil {
-			recordClientCancelled("openai.responses", requested, principal, started)
+			recordClientCancelled(endpoint, requested, principal, started)
 			return
 		}
 		recordFailureUsage(
-			"openai.responses", requested, principal,
+			endpoint, requested, principal,
 			upstreamErrorStatus(err), "upstream", started,
 		)
 		writeUpstreamError(w, err)
@@ -306,7 +309,7 @@ func streamResponsesSSE(
 	w.Header().Set("Connection", "keep-alive")
 	w.WriteHeader(http.StatusOK)
 	defer execution.Iter.Close()
-	meter := newStreamUsage("openai.responses", requested, principal, served, started, responsesPromptBytes(payload))
+	meter := newStreamUsage(endpoint, requested, principal, served, started, responsesPromptBytes(payload))
 	if execution.Native {
 		if err := streamNativeResponseEventsContext(w, ctx, execution.Iter, publicPayload, meter); err != nil {
 			meter.cancelled()

@@ -696,11 +696,16 @@ td details pre { max-width: 34rem; margin: 6px 0 0; white-space: pre-wrap; font-
 .chat-composer { display: flex; flex-direction: column; gap: 9px; }
 .chat-composer textarea { resize: vertical; }
 .chat-composer .button { align-self: flex-end; }
+.chat-composer__actions { display: flex; align-items: center; justify-content: flex-end; gap: 8px; flex-wrap: wrap; }
+.chat-composer__stream { display: flex; align-items: center; gap: 6px; margin-right: auto; color: #55606c; font-size: 0.76rem; }
+.chat-turn > header small.chat-turn__stopped { color: #8a692a; font-weight: 650; }
 .playground-audio { display: flex; flex-direction: column; gap: 9px; margin-bottom: 16px; }
 .playground-audio audio { width: 100%; }
 .playground-transcript { margin-bottom: 16px; }
 .playground-transcript p:not(.eyebrow) { margin: 6px 0 0; color: #2f3945; font-size: 0.86rem; line-height: 1.6; white-space: pre-wrap; }
 :root[data-theme="dark"] .chat-turn { border-color: #2c323a; background: #1c2026; }
+:root[data-theme="dark"] .chat-composer__stream { color: #9aa4b1; }
+:root[data-theme="dark"] .chat-turn > header small.chat-turn__stopped { color: #d5bd88; }
 :root[data-theme="dark"] .chat-turn--user { border-color: #34435c; background: #1a2230; }
 :root[data-theme="dark"] .chat-turn p, :root[data-theme="dark"] .playground-transcript p:not(.eyebrow) { color: #dbe1e8; }
 /* Playground: settings collapse into a bar so the conversation owns the page. */

@@ -1,7 +1,7 @@
 import { memo } from "preact/compat";
 import { useEffect, useMemo, useRef, useState } from "preact/hooks";
-import { AlertCircle, ChevronDown, ChevronUp, FileAudio, Play, RefreshCw, Send, Trash2 } from "lucide-preact";
-import { APIError, getJSON, requestJSON, sendJSON, type JSONRecord } from "../lib/api";
+import { AlertCircle, ChevronDown, ChevronUp, FileAudio, Play, RefreshCw, Send, Square, Trash2 } from "lucide-preact";
+import { APIError, getJSON, requestJSON, sendJSON, streamEvents, type JSONRecord } from "../lib/api";
 import type { ConsoleMode } from "../lib/mode";
 import { asList, asRecord, numberValue, stringValue } from "../lib/records";
 import { EmptyState, ErrorState, PageHeading } from "../components/PageState";
@@ -17,7 +17,9 @@ import {
 } from "../components/ModelPicker";
 
 type TextSurface = "/v1/chat/completions" | "/v1/responses" | "/v1/messages";
-type ChatTurn = { role: "user" | "assistant"; content: string; reasoning?: string; toolCalls?: JSONRecord[]; wire?: unknown[]; served?: string; latency?: number };
+// A turn being streamed shows its text as it arrives; one the user stopped
+// keeps what arrived.
+type ChatTurn = { role: "user" | "assistant"; content: string; reasoning?: string; toolCalls?: JSONRecord[]; wire?: unknown[]; served?: string; latency?: number; streaming?: boolean; stopped?: boolean };
 export type PlaygroundFailure = { message: string; status: number; code: string; retry: string; action: string };
 
 const textSurfaces: { path: TextSurface; label: string }[] = [
@@ -98,8 +100,8 @@ function toolsForSurface(surface: TextSurface, tools: unknown[]): JSONRecord[] {
 }
 
 const ChatTurnView = memo(function ChatTurnView({ turn }: { turn: ChatTurn }) {
-  return <article class={`chat-turn chat-turn--${turn.role}`}>
-    <header><span>{turn.role === "user" ? "You" : "Assistant"}</span>{turn.served ? <small class="technical">{turn.served}{turn.latency ? ` · ${turn.latency} ms` : ""}</small> : null}</header>
+  return <article class={`chat-turn chat-turn--${turn.role}${turn.streaming ? " chat-turn--streaming" : ""}`}>
+    <header><span>{turn.role === "user" ? "You" : "Assistant"}</span>{turn.served ? <small class="technical">{turn.served}{turn.latency ? ` · ${turn.latency} ms` : ""}</small> : null}{turn.streaming ? <small><RefreshCw class="spin" size={12} /> Streaming</small> : null}{turn.stopped ? <small class="chat-turn__stopped">Stopped</small> : null}</header>
     <p>{turn.content}</p>
     {turn.reasoning ? <details class="chat-turn__detail"><summary>Reasoning</summary><pre>{turn.reasoning}</pre></details> : null}
     {turn.toolCalls?.length ? <details class="chat-turn__detail"><summary>Tool calls ({turn.toolCalls.length})</summary><pre>{JSON.stringify(turn.toolCalls, null, 2)}</pre></details> : null}
@@ -151,13 +153,17 @@ function localeOf(modelID: string): string {
 
 function ChatThread({ turns, running, onClear }: { turns: ChatTurn[]; running: boolean; onClear: () => void }) {
   const endRef = useRef<HTMLDivElement | null>(null);
-  useEffect(() => { endRef.current?.scrollIntoView({ block: "end", behavior: "smooth" }); }, [turns.length, running]);
+  const last = turns[turns.length - 1];
+  useEffect(() => { endRef.current?.scrollIntoView({ block: "end", behavior: "smooth" }); }, [turns.length, running, last?.content.length]);
+  // A request waits for its route until its answer, or the start of its
+  // stream, becomes the conversation's last turn.
+  const waiting = running && last?.role !== "assistant";
   return (
     <div class="chat-thread">
       <div class="chat-thread__scroll">
         {!turns.length ? <p class="muted-copy chat-thread__hint">Send a message to start. Every turn is replayed as real conversation history through the selected route.</p> : null}
         {turns.map((turn, index) => <ChatTurnView turn={turn} key={index} />)}
-        {running ? <article class="chat-turn chat-turn--assistant chat-turn--pending"><header><span>Assistant</span></header><p><RefreshCw class="spin" size={15} /> Routing…</p></article> : null}
+        {waiting ? <article class="chat-turn chat-turn--assistant chat-turn--pending"><header><span>Assistant</span></header><p><RefreshCw class="spin" size={15} /> Routing…</p></article> : null}
         <div ref={endRef} />
       </div>
       {turns.length ? <button class="button button--secondary chat-thread__clear" type="button" onClick={onClear}><Trash2 size={15} /> Clear conversation</button> : null}
@@ -206,6 +212,8 @@ export function Playground({ data, mode, principalID, onPrincipalIDChange, prese
   const [textSurface, setTextSurface] = useState<TextSurface>("/v1/chat/completions");
   const [previousResponseID, setPreviousResponseID] = useState("");
   const [draft, setDraft] = useState("");
+  // Text answers stream into the conversation unless the user turns it off.
+  const [streamAnswers, setStreamAnswers] = useState(true);
   const [toolsOpen, setToolsOpen] = useState(false);
   const [toolDefinitions, setToolDefinitions] = useState("");
   const [toolResult, setToolResult] = useState("");
@@ -300,6 +308,8 @@ export function Playground({ data, mode, principalID, onPrincipalIDChange, prese
 	const surface = availableModes.includes(operationMode) ? operationMode : (availableModes[0] ?? "unknown");
   const availableTextSurfaces = supportedTextSurfaces(selected);
   const toolsUnsupported = selected?.tools === "unsupported" || !selected?.capabilities.includes("chat");
+  // A model the catalog says cannot stream answers without streaming.
+  const streamable = selected?.streaming !== "unsupported";
   useEffect(() => {
     executionAbort.current?.abort();
     executionAbort.current = null;
@@ -376,6 +386,21 @@ export function Playground({ data, mode, principalID, onPrincipalIDChange, prese
     setRunning(true);
     setError(""); setFailure(null);
     setResult(null);
+    // The turn a stream fills as its text arrives.
+    let streamed: ChatTurn = { role: "assistant", content: "" };
+    // finish shows the answer a request returned, or a stream ended with.
+    const finish = (payload: JSONRecord) => {
+      setResult(payload);
+      const raw = asRecord(payload.raw_response);
+      const parsed = parseTextResponse(textSurface, raw);
+      if (textSurface === "/v1/responses" && selected?.statefulResponses === "supported") setPreviousResponseID(stringValue(raw.id));
+      const served = asRecord(payload.served);
+      setTurns([...history, {
+        role: "assistant", ...parsed,
+        served: `${stringValue(served.provider)}/${stringValue(served.model)}`,
+        latency: numberValue(payload.latency_ms),
+      }]);
+    };
     try {
       const body: JSONRecord = { project_id: projectID, model };
       const statefulResponses = textSurface === "/v1/responses" && selected?.statefulResponses === "supported" && previousResponseID;
@@ -399,20 +424,49 @@ export function Playground({ data, mode, principalID, onPrincipalIDChange, prese
         else body.messages = [...asList(body.messages), { role: "tool", content: toolResult.trim(), tool_call_id: toolCallID.trim() }];
       }
       if (mode === "admin") body.principal_id = principalID;
-      const payload = await sendJSON<JSONRecord>(mode, `/playground${textSurface}`, "POST", body, controller.signal);
+      if (!streamAnswers || !streamable) {
+        const payload = await sendJSON<JSONRecord>(mode, `/playground${textSurface}`, "POST", body, controller.signal);
+        if (request !== executionRequest.current) return;
+        finish(payload);
+        return;
+      }
+      body.stream = true;
+      // A Chat stream reports its usage only when asked to.
+      if (textSurface === "/v1/chat/completions") body.stream_options = { include_usage: true };
+      let done = null as JSONRecord | null;
+      let failed = "";
+      await streamEvents(mode, `/playground${textSurface}`, body, ({ event, data }) => {
+        if (request !== executionRequest.current) return;
+        if (event === "route") {
+          // The route is known as the stream opens; its answer follows.
+          setResult({ ...data, streaming: true });
+          const route = asRecord(data.served);
+          streamed = { role: "assistant", content: "", streaming: true, served: `${stringValue(route.provider)}/${stringValue(route.model)}` };
+          setTurns([...history, streamed]);
+        } else if (event === "delta") {
+          streamed = { ...streamed, content: streamed.content + stringValue(data.text), reasoning: (streamed.reasoning ?? "") + stringValue(data.reasoning) || undefined };
+          setTurns([...history, streamed]);
+        } else if (event === "done") {
+          done = data;
+        } else if (event === "error") {
+          failed = stringValue(asRecord(data.error).message, "The stream failed.");
+        }
+      }, controller.signal);
       if (request !== executionRequest.current) return;
-      setResult(payload);
-      const raw = asRecord(payload.raw_response);
-      const parsed = parseTextResponse(textSurface, raw);
-      if (textSurface === "/v1/responses" && selected?.statefulResponses === "supported") setPreviousResponseID(stringValue(raw.id));
-      const served = asRecord(payload.served);
-      setTurns([...history, {
-        role: "assistant", ...parsed,
-        served: `${stringValue(served.provider)}/${stringValue(served.model)}`,
-        latency: numberValue(payload.latency_ms),
-      }]);
+      if (!done) throw new Error(failed || "The stream ended before the answer was complete.");
+      finish(done);
     } catch (cause) {
       if (request !== executionRequest.current) return;
+      if (controller.signal.aborted) {
+        // Stopped: what arrived stays in the conversation.
+        setResult((current) => current ? { ...current, streaming: false } : current);
+        if (streamed.content || streamed.reasoning) setTurns([...history, { ...streamed, streaming: false, stopped: true }]);
+        else {
+          setTurns(turns);
+          setDraft((current) => current || text);
+        }
+        return;
+      }
       setResult(null);
       setTurns(turns);
       setDraft((current) => current || text);
@@ -697,7 +751,11 @@ export function Playground({ data, mode, principalID, onPrincipalIDChange, prese
                 void sendChat(event, (event.currentTarget as HTMLTextAreaElement).value);
               }}
             />
-            <button class="button button--primary" type="submit" disabled={running || !model}>{running ? <RefreshCw class="spin" size={16} /> : <Send size={16} />} Send</button>
+            <div class="chat-composer__actions">
+              <label class="chat-composer__stream" title={streamable ? undefined : "The catalog says this model does not stream."}><input type="checkbox" checked={streamAnswers && streamable} disabled={running || !streamable} onChange={(event) => setStreamAnswers((event.currentTarget as HTMLInputElement).checked)} /> Stream the answer</label>
+              {running ? <button class="button button--secondary" type="button" onClick={() => executionAbort.current?.abort()}><Square size={15} /> Stop</button> : null}
+              <button class="button button--primary" type="submit" disabled={running || !model}>{running ? <RefreshCw class="spin" size={16} /> : <Send size={16} />} Send</button>
+            </div>
           </form>
         </> : null}
 
@@ -736,7 +794,7 @@ export function Playground({ data, mode, principalID, onPrincipalIDChange, prese
         </form> : null}
 
         {error ? <ErrorState title={failure ? `Request failed · HTTP ${failure.status}${failure.code ? ` · ${failure.code}` : ""}` : "Playground request did not complete"} detail={error} /> : null}
-        <p class="playground-limit"><AlertCircle size={16} /> Streaming is unavailable in this playground. Capability-proven controls and routes are enabled for the selected model only.</p>
+        <p class="playground-limit"><AlertCircle size={16} /> {surface === "chat" ? "Streamed answers arrive as they are written; Stop ends one and keeps what arrived. " : ""}Capability-proven controls and routes are enabled for the selected model only.</p>
         </div>
 
         <aside class="playground-panel">
@@ -751,7 +809,7 @@ export function Playground({ data, mode, principalID, onPrincipalIDChange, prese
           </dl> : null}
           <p class="form-help">Catalog discovery does not guarantee current inference availability. Provider and verification evidence refreshes after this request.</p>
         </section> : result ? <section class="surface playground-outcome">
-          <div class="section-heading"><div><p class="eyebrow">Routed result</p><h2>{stringValue(served.provider)} / {stringValue(served.model)}</h2></div><span class="technical">{numberValue(result.latency_ms)} ms</span></div>
+          <div class="section-heading"><div><p class="eyebrow">Routed result</p><h2>{stringValue(served.provider)} / {stringValue(served.model)}</h2></div><span class="technical">{result.streaming === true ? "Streaming…" : `${numberValue(result.latency_ms)} ms`}</span></div>
           <dl class="compact-facts">
             <div><dt>Input tokens</dt><dd>{numberValue(usage.prompt_tokens, numberValue(usage.input_tokens))}</dd></div>
             <div><dt>Output tokens</dt><dd>{numberValue(usage.completion_tokens, numberValue(usage.output_tokens))}</dd></div>

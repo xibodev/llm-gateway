@@ -61,8 +61,6 @@ future installed client release.
   form exposes it.
 - Portal chat works, while capability-specific portal playground actions are not
   all registered as separate user API routes.
-- The API supports embeddings; the primary console does not have an embeddings
-  playground.
 
 ## Operations
 

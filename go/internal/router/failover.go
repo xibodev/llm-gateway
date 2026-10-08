@@ -682,6 +682,9 @@ type attempt struct {
 }
 
 func (rt *Runtime) recordChain(ctx context.Context, requested string, attempts []attempt, served *Target) {
+	if sink := traceSinkFrom(ctx); sink != nil {
+		sink.keep(attempts)
+	}
 	// Only log interesting chains: a failure occurred, or >1 attempt.
 	if len(attempts) == 0 || (len(attempts) == 1 && attempts[0].OK) {
 		return
@@ -696,13 +699,14 @@ func (rt *Runtime) recordChain(ctx context.Context, requested string, attempts [
 	rt.recordTelemetryEvent(requested, toEventAttempts(attempts), sp, sm, project, key)
 }
 
-// AttemptTrace is a secret-free record of one complete-request routing attempt.
+// AttemptTrace is a secret-free record of one routing attempt. DurationMS is
+// how long the attempt took, where the chain timed it.
 type AttemptTrace struct {
 	Provider   string `json:"provider"`
 	Model      string `json:"model"`
 	Status     string `json:"status"`
 	Throttled  bool   `json:"throttled,omitempty"`
-	DurationMS int64  `json:"duration_ms"`
+	DurationMS int64  `json:"duration_ms,omitempty"`
 }
 
 // ExecuteComplete runs the chain for a non-streaming request. Returns the

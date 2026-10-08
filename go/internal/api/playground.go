@@ -261,10 +261,6 @@ func executePlayground(w http.ResponseWriter, r *http.Request, body playgroundBo
 }
 
 func executePlaygroundSurface(w http.ResponseWriter, r *http.Request, payload map[string]any, body playgroundBody, principal *config.Principal, project iam.Project, source string, surface core.ModelSurface) {
-	if body.Stream {
-		writeError(w, http.StatusBadRequest, "Streaming is not available in the playground yet. Use a non-streaming request.")
-		return
-	}
 	if strings.TrimSpace(body.Model) == "" {
 		writeError(w, http.StatusBadRequest, "model is required")
 		return
@@ -301,6 +297,7 @@ func executePlaygroundSurface(w http.ResponseWriter, r *http.Request, payload ma
 	}
 	targets, err = router.FilterCompatibleTargets(targets, callerOf(principal), router.CompatibilityRequest{
 		Surface: surface, Tools: requestHasTools(payload["tools"]), Vision: playgroundPayloadIsMultimodal(surface, payload),
+		Streaming: body.Stream,
 	})
 	if err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
@@ -308,16 +305,23 @@ func executePlaygroundSurface(w http.ResponseWriter, r *http.Request, payload ma
 	}
 	delete(payload, "project_id")
 	delete(payload, "principal_id")
+	if body.Stream {
+		streamPlayground(w, r, payload, body, principal, project, source, surface, targets, started)
+		return
+	}
 	delete(payload, "stream")
 
+	// Every chain reports the route members it tried to the sink; the Chat
+	// chain also times them, so its own trace is shown.
+	ctx, sink := router.WithAttemptTrace(governed(r.Context(), principal))
 	var response map[string]any
 	var served *router.Target
 	var trace []router.AttemptTrace
 	switch surface {
 	case core.ModelSurfaceResponses:
-		response, served, err = router.ExecuteResponsesContext(governed(r.Context(), principal), targets, payload, body.Model, callerOf(principal))
+		response, served, err = router.ExecuteResponsesContext(ctx, targets, payload, body.Model, callerOf(principal))
 	case core.ModelSurfaceMessages:
-		response, served, err = router.ExecuteAnthropicMessagesContext(governed(r.Context(), principal), targets, payload, body.Model, callerOf(principal))
+		response, served, err = router.ExecuteAnthropicMessagesContext(ctx, targets, payload, body.Model, callerOf(principal))
 	default:
 		var request chatRequest
 		raw, _ := json.Marshal(payload)
@@ -326,11 +330,14 @@ func executePlaygroundSurface(w http.ResponseWriter, r *http.Request, payload ma
 			writeError(w, http.StatusBadRequest, "at least one message is required")
 			return
 		}
-		response, served, trace, err = router.ExecuteCompleteWithTraceContext(governed(r.Context(), principal), targets, providerMessages(request.Messages), body.Model, callerOf(principal), chatKwargs(&request))
+		response, served, trace, err = router.ExecuteCompleteWithTraceContext(ctx, targets, providerMessages(request.Messages), body.Model, callerOf(principal), chatKwargs(&request))
 		if err == nil {
 			response["model"] = served.Model
 			normalizeChatResponseEnvelope(response)
 		}
+	}
+	if trace == nil {
+		trace = sink.Attempts()
 	}
 	latency := time.Since(started).Milliseconds()
 	endpoint := "playground." + playgroundSurfaceName(surface)

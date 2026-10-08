@@ -46,7 +46,9 @@ test("playground chat isolates completed turns from request-state rerenders", ()
   const playground = readFileSync(resolve(root, "src/pages/Playground.tsx"), "utf8");
   assert.match(playground, /const ChatTurnView = memo/);
   assert.match(playground, /<ChatTurnView turn=\{turn\} key=\{index\} \/>/);
-  assert.doesNotMatch(playground, /stream:\s*true/);
+  // A stream replaces only the turn it fills; the completed turns stay the
+  // same objects, so their memoized views do not render again.
+  assert.match(playground, /setTurns\(\[\.\.\.history, streamed\]\)/);
 });
 
 test("mode-aware API client names only local API roots", () => {

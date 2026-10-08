@@ -163,20 +163,8 @@ func handleMessages(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if req.Stream {
-		// A stream whose every target serves Messages natively reaches its
-		// target as a request that does not stream does. Translation would
-		// refuse what it cannot carry, such as cache_control and enabled
-		// thinking, and drop what the stream returns, such as signatures and
-		// cache usage.
-		if router.ServesAnthropicMessagesNatively(targets, callerOf(principal)) {
-			if !admitRequest(w, "anthropic.messages", req.Model, principal, "policy", started) {
-				return
-			}
-			streamNativeMessagesSSE(w, ctx, targets, raw, req.Model, principal, started)
-			return
-		}
-		conversion := translate.AnthropicRequestToOpenAIWithReport(raw)
-		if lossErr := conversion.RejectMaterialLoss(); lossErr != nil {
+		native, msgs, kw, lossErr := messagesStreamPlan(targets, principal, raw, &req)
+		if lossErr != nil {
 			recordFailureUsage("anthropic.messages", req.Model, principal, 400, "compatibility", started)
 			writeError(w, 400, "Streaming cannot preserve Anthropic request: "+lossErr.Error())
 			return
@@ -184,15 +172,11 @@ func handleMessages(w http.ResponseWriter, r *http.Request) {
 		if !admitRequest(w, "anthropic.messages", req.Model, principal, "policy", started) {
 			return
 		}
-		converted, kw := conversion.Value.Messages, conversion.Value.Keywords
-		if len(converted) < len(req.Messages) {
-			converted = translate.AnthropicMessagesToOpenAI(req.Messages, req.System)
+		if native {
+			streamNativeMessagesSSE(w, ctx, targets, raw, req.Model, principal, started, "anthropic.messages")
+			return
 		}
-		msgs := make([]providers.Message, len(converted))
-		for i := range converted {
-			msgs[i] = providers.Message(converted[i])
-		}
-		streamMessagesSSE(w, ctx, targets, msgs, req.Model, principal, providers.Kwargs(kw), started)
+		streamMessagesSSE(w, ctx, targets, msgs, req.Model, principal, kw, started, "anthropic.messages")
 		return
 	}
 	if !admitRequest(w, "anthropic.messages", req.Model, principal, "policy", started) {
@@ -214,15 +198,42 @@ func handleMessages(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 200, response)
 }
 
-func streamMessagesSSE(w http.ResponseWriter, ctx context.Context, targets []router.Target, msgs []providers.Message, requested string, principal *config.Principal, kw providers.Kwargs, started time.Time) {
+// messagesStreamPlan says how a Messages request streams. A stream whose
+// every target serves Messages natively reaches its target as a request that
+// does not stream does. Otherwise it streams as Chat, translated: then msgs
+// and kw are what it sends, and translation refuses, with lossErr, a request
+// it cannot carry, such as one with cache_control or enabled thinking, and
+// would drop what the stream returns, such as signatures and cache usage.
+func messagesStreamPlan(targets []router.Target, principal *config.Principal, raw map[string]any, req *anthropicRequest) (native bool, msgs []providers.Message, kw providers.Kwargs, lossErr error) {
+	if router.ServesAnthropicMessagesNatively(targets, callerOf(principal)) {
+		return true, nil, nil, nil
+	}
+	conversion := translate.AnthropicRequestToOpenAIWithReport(raw)
+	if err := conversion.RejectMaterialLoss(); err != nil {
+		return false, nil, nil, err
+	}
+	converted, keywords := conversion.Value.Messages, conversion.Value.Keywords
+	if len(converted) < len(req.Messages) {
+		converted = translate.AnthropicMessagesToOpenAI(req.Messages, req.System)
+	}
+	msgs = make([]providers.Message, len(converted))
+	for i := range converted {
+		msgs[i] = providers.Message(converted[i])
+	}
+	return false, msgs, providers.Kwargs(keywords), nil
+}
+
+// streamMessagesSSE streams a Messages request translated to Chat, recording
+// its usage under endpoint.
+func streamMessagesSSE(w http.ResponseWriter, ctx context.Context, targets []router.Target, msgs []providers.Message, requested string, principal *config.Principal, kw providers.Kwargs, started time.Time, endpoint string) {
 	it, served, err := router.ExecuteAnthropicStreamContext(governed(ctx, principal), targets, msgs, requested, callerOf(principal), kw)
 	if err != nil {
 		if ctx.Err() != nil {
-			recordClientCancelled("anthropic.messages", requested, principal, started)
+			recordClientCancelled(endpoint, requested, principal, started)
 			return
 		}
 		recordFailureUsage(
-			"anthropic.messages", requested, principal, upstreamErrorStatus(err),
+			endpoint, requested, principal, upstreamErrorStatus(err),
 			"upstream", started,
 		)
 		writeUpstreamError(w, err)
@@ -234,7 +245,7 @@ func streamMessagesSSE(w http.ResponseWriter, ctx context.Context, targets []rou
 	w.Header().Set("Connection", "keep-alive")
 	w.WriteHeader(http.StatusOK)
 
-	meter := newStreamUsage("anthropic.messages", requested, principal, served, started, payloadBytes(msgs))
+	meter := newStreamUsage(endpoint, requested, principal, served, started, payloadBytes(msgs))
 	var writeErr error
 	write := func(event string) error {
 		if err := ctx.Err(); err != nil {
@@ -309,16 +320,17 @@ func anthropicStreamErrorEvent(err error) string {
 // not stream reaches it, and each record that target sends reaches the
 // client as it was sent. The stream succeeds only with the upstream's
 // message_stop; one that ends otherwise ends with an error event, the
-// upstream's own or, when it sent none, the gateway's.
-func streamNativeMessagesSSE(w http.ResponseWriter, ctx context.Context, targets []router.Target, payload map[string]any, requested string, principal *config.Principal, started time.Time) {
+// upstream's own or, when it sent none, the gateway's. Its usage is recorded
+// under endpoint.
+func streamNativeMessagesSSE(w http.ResponseWriter, ctx context.Context, targets []router.Target, payload map[string]any, requested string, principal *config.Principal, started time.Time, endpoint string) {
 	it, served, err := router.ExecuteAnthropicMessagesStreamContext(governed(ctx, principal), targets, payload, requested, callerOf(principal))
 	if err != nil {
 		if ctx.Err() != nil {
-			recordClientCancelled("anthropic.messages", requested, principal, started)
+			recordClientCancelled(endpoint, requested, principal, started)
 			return
 		}
 		recordFailureUsage(
-			"anthropic.messages", requested, principal, upstreamErrorStatus(err),
+			endpoint, requested, principal, upstreamErrorStatus(err),
 			"upstream", started,
 		)
 		writeUpstreamError(w, err)
@@ -330,7 +342,7 @@ func streamNativeMessagesSSE(w http.ResponseWriter, ctx context.Context, targets
 	w.Header().Set("Connection", "keep-alive")
 	w.WriteHeader(http.StatusOK)
 
-	meter := newStreamUsage("anthropic.messages", requested, principal, served, started, messagesPromptBytes(payload))
+	meter := newStreamUsage(endpoint, requested, principal, served, started, messagesPromptBytes(payload))
 	write := func(records string) error {
 		if err := ctx.Err(); err != nil {
 			return err

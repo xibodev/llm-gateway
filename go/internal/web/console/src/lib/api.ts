@@ -88,6 +88,12 @@ export async function requestJSON<T>(mode: ConsoleMode, path: string, init: Requ
     headers,
     redirect: init.redirect ?? "manual",
   });
+  return answerOf<T>(mode, response);
+}
+
+// answerOf reads a gateway answer as JSON, or rejects with the APIError it
+// carries, a sign-in it needs, or one for an answer that is not JSON.
+async function answerOf<T>(mode: ConsoleMode, response: Response): Promise<T> {
   const contentType = response.headers.get("content-type") ?? "";
   const finalURL = new URL(response.url || window.location.href, window.location.href);
   if (response.type === "opaqueredirect" ||
@@ -161,4 +167,63 @@ export function sendJSON<T>(mode: ConsoleMode, path: string, method: "POST" | "D
 // Content-Type unset for a FormData body so the browser can supply the boundary.
 export function sendForm<T>(mode: ConsoleMode, path: string, body: FormData): Promise<T> {
   return requestJSON<T>(mode, path, { method: "POST", body });
+}
+
+// A ServerSentEvent is one event of a stream the gateway sends: its name and
+// its JSON data.
+export type ServerSentEvent = { event: string; data: JSONRecord };
+
+// takeServerSentEvents splits the events a stream's text holds so far from
+// the text after them, which ends no event yet. An event whose data is not a
+// JSON object is skipped.
+export function takeServerSentEvents(text: string): { events: ServerSentEvent[]; rest: string } {
+  const records = text.replace(/\r\n/g, "\n").split("\n\n");
+  const rest = records.pop() ?? "";
+  const events: ServerSentEvent[] = [];
+  for (const record of records) {
+    let event = "message";
+    const data: string[] = [];
+    for (const line of record.split("\n")) {
+      if (line.startsWith("event:")) event = line.slice("event:".length).trim();
+      else if (line.startsWith("data:")) data.push(line.slice("data:".length).replace(/^ /, ""));
+    }
+    if (!data.length) continue;
+    try {
+      const parsed: unknown = JSON.parse(data.join("\n"));
+      if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) events.push({ event, data: parsed as JSONRecord });
+    } catch { /* Not JSON: no event the console reads. */ }
+  }
+  return { events, rest };
+}
+
+// streamEvents posts body as JSON and calls onEvent with each event of the
+// stream the answer opens, as it arrives. An answer that opens no stream
+// rejects as requestJSON's do; aborting signal ends the stream.
+export async function streamEvents(
+  mode: ConsoleMode, path: string, body: unknown,
+  onEvent: (event: ServerSentEvent) => void, signal?: AbortSignal,
+): Promise<void> {
+  const headers = new Headers({ Accept: "text/event-stream", "Content-Type": "application/json" });
+  if (mode === "admin") {
+    const key = staticAdminKey();
+    if (key) headers.set("Authorization", `Bearer ${key}`);
+  }
+  const response = await fetch(apiPath(mode, path), {
+    method: "POST", body: JSON.stringify(body), credentials: "same-origin", headers, redirect: "manual", signal,
+  });
+  if (!response.ok || !response.body || !(response.headers.get("content-type") ?? "").includes("text/event-stream")) {
+    await answerOf<JSONRecord>(mode, response);
+    throw new APIError(502, "The gateway answered without a stream.", null, "unexpected_response");
+  }
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let text = "";
+  for (;;) {
+    const { value, done } = await reader.read();
+    if (done) break;
+    text += decoder.decode(value, { stream: true });
+    const taken = takeServerSentEvents(text);
+    text = taken.rest;
+    for (const event of taken.events) onEvent(event);
+  }
 }

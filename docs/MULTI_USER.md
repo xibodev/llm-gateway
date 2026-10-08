@@ -289,6 +289,21 @@ project's limits with their usage, the budgets and allowlists that set them,
 its keys, its members, and its usage over the last 30 days. **Settings** holds
 gateway-wide options.
 
+The playground streams Chat Completions, Responses and Messages answers into
+the conversation as they arrive, unless **Stream the answer** is off or the
+catalog says the model does not stream. **Stop** ends a stream and keeps what
+arrived. A stream is routed, metered and attributed as any stream is: its usage
+is recorded under `playground.chat`, `playground.responses` or
+`playground.messages`, and a stopped one as `499` with `client_cancelled`. A
+request to `/admin/api/playground/v1/chat/completions`, `/v1/responses` or
+`/v1/messages`, or to the same paths under `/user/api/playground`, with
+`"stream": true` is answered with server-sent events: `route` as the stream
+opens, with the target that serves it and `fallback_trace`, the route members
+tried; `delta`, with each piece of `text` and `reasoning`; then `done`, with the
+answer as the request that does not stream returns it, or `error`. A request
+refused before its stream opens is answered with its error as usual. Every
+playground answer, streamed or not, names the route members it tried.
+
 ## Storage and recovery
 
 The authoritative control plane is local SQLite. No Postgres, Redis, embedded
