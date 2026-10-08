@@ -1,4 +1,4 @@
-import { useId, useMemo, useState } from "preact/hooks";
+import { useEffect, useId, useMemo, useState } from "preact/hooks";
 import { Search } from "lucide-preact";
 import type { JSONRecord } from "../lib/api";
 import { asList, asRecord, stringValue } from "../lib/records";
@@ -188,31 +188,75 @@ export function ModelFilters({ models, filter, onChange, includeCategories = tru
   );
 }
 
+// matchRank orders a model that matches needle: its id starting with it,
+// then its model name after the provider, then its label, then any word of
+// its id or label, then a match anywhere. Lower ranks first; -1 is no match.
+function matchRank(model: CatalogModel, needle: string): number {
+  const id = model.id.toLowerCase();
+  const label = model.label.toLowerCase();
+  if (!`${id} ${label}`.includes(needle)) return -1;
+  if (id.startsWith(needle)) return 0;
+  if (id.slice(id.lastIndexOf("/") + 1).startsWith(needle)) return 1;
+  if (label.startsWith(needle)) return 2;
+  if (`${id} ${label}`.split(/[\s/._:-]+/).some((word) => word.startsWith(needle))) return 3;
+  return 4;
+}
+
+// rankModels returns the models matching query, prefix matches first and
+// otherwise in the order given; an empty query matches every model.
+export function rankModels(models: CatalogModel[], query: string): CatalogModel[] {
+  const needle = query.trim().toLowerCase();
+  if (!needle) return models;
+  return models
+    .map((model, index) => ({ model, index, rank: matchRank(model, needle) }))
+    .filter((entry) => entry.rank >= 0)
+    .sort((left, right) => left.rank - right.rank || left.index - right.index)
+    .map((entry) => entry.model);
+}
+
+// modelComboPageStep is how far Page Up and Page Down move the highlight:
+// about one list's height of options.
+export const modelComboPageStep = 6;
+
 // ModelCombo is a type-ahead over the narrowed list. Nobody memorises model
-// ids, and a select of hundreds is unusable, so the input filters as you type
-// and the list is bounded.
-export function ModelCombo({ models, filter, value, onChange, label = "Model", limit = 12 }: {
+// ids, and a select of hundreds is unusable, so the input filters as you
+// type, prefix matches first. The list renders pageSize options at a time
+// and more as it is scrolled or the highlight moves past them, so even a
+// catalog of thousands can be scrolled through to its end.
+export function ModelCombo({ models, filter, value, onChange, label = "Model", pageSize = 50 }: {
   models: CatalogModel[];
   filter: ModelFilterState;
   value: string;
   onChange: (modelID: string) => void;
   label?: string;
-  limit?: number;
+  pageSize?: number;
 }) {
   const [query, setQuery] = useState("");
   const [open, setOpen] = useState(false);
   const [active, setActive] = useState(0);
+  const [visible, setVisible] = useState(pageSize);
   // ARIA 1.2 combobox: focus stays on the input, which names the highlighted
   // option through aria-activedescendant, so the listbox and options need ids.
   const listID = useId();
   const pool = filterModels(models, filter).filter((model) => !model.disabled);
-  const needle = query.trim().toLowerCase();
-  const suggestions = (needle
-    ? pool.filter((model) => `${model.id} ${model.label}`.toLowerCase().includes(needle))
-    : pool).slice(0, limit);
-  const expanded = open && suggestions.length > 0;
+  const matches = rankModels(pool, query);
+  const shown = matches.slice(0, visible);
+  const current = Math.min(active, Math.max(matches.length - 1, 0));
+  const expanded = open && matches.length > 0;
   const optionID = (index: number) => `${listID}-option-${index}`;
-  const commit = (modelID: string) => { onChange(modelID); setQuery(""); setOpen(false); setActive(0); };
+  const commit = (modelID: string) => { onChange(modelID); setQuery(""); setOpen(false); setActive(0); setVisible(pageSize); };
+  // move highlights the option at index, within the matches, rendering
+  // enough of the list to hold it.
+  const move = (index: number) => {
+    const next = Math.max(0, Math.min(index, matches.length - 1));
+    setActive(next);
+    if (next >= visible) setVisible(Math.min(matches.length, (Math.floor(next / pageSize) + 1) * pageSize));
+  };
+  // The highlighted option stays in view as the keyboard moves it.
+  useEffect(() => {
+    if (!expanded || typeof document === "undefined") return;
+    document.getElementById(optionID(current))?.scrollIntoView({ block: "nearest" });
+  }, [current, expanded]);
 
   return (
     <div class="model-combo">
@@ -222,31 +266,50 @@ export function ModelCombo({ models, filter, value, onChange, label = "Model", l
           aria-autocomplete="list"
           aria-expanded={expanded}
           aria-controls={listID}
-          aria-activedescendant={expanded && suggestions[active] ? optionID(active) : undefined}
+          aria-activedescendant={expanded && shown[current] ? optionID(current) : undefined}
           value={open ? query : value}
           placeholder={pool.length ? "Type to search models…" : "No model matches these filters"}
           disabled={!pool.length}
-          onFocus={() => { setOpen(true); setQuery(""); }}
+          onFocus={() => { setOpen(true); setQuery(""); setActive(0); setVisible(pageSize); }}
           onBlur={() => window.setTimeout(() => setOpen(false), 140)}
-          onInput={(event) => { setQuery((event.currentTarget as HTMLInputElement).value); setOpen(true); setActive(0); }}
+          onInput={(event) => { setQuery((event.currentTarget as HTMLInputElement).value); setOpen(true); setActive(0); setVisible(pageSize); }}
           onKeyDown={(event) => {
-            if (event.key === "ArrowDown") { event.preventDefault(); if (open) setActive((index) => Math.min(index + 1, suggestions.length - 1)); else { setOpen(true); setActive(0); } }
-            else if (event.key === "ArrowUp") { event.preventDefault(); setActive((index) => Math.max(index - 1, 0)); }
-            else if (event.key === "Enter" && expanded && suggestions[active]) { event.preventDefault(); commit(suggestions[active].id); }
+            const keys: Record<string, () => void> = {
+              ArrowDown: () => { if (open) move(current + 1); else { setOpen(true); setActive(0); } },
+              ArrowUp: () => move(current - 1),
+              PageDown: () => move(current + modelComboPageStep),
+              PageUp: () => move(current - modelComboPageStep),
+              Home: () => move(0),
+              End: () => move(matches.length - 1),
+            };
+            if (keys[event.key] && (open || event.key === "ArrowDown")) { event.preventDefault(); keys[event.key](); }
+            else if (event.key === "Enter" && expanded && shown[current]) { event.preventDefault(); commit(shown[current].id); }
             else if (event.key === "Escape") { setOpen(false); }
           }}
         />
       </label>
-      <ul id={listID} class="model-combo__list" role="listbox" aria-label={label} hidden={!expanded}>
-        {expanded ? suggestions.map((model, index) => {
+      <ul
+        id={listID}
+        class="model-combo__list"
+        role="listbox"
+        aria-label={label}
+        hidden={!expanded}
+        onScroll={(event) => {
+          const list = event.currentTarget as HTMLUListElement;
+          if (list.scrollTop + list.clientHeight >= list.scrollHeight - 48) setVisible((count) => Math.min(count + pageSize, matches.length));
+        }}
+      >
+        {expanded ? shown.map((model, index) => {
           const isFree = model.free;
           return (
             <li
               key={model.id}
               id={optionID(index)}
-              class={index === active ? "is-active" : ""}
+              class={index === current ? "is-active" : ""}
               role="option"
-              aria-selected={index === active}
+              aria-selected={index === current}
+              aria-setsize={matches.length}
+              aria-posinset={index + 1}
               onMouseDown={(event) => { event.preventDefault(); commit(model.id); }}
             >
               <div style={{ display: "flex", alignItems: "center", gap: "6px", width: "100%" }}>
@@ -257,7 +320,7 @@ export function ModelCombo({ models, filter, value, onChange, label = "Model", l
             </li>
           );
         }) : null}
-        {expanded && pool.length > suggestions.length ? <li class="model-combo__more" role="presentation">{pool.length - suggestions.length} more — keep typing to narrow</li> : null}
+        {expanded && matches.length > shown.length ? <li class="model-combo__more" role="presentation">{shown.length} of {matches.length} matches — scroll for more</li> : null}
       </ul>
     </div>
   );
