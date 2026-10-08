@@ -31,7 +31,7 @@ test("focus rings are opaque, shown on search fields, and reach 3:1 in both them
 test("the model picker is an ARIA 1.2 combobox over a listbox of options", () => {
   const models = picker.catalogModels({ data: ["a/one", "a/two", "a/three"].map((id) => ({ id, owned_by: "a" })) });
   let chosen = "";
-  const render = mount(() => picker.ModelCombo({ models, filter: picker.emptyModelFilter, value: "", onChange: (id) => { chosen = id; }, limit: 2 }));
+  const render = mount(() => picker.ModelCombo({ models, filter: picker.emptyModelFilter, value: "", onChange: (id) => { chosen = id; }, pageSize: 2 }));
   const view = () => {
     const tree = render();
     return {
