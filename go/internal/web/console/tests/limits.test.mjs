@@ -19,7 +19,7 @@ test("the requests page names the limit that refused a request", async () => {
       { id: 1, ts: 1, request_id: "req_failed", endpoint: "chat", status_code: 502, error_code: "upstream" },
     ], next_before_id: 0 };
   } };
-  const render = mount(() => Requests({ data: { keys: [], projects: [] }, mode: "admin" }));
+  const render = mount(() => Requests({ data: { projects: [] }, mode: "admin" }));
   render();
   await settle();
   const tree = render();
@@ -104,14 +104,13 @@ const isLimitsDialog = (node) => typeof node.type === "function" && node.props?.
 test("every key in the list opens its limits", async () => {
   const data = {
     projects: [{ id: "project-1", name: "Project one", status: "active" }],
-    principals: [{ id: "user-1", kind: "human", status: "active", display_name: "Ada" }],
-    memberships: [{ project_id: "project-1", principal_id: "user-1", role: "owner", status: "active" }],
-    keys: [
-      { id: "key-1", name: "ci", status: "active", project_id: "project-1", principal_id: "user-1" },
-      { id: "key-2", name: "old", status: "revoked", project_id: "project-1", principal_id: "user-1" },
-    ],
+    memberships: [{ project_id: "project-1", principal_id: "user-1", role: "owner", principal_name: "Ada", principal_kind: "human", principal_status: "active" }],
+    counts: { keys: 2 },
   };
-  const listing = fakeKeyListing(data.keys);
+  const listing = fakeKeyListing([
+    { id: "key-1", name: "ci", status: "active", project_id: "project-1", principal_id: "user-1" },
+    { id: "key-2", name: "old", status: "revoked", project_id: "project-1", principal_id: "user-1" },
+  ]);
   globalThis.__api = { async getJSON(mode, path) { return path.startsWith("/keys?") ? listing.answer(path) : report; }, async sendJSON() { return {}; } };
   const render = mount(() => ApiKeys({ data, mode: "admin", onChanged: async () => {} }));
   render();

@@ -12,6 +12,7 @@ import {
 } from "lucide-preact";
 import { sendJSON, type JSONRecord } from "../../lib/api";
 import type { ConsoleMode } from "../../lib/mode";
+import { principalSearch } from "../../lib/directory";
 import { asList, asRecord, numberValue, stringValue } from "../../lib/records";
 import { useDialogFocus } from "../useDialogFocus";
 
@@ -58,13 +59,13 @@ export function OAuthConnectDialog({
   onComplete: () => Promise<void>;
   onOpenPlayground?: (modelID: string, ownerID: string) => void;
 }) {
-  const owners = asList(data.principals)
-    .map(asRecord)
-    .filter(
-      (principal) =>
-        stringValue(principal.kind) === "human" &&
-        stringValue(principal.status, "active") === "active",
-    );
+  // The owner is named by the server; until it answers, by its ID.
+  const [ownerName, setOwnerName] = useState(ownerID);
+  useEffect(() => {
+    setOwnerName(ownerID);
+    if (mode !== "admin" || !ownerID) return;
+    principalSearch(mode, {}).resolve(ownerID).then((name) => setOwnerName(name ?? ownerID)).catch(() => { /* The ID names the owner. */ });
+  }, [mode, ownerID]);
   const [connectionName, setConnectionName] = useState("personal");
   const [clientID, setClientID] = useState("");
   const [clientSecret, setClientSecret] = useState("");
@@ -373,7 +374,7 @@ export function OAuthConnectDialog({
           <div class="oauth-flow">
             {mode === "admin" ? (
               <p class="oauth-flow__notice">
-                Human owner: {stringValue(owners.find((owner) => stringValue(owner.id) === ownerID)?.display_name, ownerID)}
+                Human owner: {ownerName}
               </p>
             ) : (
               <p class="oauth-flow__notice">

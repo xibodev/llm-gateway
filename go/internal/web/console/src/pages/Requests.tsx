@@ -6,7 +6,8 @@ import { errorCodeLabel } from "../lib/limits";
 import type { ConsoleMode } from "../lib/mode";
 import { asList, asRecord, numberValue, stringValue } from "../lib/records";
 import { EmptyState, ErrorState, LoadingState, PageHeading } from "../components/PageState";
-import { SearchSelect } from "../components/DataTable";
+import { RemoteSearchSelect, SearchSelect } from "../components/DataTable";
+import { keySearch } from "../lib/directory";
 
 // Requests lists the requests the gateway recorded, newest first, with the
 // failover chains it kept, so an operator can find what happened to the
@@ -28,9 +29,7 @@ export function Requests({ data, mode }: { data: JSONRecord; mode: ConsoleMode }
   const search = useRef(0);
   const providerIDs = portal ? usedProviders : asList(data.providers).map((item) => stringValue(asRecord(item).id));
   if (draft.provider !== "all" && !providerIDs.includes(draft.provider)) providerIDs.push(draft.provider);
-  const keys = asList(data.keys).map(asRecord);
   const projects = asList(data.projects).map(asRecord);
-  const keyNames = new Map(keys.map((key) => [stringValue(key.id), stringValue(key.name, stringValue(key.prefix))]));
   const projectNames = new Map(projects.map((project) => [stringValue(project.id), stringValue(project.name, stringValue(project.slug))]));
 
   const load = async (filter: RequestFilter, beforeID = 0) => {
@@ -70,7 +69,7 @@ export function Requests({ data, mode }: { data: JSONRecord; mode: ConsoleMode }
         <label>Status<select value={draft.status} onInput={update("status")}><option value="all">All statuses</option><option value="ok">Succeeded</option><option value="error">Failed</option></select></label>
         <label>Provider<select value={draft.provider} onInput={update("provider")}><option value="all">All providers</option>{providerIDs.map((id) => <option value={id} key={id}>{id}</option>)}</select></label>
         <label>Model<input value={draft.model} onInput={update("model")} placeholder="Exact routed model" /></label>
-        <SearchSelect label="Key" noun="keys" value={draft.keyID} options={[{ value: "all", label: "All keys" }, ...keys.map((key) => ({ value: stringValue(key.id), label: stringValue(key.name, stringValue(key.prefix)) }))]} onChange={(keyID) => setDraft((current) => ({ ...current, keyID }))} />
+        <RemoteSearchSelect label="Key" noun="keys" value={draft.keyID === "all" ? "" : draft.keyID} emptyLabel="All keys" {...keySearch(mode, {})} onChange={(keyID) => setDraft((current) => ({ ...current, keyID: keyID || "all" }))} />
         <SearchSelect label="Project" noun="projects" value={draft.projectID} options={[{ value: "all", label: "All projects" }, ...projects.map((project) => ({ value: stringValue(project.id), label: stringValue(project.name, stringValue(project.slug)) }))]} onChange={(projectID) => setDraft((current) => ({ ...current, projectID }))} />
         <label>Request ID<input value={draft.requestID} onInput={update("requestID")} placeholder="req_…" /></label>
         <button class="button button--primary" type="submit" disabled={busy}>Search</button>
@@ -91,7 +90,7 @@ export function Requests({ data, mode }: { data: JSONRecord; mode: ConsoleMode }
                 <td>{stringValue(row.endpoint)}</td>
                 <td class="technical">{modelSummary(row)}</td>
                 <td>{stringValue(row.provider, "—")}</td>
-                <td>{keyID ? stringValue(row.key_name) || (keyNames.get(keyID) ?? keyID) : projectID ? projectNames.get(projectID) ?? projectID : portal ? "Portal" : "Administrator or local"}</td>
+                <td>{keyID ? stringValue(row.key_name, keyID) : projectID ? projectNames.get(projectID) ?? projectID : portal ? "Portal" : "Administrator or local"}</td>
                 <td><span class={`status-pill status-pill--${statusTone(status)}`} title={stringValue(row.error_code) || undefined}>{status}{stringValue(row.error_code) ? ` ${errorCodeLabel(stringValue(row.error_code))}` : ""}</span></td>
                 <td>{numberValue(row.latency_ms).toLocaleString()} ms</td>
                 <td>{tokenSummary(row)}</td>

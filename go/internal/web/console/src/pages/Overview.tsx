@@ -4,6 +4,7 @@ import type { PageID } from "../lib/navigation";
 import { asList, asRecord, endpointsOf, numberValue } from "../lib/records";
 import { PageHeading } from "../components/PageState";
 import { GetStartedGuide } from "../components/GetStartedGuide";
+import { keyCount } from "../lib/directory";
 
 function Metric({ icon, label, value, detail, onOpen }: { icon: preact.ComponentChildren; label: string; value: string; detail: string; onOpen?: () => void }) {
   if (!onOpen) {
@@ -22,7 +23,7 @@ type NextStep = {
 function nextStepFor(data: JSONRecord, mode: "admin" | "portal"): NextStep {
   const providers = asList(data.providers).map(asRecord);
   const connections = asList(data.provider_connections);
-  const keys = asList(data.keys);
+  const keys = keyCount(data);
   const projects = asList(data.projects);
   const routes = Object.keys(endpointsOf(data));
 
@@ -35,7 +36,7 @@ function nextStepFor(data: JSONRecord, mode: "admin" | "portal"): NextStep {
         page: "settings",
       };
     }
-    if (!keys.length) {
+    if (!keys) {
       return {
         title: "Create an API key",
         detail: "Issue a project-scoped gateway key for your coding CLI.",
@@ -85,7 +86,7 @@ function nextStepFor(data: JSONRecord, mode: "admin" | "portal"): NextStep {
       page: "routes",
     };
   }
-  if (!keys.length) {
+  if (!keys) {
     return {
       title: "Create an API key",
       detail: "Issue a project-scoped gateway key before connecting a coding CLI.",
@@ -103,7 +104,7 @@ function nextStepFor(data: JSONRecord, mode: "admin" | "portal"): NextStep {
 
 export function Overview({ data, mode, onNavigate }: { data: JSONRecord; mode: "admin" | "portal"; onNavigate: (page: PageID, detail?: string) => void }) {
   const providers = asList(data.providers);
-  const keys = asList(data.keys);
+  const keys = keyCount(data);
   const connections = asList(data.provider_connections);
   const endpoints = endpointsOf(data);
   const projects = asList(data.projects);
@@ -123,7 +124,7 @@ export function Overview({ data, mode, onNavigate }: { data: JSONRecord; mode: "
       <section class="metric-grid">
         <Metric icon={<Plug size={19} />} label={isPortal ? "Private connections" : "Configured providers"} value={String(totalProviders)} detail="Current connection records" onOpen={() => onNavigate("providers")} />
         <Metric icon={<Route size={19} />} label={isPortal ? "Projects" : "Fallback routes"} value={String(routes)} detail="Available routing scopes" onOpen={() => onNavigate(isPortal ? "settings" : "routes")} />
-        <Metric icon={<KeyRound size={19} />} label="API keys" value={String(keys.length)} detail="Lifecycle managed keys" onOpen={() => onNavigate("keys")} />
+        <Metric icon={<KeyRound size={19} />} label="API keys" value={String(keys)} detail="Lifecycle managed keys" onOpen={() => onNavigate("keys")} />
         <Metric icon={<Activity size={19} />} label="Gateway status" value="Ready" detail="Local console is connected" onOpen={() => onNavigate("usage")} />
       </section>
       <section class="surface surface--split">

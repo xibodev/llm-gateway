@@ -40,7 +40,7 @@ test("the alerts page lists deliveries, filters them and pages back", async () =
       };
     },
   };
-  const data = { projects: [{ id: "project-1", name: "Project one" }], principals: [] };
+  const data = { projects: [{ id: "project-1", name: "Project one" }] };
   const render = mount(() => Alerts({ data }));
   render();
   await settle();

@@ -4,6 +4,8 @@ import { sendForm, sendJSON, type JSONRecord } from "../../lib/api";
 import type { ConsoleMode } from "../../lib/mode";
 import { asList, asRecord, numberValue, stringValue } from "../../lib/records";
 import { circuitSummary, openCircuitsOf } from "../../lib/limits";
+import { principalSearch } from "../../lib/directory";
+import { RemoteSearchSelect } from "../DataTable";
 import { ProviderMark } from "../ProviderMark";
 import { EmptyState, PageHeading } from "../PageState";
 import { useDialogFocus } from "../useDialogFocus";
@@ -476,8 +478,6 @@ export function ProviderHub({ data, mode, onChanged, onOpenDetail, onOpenPlaygro
   // The configured providers the companion daemon serves, which the
   // administrator's state names.
   const daemonProviders = new Set(asList(data.companion_daemon_providers).map((providerID) => stringValue(providerID)));
-  // Names of the principals whose requests an open circuit refuses.
-  const principalNames = new Map(asList(data.principals).map(asRecord).map((principal) => [stringValue(principal.id), stringValue(principal.display_name, stringValue(principal.id))]));
   const closeExpansion = () => {
     const trigger = Array.from(shelfRef.current?.querySelectorAll<HTMLButtonElement>("[data-provider-trigger]") ?? []).find((button) => button.dataset.providerTrigger === expanded);
     setExpanded("");
@@ -498,10 +498,7 @@ export function ProviderHub({ data, mode, onChanged, onOpenDetail, onOpenPlaygro
   const [detectBusy, setDetectBusy] = useState(false);
   const [detectResult, setDetectResult] = useState<ActionResult>(null);
   const [localCandidates, setLocalCandidates] = useState<JSONRecord[]>([]);
-  const owners = asList(data.principals)
-    .map(asRecord)
-    .filter((principal) => stringValue(principal.kind) === "human" && stringValue(principal.status, "active") === "active");
-  const [ownerID, setOwnerID] = useState(stringValue(owners[0]?.id));
+  const [ownerID, setOwnerID] = useState(stringValue(asRecord(data.default_owner).id));
   const { busy, setBusy, result, setResult, runLifecycle } = useProviderLifecycle(ownerID, onChanged);
   const registry = asList(data.provider_registry).map(asRecord);
   const statuses = asList(data.provider_statuses).map(asRecord);
@@ -713,17 +710,7 @@ export function ProviderHub({ data, mode, onChanged, onOpenDetail, onOpenPlaygro
         actions={
           mode === "admin" ? (
             <>
-              <label class="owner-select">
-                Catalog owner
-                <select value={ownerID} onInput={(event) => setOwnerID((event.currentTarget as HTMLSelectElement).value)}>
-                  <option value="">No private owner selected</option>
-                  {owners.map((owner) => (
-                    <option value={stringValue(owner.id)} key={stringValue(owner.id)}>
-                      {stringValue(owner.display_name, stringValue(owner.email, stringValue(owner.id)))}
-                    </option>
-                  ))}
-                </select>
-              </label>
+              <RemoteSearchSelect class="owner-select" label="Catalog owner" noun="owners" value={ownerID} emptyLabel="No private owner selected" {...principalSearch(mode, { kinds: ["human"], status: "active" })} onChange={setOwnerID} />
               <button class="button button--secondary" type="button" disabled={autoConnectBusy} onClick={() => void autoConnectFree()}>
                 {autoConnectBusy ? <LoaderCircle class="spin" size={16} /> : <Zap size={16} />} {autoConnectBusy ? "Connecting…" : "Auto-connect Free"}
               </button>
@@ -957,7 +944,7 @@ export function ProviderHub({ data, mode, onChanged, onOpenDetail, onOpenPlaygro
                         {openCircuits.length ? (
                           <div>
                             <dt>Circuit</dt>
-                            <dd>{circuitSummary(openCircuits, (principalID) => mode === "portal" ? "your requests" : `${principalNames.get(principalID) ?? principalID}'s requests`)}</dd>
+                            <dd>{circuitSummary(openCircuits, (principalID) => mode === "portal" ? "your requests" : `${stringValue(openCircuits.find((circuit) => stringValue(circuit.principal_id) === principalID)?.principal_name, principalID)}'s requests`)}</dd>
                           </div>
                         ) : null}
                       </dl>

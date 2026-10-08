@@ -1,10 +1,11 @@
 import type { JSONRecord } from "./api";
-import { asList, asRecord, stringValue } from "./records";
+import { keyLabel, keysPath } from "./directory";
+import { asList, asRecord, numberValue } from "./records";
 
 export type RouteSavePlan =
   | { kind: "refused"; message: string }
   | { kind: "create" | "update"; name: string }
-  | { kind: "rename"; name: string; from: string; grantedKeys: string[] };
+  | { kind: "rename"; name: string; from: string };
 
 export type RouteRequest = (path: string, method: "POST" | "DELETE", body?: unknown) => Promise<unknown>;
 
@@ -14,7 +15,7 @@ const sameRouteName = (left: string, right: string) => left.toLowerCase() === ri
 // keyed on the name, and the server compares names without letter case, so a
 // rename is a create plus a delete of the original, and neither a new route nor
 // a rename may land on a name another route already uses.
-export function planRouteSave(originalName: string, draftName: string, routeNames: string[], keys: JSONRecord[]): RouteSavePlan {
+export function planRouteSave(originalName: string, draftName: string, routeNames: string[]): RouteSavePlan {
   const name = draftName.trim();
   if (originalName && name === originalName) return { kind: "update", name };
   if (originalName && sameRouteName(name, originalName)) {
@@ -27,23 +28,25 @@ export function planRouteSave(originalName: string, draftName: string, routeName
       : `A route named ${taken} already exists. Edit it from the route list, or choose a different name.` };
   }
   if (!originalName) return { kind: "create", name };
-  return { kind: "rename", name, from: originalName, grantedKeys: keysNamingRoute(keys, originalName) };
+  return { kind: "rename", name, from: originalName };
 }
 
-// keysNamingRoute lists unrevoked keys whose grants name a route. Grants store
-// route names, so they keep naming the old route after a rename.
-export function keysNamingRoute(keys: JSONRecord[], route: string): string[] {
-  return keys.filter((key) => {
-    if (stringValue(key.status) === "revoked") return false;
-    // Admin state flattens a key's policy; portal state nests it.
-    const policy = key.policy ? asRecord(key.policy) : key;
-    return [...asList(policy.allowed_routes), ...asList(policy.allowed_models)].map(String).includes(route);
-  }).map((key) => stringValue(key.name, stringValue(key.prefix, stringValue(key.id))));
+// GrantedKeys are the unrevoked keys whose grants name a route: the names of
+// the first few, and how many there are in all.
+export type GrantedKeys = { names: string[]; total: number };
+
+// keysGrantingRoute asks the server for the unrevoked keys whose allowed
+// routes or allowed models name a route. Grants store route names, so they
+// keep naming the old route after a rename.
+export async function keysGrantingRoute(load: (path: string) => Promise<JSONRecord>, route: string): Promise<GrantedKeys> {
+  const payload = await load(keysPath({ grant: route, status: "unrevoked", limit: 5 }));
+  return { names: asList(payload.keys).map(asRecord).map(keyLabel), total: numberValue(payload.total) };
 }
 
-export function renameConfirmation(plan: { name: string; from: string; grantedKeys: string[] }): string {
-  const count = plan.grantedKeys.length;
-  const shown = plan.grantedKeys.slice(0, 5).join(", ") + (count > 5 ? `, and ${count - 5} more` : "");
+export function renameConfirmation(plan: { name: string; from: string }, granted: GrantedKeys): string {
+  const count = granted.total;
+  const unnamed = count - granted.names.length;
+  const shown = granted.names.join(", ") + (unnamed > 0 ? `, and ${unnamed} more` : "");
   const keys = count
     ? `${count} API key${count === 1 ? " names" : "s name"} ${plan.from} in ${count === 1 ? "its" : "their"} grants (${shown}). Grants are not moved: until ${count === 1 ? "that key is" : "those keys are"} updated on the API keys page, ${count === 1 ? "it" : "they"} cannot call ${plan.name}.`
     : `No API key names ${plan.from} in its grants.`;

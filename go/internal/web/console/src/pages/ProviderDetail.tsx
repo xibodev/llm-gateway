@@ -9,7 +9,8 @@ import { ProviderMark } from "../components/ProviderMark";
 import { EmptyState, LoadingState, PageHeading } from "../components/PageState";
 import { OAuthConnectDialog } from "../components/providers/OAuthConnectDialog";
 import { Pager, defaultPageSize } from "../components/ModelPicker";
-import { SearchSelect, dataTable, useTableView, type TableColumn } from "../components/DataTable";
+import { RemoteSearchSelect, dataTable, useTableView, type TableColumn } from "../components/DataTable";
+import { principalSearch } from "../lib/directory";
 import { ConnectDialog, PrivateAPIKeyDialog } from "../components/providers/ProviderHub";
 import { RosterMetadata, configuredInstanceFor, rosterSetupEntry, rosterSetupUnavailableReason, useProviderRoster } from "../components/providers/ProviderRoster";
 import {
@@ -99,8 +100,7 @@ export function ProviderDetail({ entryID, data, mode, onChanged, onBack, onOpenP
 
   const entry = useMemo(() => ({ ...(registryEntry ?? {}), ...(statusEntry ?? {}) }), [registryEntry, statusEntry]);
 
-  const owners = asList(data.principals).map(asRecord).filter((principal) => stringValue(principal.kind) === "human" && stringValue(principal.status, "active") === "active");
-  const [ownerID, setOwnerID] = useState(stringValue(owners[0]?.id));
+  const [ownerID, setOwnerID] = useState(stringValue(asRecord(data.default_owner).id));
   const { busy, result, setResult, runLifecycle } = useProviderLifecycle(ownerID, onChanged);
   const [connectOpen, setConnectOpen] = useState(false);
   const [zenAPIKey, setZenAPIKey] = useState(false);
@@ -138,10 +138,12 @@ export function ProviderDetail({ entryID, data, mode, onChanged, onBack, onOpenP
 
   const connections = asList(data.provider_connections).map(asRecord)
     .filter((connection) => providerIDs.includes(stringValue(connection.provider_id)));
-  const principalName = (id: string) => {
-    const principal = asList(data.principals).map(asRecord).find((candidate) => stringValue(candidate.id) === id);
-    return principal ? stringValue(principal.display_name, id) : id;
-  };
+  // Connections and open circuits name the principal they belong to.
+  const principalNames = new Map<string, string>();
+  for (const row of [...connections, ...openCircuitsOf(instances)]) {
+    if (stringValue(row.principal_name)) principalNames.set(stringValue(row.principal_id), stringValue(row.principal_name));
+  }
+  const principalName = (id: string) => principalNames.get(id) ?? id;
   // A user sees only the circuit of their own requests.
   const circuitCaller = (id: string) => mode === "portal" ? "your requests" : `${principalName(id)}'s requests`;
   const openCircuits = openCircuitsOf(instances);
@@ -257,7 +259,7 @@ export function ProviderDetail({ entryID, data, mode, onChanged, onBack, onOpenP
           {openCircuits.length ? <p class="form-help" role="status"><span class="status-pill status-pill--attention">Circuit open</span> {circuitSummary(openCircuits, circuitCaller)}</p> : null}
         </div>
         {mode === "admin" && !isClient && !unavailable ? <div class="detail-heading__actions">
-          {supportsOAuth || configured ? <SearchSelect class="owner-select" label="Catalog owner" noun="owners" value={ownerID} options={[{ value: "", label: "No private owner selected" }, ...owners.map((owner) => ({ value: stringValue(owner.id), label: stringValue(owner.display_name, stringValue(owner.id)) }))]} onChange={setOwnerID} /> : null}
+          {supportsOAuth || configured ? <RemoteSearchSelect class="owner-select" label="Catalog owner" noun="owners" value={ownerID} emptyLabel="No private owner selected" {...principalSearch(mode, { kinds: ["human"], status: "active" })} onChange={setOwnerID} /> : null}
           {supportsOAuth ? <button class="button button--primary" type="button" disabled={!ownerID || !oauthProviderID} title={!oauthProviderID ? "Multiple instances are configured for this integration; resolve to a single instance before adding an OAuth account." : undefined} onClick={() => setOAuthOpen(true)}><Plug size={15} /> Add account</button> : isZen ? <><button class="button button--primary" type="button" onClick={() => { setZenAPIKey(false); setConnectOpen(true); }}><Plug size={15} /> {configured ? "Edit anonymous connection" : "Connect anonymously"}</button><button class="button button--secondary" type="button" onClick={() => { setZenAPIKey(true); setConnectOpen(true); }}><ShieldCheck size={15} /> Connect with API key</button></> : <button class="button button--primary" type="button" disabled={Boolean(candidateReason)} title={candidateReason || undefined} onClick={() => setConnectOpen(true)}><Plug size={15} /> {configured ? "Edit configuration" : "Connect"}</button>}
         </div> : mode === "portal" && !isClient && !unavailable ? <div class="detail-heading__actions">
           {supportsOAuth || configured ? <button class="button button--primary" type="button" disabled={supportsOAuth ? !oauthProviderID : providerIDs.length !== 1} title={supportsOAuth ? (!oauthProviderID ? "Multiple instances are configured for this integration; resolve to a single instance before adding an OAuth account." : undefined) : (providerIDs.length > 1 ? "Multiple instances are configured for this integration; ask an administrator to add a private connection for a specific instance." : undefined)} onClick={() => (supportsOAuth ? setOAuthOpen(true) : setPrivateKeyOpen(true))}><Plug size={15} /> {connections.length ? "Add or replace account" : "Connect"}</button> : <span class="provider-card__meta">Administrator setup required</span>}

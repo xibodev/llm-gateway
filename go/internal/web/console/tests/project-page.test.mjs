@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { fileURLToPath } from "node:url";
 import test from "node:test";
 import { bundle, find, findAll, mount, settle, text } from "./hook-harness.mjs";
+import { fakeKeyListing } from "./key-listing.mjs";
 
 const stubs = [
   { filter: /\/lib\/api$/, contents: "export const getJSON = (...args) => globalThis.__api.getJSON(...args); export const sendJSON = (...args) => globalThis.__api.sendJSON(...args);" },
@@ -13,20 +14,20 @@ const { Settings } = await bundle(fileURLToPath(new URL("../src/pages/Settings.t
 
 const data = {
   projects: [{ id: "prj 1", name: "Research", slug: "research", status: "active" }, { id: "prj-2", name: "Other", slug: "other", status: "active" }],
-  principals: [
-    { id: "prn-ada", kind: "human", display_name: "Ada", status: "active" },
-    { id: "prn-bot", kind: "service", display_name: "Batch", status: "active" },
-  ],
+  // Memberships name their principal, and the state counts keys and
+  // principals rather than listing them.
   memberships: [
-    { project_id: "prj 1", principal_id: "prn-ada", role: "owner" },
-    { project_id: "prj-2", principal_id: "prn-bot", role: "member" },
+    { project_id: "prj 1", principal_id: "prn-ada", role: "owner", principal_name: "Ada", principal_kind: "human", principal_status: "active" },
+    { project_id: "prj-2", principal_id: "prn-bot", role: "member", principal_name: "Batch", principal_kind: "service", principal_status: "active" },
   ],
-  keys: [
-    { id: "key-1", name: "notebook", prefix: "llmgw_ab", project_id: "prj 1", principal_id: "prn-ada", status: "active", last_used_at: 1798783140 },
-    { id: "key-2", name: "retired", prefix: "llmgw_cd", project_id: "prj 1", principal_id: "prn-ada", status: "revoked" },
-    { id: "key-3", name: "elsewhere", prefix: "llmgw_ef", project_id: "prj-2", principal_id: "prn-bot", status: "active" },
-  ],
+  counts: { keys: 3, principals: 2, active_principals: 2, active_humans: 1, project_owners: 1 },
 };
+// The key listing serves the project's keys, each naming its owner.
+const keys = [
+  { id: "key-1", name: "notebook", prefix: "llmgw_ab", project_id: "prj 1", principal_id: "prn-ada", principal: "Ada", status: "active", last_used_at: 1798783140 },
+  { id: "key-2", name: "retired", prefix: "llmgw_cd", project_id: "prj 1", principal_id: "prn-ada", principal: "Ada", status: "revoked" },
+  { id: "key-3", name: "elsewhere", prefix: "llmgw_ef", project_id: "prj-2", principal_id: "prn-bot", principal: "Batch", status: "active" },
+];
 const limits = [{ scope: "project", field: "daily_requests", metric: "requests", period: "day", limit: 100, used: 40, resets_at: 1798761600, closest: true }];
 const usage = {
   series: [{ start: 1, requests: 30, errors: 2, input_tokens: 1000, output_tokens: 500, cost_microusd: 2_000_000 }, { start: 2, requests: 10, errors: 0, input_tokens: 0, output_tokens: 0, cost_microusd: 0 }],
@@ -36,8 +37,9 @@ const usage = {
 function fakeAPI() {
   const paths = [];
   const sent = [];
+  const listing = fakeKeyListing(keys);
   globalThis.__api = {
-    async getJSON(mode, path) { paths.push(`${mode} ${path}`); return path.includes("/limits") ? { limits } : usage; },
+    async getJSON(mode, path) { paths.push(`${mode} ${path}`); if (path.startsWith("/keys?")) return listing.answer(path); return path.includes("/limits") ? { limits } : usage; },
     async sendJSON(mode, path, method) { sent.push(`${method} ${path}`); return {}; },
   };
   return { paths, sent };
@@ -56,6 +58,7 @@ test("a project's page shows its limits, keys, members and usage", async () => {
   const usagePath = new URLSearchParams(paths[1].split("?")[1]);
   assert.equal(usagePath.get("project_id"), "prj 1");
   assert.equal(Number(usagePath.get("to")) - Number(usagePath.get("from")), 30 * 24 * 60 * 60);
+  assert.equal(paths[2], "admin /keys?status=all&project_id=prj+1&limit=25", "the server pages the project's keys, of every status");
 
   const table = find(tree, (node) => typeof node.type === "function" && Array.isArray(node.props?.limits));
   assert.deepEqual(table.props.limits, limits, "the project's limits are shown with their usage");

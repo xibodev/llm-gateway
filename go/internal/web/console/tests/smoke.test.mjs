@@ -555,9 +555,11 @@ test("overview shows an evidence-driven first-run guide for admins", () => {
   assert.match(overview, /\{!isPortal \? <GetStartedGuide/);
   assert.match(guide, /Create a human owner/);
   assert.match(guide, /hasProjectOwner/);
-  assert.match(guide, /role === "owner" \|\| role === "admin"/);
-  assert.match(guide, /activeHumanIDs\.has/);
-  assert.match(guide, /activeProjectIDs\.has/);
+  // The state counts the active people, those who own or administer an
+  // active project, and the keys, so the guide reads its steps from them.
+  assert.match(guide, /counts\.active_humans/);
+  assert.match(guide, /counts\.project_owners/);
+  assert.match(guide, /keyCount\(data\)/);
   assert.match(guide, /Verify inference with a test completion/);
   assert.match(guide, /Mint a project API key/);
   assert.match(guide, /last_verified_at/);

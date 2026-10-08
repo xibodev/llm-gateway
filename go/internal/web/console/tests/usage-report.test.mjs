@@ -56,7 +56,7 @@ test("the usage page totals the filtered series and keeps bucket choices the ser
       };
     },
   };
-  const render = mount(() => UsageQuotas({ data: { providers: [], keys: [], projects: [] }, mode: "admin" }));
+  const render = mount(() => UsageQuotas({ data: { providers: [], projects: [] }, mode: "admin" }));
   render();
   await settle();
   let tree = render();
@@ -96,12 +96,12 @@ test("the usage chart shows the chosen metric and the breakdown names its rows",
         series: [{ start, requests: 3, errors: 1, input_tokens: 100, output_tokens: 20, cost_microusd: 1500000 }],
         control_plane: { groups: {
           provider: [{ provider: "openai", requests: 3, errors: 1, input_tokens: 100, output_tokens: 20, cost_microusd: 1500000, average_latency_ms: 812 }],
-          key: [{ key_id: "k1", requests: 2 }, { key_id: "", requests: 1 }, { key_id: "k-deleted", key_name: "retired key", requests: 1 }],
+          key: [{ key_id: "k1", key_name: "ci key", requests: 2 }, { key_id: "", requests: 1 }, { key_id: "k-deleted", key_name: "retired key", requests: 1 }],
         } },
       };
     },
   };
-  const render = mount(() => UsageQuotas({ data: { providers: [], keys: [{ id: "k1", name: "ci key" }], projects: [] }, mode: "admin" }));
+  const render = mount(() => UsageQuotas({ data: { providers: [], projects: [] }, mode: "admin" }));
   render();
   await settle();
   let tree = render();
@@ -136,7 +136,7 @@ test("the portal filters by the providers the user's usage names and breaks it d
       };
     },
   };
-  const render = mount(() => UsageQuotas({ data: { keys: [], projects: [] }, mode: "portal" }));
+  const render = mount(() => UsageQuotas({ data: { projects: [] }, mode: "portal" }));
   render();
   await settle();
   let tree = render();

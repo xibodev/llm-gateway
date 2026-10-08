@@ -13,7 +13,7 @@ const { ProviderHub } = await bundle(fileURLToPath(new URL("../src/components/pr
 test("route tiles are sorted by name, paged, and searched by route or member", async () => {
   globalThis.__api = { getJSON: async () => ({ data: [] }), sendJSON: async () => ({}) };
   const endpoints = Object.fromEntries(Array.from({ length: 30 }, (_, index) => [`route-${String(30 - index).padStart(2, "0")}`, { failover: [{ provider: index === 4 ? "special" : "echo", model: "m" }] }]));
-  const render = mount(() => Routes({ data: { endpoints, principals: [] }, mode: "admin", detail: "", onChanged: async () => {}, onNavigate() {} }));
+  const render = mount(() => Routes({ data: { endpoints }, mode: "admin", detail: "", onChanged: async () => {}, onNavigate() {} }));
   render();
   await settle();
   let tree = render();

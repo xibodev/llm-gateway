@@ -29,3 +29,29 @@ export function fakeKeyListing(keys, now = Date.now()) {
   };
   return { answer, requests };
 }
+
+// fakePrincipalListing answers the principal listing as the server does: by
+// name, ignoring letter case, filtered by ID, kind, status and search, and
+// paged. A descending order reverses the name order.
+export function fakePrincipalListing(principals) {
+  const requests = [];
+  const answer = (path) => {
+    requests.push(path);
+    const query = new URLSearchParams(path.split("?")[1] ?? "");
+    const ids = query.getAll("id");
+    const kinds = query.getAll("kind");
+    const status = query.get("status") ?? "";
+    const search = (query.get("q") ?? "").toLowerCase();
+    const selected = principals
+      .filter((principal) => !ids.length || ids.includes(principal.id))
+      .filter((principal) => !kinds.length || kinds.includes(principal.kind))
+      .filter((principal) => !status || status === "all" || (principal.status ?? "active") === status)
+      .filter((principal) => !search || [principal.display_name, principal.email, principal.id, principal.external_subject].join(" ").toLowerCase().includes(search))
+      .sort((left, right) => String(left.display_name).localeCompare(String(right.display_name), "en", { sensitivity: "base" }));
+    if (query.get("order") === "desc") selected.reverse();
+    const offset = Number(query.get("offset") || 0);
+    const limit = Number(query.get("limit") || 50);
+    return { principals: selected.slice(offset, offset + limit), total: selected.length };
+  };
+  return { answer, requests };
+}

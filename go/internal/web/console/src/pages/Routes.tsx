@@ -3,11 +3,12 @@ import { ArrowDown, ArrowUp, Pencil, Plus, Save, Trash2, X } from "lucide-preact
 import { getJSON, sendJSON, type JSONRecord } from "../lib/api";
 import type { ConsoleMode } from "../lib/mode";
 import { asList, asRecord, endpointsOf, stringValue } from "../lib/records";
-import { commitRouteSave, planRouteSave, renameConfirmation } from "../lib/routes";
+import { commitRouteSave, keysGrantingRoute, planRouteSave, renameConfirmation } from "../lib/routes";
+import { principalSearch } from "../lib/directory";
 import { EmptyState, ErrorState, PageHeading } from "../components/PageState";
 import { RouteDetail } from "./RouteDetail";
 import { ModelFilters, catalogModels, filterModels, modelOptionLabel, useModelFilter } from "../components/ModelPicker";
-import { SearchSelect, tableFooter, useTableView, type TableColumn } from "../components/DataTable";
+import { RemoteSearchSelect, tableFooter, useTableView, type TableColumn } from "../components/DataTable";
 
 type RouteMember = { provider: string; model: string; allow_unverified?: boolean };
 type ModelChoice = RouteMember & { label: string; publicationState: string };
@@ -47,8 +48,7 @@ export function Routes({ data, mode, detail, onChanged, onNavigate }: { data: JS
   const [message, setMessage] = useState("");
   // Route members are picked from a catalog of hundreds; narrow before listing.
   const [memberFilter, setMemberFilter] = useModelFilter();
-  const owners = asList(data.principals).map(asRecord).filter((principal) => stringValue(principal.kind) === "human" && stringValue(principal.status, "active") === "active");
-  const [ownerID, setOwnerID] = useState(stringValue(owners[0]?.id));
+  const [ownerID, setOwnerID] = useState(stringValue(asRecord(data.default_owner).id));
   const principalQuery = mode === "admin"
     ? `?${ownerID ? `principal_id=${encodeURIComponent(ownerID)}&` : ""}diagnostics=1`
     : "";
@@ -133,7 +133,7 @@ export function Routes({ data, mode, detail, onChanged, onNavigate }: { data: JS
       setMessage("A route name and at least one catalog-backed provider/model member are required.");
       return;
     }
-    const plan = planRouteSave(originalName, name, routes.map((route) => route.name), asList(data.keys).map(asRecord));
+    const plan = planRouteSave(originalName, name, routes.map((route) => route.name));
     if (plan.kind === "refused") {
       setMessage(plan.message);
       return;
@@ -141,7 +141,16 @@ export function Routes({ data, mode, detail, onChanged, onNavigate }: { data: JS
     const unverified = members.filter(isUnverifiedMember);
     if (unverified.length && !window.confirm(`Publish ${unverified.map((member) => `${member.provider}/${member.model}`).join(", ")} without successful verification? This admin override makes the target publicly runnable until evidence changes.`)) return;
     if (plan.kind === "update" && !window.confirm(`Save changes to route ${plan.name}? Route-bound and inherited keys may be affected; an exact count requires project policies. Existing route grants follow edits to this failover chain. Deleting the route denies existing route-bound clients; recreating the same name grants access to the new chain.`)) return;
-    if (plan.kind === "rename" && !window.confirm(renameConfirmation(plan))) return;
+    if (plan.kind === "rename") {
+      // The keys whose grants name the old route are counted on the server.
+      let granted;
+      try { granted = await keysGrantingRoute((path) => getJSON<JSONRecord>(mode, path), plan.from); }
+      catch (cause) {
+        setMessage(`The keys that name ${plan.from} could not be counted: ${cause instanceof Error ? cause.message : "the request failed"}`);
+        return;
+      }
+      if (!window.confirm(renameConfirmation(plan, granted))) return;
+    }
     setBusy(true);
     let outcome = "";
     try {
@@ -185,7 +194,7 @@ export function Routes({ data, mode, detail, onChanged, onNavigate }: { data: JS
 
   return (
     <div class="page-stack">
-      <PageHeading eyebrow="Routing policy" title="Routes" detail="Ordered members map directly to gateway failover: the first healthy provider/model is tried before the next." actions={<><SearchSelect class="owner-select" label="Catalog owner" noun="owners" value={ownerID} options={[{ value: "", label: "Shared catalogs only" }, ...owners.map((owner) => ({ value: stringValue(owner.id), label: stringValue(owner.display_name, stringValue(owner.email, stringValue(owner.id))) }))]} onChange={setOwnerID} /><button class="button button--primary" type="button" disabled={!choices.length} onClick={startCreate}><Plus size={16} /> Create route</button></>} />
+      <PageHeading eyebrow="Routing policy" title="Routes" detail="Ordered members map directly to gateway failover: the first healthy provider/model is tried before the next." actions={<><RemoteSearchSelect class="owner-select" label="Catalog owner" noun="owners" value={ownerID} emptyLabel="Shared catalogs only" {...principalSearch(mode, { kinds: ["human"], status: "active" })} onChange={setOwnerID} /><button class="button button--primary" type="button" disabled={!choices.length} onClick={startCreate}><Plus size={16} /> Create route</button></>} />
       {catalogError ? <ErrorState title="Model catalog is unavailable" detail={catalogError} action={<button class="button button--secondary" type="button" onClick={() => void loadCatalog()}>Retry catalog</button>} /> : null}
       {message ? <p class="route-message" role="status">{message}</p> : null}
       {editing && members.some(isUnverifiedMember) ? <p class="form-error" role="alert"><strong>Unverified target selected.</strong> Saving explicitly publishes it for public routing without a successful probe. Failed and stale targets cannot be selected.</p> : null}

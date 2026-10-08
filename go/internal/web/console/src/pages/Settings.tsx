@@ -4,7 +4,7 @@ import { getJSON, sendJSON, type JSONRecord } from "../lib/api";
 import { auditTone, safeAuditDetail } from "../lib/activity";
 import type { ConsoleMode } from "../lib/mode";
 import type { PageID } from "../lib/navigation";
-import { asList, asRecord, stringValue } from "../lib/records";
+import { asList, asRecord, numberValue, stringValue } from "../lib/records";
 import { EmptyState, ErrorState, LoadingState, PageHeading } from "../components/PageState";
 
 function AnonymousProviderAutomation({ onSaved }: { onSaved: (message: string) => void }) {
@@ -67,7 +67,7 @@ export function Settings({ data, mode, onNavigate }: { data: JSONRecord; mode: C
   useEffect(() => { if (!isAdmin) void loadAudit(); }, [mode]);
   const sso = asRecord(data.sso);
   const memberships = asList(data.memberships).map(asRecord);
-  const principals = asList(data.principals).map(asRecord);
+  const principalCount = numberValue(asRecord(data.counts).principals);
   const events = asList(audit?.events).map(asRecord);
   const ssoEnabled = sso.enabled === true;
   return (
@@ -76,7 +76,7 @@ export function Settings({ data, mode, onNavigate }: { data: JSONRecord; mode: C
       {notice ? <section class="action-notice action-notice--success" role="status"><strong>Saved</strong><span>{notice}</span></section> : null}
       <section class="settings-grid">
         <article class="surface"><ShieldCheck size={20} /><p class="eyebrow">Authentication</p><h2>{mode === "portal" ? "Private portal session" : ssoEnabled ? "Single sign-on" : "Gateway administrator access"}</h2><p>Mutation requests require same-origin validation. Provider credentials and API-key values are never represented in settings state. SSO and encryption settings are environment-driven — see the deployment guide.</p></article>
-        <article class="surface"><Users size={20} /><p class="eyebrow">Identity</p><h2>{mode === "portal" ? `${memberships.length} memberships` : `${principals.length} principals`}</h2><p>Principals, projects, and memberships are managed on the Access page, where each project's page holds its budgets and allowlists.</p>{mode === "admin" ? <button class="button button--secondary" type="button" onClick={() => onNavigate("access")}><Users size={15} /> Open Access</button> : null}</article>
+        <article class="surface"><Users size={20} /><p class="eyebrow">Identity</p><h2>{mode === "portal" ? `${memberships.length} memberships` : `${principalCount} principals`}</h2><p>Principals, projects, and memberships are managed on the Access page, where each project's page holds its budgets and allowlists.</p>{mode === "admin" ? <button class="button button--secondary" type="button" onClick={() => onNavigate("access")}><Users size={15} /> Open Access</button> : null}</article>
       </section>
       {mode === "admin" ? <AnonymousProviderAutomation onSaved={setNotice} /> : null}
       {isAdmin ? <section class="surface"><div class="section-heading"><div><p class="eyebrow">Audit</p><h2>Operational activity</h2></div><span class="status-pill status-pill--muted">Secret-free records</span></div><p class="muted-copy">Search the retained audit history by action, actor, result and target, and page back through it.</p><button class="button button--secondary" type="button" onClick={() => onNavigate("audit")}><ScrollText size={15} /> Open audit log</button></section>

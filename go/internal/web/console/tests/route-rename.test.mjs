@@ -11,44 +11,44 @@ const { outputFiles } = await build({
 const routes = await import(`data:text/javascript;base64,${Buffer.from(outputFiles[0].text).toString("base64")}`);
 
 const existing = ["coding", "Research"];
-const keys = [
-  { name: "ci", status: "active", allowed_routes: ["coding"] },
-  { name: "selector", status: "disabled", allowed_models: ["coding", "openai/gpt"] },
-  { name: "revoked", status: "revoked", allowed_routes: ["coding"] },
-  { name: "other", status: "active", allowed_routes: ["research"] },
-  { name: "portal", status: "active", policy: { allowed_routes: ["coding"] } },
-];
 
 test("a new route may not take a name already in use, whatever its letter case", () => {
-  assert.deepEqual(routes.planRouteSave("", " drafts ", existing, keys), { kind: "create", name: "drafts" });
-  const taken = routes.planRouteSave("", "research", existing, keys);
+  assert.deepEqual(routes.planRouteSave("", " drafts ", existing), { kind: "create", name: "drafts" });
+  const taken = routes.planRouteSave("", "research", existing);
   assert.equal(taken.kind, "refused");
   assert.match(taken.message, /A route named Research already exists/);
 });
 
 test("editing a route under its own name is an update", () => {
-  assert.deepEqual(routes.planRouteSave("coding", "coding", existing, keys), { kind: "update", name: "coding" });
+  assert.deepEqual(routes.planRouteSave("coding", "coding", existing), { kind: "update", name: "coding" });
 });
 
-test("a rename names every live key whose grants still name the old route", () => {
-  const plan = routes.planRouteSave("coding", "coding-v2", existing, keys);
-  assert.equal(plan.kind, "rename");
-  assert.equal(plan.from, "coding");
-  assert.equal(plan.name, "coding-v2");
-  assert.deepEqual(plan.grantedKeys, ["ci", "selector", "portal"]);
-  const message = routes.renameConfirmation(plan);
+// The server counts the unrevoked keys whose allowed routes or allowed
+// models name the old route, and names the first five.
+test("a rename names the live keys whose grants still name the old route", async () => {
+  const plan = routes.planRouteSave("coding", "coding-v2", existing);
+  assert.deepEqual(plan, { kind: "rename", name: "coding-v2", from: "coding" });
+  const asked = [];
+  const granted = await routes.keysGrantingRoute(async (path) => {
+    asked.push(path);
+    return { keys: [{ name: "ci" }, { name: "selector" }, { prefix: "llmgw_portal" }], total: 3 };
+  }, "coding");
+  assert.deepEqual(asked, ["/keys?status=unrevoked&grant=coding&limit=5"]);
+  assert.deepEqual(granted, { names: ["ci", "selector", "llmgw_portal"], total: 3 });
+  const message = routes.renameConfirmation(plan, granted);
   assert.match(message, /Rename route coding to coding-v2\?/);
   assert.match(message, /coding is deleted/);
-  assert.match(message, /3 API keys name coding in their grants \(ci, selector, portal\)/);
+  assert.match(message, /3 API keys name coding in their grants \(ci, selector, llmgw_portal\)/);
   assert.match(message, /cannot call coding-v2/);
-  assert.match(routes.renameConfirmation({ ...plan, grantedKeys: [] }), /No API key names coding in its grants/);
+  assert.match(routes.renameConfirmation(plan, { names: ["a", "b", "c", "d", "e"], total: 9 }), /9 API keys name coding in their grants \(a, b, c, d, e, and 4 more\)/);
+  assert.match(routes.renameConfirmation(plan, { names: [], total: 0 }), /No API key names coding in its grants/);
 });
 
 test("a rename never lands on another route or on its own name in another case", () => {
-  const onto = routes.planRouteSave("coding", "RESEARCH", existing, keys);
+  const onto = routes.planRouteSave("coding", "RESEARCH", existing);
   assert.equal(onto.kind, "refused");
   assert.match(onto.message, /A route named Research already exists\. Renaming never replaces another route/);
-  const caseOnly = routes.planRouteSave("coding", "Coding", existing, keys);
+  const caseOnly = routes.planRouteSave("coding", "Coding", existing);
   assert.equal(caseOnly.kind, "refused");
   assert.match(caseOnly.message, /ignore letter case/);
 });
@@ -56,7 +56,7 @@ test("a rename never lands on another route or on its own name in another case",
 test("a rename creates the new route before deleting the old one", async () => {
   const calls = [];
   const send = async (path, method, body) => { calls.push([method, path, body?.name]); };
-  const plan = { kind: "rename", name: "coding v2", from: "coding", grantedKeys: [] };
+  const plan = { kind: "rename", name: "coding v2", from: "coding" };
   const outcome = await routes.commitRouteSave(plan, [{ provider: "p", model: "m" }], "?diagnostics=1", send);
   assert.deepEqual(calls, [["POST", "/endpoints?diagnostics=1", "coding v2"], ["DELETE", "/endpoints/coding", undefined]]);
   assert.equal(outcome, "Route coding was renamed to coding v2.");
@@ -64,7 +64,7 @@ test("a rename creates the new route before deleting the old one", async () => {
 
 test("a failed create deletes nothing, and a failed delete names the route left behind", async () => {
   const calls = [];
-  const plan = { kind: "rename", name: "next", from: "coding", grantedKeys: [] };
+  const plan = { kind: "rename", name: "next", from: "coding" };
   await assert.rejects(routes.commitRouteSave(plan, [], "", async (path, method) => {
     calls.push(method);
     throw new Error("route member 1 has unknown model");
@@ -88,6 +88,7 @@ test("the route editor saves through the plan and titles a new route as new", ()
   const page = readFileSync(new URL("../src/pages/Routes.tsx", import.meta.url), "utf8");
   assert.match(page, /planRouteSave\(originalName, name,/);
   assert.match(page, /commitRouteSave\(plan, failover, principalQuery,/);
+  assert.match(page, /keysGrantingRoute\(/, "a rename counts the keys that grant the old route on the server");
   assert.match(page, /\{originalName \? `Edit \$\{originalName\}` : "Create route"\}/);
   assert.doesNotMatch(page, /\{name \? `Edit \$\{name\}`/);
 });

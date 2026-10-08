@@ -3,7 +3,7 @@ import { AppShell } from "./components/AppShell";
 import { ErrorState, LoadingState, RenderBoundary } from "./components/PageState";
 import { APIError, authenticationRedirectCode, clearStaticAdminKey, getJSON, hasStaticAdminKey, storeStaticAdminKey, type JSONRecord } from "./lib/api";
 import { modeForPath, type ConsoleMode } from "./lib/mode";
-import { asList, asRecord, stringValue } from "./lib/records";
+import { asRecord, stringValue } from "./lib/records";
 import { navigationFor, type PageID } from "./lib/navigation";
 import { Access } from "./pages/Access";
 import { AuditLog } from "./pages/AuditLog";
@@ -113,15 +113,15 @@ export function App() {
   };
 
   useEffect(() => { void load(true); }, [mode]);
+  // The catalog shows the default owner's view, the first active person by
+  // name, until another owner is chosen; a chosen owner stays chosen.
   useEffect(() => {
     if (!isAdmin || !data) {
       setCatalogPrincipalID("");
       return;
     }
-    const ownerIDs = asList(data.principals).map(asRecord)
-      .filter((principal) => stringValue(principal.kind) === "human" && stringValue(principal.status, "active") === "active")
-      .map((principal) => stringValue(principal.id)).filter(Boolean);
-    setCatalogPrincipalID((current) => ownerIDs.includes(current) ? current : (ownerIDs[0] ?? ""));
+    const defaultOwner = stringValue(asRecord(data.default_owner).id);
+    setCatalogPrincipalID((current) => current || defaultOwner);
   }, [data, isAdmin]);
   useEffect(() => {
     if (!isAdmin || !playgroundRoute.owner || appliedPlaygroundOwner === route.detail) return;

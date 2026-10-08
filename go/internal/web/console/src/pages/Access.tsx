@@ -1,12 +1,13 @@
-import { useState } from "preact/hooks";
+import { useEffect, useRef, useState } from "preact/hooks";
 import { FolderOpen, KeyRound, LoaderCircle, PencilLine, Power, Trash2, UserPlus, Users, FolderPlus, X } from "lucide-preact";
-import { sendJSON, type JSONRecord } from "../lib/api";
+import { getJSON, sendJSON, type JSONRecord } from "../lib/api";
+import { principalsPath } from "../lib/directory";
 import type { ConsoleMode } from "../lib/mode";
 import type { PageID } from "../lib/navigation";
-import { asList, asRecord, stringValue } from "../lib/records";
+import { asList, asRecord, numberValue, stringValue } from "../lib/records";
 import { AddMembershipDialog } from "../components/AddMembershipDialog";
-import { ShortID, dataTable, useTableView, type TableColumn } from "../components/DataTable";
-import { EmptyState, PageHeading } from "../components/PageState";
+import { ShortID, dataTable, serverTableView, tablePageSizes, useTableView, type ServerTableState, type TableColumn } from "../components/DataTable";
+import { EmptyState, ErrorState, LoadingState, PageHeading } from "../components/PageState";
 import { useDialogFocus } from "../components/useDialogFocus";
 import { ProjectDetail } from "./ProjectDetail";
 
@@ -91,13 +92,37 @@ export function Access({ data, mode, detail = "", onChanged, onNavigate }: { dat
   const [membershipProject, setMembershipProject] = useState<JSONRecord | null>(null);
   const [result, setResult] = useState<ActionResult>(null);
   const [busy, setBusy] = useState("");
-  const principals = asList(data.principals).map(asRecord);
   const projects = asList(data.projects).map(asRecord);
   const memberships = asList(data.memberships).map(asRecord);
-  const activePrincipals = principals.filter((principal) => stringValue(principal.status, "active") === "active" && stringValue(principal.kind) !== "system");
-  const principalName = (id: string) => {
-    const principal = principals.find((candidate) => stringValue(candidate.id) === id);
-    return principal ? stringValue(principal.display_name, id) : id;
+  // The state counts the active people and service principals a project can
+  // take as members, and memberships name their principal.
+  const activePrincipals = numberValue(asRecord(data.counts).active_principals);
+  const memberName = (membership: JSONRecord) => stringValue(membership.principal_name, stringValue(membership.principal_id));
+  // The server pages, sorts and searches the principals; listing is its
+  // answer for the page shown.
+  const [listing, setListing] = useState<{ principals: JSONRecord[]; total: number } | null>(null);
+  const [listError, setListError] = useState("");
+  const [search, setSearch] = useState("");
+  const [table, setTable] = useState<ServerTableState>({ page: 0, pageSize: tablePageSizes[0], sort: null });
+  const [reload, setReload] = useState(0);
+  const listRequest = useRef(0);
+  const listPath = principalsPath({ q: search, limit: table.pageSize, offset: table.page * table.pageSize, sort: table.sort?.id, descending: table.sort?.descending });
+  useEffect(() => {
+    if (mode !== "admin" || detail) return;
+    // A page that arrives after a newer request must not replace its answer.
+    const request = ++listRequest.current;
+    setListError("");
+    getJSON<JSONRecord>("admin", listPath).then((payload) => {
+      if (request === listRequest.current) setListing({ principals: asList(payload.principals).map(asRecord), total: numberValue(payload.total) });
+    }).catch((cause) => {
+      if (request === listRequest.current) setListError(cause instanceof Error ? cause.message : "Principals could not load.");
+    });
+  }, [mode, detail, listPath, reload]);
+  const principals = listing?.principals ?? [];
+  // changed reloads the principals and the console's state after a change.
+  const changed = async () => {
+    setReload((current) => current + 1);
+    await onChanged();
   };
   const memberCount = (projectID: string) => memberships.filter((membership) => stringValue(membership.project_id) === projectID).length;
 
@@ -108,7 +133,7 @@ export function Access({ data, mode, detail = "", onChanged, onNavigate }: { dat
     try {
       await sendJSON<JSONRecord>("admin", `/${target}/status`, "POST", { id, status: next });
       setResult({ title: next === "active" ? "Enabled" : "Disabled", success: true, detail: `${stringValue(record.display_name, stringValue(record.name, id))} is now ${next}.` });
-      await onChanged();
+      await changed();
     } catch (cause) {
       setResult({ title: "Status change failed", success: false, detail: cause instanceof Error ? cause.message : "The status could not be changed." });
     } finally { setBusy(""); }
@@ -120,7 +145,7 @@ export function Access({ data, mode, detail = "", onChanged, onNavigate }: { dat
     setBusy(`member-${projectID}-${principalID}`);
     try {
       await sendJSON<JSONRecord>("admin", `/memberships?project_id=${encodeURIComponent(projectID)}&principal_id=${encodeURIComponent(principalID)}`, "DELETE");
-      setResult({ title: "Membership removed", success: true, detail: `${principalName(principalID)} was removed from the project.` });
+      setResult({ title: "Membership removed", success: true, detail: `${memberName(membership)} was removed from the project.` });
       await onChanged();
     } catch (cause) {
       setResult({ title: "Removal failed", success: false, detail: cause instanceof Error ? cause.message : "The membership could not be removed." });
@@ -131,13 +156,13 @@ export function Access({ data, mode, detail = "", onChanged, onNavigate }: { dat
   const projectName = (project: JSONRecord) => stringValue(project.name, stringValue(project.slug, stringValue(project.id)));
   const principalColumns: TableColumn<JSONRecord>[] = [
     {
-      id: "name", header: "Name", sortValue: (principal) => stringValue(principal.display_name, stringValue(principal.id)),
+      id: "name", header: "Name", sortable: true,
       cell: (principal) => <><strong>{stringValue(principal.display_name, stringValue(principal.id))}</strong>{principal.name_set_by_admin === true && stringValue(principal.external_subject) ? <small class="table-subtitle">Named by an administrator</small> : null}</>,
     },
     { id: "id", header: "ID", cell: (principal) => <ShortID id={stringValue(principal.id)} label="principal ID" /> },
-    { id: "kind", header: "Kind", sortValue: (principal) => stringValue(principal.kind), cell: (principal) => stringValue(principal.kind) },
-    { id: "email", header: "Email", sortValue: (principal) => stringValue(principal.email), cell: (principal) => stringValue(principal.email, "—") },
-    { id: "status", header: "Status", sortValue: (principal) => stringValue(principal.status, "active"), cell: (principal) => statusPill(stringValue(principal.status, "active")) },
+    { id: "kind", header: "Kind", sortable: true, cell: (principal) => stringValue(principal.kind) },
+    { id: "email", header: "Email", sortable: true, cell: (principal) => stringValue(principal.email, "—") },
+    { id: "status", header: "Status", sortable: true, cell: (principal) => statusPill(stringValue(principal.status, "active")) },
     {
       id: "actions", header: "Actions", cell: (principal) => {
         const id = stringValue(principal.id);
@@ -166,7 +191,7 @@ export function Access({ data, mode, detail = "", onChanged, onNavigate }: { dat
         return <div class="row-actions">
           {onNavigate ? <button class="icon-button icon-button--compact" type="button" aria-label={`Open ${name}`} title="Its limits, keys, members and usage" onClick={() => onNavigate("access", id)}><FolderOpen size={14} /></button> : null}
           {onNavigate ? <button class="icon-button icon-button--compact" type="button" aria-label={`Keys of ${name}`} title="Keys" onClick={() => onNavigate("keys", `project=${encodeURIComponent(id)}`)}><KeyRound size={14} /></button> : null}
-          <button class="icon-button icon-button--compact" type="button" aria-label={`Add a member to ${name}`} title={activePrincipals.length ? "Add member" : "Create an active principal first"} disabled={!activePrincipals.length} onClick={() => setMembershipProject(project)}><Users size={14} /></button>
+          <button class="icon-button icon-button--compact" type="button" aria-label={`Add a member to ${name}`} title={activePrincipals ? "Add member" : "Create an active principal first"} disabled={!activePrincipals} onClick={() => setMembershipProject(project)}><Users size={14} /></button>
           <button class="icon-button icon-button--compact" type="button" aria-label={`${active ? "Disable" : "Enable"} ${name}`} title={active ? "Disable" : "Enable"} disabled={busy === `projects-${id}`} onClick={() => void setStatus("projects", project)}><Power size={14} /></button>
         </div>;
       },
@@ -177,18 +202,18 @@ export function Access({ data, mode, detail = "", onChanged, onNavigate }: { dat
     return project ? projectName(project) : stringValue(membership.project_id);
   };
   const membershipColumns: TableColumn<JSONRecord>[] = [
-    { id: "principal", header: "Principal", sortValue: (membership) => principalName(stringValue(membership.principal_id)), cell: (membership) => principalName(stringValue(membership.principal_id)) },
+    { id: "principal", header: "Principal", sortValue: memberName, cell: memberName },
     { id: "project", header: "Project", sortValue: membershipProjectName, cell: membershipProjectName },
     { id: "role", header: "Role", sortValue: (membership) => stringValue(membership.role), cell: (membership) => stringValue(membership.role) },
     {
       id: "actions", header: "Actions", cell: (membership) => {
         const projectID = stringValue(membership.project_id);
         const principalID = stringValue(membership.principal_id);
-        return <div class="row-actions"><button class="icon-button icon-button--compact" type="button" aria-label={`Remove ${principalName(principalID)} from ${membershipProjectName(membership)}`} title="Remove" disabled={busy === `member-${projectID}-${principalID}`} onClick={() => void removeMembership(membership)}><Trash2 size={14} /></button></div>;
+        return <div class="row-actions"><button class="icon-button icon-button--compact" type="button" aria-label={`Remove ${memberName(membership)} from ${membershipProjectName(membership)}`} title="Remove" disabled={busy === `member-${projectID}-${principalID}`} onClick={() => void removeMembership(membership)}><Trash2 size={14} /></button></div>;
       },
     },
   ];
-  const principalView = useTableView(principals, principalColumns);
+  const principalView = serverTableView(principals, listing?.total ?? 0, table, setTable);
   const projectView = useTableView(projects, projectColumns);
   const membershipView = useTableView(memberships, membershipColumns);
 
@@ -205,8 +230,12 @@ export function Access({ data, mode, detail = "", onChanged, onNavigate }: { dat
       <PageHeading eyebrow="Identity and projects" title="Access" detail="Create the humans and services that own catalogs and keys, group them into projects, and control membership." actions={<><button class="button button--secondary" type="button" onClick={() => setCreateProject(true)}><FolderPlus size={16} /> New project</button><button class="button button--primary" type="button" onClick={() => setCreatePrincipal(true)}><UserPlus size={16} /> New principal</button></>} />
       <ResultNotice result={result} />
       <section class="surface">
-        <div class="section-heading"><div><p class="eyebrow">Principals</p><h2>Humans and services</h2></div><span>{principals.length} record{principals.length === 1 ? "" : "s"}</span></div>
-        {principals.length === 0 ? <EmptyState title="No principals yet" detail="Create a human principal to own private catalogs, playground runs, and provider connections." /> : dataTable(principalView, principalColumns, { label: "Principals", rowKey: (principal) => stringValue(principal.id) })}
+        <div class="section-heading"><div><p class="eyebrow">Principals</p><h2>Humans and services</h2></div><span>{principalView.total} record{principalView.total === 1 ? "" : "s"}</span></div>
+        <label>Search principals<input type="search" value={search} onInput={(event) => { const value = event.currentTarget.value; setSearch(value); setTable((current) => ({ ...current, page: 0 })); }} placeholder="Name, email or ID" /></label>
+        {listError ? <ErrorState title="Principals could not load" detail={listError} action={<button class="button button--secondary" type="button" onClick={() => setReload((current) => current + 1)}>Retry</button>} />
+          : listing === null ? <LoadingState title="Loading principals" />
+          : listing.total === 0 ? <EmptyState title={search ? "No principals match this search" : "No principals yet"} detail={search ? "Search by another name, email or ID." : "Create a human principal to own private catalogs, playground runs, and provider connections."} />
+          : dataTable(principalView, principalColumns, { label: "Principals", rowKey: (principal) => stringValue(principal.id) })}
       </section>
       <section class="surface">
         <div class="section-heading"><div><p class="eyebrow">Projects</p><h2>Key and budget scopes</h2></div><span>{projects.length} project{projects.length === 1 ? "" : "s"}</span></div>
@@ -217,10 +246,10 @@ export function Access({ data, mode, detail = "", onChanged, onNavigate }: { dat
         <div class="section-heading"><div><p class="eyebrow">Memberships</p><h2>Who can act in which project</h2></div><span>{memberships.length} membership{memberships.length === 1 ? "" : "s"}</span></div>
         {memberships.length === 0 ? <EmptyState title="No memberships yet" detail="Add a principal to a project so it can hold keys and run project-attributed requests." /> : dataTable(membershipView, membershipColumns, { label: "Memberships", rowKey: (membership) => `${stringValue(membership.project_id)}-${stringValue(membership.principal_id)}` })}
       </section>
-      {createPrincipal ? <CreatePrincipalDialog onClose={() => setCreatePrincipal(false)} onCreated={onChanged} /> : null}
-      {renamePrincipal ? <RenamePrincipalDialog principal={renamePrincipal} onClose={() => setRenamePrincipal(null)} onRenamed={async (name) => { setResult({ title: "Renamed", success: true, detail: `${stringValue(renamePrincipal.display_name, stringValue(renamePrincipal.id))} is now ${name}.` }); await onChanged(); }} /> : null}
+      {createPrincipal ? <CreatePrincipalDialog onClose={() => setCreatePrincipal(false)} onCreated={changed} /> : null}
+      {renamePrincipal ? <RenamePrincipalDialog principal={renamePrincipal} onClose={() => setRenamePrincipal(null)} onRenamed={async (name) => { setResult({ title: "Renamed", success: true, detail: `${stringValue(renamePrincipal.display_name, stringValue(renamePrincipal.id))} is now ${name}.` }); await changed(); }} /> : null}
       {createProject ? <CreateProjectDialog onClose={() => setCreateProject(false)} onCreated={onChanged} /> : null}
-      {membershipProject ? <AddMembershipDialog project={membershipProject} principals={activePrincipals} onClose={() => setMembershipProject(null)} onCreated={onChanged} /> : null}
+      {membershipProject ? <AddMembershipDialog project={membershipProject} onClose={() => setMembershipProject(null)} onCreated={onChanged} /> : null}
     </div>
   );
 }

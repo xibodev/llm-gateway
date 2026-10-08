@@ -4,7 +4,8 @@ import { sendJSON, type JSONRecord } from "../lib/api";
 import type { ConsoleMode } from "../lib/mode";
 import { asList, asRecord, endpointsOf, numberValue, stringValue } from "../lib/records";
 import { EmptyState, ErrorState, PageHeading } from "../components/PageState";
-import { SearchSelect } from "../components/DataTable";
+import { RemoteSearchSelect, SearchSelect } from "../components/DataTable";
+import { principalSearch } from "../lib/directory";
 
 type RouteMember = { provider: string; model: string };
 
@@ -20,9 +21,9 @@ export function RouteDetail({ routeName, data, mode, onChanged, onBack }: {
   const members: RouteMember[] = asList(asRecord(routeValue).failover).map(asRecord)
     .map((member) => ({ provider: stringValue(member.provider), model: stringValue(member.model) }));
 
-  const humans = asList(data.principals).map(asRecord).filter((principal) => stringValue(principal.kind) === "human" && stringValue(principal.status, "active") === "active");
+  const activeHumans = numberValue(asRecord(data.counts).active_humans);
   const projects = asList(data.projects).map(asRecord).filter((project) => stringValue(project.status, "active") === "active");
-  const [principalID, setPrincipalID] = useState(stringValue(humans[0]?.id));
+  const [principalID, setPrincipalID] = useState(stringValue(asRecord(data.default_owner).id));
   const [projectID, setProjectID] = useState(stringValue(projects[0]?.id));
   const [prompt, setPrompt] = useState("Reply with the single word: ok");
   const [busy, setBusy] = useState(false);
@@ -88,9 +89,9 @@ export function RouteDetail({ routeName, data, mode, onChanged, onBack }: {
       </section>
       <section class="surface">
         <div class="section-heading"><div><p class="eyebrow">Route test</p><h2>Run this route end to end</h2></div></div>
-        {!humans.length || !projects.length ? <EmptyState title="A human owner and a project are required" detail="Route tests are real project-attributed gateway requests. Create them on the Access page first." /> : <form class="route-test-form" onSubmit={runTest}>
+        {!activeHumans || !projects.length ? <EmptyState title="A human owner and a project are required" detail="Route tests are real project-attributed gateway requests. Create them on the Access page first." /> : <form class="route-test-form" onSubmit={runTest}>
           <div class="route-test-form__row">
-            <label>Run as<select value={principalID} onInput={(event) => setPrincipalID((event.currentTarget as HTMLSelectElement).value)}>{humans.map((principal) => <option value={stringValue(principal.id)} key={stringValue(principal.id)}>{stringValue(principal.display_name, stringValue(principal.id))}</option>)}</select></label>
+            <RemoteSearchSelect label="Run as" noun="people" value={principalID} {...principalSearch(mode, { kinds: ["human"], status: "active" })} onChange={setPrincipalID} />
             <SearchSelect label="Project" noun="projects" value={projectID} options={projects.map((project) => ({ value: stringValue(project.id), label: stringValue(project.name, stringValue(project.slug)) }))} onChange={setProjectID} />
           </div>
           <label>Prompt<input value={prompt} onInput={(event) => setPrompt((event.currentTarget as HTMLInputElement).value)} /></label>

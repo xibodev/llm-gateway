@@ -54,7 +54,7 @@ test("the panel says when the daemon does not answer, and stays hidden when noth
 });
 
 test("the overview shows an administrator the warnings the gateway started with", () => {
-  const data = { startup_warnings: ["LLMGW_API_KEYS holds 2 static key(s)"], providers: [], keys: [], provider_connections: [], projects: [] };
+  const data = { startup_warnings: ["LLMGW_API_KEYS holds 2 static key(s)"], providers: [], counts: { keys: 0 }, provider_connections: [], projects: [] };
   const admin = mount(() => Overview({ data, mode: "admin", onNavigate() {} }))();
   assert.match(text(find(admin, (node) => node.props?.role === "alert")), /Startup warning.*LLMGW_API_KEYS holds 2 static key\(s\)/);
   const portal = mount(() => Overview({ data, mode: "portal", onNavigate() {} }))();

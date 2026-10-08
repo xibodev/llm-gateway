@@ -9,9 +9,10 @@ import {
   X,
 } from "lucide-preact";
 import { getJSON, sendJSON, type JSONRecord } from "../lib/api";
+import { principalSearch } from "../lib/directory";
 import { deliveriesPath, deliveryKindLabel, deliveryKinds, deliveryState, emptyDeliveryFilter, nextAttemptLabel, nextCursor, type DeliveryFilter } from "../lib/activity";
 import { asList, asRecord, numberValue, stringValue } from "../lib/records";
-import { SearchSelect, dataTable, useTableView, type TableColumn } from "../components/DataTable";
+import { RemoteSearchSelect, SearchSelect, dataTable, useTableView, type TableColumn } from "../components/DataTable";
 import {
   EmptyState,
   ErrorState,
@@ -38,7 +39,6 @@ function metricLabel(metric: string): string {
 
 export function Alerts({ data }: { data: JSONRecord }) {
   const projects = asList(data.projects).map(asRecord);
-  const principals = asList(data.principals).map(asRecord);
   const [rules, setRules] = useState<JSONRecord[] | null>(null);
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
@@ -171,15 +171,11 @@ export function Alerts({ data }: { data: JSONRecord }) {
     stringValue(project.id),
     stringValue(project.name, stringValue(project.slug, stringValue(project.id))),
   ]));
-  const principalNames = new Map(principals.map((principal) => [
-    stringValue(principal.id),
-    stringValue(principal.display_name, stringValue(principal.email, stringValue(principal.id))),
-  ]));
 
   const ruleScope = (rule: JSONRecord) => {
     const project = stringValue(rule.project_id);
     const principal = stringValue(rule.principal_id);
-    return [project ? projectNames.get(project) : "", principal ? principalNames.get(principal) : ""].filter(Boolean).join(" · ") || "All eligible keys";
+    return [project ? projectNames.get(project) : "", principal ? stringValue(rule.principal_name, principal) : ""].filter(Boolean).join(" · ") || "All eligible keys";
   };
   const ruleCondition = (rule: JSONRecord) => stringValue(rule.kind) === "key_expiry"
     ? `${numberValue(rule.threshold)} day${numberValue(rule.threshold) === 1 ? "" : "s"} before expiry`
@@ -234,7 +230,7 @@ export function Alerts({ data }: { data: JSONRecord }) {
             <label>{kind === "key_expiry" ? "Warning days" : "Threshold percent"}<input inputMode="numeric" value={threshold} onInput={(event) => setThreshold((event.currentTarget as HTMLInputElement).value)} /></label>
             {kind === "quota_usage" ? <label>Period<select value={period} onInput={(event) => setPeriod((event.currentTarget as HTMLSelectElement).value)}><option value="day">Daily</option><option value="month">Monthly</option></select></label> : null}
             <SearchSelect label="Project scope" noun="projects" value={projectID} options={[{ value: "", label: "All projects" }, ...projects.map((project) => ({ value: stringValue(project.id), label: stringValue(project.name, stringValue(project.slug)) }))]} onChange={setProjectID} />
-            <SearchSelect label="Principal scope" noun="principals" value={principalID} options={[{ value: "", label: "All principals" }, ...principals.map((principal) => ({ value: stringValue(principal.id), label: stringValue(principal.display_name, stringValue(principal.email, stringValue(principal.id))) }))]} onChange={setPrincipalID} />
+            <RemoteSearchSelect label="Principal scope" noun="principals" value={principalID} emptyLabel="All principals" {...principalSearch("admin", {})} onChange={setPrincipalID} />
           </div>
           <p class="form-help">{kind === "key_expiry" ? "The scheduled evaluator enqueues one notification per matching active key before it expires." : "Quota rules trigger against configured key or project limits; a missing limit cannot produce an alert."}</p>
           <footer><button class="button button--secondary" type="button" onClick={() => setCreating(false)}>Cancel</button><button class="button button--primary" type="submit" disabled={busy === "create"}><BellRing size={16} /> Create rule</button></footer>
@@ -265,7 +261,7 @@ export function Alerts({ data }: { data: JSONRecord }) {
                 const state = deliveryState(delivery);
                 const project = stringValue(delivery.project_id);
                 const principal = stringValue(delivery.principal_id);
-                const scope = [project ? projectNames.get(project) ?? project : "", principal ? principalNames.get(principal) ?? principal : ""].filter(Boolean).join(" · ") || "—";
+                const scope = [project ? projectNames.get(project) ?? project : "", principal ? stringValue(delivery.principal_name, principal) : ""].filter(Boolean).join(" · ") || "—";
                 const deliveredAt = numberValue(delivery.delivered_at);
                 const lastError = stringValue(delivery.last_error);
                 return <tr key={String(delivery.id)}>

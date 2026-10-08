@@ -8,7 +8,8 @@ import { asList, asRecord, numberValue, stringValue } from "../lib/records";
 import { formatUsageMetric, usageMetricTotal, usageTotals } from "../lib/usage";
 import { EmptyState, ErrorState, LoadingState } from "../components/PageState";
 import { AddMembershipDialog } from "../components/AddMembershipDialog";
-import { ShortID, dataTable, useTableView, type TableColumn } from "../components/DataTable";
+import { ShortID, dataTable, serverTableView, tablePageSizes, useTableView, type ServerTableState, type TableColumn } from "../components/DataTable";
+import { keysPath } from "../lib/directory";
 import { LimitUsageTable } from "../components/LimitUsage";
 
 // Numeric policy fields editable in the project policy form. Zero means "no
@@ -144,15 +145,29 @@ export function ProjectDetail({ projectID, data, onChanged, onNavigate, onBack }
     catch (cause) { setUsageError(cause instanceof Error ? cause.message : "The project's usage could not load."); }
   };
   useEffect(() => { void loadLimits(); void loadUsage(); }, [projectID]);
+  // The server pages and sorts the project's keys, of every status, newest
+  // first unless a header asks otherwise.
+  const [keyListing, setKeyListing] = useState<{ keys: JSONRecord[]; total: number } | null>(null);
+  const [keyError, setKeyError] = useState("");
+  const [keyTable, setKeyTable] = useState<ServerTableState>({ page: 0, pageSize: tablePageSizes[0], sort: null });
+  const keyRequest = useRef(0);
+  const keyPath = keysPath({ projectID, status: "all", limit: keyTable.pageSize, offset: keyTable.page * keyTable.pageSize, sort: keyTable.sort?.id, descending: keyTable.sort?.descending });
+  useEffect(() => {
+    const request = ++keyRequest.current;
+    setKeyError("");
+    getJSON<JSONRecord>("admin", keyPath).then((payload) => {
+      if (request === keyRequest.current) setKeyListing({ keys: asList(payload.keys).map(asRecord), total: numberValue(payload.total) });
+    }).catch((cause) => {
+      if (request === keyRequest.current) setKeyError(cause instanceof Error ? cause.message : "The project's keys could not load.");
+    });
+  }, [keyPath]);
+  const keys = keyListing?.keys ?? [];
+  const keyTotal = keyListing?.total ?? 0;
 
   const project = asList(data.projects).map(asRecord).find((candidate) => stringValue(candidate.id) === projectID);
-  const principals = asList(data.principals).map(asRecord);
-  const principalName = (id: string) => {
-    const principal = principals.find((candidate) => stringValue(candidate.id) === id);
-    return principal ? stringValue(principal.display_name, id) : id;
-  };
-  const keys = asList(data.keys).map(asRecord).filter((key) => stringValue(key.project_id) === projectID);
   const memberships = asList(data.memberships).map(asRecord).filter((membership) => stringValue(membership.project_id) === projectID);
+  // Memberships name their principal.
+  const principalName = (id: string) => stringValue(memberships.find((membership) => stringValue(membership.principal_id) === id)?.principal_name, id);
   const name = project ? stringValue(project.name, stringValue(project.slug, projectID)) : projectID;
   const removeMembership = async (principalID: string) => {
     setBusy(`member-${principalID}`);
@@ -165,20 +180,20 @@ export function ProjectDetail({ projectID, data, onChanged, onNavigate, onBack }
     } finally { setBusy(""); }
   };
   const keyColumns: TableColumn<JSONRecord>[] = [
-    { id: "name", header: "Name", sortValue: (key) => stringValue(key.name), cell: (key) => stringValue(key.name, "Gateway key") },
+    { id: "name", header: "Name", sortable: true, cell: (key) => stringValue(key.name, "Gateway key") },
     { id: "prefix", header: "Prefix", class: "technical", cell: (key) => stringValue(key.prefix, "—") },
-    { id: "owner", header: "Owner", sortValue: (key) => stringValue(key.principal, principalName(stringValue(key.principal_id))), cell: (key) => stringValue(key.principal, principalName(stringValue(key.principal_id))) },
+    { id: "owner", header: "Owner", sortable: true, cell: (key) => stringValue(key.principal, stringValue(key.principal_id)) },
     {
-      id: "status", header: "Status", sortValue: keyState, cell: (key) => {
+      id: "status", header: "Status", sortable: true, cell: (key) => {
         const state = keyState(key);
         return <span class={`status-pill ${state === "active" ? "status-pill--ready" : state === "disabled" ? "status-pill--muted" : "status-pill--attention"}`}>{state}</span>;
       },
     },
-    { id: "last_used", header: "Last used", class: "technical", sortValue: (key) => keyTimes(key).lastUsed, cell: (key) => formatKeyTime(keyTimes(key).lastUsed, "Never") },
+    { id: "last_used", header: "Last used", class: "technical", sortable: true, cell: (key) => formatKeyTime(keyTimes(key).lastUsed, "Never") },
   ];
   const memberColumns: TableColumn<JSONRecord>[] = [
     { id: "principal", header: "Principal", sortValue: (membership) => principalName(stringValue(membership.principal_id)), cell: (membership) => principalName(stringValue(membership.principal_id)) },
-    { id: "kind", header: "Kind", cell: (membership) => stringValue(principals.find((candidate) => stringValue(candidate.id) === stringValue(membership.principal_id))?.kind, "—") },
+    { id: "kind", header: "Kind", cell: (membership) => stringValue(membership.principal_kind, "—") },
     { id: "role", header: "Role", sortValue: (membership) => stringValue(membership.role), cell: (membership) => stringValue(membership.role) },
     {
       id: "actions", header: "Actions", cell: (membership) => {
@@ -187,13 +202,13 @@ export function ProjectDetail({ projectID, data, onChanged, onNavigate, onBack }
       },
     },
   ];
-  const keyView = useTableView(keys, keyColumns);
+  const keyView = serverTableView(keys, keyTotal, keyTable, setKeyTable);
   const memberView = useTableView(memberships, memberColumns);
   const back = <nav class="detail-breadcrumb"><button class="button button--secondary" type="button" onClick={onBack}><ArrowLeft size={16} /> Access</button></nav>;
   if (!project) {
     return <div class="page-stack">{back}<EmptyState title="Unknown project" detail="This project does not exist. Projects are listed on the Access page." /></div>;
   }
-  const activePrincipals = principals.filter((principal) => stringValue(principal.status, "active") === "active" && stringValue(principal.kind) !== "system");
+  const activePrincipals = numberValue(asRecord(data.counts).active_principals);
   const status = stringValue(project.status, "active");
   const series = asList(usage?.series).map(asRecord);
   const totals = usageTotals(series);
@@ -209,13 +224,13 @@ export function ProjectDetail({ projectID, data, onChanged, onNavigate, onBack }
         <dl class="compact-facts">
           <div><dt>Slug</dt><dd class="technical">{stringValue(project.slug, "—")}</dd></div>
           <div><dt>ID</dt><dd><ShortID id={projectID} label="project ID" /></dd></div>
-          <div><dt>Keys</dt><dd>{keys.length}</dd></div>
+          <div><dt>Keys</dt><dd>{keyTotal}</dd></div>
           <div><dt>Members</dt><dd>{memberships.length}</dd></div>
         </dl>
       </div>
       <div class="detail-heading__actions">
         <button class="button button--primary" type="button" onClick={() => onNavigate("keys", `project=${path}`)}><KeyRound size={15} /> Manage keys</button>
-        <button class="button button--secondary" type="button" disabled={!activePrincipals.length} title={activePrincipals.length ? undefined : "Create an active principal first"} onClick={() => setAdding(true)}><Users size={15} /> Add member</button>
+        <button class="button button--secondary" type="button" disabled={!activePrincipals} title={activePrincipals ? undefined : "Create an active principal first"} onClick={() => setAdding(true)}><Users size={15} /> Add member</button>
       </div>
     </header>
     {notice ? <section class={`action-notice ${notice.success ? "action-notice--success" : "action-notice--warning"}`} role="status"><strong>{notice.success ? "Saved" : "Not saved"}</strong><span>{notice.detail}</span></section> : null}
@@ -229,8 +244,11 @@ export function ProjectDetail({ projectID, data, onChanged, onNavigate, onBack }
       <ProjectPolicyEditor projectID={projectID} onSaved={(detail) => { setNotice({ success: true, detail }); void loadLimits(); }} />
     </section>
     <section class="surface">
-      <div class="section-heading"><div><p class="eyebrow">Keys</p><h2>Keys in this project</h2></div><span>{keys.length} key{keys.length === 1 ? "" : "s"}</span></div>
-      {keys.length === 0 ? <EmptyState title="No keys in this project" detail="Create one from Manage keys." /> : dataTable(keyView, keyColumns, { label: `Keys in ${name}`, rowKey: (key) => stringValue(key.id) })}
+      <div class="section-heading"><div><p class="eyebrow">Keys</p><h2>Keys in this project</h2></div><span>{keyTotal} key{keyTotal === 1 ? "" : "s"}</span></div>
+      {keyError ? <ErrorState title="The project's keys are unavailable" detail={keyError} />
+        : keyListing === null ? <LoadingState title="Loading keys" />
+        : keyTotal === 0 ? <EmptyState title="No keys in this project" detail="Create one from Manage keys." />
+        : dataTable(keyView, keyColumns, { label: `Keys in ${name}`, rowKey: (key) => stringValue(key.id) })}
     </section>
     <section class="surface">
       <div class="section-heading"><div><p class="eyebrow">Members</p><h2>Who can act in this project</h2></div><span>{memberships.length} member{memberships.length === 1 ? "" : "s"}</span></div>
@@ -250,6 +268,6 @@ export function ProjectDetail({ projectID, data, onChanged, onNavigate, onBack }
           {keyUsage.length === 0 ? <p class="muted-copy">No recorded usage in this project in the last {usageDays} days.</p> : <table><thead><tr><th>Key</th><th>Requests</th><th>Failed</th><th>Tokens</th><th>Estimated cost</th></tr></thead><tbody>{keyUsage.map((row, index) => <tr key={`${stringValue(row.key_id)}-${index}`}><td>{stringValue(row.key_name) || stringValue(row.key_id) || "Playground or external keys"}</td><td>{numberValue(row.requests).toLocaleString()}</td><td>{numberValue(row.errors).toLocaleString()}</td><td>{(numberValue(row.input_tokens) + numberValue(row.output_tokens)).toLocaleString()}</td><td>{formatUsageMetric(numberValue(row.cost_microusd), "cost")}</td></tr>)}</tbody></table>}
         </>}
     </section>
-    {adding ? <AddMembershipDialog project={project} principals={activePrincipals} onClose={() => setAdding(false)} onCreated={onChanged} /> : null}
+    {adding ? <AddMembershipDialog project={project} onClose={() => setAdding(false)} onCreated={onChanged} /> : null}
   </div>;
 }

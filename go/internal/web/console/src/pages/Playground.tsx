@@ -5,7 +5,8 @@ import { APIError, getJSON, requestJSON, sendJSON, streamEvents, type JSONRecord
 import type { ConsoleMode } from "../lib/mode";
 import { asList, asRecord, numberValue, stringValue } from "../lib/records";
 import { EmptyState, ErrorState, PageHeading } from "../components/PageState";
-import { SearchSelect } from "../components/DataTable";
+import { RemoteSearchSelect, SearchSelect } from "../components/DataTable";
+import { principalSearch } from "../lib/directory";
 import {
   ModelCombo,
   ModelFilters,
@@ -184,7 +185,6 @@ export function Playground({ data, mode, principalID, onPrincipalIDChange, prese
 }) {
   const projects = asList(data.projects).map(asRecord);
   const memberships = asList(data.memberships).map(asRecord);
-  const humans = asList(data.principals).map(asRecord).filter((principal) => stringValue(principal.kind) === "human" && stringValue(principal.status, "active") === "active");
   const signedInPrincipalID = stringValue(asRecord(data.principal).id);
   const scopedPrincipalID = mode === "admin" ? principalID : signedInPrincipalID;
   const eligibleProjects = useMemo(() => {
@@ -196,11 +196,10 @@ export function Playground({ data, mode, principalID, onPrincipalIDChange, prese
       stringValue(project.status, "active") === "active" && allowed.has(stringValue(project.id)));
   }, [data, scopedPrincipalID]);
 
+  const defaultOwner = stringValue(asRecord(data.default_owner).id);
   useEffect(() => {
-    if (mode === "admin" && !principalID && humans.length) {
-      onPrincipalIDChange(stringValue(humans[0].id));
-    }
-  }, [mode, principalID, humans]);
+    if (mode === "admin" && !principalID && defaultOwner) onPrincipalIDChange(defaultOwner);
+  }, [mode, principalID, defaultOwner]);
 
   const [catalog, setCatalog] = useState<JSONRecord | null>(null);
   const [catalogSource, setCatalogSource] = useState("");
@@ -684,10 +683,9 @@ export function Playground({ data, mode, principalID, onPrincipalIDChange, prese
   }[surface as "tts" | "transcription" | "image" | "video"] ?? "Unknown";
   const expectedTransport = transportForSurface(selected, selectedSurface);
   const formatFreshness = (value: string) => value ? new Date(value).toLocaleString() : "Not available";
-  const scopeSummary = [
-    humans.find((principal) => stringValue(principal.id) === principalID),
-    eligibleProjects.find((project) => stringValue(project.id) === projectID),
-  ];
+  // The owner is named by a membership: one without any opens no project here.
+  const ownerName = mode === "admin" ? stringValue(memberships.find((membership) => stringValue(membership.principal_id) === principalID)?.principal_name) : "";
+  const scopeProject = eligibleProjects.find((project) => stringValue(project.id) === projectID);
 
   return (
     <div class="page-stack playground-page">
@@ -705,12 +703,12 @@ export function Playground({ data, mode, principalID, onPrincipalIDChange, prese
           {settingsOpen ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
           <span class="playground-settings__summary">
             <strong class="technical">{model || "No model selected"}</strong>
-            <small>{[stringValue(scopeSummary[0]?.display_name), stringValue(scopeSummary[1]?.name, stringValue(scopeSummary[1]?.slug)), capabilityNote].filter(Boolean).join(" · ") || "Configure scope"}</small>
+            <small>{[ownerName, stringValue(scopeProject?.name, stringValue(scopeProject?.slug)), capabilityNote].filter(Boolean).join(" · ") || "Configure scope"}</small>
           </span>
         </button>
         {settingsOpen ? <div class="playground-settings__body">
           <div class="playground-settings__scope">
-            {mode === "admin" ? <SearchSelect label="Human owner" noun="owners" value={principalID} options={[{ value: "", label: "Select a human owner" }, ...humans.map((principal) => ({ value: stringValue(principal.id), label: stringValue(principal.display_name, stringValue(principal.id)) }))]} onChange={onPrincipalIDChange} /> : null}
+            {mode === "admin" ? <RemoteSearchSelect label="Human owner" noun="owners" value={principalID} emptyLabel="Select a human owner" {...principalSearch(mode, { kinds: ["human"], status: "active" })} onChange={onPrincipalIDChange} /> : null}
             <SearchSelect label="Project" noun="projects" value={projectID} options={[{ value: "", label: "Select a project" }, ...eligibleProjects.map((project) => ({ value: stringValue(project.id), label: stringValue(project.name, stringValue(project.slug)) }))]} onChange={setProjectID} />
             {surface === "tts" && locales.length > 1 ? <label>Language<select value={locale} onInput={(event) => setLocale((event.currentTarget as HTMLSelectElement).value)}><option value="all">All languages ({locales.length})</option>{locales.map((code) => <option value={code} key={code}>{code}</option>)}</select></label> : null}
 			{surface === "chat" && availableTextSurfaces.length > 1 ? <label>Text surface<select value={textSurface} onInput={(event) => setTextSurface((event.currentTarget as HTMLSelectElement).value as TextSurface)}>{textSurfaces.filter(({ path }) => availableTextSurfaces.includes(path)).map(({ path, label }) => <option value={path} key={path}>{label} · {transportForSurface(selected, path)}</option>)}</select></label> : null}

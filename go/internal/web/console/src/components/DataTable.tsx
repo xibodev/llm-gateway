@@ -1,5 +1,5 @@
 import type { ComponentChildren } from "preact";
-import { useId, useState } from "preact/hooks";
+import { useEffect, useId, useRef, useState } from "preact/hooks";
 import { ArrowDown, ArrowUp, ArrowUpDown, Check, Copy } from "lucide-preact";
 import { Pager } from "./ModelPicker";
 
@@ -165,5 +165,56 @@ export function SearchSelect({ label, value, options, onChange, disabled = false
   return <label class={[className, "search-select"].filter(Boolean).join(" ")}>{label}
     <input type="search" value={search} disabled={disabled} placeholder={`Search ${options.length} ${noun}`} aria-label={`Search ${noun}`} aria-controls={id} onInput={(event) => setSearch((event.currentTarget as HTMLInputElement).value)} />
     {select}
+  </label>;
+}
+
+// RemoteSearchSelect is a SearchSelect over options the server finds: search
+// answers the first page that matches the term typed, and the chosen option
+// stays listed, by the label resolve gives it, whatever the search, so
+// narrowing never changes the choice. A choice the server no longer knows
+// keeps its value, labelled as unavailable. The options reload when the term
+// or filterKey changes; search and resolve may change on every render.
+export function RemoteSearchSelect({ label, value, onChange, search, resolve, filterKey, emptyLabel, disabled = false, searchAt = 8, noun = "options", class: className }: {
+  label: string; value: string; onChange: (value: string) => void;
+  search: (term: string) => Promise<{ options: PickerOption[]; total: number }>;
+  resolve: (value: string) => Promise<string | null>;
+  filterKey: string; emptyLabel?: string; disabled?: boolean; searchAt?: number; noun?: string; class?: string;
+}) {
+  const [term, setTerm] = useState("");
+  const [found, setFound] = useState<{ options: PickerOption[]; total: number } | null>(null);
+  const [error, setError] = useState("");
+  const [chosen, setChosen] = useState<PickerOption | null>(null);
+  const request = useRef(0);
+  const id = useId();
+  useEffect(() => {
+    // An answer that arrives after a newer search must not replace its own.
+    const current = ++request.current;
+    setError("");
+    search(term).then((result) => {
+      if (current === request.current) setFound(result);
+    }).catch((cause) => {
+      if (current === request.current) setError(cause instanceof Error ? cause.message : `The ${noun} could not load.`);
+    });
+  }, [term, filterKey]);
+  const listed = found?.options ?? [];
+  const missing = Boolean(value) && !listed.some((option) => option.value === value);
+  useEffect(() => {
+    if (!missing || chosen?.value === value) return;
+    const wanted = value;
+    resolve(wanted).then((name) => setChosen({ value: wanted, label: name ?? `${wanted} (unavailable)` }))
+      .catch(() => setChosen({ value: wanted, label: wanted }));
+  }, [value, missing]);
+  const options = [
+    ...(emptyLabel === undefined ? [] : [{ value: "", label: emptyLabel }]),
+    ...(missing ? [chosen?.value === value ? chosen : { value, label: value }] : []),
+    ...listed,
+  ];
+  const more = found ? found.total - listed.length : 0;
+  const select = <select id={id} value={value} disabled={disabled} aria-label={label} onChange={(event) => onChange((event.currentTarget as HTMLSelectElement).value)}>{options.map((option) => <option key={option.value} value={option.value} disabled={option.disabled}>{option.label}</option>)}</select>;
+  const notes = <>{more > 0 ? <small class="form-help">{more} more {noun} match; search to narrow them.</small> : null}{error ? <small class="form-error" role="alert">{error}</small> : null}</>;
+  if (!term && (found?.total ?? 0) <= searchAt) return <label class={className}>{label}{select}{notes}</label>;
+  return <label class={[className, "search-select"].filter(Boolean).join(" ")}>{label}
+    <input type="search" value={term} disabled={disabled} placeholder={`Search ${noun}`} aria-label={`Search ${noun}`} aria-controls={id} onInput={(event) => setTerm((event.currentTarget as HTMLInputElement).value)} />
+    {select}{notes}
   </label>;
 }

@@ -6,7 +6,8 @@ import { asList, asRecord, numberValue, stringValue } from "../lib/records";
 import { EmptyState, ErrorState, LoadingState, PageHeading } from "../components/PageState";
 import { KeyScopeEditor, keyPolicySummary, keyQuotaLabels } from "../components/KeyScopeEditor";
 import { KeyLimitsDialog } from "../components/LimitUsage";
-import { SearchSelect, dataTable, serverTableView, tablePageSizes, type ServerTableState, type TableColumn } from "../components/DataTable";
+import { RemoteSearchSelect, SearchSelect, dataTable, serverTableView, tablePageSizes, type ServerTableState, type TableColumn } from "../components/DataTable";
+import { keyCount, principalSearch } from "../lib/directory";
 import { keyQuotaDraftsFor, keyQuotaFields, keyQuotaPolicyFromDrafts } from "../lib/key-policy";
 import { formatKeyTime, keyExpiryFromInput, keyExpiryInputValue, keyTimes } from "../lib/key-dates";
 import { useDialogFocus } from "../components/useDialogFocus";
@@ -80,14 +81,15 @@ export function ApiKeys({ data, mode, onChanged, initialContext }: {
   initialContext?: { ownerID?: string; projectID?: string; routeName?: string };
 }) {
   const projects = asList(data.projects).map(asRecord);
-  const principals = asList(data.principals).map(asRecord);
   const memberships = asList(data.memberships).map(asRecord);
   const self = asRecord(data.principal);
-  const eligibleOwners = (id: string) => principals.filter((principal) =>
-    ["human", "service"].includes(stringValue(principal.kind)) && stringValue(principal.status) === "active" &&
-    memberships.some((membership) => stringValue(membership.project_id) === id &&
-      stringValue(membership.principal_id) === stringValue(principal.id) &&
-      ["owner", "admin", "member", "viewer"].includes(stringValue(membership.role)) && stringValue(membership.status, "active") === "active"));
+  // A project's eligible owners are its active people and service principals,
+  // whom its memberships name. The portal acts as its signed-in user.
+  const eligibleOwners = (id: string) => mode === "portal" ? [] : memberships.filter((membership) =>
+    stringValue(membership.project_id) === id &&
+    ["human", "service"].includes(stringValue(membership.principal_kind)) && stringValue(membership.principal_status) === "active" &&
+    ["owner", "admin", "member", "viewer"].includes(stringValue(membership.role)) && stringValue(membership.status, "active") === "active")
+    .map((membership) => ({ id: stringValue(membership.principal_id), display_name: stringValue(membership.principal_name, stringValue(membership.principal_id)), kind: stringValue(membership.principal_kind) }));
   const creatableProjects = projects.filter((project) => stringValue(project.status, "active") === "active" &&
     (mode === "admin" || memberships.some((membership) => stringValue(membership.project_id) === stringValue(project.id) &&
       stringValue(membership.principal_id) === stringValue(self.id) && ["owner", "admin", "member"].includes(stringValue(membership.role)))));
@@ -168,9 +170,6 @@ export function ApiKeys({ data, mode, onChanged, initialContext }: {
   };
   const owners = eligibleOwners(projectID);
   const selectedOwner = owners.find((owner) => owner.id === principalID);
-  const ownerNames = new Map(principals.map((principal) => [stringValue(principal.id), stringValue(principal.display_name, stringValue(principal.id))]));
-  for (const key of keys) if (!ownerNames.has(stringValue(key.principal_id))) ownerNames.set(stringValue(key.principal_id), stringValue(key.principal, stringValue(key.principal_id)));
-  if (ownerFilter && !ownerNames.has(ownerFilter)) ownerNames.set(ownerFilter, `${ownerFilter} (unavailable owner)`);
   // Only the deletable keys the list shows can be selected, so a filter never
   // hides a key it would delete.
   const deletableShown = keys.filter(keyDeletable).map((key) => stringValue(key.id));
@@ -335,7 +334,7 @@ export function ApiKeys({ data, mode, onChanged, initialContext }: {
 
   // Whether any key exists, which tells an empty filtered list from an empty
   // workspace.
-  const anyKeys = asList(data.keys).length > 0;
+  const anyKeys = keyCount(data) > 0;
   const columns: TableColumn<JSONRecord>[] = [
     {
       id: "select", header: "Select",
@@ -355,7 +354,7 @@ export function ApiKeys({ data, mode, onChanged, initialContext }: {
       },
     },
     { id: "project", header: "Project", sortable: true, cell: (key) => stringValue(key.project, stringValue(key.project_id)) },
-    { id: "owner", header: "Owner", sortable: true, cell: (key) => stringValue(key.principal, ownerNames.get(stringValue(key.principal_id)) ?? stringValue(key.principal_id)) },
+    { id: "owner", header: "Owner", sortable: true, cell: (key) => stringValue(key.principal, stringValue(key.principal_id)) },
     {
       id: "policy", header: "Policy", class: "key-policy-summary", cell: (key) => {
         const policy = policyFor(key);
@@ -393,7 +392,7 @@ export function ApiKeys({ data, mode, onChanged, initialContext }: {
     <PageHeading eyebrow="Credential governance" title="API keys" detail="Scope gateway keys by owner and project, inspect policy, revoke a key that should stop working, and delete keys that no longer work." actions={<button ref={createButtonRef} class="button button--primary" type="button" disabled={busy} onClick={startCreate}><Plus size={16} /> Create key</button>} />
     {message ? <p class="route-message" role="status">{message}</p> : null}
     <section class="surface key-list-filters" aria-label="Filter API keys">
-      {mode === "admin" ? <SearchSelect label="Owner" noun="owners" value={ownerFilter} options={[{ value: "", label: "All owners" }, ...[...ownerNames].filter(([id]) => id).map(([id, label]) => ({ value: id, label }))]} onChange={(value) => filtered(() => setOwnerFilter(value))} /> : <p class="form-help">Owner: {stringValue(self.display_name, "you")}. Only your keys are shown.</p>}
+      {mode === "admin" ? <RemoteSearchSelect label="Owner" noun="owners" value={ownerFilter} emptyLabel="All owners" {...principalSearch(mode, {})} onChange={(value) => filtered(() => setOwnerFilter(value))} /> : <p class="form-help">Owner: {stringValue(self.display_name, "you")}. Only your keys are shown.</p>}
       <SearchSelect label="Project" noun="projects" value={projectFilter} options={[{ value: "", label: "All projects" }, ...projects.map((project) => ({ value: stringValue(project.id), label: stringValue(project.name, stringValue(project.slug, stringValue(project.id))) }))]} onChange={(value) => filtered(() => setProjectFilter(value))} />
       <label>Status<select value={statusFilter} onChange={(event) => { const value = event.currentTarget.value; filtered(() => setStatusFilter(value)); }}>{statusFilters.map((filter) => <option key={filter.id} value={filter.id}>{filter.label}</option>)}</select></label>
       <label>Search keys<input type="search" value={search} onInput={(event) => { const value = event.currentTarget.value; filtered(() => setSearch(value)); }} placeholder="Name, prefix, owner or project" /></label>

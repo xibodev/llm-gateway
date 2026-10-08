@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { fileURLToPath } from "node:url";
 import test from "node:test";
 import { bundle, find, findAll, input, mount, settle, text } from "./hook-harness.mjs";
+import { fakePrincipalListing } from "./key-listing.mjs";
 
 const { Access } = await bundle(fileURLToPath(new URL("../src/pages/Access.tsx", import.meta.url)), [
   { filter: /\/lib\/api$/, contents: "export const sendJSON = (...args) => globalThis.__api.sendJSON(...args);\nexport const getJSON = (...args) => globalThis.__api.getJSON(...args);" },
@@ -19,17 +20,22 @@ function opened(tree, matches) {
 test("an administrator renames a principal, and the built-in one keeps its name", async () => {
   const sent = [];
   let changed = 0;
-  globalThis.__api = { sendJSON: async (mode, path, method, body) => { sent.push({ mode, path, method, body }); return {}; } };
-  const data = {
-    principals: [
-      { id: "prn-1", kind: "human", display_name: "fixture-subject", external_subject: "authentik:fixture-subject", status: "active" },
-      { id: "prn-2", kind: "human", display_name: "Grace", external_subject: "authentik:grace", name_set_by_admin: true, status: "active" },
-      { id: "prn-sys", kind: "system", display_name: "Gateway system", status: "active" },
-    ],
-    projects: [], memberships: [],
+  // The page lists principals a page at a time from the server.
+  const listing = fakePrincipalListing([
+    { id: "prn-1", kind: "human", display_name: "fixture-subject", external_subject: "authentik:fixture-subject", status: "active" },
+    { id: "prn-2", kind: "human", display_name: "Grace", external_subject: "authentik:grace", name_set_by_admin: true, status: "active" },
+    { id: "prn-sys", kind: "system", display_name: "Gateway system", status: "active" },
+  ]);
+  globalThis.__api = {
+    getJSON: async (mode, path) => listing.answer(path),
+    sendJSON: async (mode, path, method, body) => { sent.push({ mode, path, method, body }); return {}; },
   };
+  const data = { projects: [], memberships: [], counts: { active_principals: 2 } };
   const render = mount(() => Access({ data, mode: "admin", onChanged: async () => { changed += 1; } }));
+  render();
+  await settle();
   let tree = render();
+  assert.match(listing.requests[0], /^\/principals\?limit=25$/, "the server pages the principals");
   const rename = (name) => find(tree, (node) => node.type === "button" && node.props?.["aria-label"] === `Rename ${name}`);
   assert.equal(rename("Gateway system"), undefined, "the built-in system principal has no rename action");
   const grace = find(tree, (node) => node.type === "tr" && node.key === "prn-2");
@@ -58,6 +64,7 @@ test("an administrator renames a principal, and the built-in one keeps its name"
   tree = render();
   assert.deepEqual(sent, [{ mode: "admin", path: "/principals/prn-1/rename", method: "POST", body: { display_name: "Ada Lovelace" } }]);
   assert.equal(changed, 1);
+  assert.equal(listing.requests.length, 2, "the renamed principal's page is read again");
   assert.equal(opened(tree, (props) => props.principal?.id === "prn-1"), null, "the dialog closes");
   const notice = find(tree, (node) => typeof node.type === "function" && node.props?.result);
   assert.match(notice.props.result.detail, /fixture-subject is now Ada Lovelace\./);

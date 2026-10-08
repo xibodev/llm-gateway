@@ -5,7 +5,8 @@ import type { ConsoleMode } from "../lib/mode";
 import { asList, asRecord, stringValue } from "../lib/records";
 import { EmptyState, ErrorState, LoadingState, PageHeading } from "../components/PageState";
 import { ModelFilters, catalogModels, filterModels, useModelFilter } from "../components/ModelPicker";
-import { SearchSelect, dataTable, useTableView, type TableColumn } from "../components/DataTable";
+import { RemoteSearchSelect, dataTable, useTableView, type TableColumn } from "../components/DataTable";
+import { principalSearch } from "../lib/directory";
 
 function CopySnippet({ value }: { value: string }) {
   const [copied, setCopied] = useState(false);
@@ -46,12 +47,10 @@ export COPILOT_PROVIDER_WIRE_MODEL=PROVIDER_OR_ENDPOINT/MODEL` },
 }
 
 export function ModelsEndpoints({ data, mode, principalID, onPrincipalIDChange }: { data: JSONRecord; mode: ConsoleMode; principalID: string; onPrincipalIDChange: (principalID: string) => void }) {
-  const humans = asList(data.principals).map(asRecord).filter((principal) => stringValue(principal.kind) === "human" && stringValue(principal.status, "active") === "active");
+  const defaultOwner = stringValue(asRecord(data.default_owner).id);
   useEffect(() => {
-    if (mode === "admin" && !principalID && humans.length) {
-      onPrincipalIDChange(stringValue(humans[0].id));
-    }
-  }, [mode, principalID, humans]);
+    if (mode === "admin" && !principalID && defaultOwner) onPrincipalIDChange(defaultOwner);
+  }, [mode, principalID, defaultOwner]);
   const [catalog, setCatalog] = useState<JSONRecord | null>(null);
   const [error, setError] = useState("");
   const [filter, setFilter] = useModelFilter();
@@ -103,7 +102,7 @@ export function ModelsEndpoints({ data, mode, principalID, onPrincipalIDChange }
         {snippets.map((snippet) => <article class="endpoint-card" key={snippet.title}><header><Terminal size={18} /><h2>{snippet.title}</h2><CopySnippet value={snippet.value} /></header><pre class="technical">{snippet.value}</pre></article>)}
       </section>
       <section class="surface endpoint-capabilities"><div class="section-heading"><div><p class="eyebrow">Gateway surfaces</p><h2>Documented endpoint capabilities</h2></div><span class="status-pill status-pill--muted">Gateway documented</span></div><div class="capability-list"><div><strong>OpenAI core</strong><span class="technical">/v1/models · /v1/chat/completions · /v1/responses · /v1/embeddings</span></div><div><strong>Anthropic core</strong><span class="technical">/v1/messages · /v1/messages/count_tokens</span></div><div><strong>Media</strong><span class="technical">/v1/audio/transcriptions · /v1/audio/speech · /v1/images/generations · /v1/videos/generations</span></div><div><strong>Codex</strong><span>Official owner-private connection routes through the gateway Responses surface.</span></div></div></section>
-      <section class="surface"><div class="section-heading"><div><p class="eyebrow">Real catalog</p><h2>Available models</h2></div><button class="button button--secondary" type="button" onClick={() => void load()}>Refresh list</button></div><div class="model-toolbar">{mode === "admin" ? <SearchSelect label="Catalog owner" noun="owners" value={principalID} options={[{ value: "", label: "Select a human owner" }, ...humans.map((principal) => ({ value: stringValue(principal.id), label: stringValue(principal.display_name, stringValue(principal.id)) }))]} onChange={onPrincipalIDChange} /> : null}</div><ModelFilters models={models} filter={filter} onChange={setFilter} />{error ? <ErrorState title="Model catalog is unavailable" detail={error} action={<button class="button button--secondary" type="button" onClick={() => void load()}>Retry</button>} /> : catalog === null ? <LoadingState title="Loading configured model catalogs" /> : filtered.length === 0 ? <EmptyState title="No models match this filter" detail="Sync a provider catalog, or widen the provider and capability filters." /> : dataTable(modelView, modelColumns, { label: "Available models", rowKey: (row) => stringValue(row.id) })}</section>
+      <section class="surface"><div class="section-heading"><div><p class="eyebrow">Real catalog</p><h2>Available models</h2></div><button class="button button--secondary" type="button" onClick={() => void load()}>Refresh list</button></div><div class="model-toolbar">{mode === "admin" ? <RemoteSearchSelect label="Catalog owner" noun="owners" value={principalID} emptyLabel="Select a human owner" {...principalSearch(mode, { kinds: ["human"], status: "active" })} onChange={onPrincipalIDChange} /> : null}</div><ModelFilters models={models} filter={filter} onChange={setFilter} />{error ? <ErrorState title="Model catalog is unavailable" detail={error} action={<button class="button button--secondary" type="button" onClick={() => void load()}>Retry</button>} /> : catalog === null ? <LoadingState title="Loading configured model catalogs" /> : filtered.length === 0 ? <EmptyState title="No models match this filter" detail="Sync a provider catalog, or widen the provider and capability filters." /> : dataTable(modelView, modelColumns, { label: "Available models", rowKey: (row) => stringValue(row.id) })}</section>
     </div>
   );
 }

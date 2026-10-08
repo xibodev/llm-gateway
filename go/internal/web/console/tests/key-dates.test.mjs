@@ -44,16 +44,16 @@ test("an expiry shows in the field as the local date and time it reads back as",
   assert.equal(dates.keyExpiryInputValue(new Date(2027, 0, 2, 3, 4, 59).getTime() / 1000), "2027-01-02T03:04");
 });
 
+const keys = [{ id: "key-1", name: "ci", status: "active", project_id: "project-1", principal_id: "user-1", created: 1798700000, expires_at: 0, last_used_at: 1798783140 }];
 const data = {
   projects: [{ id: "project-1", name: "Project one", status: "active" }],
-  principals: [{ id: "user-1", kind: "human", status: "active", display_name: "Ada" }],
-  memberships: [{ project_id: "project-1", principal_id: "user-1", role: "owner", status: "active" }],
-  keys: [{ id: "key-1", name: "ci", status: "active", project_id: "project-1", principal_id: "user-1", created: 1798700000, expires_at: 0, last_used_at: 1798783140 }],
+  memberships: [{ project_id: "project-1", principal_id: "user-1", role: "owner", principal_name: "Ada", principal_kind: "human", principal_status: "active" }],
+  counts: { keys: keys.length },
 };
 
 function keysPage() {
   const sent = [];
-  const listing = fakeKeyListing(data.keys);
+  const listing = fakeKeyListing(keys);
   globalThis.__api = {
     getJSON: async (mode, path) => listing.answer(path),
     sendJSON: async (mode, path, method, body) => { sent.push({ path, method, body }); return { token: "fixture-token" }; },

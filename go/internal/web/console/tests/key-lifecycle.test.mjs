@@ -8,20 +8,21 @@ const { ApiKeys } = await bundle(fileURLToPath(new URL("../src/pages/ApiKeys.tsx
   { filter: /\/lib\/api$/, contents: "export const sendJSON = (...args) => globalThis.__api.sendJSON(...args);\nexport const getJSON = (...args) => globalThis.__api.getJSON(...args);" },
 ]);
 
-const key = (id, status, expiresAt = 0) => ({ id, name: id, status, project_id: "project-1", principal_id: "user-1", created: 1798700000, expires_at: expiresAt });
+const key = (id, status, expiresAt = 0) => ({ id, name: id, status, project_id: "project-1", principal_id: "user-1", principal: "Ada", created: 1798700000, expires_at: expiresAt });
+const keys = [key("live", "active"), key("paused", "disabled"), key("gone", "revoked"), key("lapsed", "active", 1000000000), key("old", "revoked")];
+// The administrator state counts keys, and memberships name their principal.
 const data = {
   projects: [{ id: "project-1", name: "Project one", status: "active" }],
-  principals: [{ id: "user-1", kind: "human", status: "active", display_name: "Ada" }],
-  memberships: [{ project_id: "project-1", principal_id: "user-1", role: "owner", status: "active" }],
-  keys: [key("live", "active"), key("paused", "disabled"), key("gone", "revoked"), key("lapsed", "active", 1000000000), key("old", "revoked")],
+  memberships: [{ project_id: "project-1", principal_id: "user-1", role: "owner", principal_name: "Ada", principal_kind: "human", principal_status: "active" }],
+  counts: { keys: keys.length },
 };
 
-// keysPage mounts the administrator's key list, served from data.keys, and
-// waits for its first page.
+// keysPage mounts the administrator's key list, served from keys, and waits
+// for its first page.
 async function keysPage() {
   const sent = [];
   const confirmations = [];
-  const listing = fakeKeyListing(data.keys);
+  const listing = fakeKeyListing(keys);
   globalThis.window = { confirm: (message) => { confirmations.push(message); return true; } };
   globalThis.__api = {
     getJSON: async (mode, path) => listing.answer(path),
@@ -114,4 +115,27 @@ test("revoked and expired keys are deleted in bulk, only those the list shows", 
   find(tree, (node) => node.type === "button" && /Delete 2 selected/.test(text(node))).props.onClick();
   await settle();
   assert.deepEqual(sent.at(-1).body, { ids: ["gone", "old"] }, "the expired key the filter hides is not deleted");
+});
+
+test("an administrator's key acts as an active person or service member of its project, named by the membership", async () => {
+  const listing = fakeKeyListing([]);
+  globalThis.window = { confirm: () => true };
+  globalThis.__api = { getJSON: async (mode, path) => listing.answer(path), sendJSON: async () => ({}) };
+  const members = {
+    projects: [{ id: "project-1", name: "Project one", status: "active" }, { id: "project-2", name: "Project two", status: "active" }],
+    memberships: [
+      { project_id: "project-1", principal_id: "user-1", role: "owner", principal_name: "Ada", principal_kind: "human", principal_status: "active" },
+      { project_id: "project-1", principal_id: "bot-1", role: "viewer", principal_name: "Batch", principal_kind: "service", principal_status: "active" },
+      { project_id: "project-1", principal_id: "user-2", role: "member", principal_name: "Cy", principal_kind: "human", principal_status: "disabled" },
+      { project_id: "project-2", principal_id: "user-3", role: "owner", principal_name: "Dee", principal_kind: "human", principal_status: "active" },
+    ],
+    counts: { keys: 0 },
+  };
+  const render = mount(() => ApiKeys({ data: members, mode: "admin", onChanged: async () => {}, initialContext: { projectID: "project-1" } }));
+  render();
+  await settle();
+  const tree = render();
+  const actsAs = find(tree, (node) => typeof node.type === "function" && node.props?.label === "Acts as");
+  assert.deepEqual(actsAs.props.options.slice(2).map((option) => [option.value, option.label]), [["user-1", "Ada (human)"], ["bot-1", "Batch (service)"]],
+    "a disabled member and another project's member cannot be chosen");
 });

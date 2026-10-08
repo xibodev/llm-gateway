@@ -58,7 +58,7 @@ test("the portal requests page lists the user's requests without the gateway's f
       };
     },
   };
-  const render = mount(() => Requests({ data: { keys: [], projects: [] }, mode: "portal" }));
+  const render = mount(() => Requests({ data: { projects: [] }, mode: "portal" }));
   render();
   await settle();
   let tree = render();
@@ -79,14 +79,14 @@ test("the requests page lists, filters and pages recorded requests", async () =>
       if (path.includes("before_id=2")) return { requests: [{ id: 1, ts: 1, request_id: "req_old", status_code: 200, endpoint: "chat" }], next_before_id: 0 };
       return {
         requests: [
-          { id: 3, ts: 3, request_id: "req_new", endpoint: "chat", status_code: 502, error_code: "upstream", provider: "openai", requested_model: "fast", routed_model: "gpt", key_id: "k1", latency_ms: 812, input_tokens: 11, output_tokens: 3 },
+          { id: 3, ts: 3, request_id: "req_new", endpoint: "chat", status_code: 502, error_code: "upstream", provider: "openai", requested_model: "fast", routed_model: "gpt", key_id: "k1", key_name: "ci key", latency_ms: 812, input_tokens: 11, output_tokens: 3 },
           { id: 2, ts: 2, request_id: "req_mid", endpoint: "messages", status_code: 200, provider: "anthropic", key_id: "k-deleted", key_name: "retired key" },
         ],
         next_before_id: 2,
       };
     },
   };
-  const data = { providers: [{ id: "openai" }], keys: [{ id: "k1", name: "ci key" }], projects: [] };
+  const data = { providers: [{ id: "openai" }], projects: [] };
   const render = mount(() => Requests({ data, mode: "admin" }));
   render();
   await settle();
