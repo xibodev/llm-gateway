@@ -11,12 +11,21 @@ import {
   directProviderObservation,
   gatewayProviderTimeoutSeconds,
   isFreeModel,
+  playgroundPayload,
   requiredChecks,
   routeResultPassed,
   schema,
   selectHealthyModels,
   sendWithReplay,
 } from "./core.mjs";
+
+test("a Playground answer is read whether it streamed or not", () => {
+  assert.deepEqual(playgroundPayload("application/json", '{"served":{"provider":"a"}}'), { served: { provider: "a" } });
+  assert.equal(playgroundPayload("application/json", "not json"), null);
+  const stream = 'event: route\ndata: {"served":{"provider":"a"}}\n\nevent: delta\ndata: {"text":"ok"}\n\nevent: done\r\ndata: {"served":{"provider":"a"},"project_id":"p"}\r\n\r\n';
+  assert.deepEqual(playgroundPayload("text/event-stream", stream), { served: { provider: "a" }, project_id: "p" }, "a stream's payload is its done event");
+  assert.equal(playgroundPayload("text/event-stream", 'event: route\ndata: {}\n\nevent: error\ndata: {"error":{"message":"failed"}}\n\n'), null, "a stream that failed has none");
+});
 
 test("the gateway gives up on a provider before the harness gives up on the gateway", () => {
   assert.equal(gatewayProviderTimeoutSeconds(180_000), 120);

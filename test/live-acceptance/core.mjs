@@ -134,6 +134,24 @@ export function routeResultPassed(payload, members, minimumAttempts = 1) {
     attempts >= minimumAttempts && attempts <= members.length;
 }
 
+// playgroundPayload reads a Playground answer from its content type and
+// body: the JSON a request that does not stream answers, or the data of the
+// done event a streamed one ends with. Anything else is null.
+export function playgroundPayload(contentType, body) {
+  if (!String(contentType || "").includes("text/event-stream")) {
+    try { return JSON.parse(body); } catch { return null; }
+  }
+  let payload = null;
+  for (const record of String(body).replace(/\r\n/g, "\n").split("\n\n")) {
+    const lines = record.split("\n");
+    const event = lines.find((line) => line.startsWith("event:"))?.slice("event:".length).trim();
+    const data = lines.filter((line) => line.startsWith("data:")).map((line) => line.slice("data:".length).trim()).join("\n");
+    if (event !== "done" || !data) continue;
+    try { payload = JSON.parse(data); } catch { payload = null; }
+  }
+  return payload;
+}
+
 // sendWithReplay sends a request and, when the answer is a 2xx that passed
 // rejects, sends the same request once more. A free model answers one
 // request at a time with no fixed output, so one unusable answer, such as a

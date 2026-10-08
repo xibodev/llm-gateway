@@ -15,6 +15,7 @@ import {
   evaluatePolicy,
   gatewayProviderTimeoutSeconds,
   isFreeModel,
+  playgroundPayload,
   routeResultPassed,
   safeExcerpt,
   schema,
@@ -552,7 +553,9 @@ async function testPlayground(identity, healthy, plans) {
         page.waitForResponse((candidate) => candidate.request().method() === "POST" && candidate.url().endsWith("/admin/api/playground/v1/chat/completions"), { timeout: 70_000 }),
         page.getByRole("button", { name: /^Send$/ }).click(),
       ]);
-      const payload = await response.json().catch(() => null);
+      // The Playground streams its answer by default: the payload is then the
+      // data of the stream's done event.
+      const payload = playgroundPayload(response.headers()["content-type"], await response.text().catch(() => ""));
       await page.waitForFunction(() => document.querySelectorAll(".chat-turn--assistant").length === 1 || document.querySelector(".state-panel--error"), null, { timeout: 10_000 });
       const routed = await page.locator(".playground-outcome").innerText();
       const assistantText = await page.locator(".chat-turn--assistant:not(.chat-turn--pending) p").textContent().catch(() => "");

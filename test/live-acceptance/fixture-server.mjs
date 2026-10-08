@@ -18,7 +18,19 @@ createServer((request, response) => {
   request.on("data", (chunk) => { body += chunk; });
   request.on("end", () => {
     let model = models[0];
-    try { model = JSON.parse(body).model || model; } catch {}
+    let stream = false;
+    try {
+      const parsed = JSON.parse(body);
+      model = parsed.model || model;
+      stream = parsed.stream === true;
+    } catch {}
+    if (stream) {
+      // A request that streams is answered as an OpenAI-compatible stream.
+      const chunk = (delta, finish) => `data: ${JSON.stringify({ id: "chatcmpl-live", model, choices: [{ index: 0, delta, finish_reason: finish }] })}\n\n`;
+      response.setHeader("Content-Type", "text/event-stream");
+      response.end(chunk({ role: "assistant", content: "ok" }, null) + chunk({}, "stop") + "data: [DONE]\n\n");
+      return;
+    }
     response.end(JSON.stringify({ id: "chatcmpl-live", model, choices: [{ index: 0, message: { role: "assistant", content: "ok" }, finish_reason: "stop" }] }));
   });
 }).listen(8080, "0.0.0.0");
