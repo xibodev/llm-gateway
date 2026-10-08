@@ -105,10 +105,14 @@ func (rt *Runtime) chatFieldsSent(providerID, model string, caller core.Caller, 
 		ptype = ExtensionTypeCodex
 	}
 	switch {
-	case ptype == ExtensionTypeCopilot:
-		// The daemon serves Copilot on the OpenAI wire, with what the
-		// gateway's Copilot transport sent.
+	case ptype == ExtensionTypeCopilot, ptype == ExtensionTypeZenAnonymous:
+		// The daemon serves Copilot and anonymous OpenCode Zen on the
+		// OpenAI wire, with the fields the gateway's OpenAI transport sends.
 		return openAITransportField
+	case ptype == ExtensionTypeCodex:
+		return codexChatField
+	case ptype == ExtensionTypeAntigravity:
+		return antigravityChatField
 	case isExtensionType(ptype):
 		return daemonChatField
 	}
@@ -142,11 +146,25 @@ func (rt *Runtime) cachedOverResponses(instance, model string, caller core.Calle
 }
 
 // daemonChatField reports a Chat field the gateway hands the companion
-// daemon for a type other than Copilot. What the daemon sends on is not
-// visible here, so only the fields the Chat API has always handed it count
-// as sent.
+// daemon for a type it weighs no other way. Only the fields the Chat API has
+// always handed it count as sent: the daemon drops the others, and refuses
+// or loses one that changes the answer's structure.
 func daemonChatField(field string) bool {
 	return field != "parallel_tool_calls" && field != "thinking" && openAITransportField(field)
+}
+
+// codexChatField reports a Chat field the daemon serves Codex with: those
+// daemonChatField names, and parallel_tool_calls, which it carries over
+// Responses with tool_choice.
+func codexChatField(field string) bool {
+	return field == "parallel_tool_calls" || daemonChatField(field)
+}
+
+// antigravityChatField reports a Chat field the daemon serves Antigravity
+// with: those daemonChatField names but tool_choice, which Cloud Code Assist
+// is not sent, so one other than "auto" would be lost.
+func antigravityChatField(field string) bool {
+	return field != "tool_choice" && daemonChatField(field)
 }
 
 // responsesAdaptedChatField reports a Chat field adaptation carries over
