@@ -30,7 +30,7 @@ is `endpoints`.
 | OpenAI | OpenAI-compatible | API key | System or personal | Standard project API-key integration. |
 | Anthropic | Native Anthropic | API key or setup token | System or personal | Native Messages and token counting; setup tokens are stored only as encrypted connections. |
 | Google Gemini | Google's OpenAI-compatible endpoint | API key | System or personal | Distinct from native AI Studio. |
-| Google AI Studio | Native Gemini | API key | System or personal | Chat, image, and video; native chat streaming is not implemented. |
+| Google AI Studio | Native Gemini | API key | System or personal | Chat with streaming and tools, image, and video. |
 | Vertex AI (Agent Platform) | Native Gemini/Vertex | API key or service-account JSON | System or personal | Project/location required; discovery credential requirements can differ from inference. Optional request type selects default, PayGo, or dedicated provisioned throughput. |
 | Google Antigravity | Cloud Code Assist `v1internal` | Browser OAuth | Personal | Experimental undocumented API; exact upstream catalog, non-streaming chat, tools, and reasoning. |
 | OpenRouter | OpenAI-compatible | API key | System or personal | Multi-vendor aggregator. |
@@ -139,8 +139,8 @@ Google exposes four distinct paths:
 | Integration | API grammar | Typical authentication | Distinguishing behavior |
 | --- | --- | --- | --- |
 | `gemini` | Google's OpenAI-compatible API | API key | OpenAI-shaped client compatibility. |
-| `ai_studio` | Native Gemini API | API key | Native image and Veo video support. |
-| `vertex_ai` | Native Gemini/Vertex API | Service-account JSON or eligible API key | Project and location scope; Cloud billing. `vertex_request_type: dedicated` requires matching provisioned capacity and never silently falls back. |
+| `ai_studio` | Native Gemini API | API key | Native chat with streaming and function tools; native image and Veo video support. |
+| `vertex_ai` | Native Gemini/Vertex API | Service-account JSON or eligible API key | Native chat with streaming and function tools; project and location scope; Cloud billing. `vertex_request_type: dedicated` requires matching provisioned capacity and never silently falls back. |
 | `google_antigravity` | Cloud Code Assist `v1internal` | Browser OAuth | Experimental owner-private catalog and non-streaming chat; requires an operator-provided OAuth client. |
 
 A `vertex_ai` service-account key must name `https://oauth2.googleapis.com/token`

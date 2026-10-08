@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -85,10 +86,7 @@ func TestGoogleFacadeRefusesBeforeSending(t *testing.T) {
 			func() error { _, _, err := studio.GenerateImages("m", " ", 1); return err },
 			&InvocationError{Msg: "ai_studio: a prompt is required"},
 		},
-		"stream": {
-			func() error { _, err := studio.Stream("m", googleChat, nil); return err },
-			&ConfigError{Msg: "ai_studio: streaming is not implemented for this provider yet; use a non-streaming request"},
-		},
+		"blank stream model": {func() error { _, err := studio.Stream(" ", googleChat, nil); return err }, blank},
 	} {
 		if err := fixture.call(); err == nil || err.Error() != fixture.want.Error() || IsConfig(err) != IsConfig(fixture.want) {
 			t.Fatalf("%s: err=%#v, want %#v", name, err, fixture.want)
@@ -229,5 +227,161 @@ func TestGoogleFacadeEmbeddingsKeepTheirValues(t *testing.T) {
 	if want := `{"data":[{"embedding":[0.1,-0.25,3e-7],"index":0,"object":"embedding"}],"model":"gemini-embedding-001",` +
 		`"object":"list","usage":{"prompt_tokens":2,"total_tokens":2}}`; string(encoded) != want {
 		t.Fatalf("embeddings = %s\nwant %s", encoded, want)
+	}
+}
+
+// googleToolFixture is a Chat request's tool and tool choice, as the API
+// layer hands them on.
+var googleToolFixture = Kwargs{
+	"tools": []any{map[string]any{"type": "function", "function": map[string]any{
+		"name": "lookup", "parameters": map[string]any{"type": "object", "properties": map[string]any{"q": map[string]any{"type": "string"}}},
+	}}},
+	"tool_choice": "required", "temperature": 0.2, "max_completion_tokens": json.Number("64"), "top_p": 0.9,
+}
+
+// googleBodies is a synthetic Gemini API that records each request's path,
+// query and body, and answers a stream with stream and anything else with
+// answer.
+func googleBodies(t *testing.T, answer, stream string) (*httptest.Server, func() []string) {
+	t.Helper()
+	var mu sync.Mutex
+	var seen []string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		mu.Lock()
+		seen = append(seen, r.URL.Path+"?"+r.URL.RawQuery+" "+string(body))
+		mu.Unlock()
+		if strings.HasSuffix(r.URL.Path, ":streamGenerateContent") {
+			w.Header().Set("Content-Type", "text/event-stream")
+			_, _ = io.WriteString(w, stream)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = io.WriteString(w, answer)
+	}))
+	t.Cleanup(server.Close)
+	return server, func() []string {
+		mu.Lock()
+		defer mu.Unlock()
+		taken := seen
+		seen = nil
+		return taken
+	}
+}
+
+// A Chat request's tools and tool choice reach Gemini as function
+// declarations and its function calling config, and Gemini's function call
+// comes back as a tool call that finishes the answer.
+func TestGoogleFacadeSendsToolsAndReturnsToolCalls(t *testing.T) {
+	server, take := googleBodies(t, `{"candidates":[{"content":{"role":"model","parts":[{"functionCall":{"name":"lookup","args":{"q":"crane"}},`+
+		`"thoughtSignature":"c2ln"}]},"finishReason":"STOP"}],"responseId":"resp-fixture","usageMetadata":{"promptTokenCount":5,"candidatesTokenCount":3,"totalTokenCount":8}}`, "")
+	completion, err := studioFixture(t, server.URL, "k").Complete("gemini-fixture", googleChat, googleToolFixture)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := `/models/gemini-fixture:generateContent? {"contents":[{"parts":[{"text":"hi"}],"role":"user"}],"generationConfig":{"maxOutputTokens":64,"temperature":0.2},` +
+		`"toolConfig":{"functionCallingConfig":{"mode":"ANY"}},"tools":[{"functionDeclarations":[{"name":"lookup",` +
+		`"parametersJsonSchema":{"properties":{"q":{"type":"string"}},"type":"object"}}]}]}`
+	if seen := take(); len(seen) != 1 || seen[0] != want {
+		t.Fatalf("upstream = %q\nwant %q", seen, want)
+	}
+	choice := completion["choices"].([]any)[0].(map[string]any)
+	calls, _ := choice["message"].(map[string]any)["tool_calls"].([]any)
+	if choice["finish_reason"] != "tool_calls" || len(calls) != 1 {
+		t.Fatalf("completion = %+v", completion)
+	}
+	call := calls[0].(map[string]any)
+	if call["id"] != "call_resp-fixture_0" || call["function"].(map[string]any)["arguments"] != `{"q":"crane"}` ||
+		call["extra_content"].(map[string]any)["google"].(map[string]any)["thought_signature"] != "c2ln" {
+		t.Fatalf("tool call = %+v", call)
+	}
+}
+
+// A Chat stream reaches Gemini's streamGenerateContent, and its chunks reach
+// the API layer as data, with the usage the client asked for and without
+// [DONE].
+func TestGoogleFacadeStreamsThroughCore(t *testing.T) {
+	server, take := googleBodies(t, "", "data: {\"candidates\": [{\"content\": {\"parts\": [{\"text\": \"Hel\"}],\"role\": \"model\"}}],\"modelVersion\": \"gemini-fixture-001\"}\r\n\r\n"+
+		"data: {\"candidates\": [{\"content\": {\"parts\": [{\"text\": \"lo\"}],\"role\": \"model\"},\"finishReason\": \"STOP\"}],"+
+		"\"usageMetadata\": {\"promptTokenCount\": 2,\"candidatesTokenCount\": 1,\"totalTokenCount\": 3},\"modelVersion\": \"gemini-fixture-001\"}\r\n\r\n")
+	kw := Kwargs{"max_tokens": 32.0, "stream_options": map[string]any{"include_usage": true}}
+	stream, err := studioFixture(t, server.URL, "k").Stream("gemini-fixture", googleChat, kw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer stream.Close()
+	var chunks []string
+	for {
+		chunk, ok := stream.Next()
+		if !ok {
+			break
+		}
+		chunks = append(chunks, chunk)
+	}
+	if err := stream.Err(); err != nil {
+		t.Fatal(err)
+	}
+	head := `{"choices":[{"delta":`
+	tail := `,"index":0}],"id":"chatcmpl-google","model":"gemini-fixture-001","object":"chat.completion.chunk"}`
+	want := []string{
+		head + `{"content":"Hel","role":"assistant"},"finish_reason":null` + tail,
+		head + `{"content":"lo"},"finish_reason":null` + tail,
+		head + `{},"finish_reason":"stop"` + tail,
+		`{"choices":[],"id":"chatcmpl-google","model":"gemini-fixture-001","object":"chat.completion.chunk","usage":{"completion_tokens":1,"prompt_tokens":2,"total_tokens":3}}`,
+	}
+	if strings.Join(chunks, "\n") != strings.Join(want, "\n") {
+		t.Fatalf("chunks:\n%s\nwant:\n%s", strings.Join(chunks, "\n"), strings.Join(want, "\n"))
+	}
+	if seen := take(); len(seen) != 1 || seen[0] != `/models/gemini-fixture:streamGenerateContent?alt=sse {"contents":[{"parts":[{"text":"hi"}],"role":"user"}],"generationConfig":{"maxOutputTokens":32}}` {
+		t.Fatalf("upstream = %q", seen)
+	}
+}
+
+// A stream fails as the gateway's other streams fail: a refusal before the
+// first chunk keeps its status and the wait Google asked for, an error
+// Google sends in the stream keeps its status, a stream cut short counts
+// against the provider, and a record over the size limit is the gateway's
+// StreamRecordTooLargeError.
+func TestGoogleFacadeStreamFailures(t *testing.T) {
+	refusal := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusTooManyRequests)
+		_, _ = io.WriteString(w, `{"error":{"code":429,"status":"RESOURCE_EXHAUSTED","message":"quota",`+
+			`"details":[{"@type":"type.googleapis.com/google.rpc.RetryInfo","retryDelay":"9s"}]}}`)
+	}))
+	defer refusal.Close()
+	if _, err := studioFixture(t, refusal.URL, "k").Stream("gemini-fixture", googleChat, nil); UpstreamStatus(err) != http.StatusTooManyRequests ||
+		!InvocationRetryable(err) || InvocationRetryAfter(err) != "9" {
+		t.Fatalf("refused stream: err=%v status=%d retry-after=%q", err, UpstreamStatus(err), InvocationRetryAfter(err))
+	}
+	const hello = "data: {\"candidates\": [{\"content\": {\"parts\": [{\"text\": \"Hello\"}],\"role\": \"model\"}}]}\r\n\r\n"
+	for name, fixture := range map[string]struct {
+		stream string
+		check  func(error) bool
+	}{
+		"error event": {hello + "data: {\"error\": {\"code\": 503,\"status\": \"UNAVAILABLE\",\"message\": \"overloaded\"}}\r\n\r\n", func(err error) bool {
+			return UpstreamStatus(err) == http.StatusServiceUnavailable && InvocationRetryable(err)
+		}},
+		"cut short": {hello, func(err error) bool {
+			return err.Error() == "the ai_studio stream ended before the model finished" && InvocationCircuitFailure(err) && !InvocationRetryable(err)
+		}},
+		"record too large": {hello + "data: " + strings.Repeat("x", maxStreamRecordWireSize) + "\r\n\r\n", func(err error) bool {
+			var tooLarge *StreamRecordTooLargeError
+			return errors.As(err, &tooLarge)
+		}},
+	} {
+		server, _ := googleBodies(t, "", fixture.stream)
+		stream, err := studioFixture(t, server.URL, "k").Stream("gemini-fixture", googleChat, nil)
+		if err != nil {
+			t.Fatalf("%s: %v", name, err)
+		}
+		var chunks int
+		for _, ok := stream.Next(); ok; _, ok = stream.Next() {
+			chunks++
+		}
+		_ = stream.Close()
+		if err := stream.Err(); chunks != 1 || err == nil || !fixture.check(err) {
+			t.Fatalf("%s: chunks=%d err=%#v", name, chunks, err)
+		}
 	}
 }

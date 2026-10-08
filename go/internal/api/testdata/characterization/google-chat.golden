@@ -35,18 +35,24 @@ body:
 }
 # Chat Completions stream, AI Studio
 request: POST /v1/chat/completions
-status: 502
-header Content-Type: application/json
+status: 200
+header Cache-Control: no-cache
+header Connection: keep-alive
+header Content-Type: text/event-stream
+header X-Llmgw-Prompt-Bytes: 111
+header X-Llmgw-Tool-Schema-Bytes: 0
+header X-Llmgw-Ttfb-Ms: <ms>
 header X-Request-Id: <generated req_>
+upstream: POST /studio/v1beta/models/gemini-fixture:streamGenerateContent
+upstream body: {"contents":[{"parts":[{"text":"Say hello"}],"role":"user"}],"generationConfig":{"maxOutputTokens":64,"temperature":0.2},"systemInstruction":{"parts":[{"text":"Answer <briefly> & kindly."}]}}
 body:
-{
-  "error": {
-    "code": "502",
-    "message": "ai_studio: streaming is not implemented for this provider yet; use a non-streaming request",
-    "request_id": "<generated req_>",
-    "type": "api_error"
-  }
-}
+data: {"choices":[{"delta":{"content":"Hello","role":"assistant"},"finish_reason":null,"index":0}],"id":"<generated chatcmpl->","model":"gemini-fixture","object":"chat.completion.chunk"}
+
+data: {"choices":[{"delta":{"content":" from Gemini"},"finish_reason":null,"index":0}],"id":"<generated chatcmpl->","model":"gemini-fixture","object":"chat.completion.chunk"}
+
+data: {"choices":[{"delta":{},"finish_reason":"stop","index":0}],"id":"<generated chatcmpl->","model":"gemini-fixture","object":"chat.completion.chunk"}
+
+data: [DONE]
 # Chat Completions, Vertex AI
 request: POST /v1/chat/completions
 status: 200

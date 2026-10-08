@@ -31,7 +31,8 @@ from implying behavior the implementation does not provide.
 
 - Registry availability does not guarantee an account entitlement, deployment,
   model, region, or installed-client result.
-- Google AI Studio and Vertex native chat streaming is not implemented.
+- Google AI Studio and Vertex AI chat sends message text and function tools
+  only: image and other non-text message content does not reach the model.
 - Image/video generation is implemented only by capable Google providers today.
 - Upstream quota storage/advisory foundations exist, but no production quota
   adapter drives routing; unknown remains unknown.

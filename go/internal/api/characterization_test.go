@@ -356,6 +356,8 @@ func (f *charFixture) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		panic(http.ErrAbortHandler)
 	case strings.HasSuffix(path, ":generateContent"):
 		charAnswer(w, http.StatusOK, charGemini[model])
+	case strings.HasSuffix(path, ":streamGenerateContent"):
+		charAnswer(w, http.StatusOK, charGeminiStream)
 	case strings.HasSuffix(path, ":embedContent"):
 		charAnswer(w, http.StatusOK, `{"embedding":{"values":[0.25,-0.5]},"usageMetadata":{"promptTokenCount":2}}`)
 	case strings.HasSuffix(path, ":predict"):
@@ -422,6 +424,13 @@ var charGemini = map[string]string{
 	"gemini-thinking-fixture": `{"candidates":[{"content":{"role":"model","parts":[]},"finishReason":"MAX_TOKENS"}],"usageMetadata":{"promptTokenCount":3,"thoughtsTokenCount":32,"totalTokenCount":35}}`,
 	"gemini-image-fixture":    `{"candidates":[{"content":{"role":"model","parts":[{"inlineData":{"mimeType":"image/png","data":"iVBORw0KGgo="}}]},"finishReason":"STOP"}]}`,
 }
+
+// charGeminiStream is gemini-fixture's answer as streamGenerateContent sends
+// it with alt=sse: one event per part, separated by CRLF.
+const charGeminiStream = "data: {\"candidates\": [{\"content\": {\"parts\": [{\"text\": \"Hello\"}],\"role\": \"model\"},\"index\": 0}]," +
+	"\"usageMetadata\": {\"promptTokenCount\": 3,\"totalTokenCount\": 3},\"modelVersion\": \"gemini-fixture\"}\r\n\r\n" +
+	"data: {\"candidates\": [{\"content\": {\"parts\": [{\"text\": \" from Gemini\"}],\"role\": \"model\"},\"finishReason\": \"STOP\",\"index\": 0}]," +
+	"\"usageMetadata\": {\"promptTokenCount\": 3,\"candidatesTokenCount\": 4,\"totalTokenCount\": 7},\"modelVersion\": \"gemini-fixture\"}\r\n\r\n"
 
 const (
 	charChat = `{"id":"chatcmpl_fixture","object":"chat.completion","created":1700000000,"model":%q,"choices":[{"index":0,"message":{"role":"assistant","content":"Hello from chat"},"finish_reason":"stop"}],"usage":{"prompt_tokens":3,"completion_tokens":4,"total_tokens":7}}`

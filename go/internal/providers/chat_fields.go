@@ -130,7 +130,7 @@ func (rt *Runtime) chatFieldsSent(providerID, model string, caller core.Caller, 
 	case "anthropic":
 		return anthropicChatField
 	case "ai_studio", "vertex_ai":
-		return googleChatField
+		return googleChatField(kw)
 	case "ollama":
 		return ollamaChatField
 	}
@@ -187,10 +187,61 @@ func anthropicChatField(field string) bool {
 	return false
 }
 
-// googleChatField reports a Chat field the Google facade carries into
-// generateContent; see googleProvider.CompleteContext.
-func googleChatField(field string) bool {
-	return field == "max_tokens" || field == "max_completion_tokens" || field == "temperature"
+// googleChatField reports a Chat field of kw the Google facade carries into
+// generateContent; see googleChatPayload. Core's Google declares only
+// function tools with a name, and maps only a tool choice of auto, none,
+// required or a declared function; it drops any other as a loss the facade
+// does not read, so such tools or tool choice count as unsent.
+func googleChatField(kw Kwargs) func(string) bool {
+	return func(field string) bool {
+		switch field {
+		case "temperature", "max_tokens", "max_completion_tokens":
+			return true
+		case "tools":
+			return googleFunctionNames(kw["tools"]) != nil
+		case "tool_choice":
+			return googleToolChoiceMapped(kw["tool_choice"], googleFunctionNames(kw["tools"]))
+		}
+		return false
+	}
+}
+
+// googleFunctionNames returns the names of tools, a list of function tools
+// that each have a name and parameters that are an object or none, or nil
+// when a tool is anything else.
+func googleFunctionNames(tools any) []string {
+	list, ok := tools.([]any)
+	if !ok {
+		return nil
+	}
+	names := make([]string, 0, len(list))
+	for _, raw := range list {
+		tool, _ := raw.(map[string]any)
+		function, _ := tool["function"].(map[string]any)
+		name, _ := function["name"].(string)
+		kind, typed := tool["type"]
+		_, schema := function["parameters"].(map[string]any)
+		if (typed && kind != "function") || strings.TrimSpace(name) == "" || (function["parameters"] != nil && !schema) {
+			return nil
+		}
+		names = append(names, name)
+	}
+	return names
+}
+
+// googleToolChoiceMapped reports a tool choice core's Google maps to the
+// function calling config, given the functions it declares: auto, none,
+// required with a function to call, or a declared function by name.
+func googleToolChoiceMapped(choice any, functions []string) bool {
+	switch value := choice.(type) {
+	case string:
+		return value == "auto" || value == "none" || (value == "required" && len(functions) > 0)
+	case map[string]any:
+		function, _ := value["function"].(map[string]any)
+		name, _ := function["name"].(string)
+		return value["type"] == "function" && name != "" && slices.Contains(functions, name)
+	}
+	return false
 }
 
 // ollamaChatField reports a Chat field core's Ollama carries into Ollama's

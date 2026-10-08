@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"strings"
 
 	"llmgw/internal/config"
@@ -15,11 +16,12 @@ import (
 )
 
 // googleProvider is the gateway's Google AI Studio and Vertex AI facade.
-// Chat and embeddings go through the core Runtime, which resolves the
-// caller's credential through Google's store on each request, and core's
-// Google, which shapes each request and reads each answer as the gateway's
-// transport did. Image generation calls core's Google too, with a credential
-// resolved the same way, because the Runtime has no image operation.
+// Chat, its stream and embeddings go through the core Runtime, which
+// resolves the caller's credential through Google's store on each request,
+// and core's Google, which shapes each request and reads each answer as the
+// gateway's transport did, tools and tool calls included. Image generation
+// calls core's Google too, with a credential resolved the same way, because
+// the Runtime has no image operation.
 //
 // Video stays on the gateway's transport, which core does not serve yet, and
 // so does the catalog: the gateway's cache, routing and model list read its
@@ -38,7 +40,10 @@ type googleProvider struct {
 	legacy GoogleAIProvider
 }
 
-var _ Provider = (*googleProvider)(nil)
+var (
+	_ Provider              = (*googleProvider)(nil)
+	_ ContextStreamProvider = (*googleProvider)(nil)
+)
 
 // newGoogleProvider returns the facade of instance, configured as cfg, for
 // caller, over legacy, the transport the factory built with the credential
@@ -72,27 +77,105 @@ func (p *googleProvider) Complete(model string, messages []Message, kw Kwargs) (
 	return p.CompleteContext(context.Background(), model, messages, kw)
 }
 
-// CompleteContext sends the Chat body core's Google maps, which holds what
-// the transport mapped: the messages, max_tokens or, when that is unset, the
-// internal _max_output_tokens, and temperature. Core's Google maps it to
-// generateContent as the transport did, so the upstream request is unchanged.
+// CompleteContext sends the Chat body googleChatPayload builds, which core's
+// Google maps to generateContent.
 func (p *googleProvider) CompleteContext(ctx context.Context, model string, messages []Message, kw Kwargs) (map[string]any, error) {
 	if err := googleModelRequired(model); err != nil {
 		return nil, err
 	}
+	return p.invoke(ctx, core.ModelSurfaceChatCompletions, model, googleChatPayload(messages, kw, false))
+}
+
+func (p *googleProvider) Stream(model string, messages []Message, kw Kwargs) (StreamIter, error) {
+	return p.StreamContext(context.Background(), model, messages, kw)
+}
+
+// StreamContext streams the Chat answer core's Google reads from
+// streamGenerateContent, as Chat chunks the API layer reads. Core finishes a
+// stream that calls a tool with tool_calls, and ends it with [DONE].
+func (p *googleProvider) StreamContext(ctx context.Context, model string, messages []Message, kw Kwargs) (StreamIter, error) {
+	if err := googleModelRequired(model); err != nil {
+		return nil, err
+	}
+	body, err := json.Marshal(googleChatPayload(messages, kw, true))
+	if err != nil {
+		return nil, invocation(p.label() + ": request encoding failed")
+	}
+	ctx = withCoreOperation(ctx, googleCoreType, p.caller)
+	stream, err := p.runtime.core.Stream(ctx, p.caller, p.instance, core.Request{
+		Surface: core.ModelSurfaceChatCompletions, Model: model, Body: body, ContentType: core.ContentTypeJSON,
+	})
+	if err != nil {
+		return nil, p.streamFailure(ctx, err)
+	}
+	return &googleCoreStream{ctx: ctx, inner: stream, provider: p}, nil
+}
+
+// googleChatPayload is the Chat body core's Google maps: the messages, the
+// output limit as max_tokens (max_tokens, or max_completion_tokens or the
+// internal _max_output_tokens when it is unset), temperature, and the tools
+// and tool_choice, which core declares as Gemini functions. A stream also
+// carries stream_options, so that core sends the stream's usage when the
+// client asked for it. These are the fields googleChatField names.
+func googleChatPayload(messages []Message, kw Kwargs, stream bool) map[string]any {
 	payload := map[string]any{"messages": messages}
 	if maxTokens := chatMaxTokens(kw); maxTokens != nil {
 		payload["max_tokens"] = maxTokens
 	}
-	if temperature := kw["temperature"]; temperature != nil {
-		payload["temperature"] = temperature
+	fields := []string{"temperature", "tools", "tool_choice"}
+	if stream {
+		fields = append(fields, "stream_options")
 	}
-	return p.invoke(ctx, core.ModelSurfaceChatCompletions, model, payload)
+	for _, field := range fields {
+		if value := kw[field]; value != nil {
+			payload[field] = value
+		}
+	}
+	return payload
 }
 
-// Stream refuses before anything is resolved or sent, as the transport did.
-func (p *googleProvider) Stream(string, []Message, Kwargs) (StreamIter, error) {
-	return nil, &ConfigError{Msg: p.label() + ": streaming is not implemented for this provider yet; use a non-streaming request"}
+// googleCoreStream relays core's Google stream as the chunks the API layer
+// reads: the data of each Chat chunk, without [DONE].
+type googleCoreStream struct {
+	ctx      context.Context
+	inner    core.StreamIter
+	provider *googleProvider
+	err      error
+}
+
+func (s *googleCoreStream) Next() (string, bool) {
+	for {
+		frame, err := s.inner.Next()
+		if err != nil {
+			if !errors.Is(err, io.EOF) {
+				s.err = s.provider.streamFailure(s.ctx, err)
+			}
+			return "", false
+		}
+		data := strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(string(frame)), "data:"))
+		if data != "" && data != "[DONE]" {
+			return data, true
+		}
+	}
+}
+
+func (s *googleCoreStream) Err() error   { return s.err }
+func (s *googleCoreStream) Close() error { return s.inner.Close() }
+
+// streamFailure is failure for a stream: a caller that went away ends it
+// with its context's error, and a record over the size limit is the
+// gateway's StreamRecordTooLargeError, as for every stream it reads. Core
+// reports that as an upstream failure whose cause is no refusal.
+func (p *googleProvider) streamFailure(ctx context.Context, err error) error {
+	if ctxErr := ctx.Err(); ctxErr != nil {
+		return ctxErr
+	}
+	var failure *core.ProviderError
+	var refusal *coreproviders.InvocationError
+	if errors.As(err, &failure) && failure.Class == core.ProviderErrorUpstream && failure.Cause != nil && !errors.As(err, &refusal) {
+		return &StreamRecordTooLargeError{Format: "SSE", Limit: maxStreamRecordWireSize}
+	}
+	return p.failure(err)
 }
 
 // Embed sends the embeddings body core's Google reads. It embeds each input
