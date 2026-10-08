@@ -576,12 +576,35 @@ func visibleOpenCircuits(providerID, checkScope string, now time.Time) []provide
 	return own
 }
 
+// openCircuitRow is an open circuit as a view shows it, with the name of the
+// principal whose requests it refuses, so the view need not look it up.
+type openCircuitRow struct {
+	providers.OpenCircuit
+	PrincipalName string `json:"principal_name,omitempty"`
+}
+
 // withOpenCircuits adds an instance's open circuits to its row, which omits
-// them while none is open.
+// them while none is open. A circuit whose principal cannot be named is
+// shown without a name rather than not at all.
 func withOpenCircuits(row map[string]any, open []providers.OpenCircuit) map[string]any {
-	if len(open) > 0 {
-		row["open_circuits"] = open
+	if len(open) == 0 {
+		return row
 	}
+	ids := make([]string, 0, len(open))
+	for _, circuit := range open {
+		ids = append(ids, circuit.PrincipalID)
+	}
+	names := map[string]string{}
+	if principals, _, err := iam.ListPrincipalsPage(iam.PrincipalListFilter{IDs: ids, Limit: 200}); err == nil {
+		for _, principal := range principals {
+			names[principal.ID] = principal.DisplayName
+		}
+	}
+	rows := make([]openCircuitRow, 0, len(open))
+	for _, circuit := range open {
+		rows = append(rows, openCircuitRow{OpenCircuit: circuit, PrincipalName: names[circuit.PrincipalID]})
+	}
+	row["open_circuits"] = rows
 	return row
 }
 

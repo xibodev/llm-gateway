@@ -148,15 +148,26 @@ expired keys unless its status filter shows them.
 
 `GET /admin/api/keys` lists keys a page at a time, and `GET /user/api/keys`
 the signed-in user's. `status` is `usable`, the default: active and disabled
-keys that have not expired; `ended`: revoked and expired ones; `active`,
-`disabled`, `expired`, `revoked` or `all`. `principal_id`, `project_id` and
-`route`, a route the key's allowed routes name, narrow the list, and `q`
-searches key names, prefixes and IDs, project slugs and names, and owners'
-names. `sort` is `created`, `name`, `project`, `owner`, `status`, `expires` or
-`last_used`, in the `order` `asc` or `desc`; without a sort, keys are listed
-newest first. `limit` is 1 to 200, 50 by default, and `offset` skips that many
-keys. The answer carries the page's `keys` and the `total` the filters select.
-The console's **API keys** page reads its list this way.
+keys that have not expired; `ended`: revoked and expired ones; `unrevoked`:
+all but the revoked; `active`, `disabled`, `expired`, `revoked` or `all`.
+`principal_id`, `project_id`, `route`, a route the key's allowed routes name,
+and `grant`, a name the key's allowed routes or allowed models hold, narrow the
+list, and `q` searches key names, prefixes and IDs, project slugs and names,
+and owners' names. `sort` is `created`, `name`, `project`, `owner`, `status`,
+`expires` or `last_used`, in the `order` `asc` or `desc`; without a sort, keys
+are listed newest first. `limit` is 1 to 200, 50 by default, and `offset` skips
+that many keys. The answer carries the page's `keys` and the `total` the
+filters select. The console's **API keys** page reads its list this way.
+
+`GET /admin/api/principals` lists principals the same way, by name unless
+asked otherwise. `id` and `kind` (`human`, `service` or `system`) may each be
+given more than once; `status` is `active`, `disabled` or `all`, the default;
+`project_id` keeps a project's members; and `q` searches names, emails, IDs
+and external subjects. `sort` is `name`, `kind`, `email`, `status` or
+`created`. The answer carries the page's `principals` and their `total`. The
+console lists, picks and names principals this way, and project memberships,
+provider connections and open circuits name their principal as
+`principal_name`.
 
 Removing a principal from a project revokes that principal's keys in the
 project, including disabled ones; adding the membership back does not restore

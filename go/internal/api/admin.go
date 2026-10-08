@@ -268,6 +268,23 @@ func handleState(w http.ResponseWriter, r *http.Request) {
 		writeError(w, 500, "Identity store unavailable.")
 		return
 	}
+	// The counts stand in for the key and principal lists, and the default
+	// owner, the first active person by name, is whose catalog the console
+	// shows until another is chosen.
+	counts, err := iam.CountIdentities()
+	if err != nil {
+		writeError(w, 500, "Identity store unavailable.")
+		return
+	}
+	owners, _, err := iam.ListPrincipalsPage(iam.PrincipalListFilter{Kinds: []string{"human"}, Status: "active", Limit: 1})
+	if err != nil {
+		writeError(w, 500, "Identity store unavailable.")
+		return
+	}
+	var defaultOwner any
+	if len(owners) > 0 {
+		defaultOwner = map[string]any{"id": owners[0].ID, "display_name": owners[0].DisplayName}
+	}
 
 	statusSnapshots, err := providerStatusSnapshots(s, secrets, connections, "")
 	if err != nil {
@@ -297,6 +314,8 @@ func handleState(w http.ResponseWriter, r *http.Request) {
 		"provider_credential_bindings": credentialBindings,
 		"provider_connections":         connections,
 		"memberships":                  memberships,
+		"counts":                       counts,
+		"default_owner":                defaultOwner,
 		"providers":                    provList,
 		"categories":                   cats, // Deprecated compatibility alias; use "endpoints".
 		"endpoints":                    cats,

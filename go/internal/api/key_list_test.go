@@ -90,6 +90,15 @@ func TestKeyListingPagesKeys(t *testing.T) {
 			t.Fatalf("%s: status=%d", query, w.Code)
 		}
 	}
+	// A grant names a route in a key's allowed routes or allowed models, as
+	// renaming a route has to find.
+	if _, err := iam.IssueKey(iam.KeyCreate{ProjectID: project.ID, PrincipalID: other.ID, Name: "granted key", Policy: iam.KeyPolicy{AllowedModels: []string{"coding"}}}); err != nil {
+		t.Fatal(err)
+	}
+	page = read(adminGet(handler, "/admin/api/keys?grant=coding&status=unrevoked"))
+	if got := names(page); len(got) != 1 || got[0] != "granted key" || page.Total != 1 {
+		t.Fatalf("keys granting a route: %v of %d", got, page.Total)
+	}
 	anonymous := httptest.NewRecorder()
 	handler.ServeHTTP(anonymous, httptest.NewRequest(http.MethodGet, "/admin/api/keys", nil))
 	if anonymous.Code != http.StatusUnauthorized {

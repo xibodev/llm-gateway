@@ -17,18 +17,6 @@ type principalBody struct {
 	DisplayName     string `json:"display_name"`
 }
 
-func handleListPrincipals(w http.ResponseWriter, r *http.Request) {
-	if !adminAuthed(w, r) {
-		return
-	}
-	items, err := iam.ListPrincipals()
-	if err != nil {
-		writeError(w, 500, "Identity store unavailable.")
-		return
-	}
-	writeJSON(w, 200, map[string]any{"principals": items})
-}
-
 func handleCreatePrincipal(w http.ResponseWriter, r *http.Request) {
 	if !adminAuthed(w, r) {
 		return

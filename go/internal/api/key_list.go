@@ -4,7 +4,6 @@ import (
 	"errors"
 	"net/http"
 	"net/url"
-	"strconv"
 	"strings"
 
 	"llmgw/internal/iam"
@@ -39,12 +38,12 @@ func adminKeyRow(k iam.APIKey) map[string]any {
 }
 
 // keyListFilter reads a key listing's query: status, principal_id,
-// project_id, route, q, sort, order (asc or desc), limit and offset. Without
-// a sort, keys are listed newest first.
+// project_id, route, grant, q, sort, order (asc or desc), limit and offset.
+// Without a sort, keys are listed newest first.
 func keyListFilter(query url.Values) (iam.KeyListFilter, error) {
 	filter := iam.KeyListFilter{
 		Status: query.Get("status"), PrincipalID: query.Get("principal_id"), ProjectID: query.Get("project_id"),
-		Route: query.Get("route"), Search: query.Get("q"), Sort: strings.TrimSpace(query.Get("sort")),
+		Route: query.Get("route"), Grant: query.Get("grant"), Search: query.Get("q"), Sort: strings.TrimSpace(query.Get("sort")),
 	}
 	switch order := strings.TrimSpace(query.Get("order")); order {
 	case "":
@@ -54,18 +53,7 @@ func keyListFilter(query url.Values) (iam.KeyListFilter, error) {
 	default:
 		return filter, errors.New("order must be asc or desc")
 	}
-	for name, target := range map[string]*int{"limit": &filter.Limit, "offset": &filter.Offset} {
-		value := strings.TrimSpace(query.Get(name))
-		if value == "" {
-			continue
-		}
-		number, err := strconv.Atoi(value)
-		if err != nil || number < 0 {
-			return filter, errors.New(name + " must be a whole number")
-		}
-		*target = number
-	}
-	return filter, nil
+	return filter, readPageBounds(query, &filter.Limit, &filter.Offset)
 }
 
 // listKeys answers the page of keys filter selects, each as row renders it.
