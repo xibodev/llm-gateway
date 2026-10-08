@@ -1,17 +1,22 @@
 package api
 
 import (
+	"bytes"
+	"encoding/base64"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	"llmgw/internal/config"
 	"llmgw/internal/iam"
 
+	"github.com/xibodev/llm-provider-auth/tokenstore"
 	"github.com/xibodev/llmgw-core/oauthflow"
 )
 
@@ -23,12 +28,18 @@ type codexDaemonStart struct {
 }
 
 // codexSignIn is a gateway whose Codex provider signs in through a fake
-// companion daemon, which records every start it receives.
+// companion daemon, which records every start it receives and answers every
+// device poll with answer.
 type codexSignIn struct {
 	server *httptest.Server
 	owner  iam.Principal
 	mu     sync.Mutex
 	starts []codexDaemonStart
+	answer oauthflow.PollResult
+	polls  int
+	// skew is how far the gateway's clock runs ahead of the real one, so a
+	// test lets a device flow's polling interval pass without waiting.
+	skew atomic.Int64
 }
 
 // newCodexSignIn serves a gateway whose configured Codex OAuth client ID is
@@ -50,6 +61,8 @@ func newCodexSignIn(t *testing.T, clientID string) *codexSignIn {
 		}
 		s.Endpoints = map[string]*config.EndpointConfig{}
 		s.OpenAICodexClientID = clientID
+		// A completed sign-in stores its connection encrypted.
+		s.CredentialEncryptionKey = base64.RawURLEncoding.EncodeToString(bytes.Repeat([]byte{7}, 32))
 	})
 	if _, err := iam.Initialize(); err != nil {
 		t.Fatal(err)
@@ -83,8 +96,17 @@ func newCodexSignIn(t *testing.T, clientID string) *codexSignIn {
 		}
 		writeJSON(w, http.StatusOK, map[string]any{"authorization": authorization})
 	})
+	daemon.HandleFunc("POST /extension/v1/openai_codex/oauth/poll", func(w http.ResponseWriter, r *http.Request) {
+		signIn.mu.Lock()
+		signIn.polls++
+		answer := signIn.answer
+		signIn.mu.Unlock()
+		writeJSON(w, http.StatusOK, map[string]any{"result": answer})
+	})
 	serveExtensionDaemon(t, daemon)
-	signIn.server = httptest.NewServer(NewServer(Runtime{}))
+	signIn.server = httptest.NewServer(newServer(Runtime{}, func() time.Time {
+		return time.Now().Add(time.Duration(signIn.skew.Load()))
+	}).handler())
 	t.Cleanup(signIn.server.Close)
 	return signIn
 }
@@ -199,5 +221,83 @@ func TestOnlyAnAdministratorChangesTheCodexClientID(t *testing.T) {
 	}
 	if got := config.Get().OpenAICodexClientID; got != "fixture-codex-client" {
 		t.Errorf("configured Codex client ID = %q, want it unchanged", got)
+	}
+}
+
+// startDeviceSignIn starts an administrator's Codex device sign-in for the
+// owner and returns the device code its polls carry.
+func (c *codexSignIn) startDeviceSignIn(t *testing.T) string {
+	t.Helper()
+	status, response := adminCodexStarter.start(t, c, map[string]any{"flow": "device_code", "connection_name": "personal"})
+	deviceCode, _ := response["device_code"].(string)
+	if status != http.StatusOK || deviceCode == "" {
+		t.Fatalf("device start: status=%d body=%+v", status, response)
+	}
+	return deviceCode
+}
+
+// pollDeviceSignIn polls a device sign-in as the console does, with the
+// daemon answering answer, and returns the gateway's answer. The gateway's
+// clock first moves a minute on, past any polling interval the flow has.
+func (c *codexSignIn) pollDeviceSignIn(t *testing.T, deviceCode string, answer oauthflow.PollResult) map[string]any {
+	t.Helper()
+	c.mu.Lock()
+	c.answer = answer
+	c.mu.Unlock()
+	c.skew.Add(int64(time.Minute))
+	status, response := jsonRequest(t, c.server.URL+"/admin/api/principals/"+c.owner.ID+"/connections/codex/oauth/poll",
+		http.MethodPost, "admin-secret", map[string]any{"device_code": deviceCode, "connection_name": "personal"})
+	if status != http.StatusOK {
+		t.Fatalf("device poll: status=%d body=%+v", status, response)
+	}
+	return response
+}
+
+// daemonPolls is how many device polls reached the daemon.
+func (c *codexSignIn) daemonPolls() int {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.polls
+}
+
+// A device sign-in waits for its owner: every poll answers what the provider
+// answered while it waits, so the console keeps polling, and the approval it
+// reports at last stores the connection the poll names.
+func TestDeviceSignInAnswersPendingUntilTheOwnerApproves(t *testing.T) {
+	signIn := newCodexSignIn(t, "")
+	deviceCode := signIn.startDeviceSignIn(t)
+	for _, answer := range []oauthflow.PollStatus{oauthflow.PollPending, oauthflow.PollSlowDown, oauthflow.PollPending} {
+		if got := signIn.pollDeviceSignIn(t, deviceCode, oauthflow.PollResult{Status: answer}); got["status"] != string(answer) {
+			t.Fatalf("a poll the provider answered %s answered %+v", answer, got)
+		}
+	}
+	got := signIn.pollDeviceSignIn(t, deviceCode, oauthflow.PollResult{Status: oauthflow.PollApproved, Record: tokenstore.Record{
+		AccessToken: "fixture-access", RefreshToken: "fixture-refresh", Expiry: time.Now().Add(time.Hour),
+	}})
+	connection, _ := got["connection"].(map[string]any)
+	if got["status"] != "authorized" || connection["connection_name"] != "personal" || connection["provider_id"] != "codex" {
+		t.Fatalf("the approved poll answered %+v", got)
+	}
+	if polls := signIn.daemonPolls(); polls != 4 {
+		t.Fatalf("the provider was polled %d times, want 4", polls)
+	}
+}
+
+// A denial or the provider's expiry ends a device sign-in: the poll says
+// which, and a later poll finds the flow over without asking the provider.
+func TestDeviceSignInReportsDenialAndExpiry(t *testing.T) {
+	for _, answer := range []oauthflow.PollStatus{oauthflow.PollDenied, oauthflow.PollExpired} {
+		t.Run(string(answer), func(t *testing.T) {
+			signIn := newCodexSignIn(t, "")
+			deviceCode := signIn.startDeviceSignIn(t)
+			got := signIn.pollDeviceSignIn(t, deviceCode, oauthflow.PollResult{Status: answer})
+			if got["status"] != string(answer) || got["error"] == nil {
+				t.Fatalf("a poll the provider answered %s answered %+v", answer, got)
+			}
+			later := signIn.pollDeviceSignIn(t, deviceCode, oauthflow.PollResult{Status: oauthflow.PollPending})
+			if later["status"] != "expired" || signIn.daemonPolls() != 1 {
+				t.Fatalf("a poll after the %s answered %+v; the provider was polled %d times, want once", answer, later, signIn.daemonPolls())
+			}
+		})
 	}
 }

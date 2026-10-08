@@ -1,7 +1,6 @@
 package providers
 
 import (
-	"context"
 	"fmt"
 	"strings"
 
@@ -79,28 +78,4 @@ func (rt *Runtime) OAuthDriver(adapterID, providerID string, method oauthflow.Me
 		return client.OAuthDriver(adapterID), nil
 	}
 	return nil, fmt.Errorf("provider %q does not offer %s authorization", providerID, method)
-}
-
-// OAuthPollNote records what the provider answered the one poll a device
-// driver made. oauthflow reports only the outcome, and the console shows the
-// owner the provider's own status and explanation, so a route that polls puts
-// a note in the context and reads it afterwards. A poll that never reached
-// the provider, because the interval had not elapsed or the flow was gone,
-// leaves the note empty.
-type OAuthPollNote struct {
-	// Polled reports that the provider was asked.
-	Polled bool
-	// Status is the provider's answer: pending, slow_down, authorized,
-	// denied, expired or error.
-	Status string
-	// Detail is the provider's sanitized explanation, if any.
-	Detail string
-}
-
-type oauthPollNoteKey struct{}
-
-// WithOAuthPollNote returns ctx carrying an empty note for one poll.
-func WithOAuthPollNote(ctx context.Context) (context.Context, *OAuthPollNote) {
-	note := &OAuthPollNote{}
-	return context.WithValue(ctx, oauthPollNoteKey{}, note), note
 }

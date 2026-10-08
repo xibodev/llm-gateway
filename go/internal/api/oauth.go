@@ -549,7 +549,7 @@ func (s *server) pollBrowserOAuthFlow(ctx context.Context, caller core.Caller, p
 			return safeOAuthPollResponse("error", "Could not load the private OAuth connection.")
 		}
 	}
-	return safeOAuthPollResponse("expired", "Device authorization is no longer active. Start again.")
+	return safeOAuthPollResponse("expired", "Browser authorization is no longer active. Start again.")
 }
 
 // oauthConnectedPage is what the browser shows once the provider's redirect
@@ -592,7 +592,9 @@ func (s *server) handleOAuthBrowserCallback(w http.ResponseWriter, r *http.Reque
 // pollOAuthFlow answers a poll of the flow flowID names: a device_code or a
 // flow_id, which both carry the flow's ID. A device poll asks the provider,
 // no more often than its interval, and stores the connection name and
-// source the poll carries once the owner approved.
+// source the poll carries once the owner approved. It answers pending until
+// the provider reports the owner's approval or denial, or the flow expires:
+// the console stops polling at any other answer.
 func (s *server) pollOAuthFlow(principal iam.Principal, providerRef, flowID, name, source string) map[string]any {
 	providerID, _, adapter, err := oauthAdapterFor(providerRef)
 	if err != nil {
@@ -622,28 +624,27 @@ func (s *server) pollOAuthFlow(principal iam.Principal, providerRef, flowID, nam
 	if view.Instance != providerID {
 		return inactive
 	}
-	ctx, note := providers.WithOAuthPollNote(ctx)
 	completion := &oauthCompletion{providerRef: providerRef, name: name, source: source}
-	_, err = s.oauth.Poll(withOAuthCompletion(ctx, completion), caller, flowID)
+	view, err = s.oauth.Poll(withOAuthCompletion(ctx, completion), caller, flowID)
 	switch {
 	case err == nil && completion.connection != nil:
-		response := safeOAuthPollResponse("authorized", note.Detail)
-		response["connection"] = *completion.connection
-		return response
+		return map[string]any{"status": "authorized", "connection": *completion.connection}
 	case completion.failure != "":
 		return safeOAuthPollResponse("error", completion.failure)
-	case errors.Is(err, oauthflow.ErrFlowNotFound), note.Status == "authorized":
-		// Another request ended the flow first, or the cap evicted it.
-		return inactive
-	case note.Polled:
-		// The provider answered; its answer is the owner's.
-		return safeOAuthPollResponse(note.Status, note.Detail)
 	case errors.Is(err, oauthflow.ErrSlowDown):
 		return safeOAuthPollResponse("slow_down", "Wait for the provider polling interval before retrying.")
+	case errors.Is(err, oauthflow.ErrAccessDenied):
+		return safeOAuthPollResponse("denied", "Device authorization was denied. Start again.")
 	case errors.Is(err, oauthflow.ErrFlowExpired):
 		return safeOAuthPollResponse("expired", "Device authorization expired. Start again.")
+	case errors.Is(err, oauthflow.ErrFlowNotFound):
+		// Another request ended the flow first, or the cap evicted it.
+		return inactive
 	case err != nil:
 		return safeOAuthPollResponse("error", err.Error())
+	case view.Status == oauthflow.StatusPending:
+		// The owner has not answered the provider yet.
+		return map[string]any{"status": "pending"}
 	}
 	// The flow ended in an earlier poll, which answered for it.
 	return inactive
