@@ -1,0 +1,221 @@
+{
+  "schema_version": "1.0.0",
+  "mode": "change",
+  "contract": {
+    "digest": "da05219969e051b692980ada8e8066ac909bf88d11ad6a5af6338834a8cc384f"
+  },
+  "authoring_provenance": {
+    "status": "established",
+    "path": ".release-harness/drafts/llm-gateway.record.json",
+    "digest": "e819045146db82b3754d02e0950d13ca8527706a2b478ada58c176c24e706d2b"
+  },
+  "sources": [
+    {
+      "source_id": "primary",
+      "status": "established",
+      "repository_identity": "https://github.com/xibodev/llm-gateway.git",
+      "base_ref": "v1.9.2",
+      "base_commit": "ab285168c9f53225c2347865bbaaefc10257cd1b",
+      "merge_base": "ab285168c9f53225c2347865bbaaefc10257cd1b",
+      "head_commit": "728a96ce38c7bce03f0a42591b9b63e2f987143b",
+      "head_tree": "7336cd79516179034cb6b860909d4930337aa7ec",
+      "reviewed_source_digest": "0635f246c1599b61f31e379d251199e52f01ea021603e5a0157b8b1ae9d362d1",
+      "changed_paths": [
+        {
+          "status": "modified",
+          "path": ".github/workflows/ci.yml",
+          "old_blob": "6dfa504c180dd1074f30fc2c3730499ba800311c",
+          "new_blob": "e2ff3de43d660040ac5eede462ee07cc963b0638"
+        },
+        {
+          "status": "modified",
+          "path": "go/Dockerfile",
+          "old_blob": "86c3ef520eb5abed9f7301e4241c94fc127df986",
+          "new_blob": "819b1a8803d1c6786dc9d4fdaa3626e0dcb3512a"
+        },
+        {
+          "status": "modified",
+          "path": "go/go.mod",
+          "old_blob": "226c404ebee45592bdd3f8cee3a3463747c1b3fd",
+          "new_blob": "25065640a931e9a835c71511ca6db5c55cba0537"
+        }
+      ]
+    }
+  ],
+  "facts": [
+    {
+      "id": "toolchain",
+      "claim": "go/go.mod, go/Dockerfile and .github/workflows/ci.yml are the only paths that changed since v1.9.2. go/go.mod changes only its go line, from 1.26.9 to 1.27.2; its requirements and go/go.sum are unchanged. The image's builder moves from golang:1.26.9-alpine to golang:1.27.2-alpine, pinned by the index digest sha256:85dc1069ac644ea3c527b177303a406eb3358192816cd7f9e5848eb658851673. In ci.yml only the staticcheck step changed: staticcheck 2026.2.1 (v0.8.1) as published stops on this source built by Go 1.27.2 with 'export data version 5 is greater than maximum supported version 4' (dominikh/go-tools#1832), so the step builds that release against golang.org/x/tools v0.51.0 and runs the result; go/staticcheck.conf still selects the checks. govulncheck stays at v1.5.0 and, run by Go 1.27.2, finds no vulnerabilities.",
+      "status": "observed",
+      "evidence": {
+        "source": "git diff v1.9.2..HEAD; go/go.mod; go/Dockerfile; .github/workflows/ci.yml; docker buildx imagetools inspect golang:1.27.2-alpine; staticcheck v0.8.1 and govulncheck v1.5.0 run by Go 1.27.2"
+      }
+    },
+    {
+      "id": "go127-behaviour",
+      "claim": "Go 1.27 binaries need macOS 13 Ventura or later. With the module's go line at 1.27, two GODEBUG defaults change for this program: x509sslcertoverrideplatform=1, so on Windows and macOS crypto/x509 loads roots from SSL_CERT_FILE or SSL_CERT_DIR when either is set instead of using the platform verifier, and tracebacklabels=1, which adds runtime/pprof goroutine labels to tracebacks; the source sets no goroutine labels. Go 1.27 removes the GODEBUG settings gotypesalias, tlsunsafeekm, tlsrsakex, tls3des, tls10server, x509keypairleaf and asynctimerchan; no file in this repository names any of them, and the source has no //go:debug directive or godebug line. The toolchain also backs encoding/json with its v2 implementation, which keeps marshalling and unmarshalling behaviour but may word errors differently, limits a net/http server to 500 header values per request unless Server.MaxHeaderValueCount is set, and drains unread content, up to a limit, when an HTTP/1 response body is closed.",
+      "status": "observed",
+      "evidence": {
+        "source": "https://go.dev/doc/go1.27; https://go.dev/doc/godebug; repository search"
+      }
+    },
+    {
+      "id": "prior-reviews",
+      "claim": "The confirmed review release-v1.9.2 covers v1.9.1..ab32648eb548 and, with the confirmed reviews release-v1.9.0 and release-v1.9.1 it cites, describes every change since v1.8.0; v1.9.2 adds only that review's own files after ab32648eb548.",
+      "status": "observed",
+      "evidence": {
+        "source": ".release-harness/reviews/release-v1.9.2.review.json; git log v1.9.1..v1.9.2"
+      }
+    },
+    {
+      "id": "untouched-surfaces",
+      "claim": "No Go source file, test, console file, document or script changed since v1.9.2, and the only workflow change is the staticcheck step: the binary is built from the source v1.9.2 builds, by Go 1.27.2 instead of Go 1.26.9, and it embeds v1.9.2's console bundle.",
+      "status": "observed",
+      "evidence": {
+        "source": "git diff --name-only v1.9.2..HEAD"
+      }
+    },
+    {
+      "id": "exploratory-run",
+      "claim": "Exploratory run run-20261009T015304-75rbpy of draft llm-gateway, the draft that became contract da05219969e0, against a binary built by Go 1.27.2 from 728a96ce38c7 and served with LLMGW_ALLOW_UNAUTHENTICATED_API=1 as the release smoke serves it, passed all ten assertions, and its chain verifies.",
+      "status": "observed",
+      "evidence": {
+        "source": "local exploratory run"
+      }
+    },
+    {
+      "id": "verification",
+      "claim": "For source revision 728a96ce38c7bce03f0a42591b9b63e2f987143b built by Go 1.27.2: go build, go vet, gofmt, go mod tidy -diff, go mod verify, staticcheck built as ci.yml builds it, and govulncheck v1.5.0 pass; go test passes for every package on windows/amd64 and linux/amd64, and go test -race for every package on linux/amd64; all eight release targets cross-compile; and the deterministic Docker acceptance passes all 31 checks against an image built from it with the new builder on a Linux engine, where its digest policy does not apply to a locally built candidate. actionlint passes on the changed workflow, and the documentation check passes.",
+      "status": "observed",
+      "evidence": {
+        "source": "local and remote Linux test execution"
+      }
+    }
+  ],
+  "impact": {
+    "assertions": [
+      {
+        "id": "A1",
+        "impact": "unchanged",
+        "supported_by": [
+          "untouched-surfaces",
+          "toolchain",
+          "go127-behaviour",
+          "verification",
+          "exploratory-run"
+        ]
+      },
+      {
+        "id": "A2",
+        "impact": "unchanged",
+        "supported_by": [
+          "untouched-surfaces",
+          "toolchain",
+          "go127-behaviour",
+          "verification",
+          "exploratory-run"
+        ]
+      },
+      {
+        "id": "A3",
+        "impact": "unchanged",
+        "supported_by": [
+          "untouched-surfaces",
+          "toolchain",
+          "go127-behaviour",
+          "verification",
+          "exploratory-run"
+        ]
+      },
+      {
+        "id": "A4",
+        "impact": "unchanged",
+        "supported_by": [
+          "untouched-surfaces",
+          "toolchain",
+          "go127-behaviour",
+          "verification",
+          "exploratory-run"
+        ]
+      },
+      {
+        "id": "A5",
+        "impact": "unchanged",
+        "supported_by": [
+          "untouched-surfaces",
+          "toolchain",
+          "go127-behaviour",
+          "verification",
+          "exploratory-run"
+        ]
+      },
+      {
+        "id": "A6",
+        "impact": "unchanged",
+        "supported_by": [
+          "untouched-surfaces",
+          "toolchain",
+          "go127-behaviour",
+          "verification",
+          "exploratory-run"
+        ]
+      },
+      {
+        "id": "A7",
+        "impact": "unchanged",
+        "supported_by": [
+          "untouched-surfaces",
+          "toolchain",
+          "go127-behaviour",
+          "verification",
+          "exploratory-run"
+        ]
+      },
+      {
+        "id": "A8",
+        "impact": "unchanged",
+        "supported_by": [
+          "untouched-surfaces",
+          "toolchain",
+          "go127-behaviour",
+          "verification",
+          "exploratory-run"
+        ]
+      },
+      {
+        "id": "A9",
+        "impact": "unchanged",
+        "supported_by": [
+          "untouched-surfaces",
+          "toolchain",
+          "go127-behaviour",
+          "verification",
+          "exploratory-run"
+        ]
+      },
+      {
+        "id": "A10",
+        "impact": "unchanged",
+        "supported_by": [
+          "untouched-surfaces",
+          "toolchain",
+          "go127-behaviour",
+          "verification",
+          "exploratory-run"
+        ]
+      }
+    ],
+    "requires": [],
+    "possible_binding_changes": []
+  },
+  "questions": [],
+  "conclusion": {
+    "action": "reuse_contract",
+    "summary": "The release ships v1.9.2's source built by Go 1.27.2 instead of Go 1.26.9: only the module's go line, the image's builder and CI's staticcheck step changed. Go 1.27 needs macOS 13 or later and, at the module's new go version, honours SSL_CERT_FILE and SSL_CERT_DIR on Windows and macOS; neither bears on an accepted proposition. Every accepted proposition holds for this source, and the exploratory run, the unit tests, the race run and the Docker acceptance exercise them."
+  },
+  "proposed": {
+    "by": "release operator",
+    "at": "2026-10-09T02:03:12.000Z"
+  },
+  "digest": "f4ca4781b50df48bd985d77050f2565ea62902940cfd526ad8d69c63ba87b5c0"
+}
