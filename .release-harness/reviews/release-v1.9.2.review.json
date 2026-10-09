@@ -1,0 +1,196 @@
+{
+  "schema_version": "1.0.0",
+  "mode": "change",
+  "contract": {
+    "digest": "da05219969e051b692980ada8e8066ac909bf88d11ad6a5af6338834a8cc384f"
+  },
+  "authoring_provenance": {
+    "status": "established",
+    "path": ".release-harness/drafts/llm-gateway.record.json",
+    "digest": "e819045146db82b3754d02e0950d13ca8527706a2b478ada58c176c24e706d2b"
+  },
+  "sources": [
+    {
+      "source_id": "primary",
+      "status": "established",
+      "repository_identity": "https://github.com/xibodev/llm-gateway.git",
+      "base_ref": "v1.9.1",
+      "base_commit": "59c00110ebd9b5fe46a02e233977d1346fc46f4d",
+      "merge_base": "59c00110ebd9b5fe46a02e233977d1346fc46f4d",
+      "head_commit": "ab32648eb548ea90c6ba92e8cdb85d50430c59c1",
+      "head_tree": "5ae527dfa0c9cf1646cc973acb6afa963725d266",
+      "reviewed_source_digest": "1336bd956257c39302eb48d40f2a224b8a61bc1eec374a7a5b27305370ecb2af",
+      "changed_paths": [
+        {
+          "status": "modified",
+          "path": "go/Dockerfile",
+          "old_blob": "0007b932a4c3f7e354e769a5e9920518d29ca03d",
+          "new_blob": "86c3ef520eb5abed9f7301e4241c94fc127df986"
+        },
+        {
+          "status": "modified",
+          "path": "go/go.mod",
+          "old_blob": "e76566390bcf15173df1f59126fd30c20c158373",
+          "new_blob": "226c404ebee45592bdd3f8cee3a3463747c1b3fd"
+        }
+      ]
+    }
+  ],
+  "facts": [
+    {
+      "id": "toolchain",
+      "claim": "go/go.mod and go/Dockerfile are the only paths that changed since v1.9.1. The module's go version moves from 1.26.8 to 1.26.9, and the image's builder from golang:1.26.8-alpine to golang:1.26.9-alpine, pinned by the digest sha256:cdfd4fe2da6b225d8b40c6b7a105736e548e83ff56d5d8f9394446eeb5eb84e0. Go 1.26.9 fixes vulnerabilities in net/http, net/textproto and crypto/tls (GO-2026-6603, 6605, 6607 to 6613 and 6617) that govulncheck reports as reachable from this source built with Go 1.26.8; built with Go 1.26.9, govulncheck finds none. The release run for v1.9.1 failed on that govulncheck report before it published anything: it staged no release and pushed no image.",
+      "status": "observed",
+      "evidence": {
+        "source": "go/go.mod; go/Dockerfile; git diff v1.9.1..HEAD; govulncheck v1.5.0; release workflow run for v1.9.1"
+      }
+    },
+    {
+      "id": "prior-reviews",
+      "claim": "The confirmed review release-v1.9.0 covers v1.8.0..55e7790c1ef5, and release-v1.9.1 covers v1.9.0..1b3ba722cb59; v1.9.0 and v1.9.1 add only those reviews' own files. Together they describe every change this source carries since v1.8.0 apart from the toolchain.",
+      "status": "observed",
+      "evidence": {
+        "source": ".release-harness/reviews/release-v1.9.0.review.json; .release-harness/reviews/release-v1.9.1.review.json"
+      }
+    },
+    {
+      "id": "untouched-surfaces",
+      "claim": "No Go source file, console file, document or workflow changed since v1.9.1: the binary is built from the source v1.9.1 builds, by Go 1.26.9 instead of Go 1.26.8, and it embeds v1.9.1's console bundle.",
+      "status": "observed",
+      "evidence": {
+        "source": "git diff --name-only v1.9.1..HEAD"
+      }
+    },
+    {
+      "id": "exploratory-run",
+      "claim": "Exploratory run run-20261009T002917-y2uxpv of draft llm-gateway, the draft that became contract da05219969e0, against a binary built by Go 1.26.9 from ab32648eb548 and served with LLMGW_ALLOW_UNAUTHENTICATED_API=1 as the release smoke serves it, passed all ten assertions.",
+      "status": "observed",
+      "evidence": {
+        "source": "local exploratory run"
+      }
+    },
+    {
+      "id": "verification",
+      "claim": "For source revision ab32648eb548ea90c6ba92e8cdb85d50430c59c1 built by Go 1.26.9: go build, go vet, gofmt, staticcheck, govulncheck, go mod tidy -diff and go mod verify pass, as does go test for every package; go test -race passes for every package on linux/amd64; and the deterministic Docker acceptance passes all 31 checks against an image built from it with the new builder on a Linux engine, where its digest policy does not apply to a locally built candidate. The console's typecheck, 212 tests, npm audit and dist rebuild check, the documentation check, actionlint, the acceptance-policy tests (19) and the roster script tests (78 passed, 1 skipped) pass on 55e7790c1ef5, whose console, documents, scripts and workflows this source carries unchanged.",
+      "status": "observed",
+      "evidence": {
+        "source": "local and remote Linux test execution"
+      }
+    }
+  ],
+  "impact": {
+    "assertions": [
+      {
+        "id": "A1",
+        "impact": "unchanged",
+        "supported_by": [
+          "untouched-surfaces",
+          "toolchain",
+          "verification",
+          "exploratory-run"
+        ]
+      },
+      {
+        "id": "A2",
+        "impact": "unchanged",
+        "supported_by": [
+          "untouched-surfaces",
+          "toolchain",
+          "verification",
+          "exploratory-run"
+        ]
+      },
+      {
+        "id": "A3",
+        "impact": "unchanged",
+        "supported_by": [
+          "untouched-surfaces",
+          "toolchain",
+          "verification",
+          "exploratory-run"
+        ]
+      },
+      {
+        "id": "A4",
+        "impact": "unchanged",
+        "supported_by": [
+          "untouched-surfaces",
+          "toolchain",
+          "verification",
+          "exploratory-run"
+        ]
+      },
+      {
+        "id": "A5",
+        "impact": "unchanged",
+        "supported_by": [
+          "untouched-surfaces",
+          "toolchain",
+          "verification",
+          "exploratory-run"
+        ]
+      },
+      {
+        "id": "A6",
+        "impact": "unchanged",
+        "supported_by": [
+          "untouched-surfaces",
+          "toolchain",
+          "verification",
+          "exploratory-run"
+        ]
+      },
+      {
+        "id": "A7",
+        "impact": "unchanged",
+        "supported_by": [
+          "untouched-surfaces",
+          "toolchain",
+          "verification",
+          "exploratory-run"
+        ]
+      },
+      {
+        "id": "A8",
+        "impact": "unchanged",
+        "supported_by": [
+          "untouched-surfaces",
+          "toolchain",
+          "verification",
+          "exploratory-run"
+        ]
+      },
+      {
+        "id": "A9",
+        "impact": "unchanged",
+        "supported_by": [
+          "untouched-surfaces",
+          "toolchain",
+          "verification",
+          "exploratory-run"
+        ]
+      },
+      {
+        "id": "A10",
+        "impact": "unchanged",
+        "supported_by": [
+          "untouched-surfaces",
+          "toolchain",
+          "verification",
+          "exploratory-run"
+        ]
+      }
+    ],
+    "requires": [],
+    "possible_binding_changes": []
+  },
+  "questions": [],
+  "conclusion": {
+    "action": "reuse_contract",
+    "summary": "The release ships v1.9.1's source, which was tagged but never published, built by Go 1.26.9, which fixes net/http, net/textproto and crypto/tls vulnerabilities govulncheck reports as reachable from it built by Go 1.26.8. No source changed since v1.9.1, and the confirmed release-v1.9.0 and release-v1.9.1 reviews describe the changes since v1.8.0. Every accepted proposition holds for this source, and the exploratory run, the unit tests, the race run and the Docker acceptance exercise them."
+  },
+  "proposed": {
+    "by": "release operator",
+    "at": "2026-10-09T00:30:06.938Z"
+  }
+}
